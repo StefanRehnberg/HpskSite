@@ -47,6 +47,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly MemberClubService _memberClubs;
+        private readonly BoardWorkAccess _board;
         private readonly MemberDirectoryService _directory;
         private readonly ClubService _clubs;
         private readonly AdminAuthorizationService _auth;
@@ -59,7 +60,7 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             PlanningService planning, PlanningNotifier notify, PlanningLinkService links,
             IMemberManager memberManager, IMemberService memberService,
-            MemberClubService memberClubs, MemberDirectoryService directory, ClubService clubs,
+            MemberClubService memberClubs, BoardWorkAccess board, MemberDirectoryService directory, ClubService clubs,
             AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -69,6 +70,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _memberClubs = memberClubs;
+            _board = board;
             _directory = directory;
             _clubs = clubs;
             _auth = auth;
@@ -172,21 +174,53 @@ namespace HpskSite.Controllers
         //  Mina planeringar och en ny planering
         // =====================================================================================
 
+        /// <summary>
+        /// Listsidan (Stefan 2026-10-23): mina planeringar, de som den sammankallande valt att visa för alla
+        /// medlemmar (så att man kan be om att få vara med), och — för sajtadmin, som SUPPORT — de som har
+        /// förfrågningar som väntar på godkännande. Andras planeringar visar bara namn, tid och sammankallande.
+        /// </summary>
         [HttpGet]
         public async Task<IActionResult> MyPlannings()
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
             var mine = _planning.ForMember(me);
+            var mineIds = mine.Select(m => m.PlanningId).ToHashSet();
+            var listed = _planning.Listed().Where(p => !mineIds.Contains(p.Id)).ToList();
+            var isAdmin = await _auth.IsCurrentUserAdminAsync();
+            var support = new List<PlanningRow>();
+            Dictionary<int, int> pendingAll = new();
+            if (isAdmin)
+            {
+                pendingAll = _planning.AllPendingCounts();
+                support = pendingAll.Keys.Where(k => !mineIds.Contains(k)).Select(k => _planning.Get(k)).Where(p => p != null).Select(p => p!).ToList();
+            }
+            var ownerIds = mine.Where(m => m.Access == PlanningAccessLevel.Owner).Select(m => m.PlanningId).ToList();
+            var pending = _planning.PendingCounts(ownerIds);
+            var conveners = _planning.ConvenerNames(mineIds.Concat(listed.Select(p => p.Id)).Concat(support.Select(p => p.Id)));
+            var myRequests = _planning.OpenRequestsByMember(me);
+            string Conv(int pid) => conveners.TryGetValue(pid, out var l) ? string.Join(", ", l) : "";
             return Json(new
             {
                 success = true,
+                isSiteAdmin = isAdmin,
+                inviteCap = PlanningInviteRules.MaxPerDay,
                 plannings = mine.Select(m => new
                 {
-                    id = m.PlanningId, name = m.Name, status = m.Status, kindLabel = PlanningKind.Label(m.Kind),
+                    id = m.PlanningId, participantId = m.ParticipantId, name = m.Name, status = m.Status,
                     targetText = m.TargetText, targetStart = D(m.TargetStart), access = m.Access,
                     accessLabel = PlanningAccessLevel.Label(m.Access), unread = m.Unread, votesOwed = m.VotesOwed,
                     nextMeetingAt = DT(m.NextMeetingAt), nextMeetingTitle = m.NextMeetingTitle,
+                    conveners = Conv(m.PlanningId), pendingRequests = pending.GetValueOrDefault(m.PlanningId),
+                }),
+                listed = listed.Select(p => new
+                {
+                    id = p.Id, name = p.Name, targetText = p.TargetText, targetStart = D(p.TargetStart),
+                    conveners = Conv(p.Id), requested = myRequests.ContainsKey(p.Id),
+                }),
+                support = support.Select(p => new
+                {
+                    id = p.Id, name = p.Name, targetText = p.TargetText, conveners = Conv(p.Id), pendingRequests = pendingAll.GetValueOrDefault(p.Id),
                 }),
             });
         }
@@ -261,7 +295,7 @@ namespace HpskSite.Controllers
                 {
                     id = x.Planning.Id, name = x.Planning.Name, kind = x.Planning.Kind, kindLabel = PlanningKind.Label(x.Planning.Kind),
                     targetText = x.Planning.TargetText, targetStart = D(x.Planning.TargetStart), targetEnd = D(x.Planning.TargetEnd),
-                    status = x.Planning.Status,
+                    status = x.Planning.Status, listed = x.Planning.ListedForMembers,
                     createdAt = D(x.Planning.CreatedAt),
                 },
                 me = new
@@ -273,6 +307,7 @@ namespace HpskSite.Controllers
                     canEdit = PlanningAccess.CanEditPlanning(c), canManage = PlanningAccess.CanManagePlanning(c),
                     canInvite = PlanningAccess.CanInvite(c), canReadMessages = PlanningAccess.CanReadMessages(c),
                     canUseMeetings = PlanningAccess.CanUseMeetings(c), canWrite = PlanningAccess.CanWriteMessages(c),
+                    pendingRequests = PlanningAccess.CanManagePlanning(c) ? _planning.PendingCounts(new[] { id }).GetValueOrDefault(id) : 0,
                     icsUrl = PlanningAccess.CanUseMeetings(c) ? _links.IcsUrl(c.ParticipantId, id, Request.PublicBase()) : null,
                     pushConfigured = _pushInfo.IsConfigured,
                 },
@@ -294,6 +329,7 @@ namespace HpskSite.Controllers
                     value = a, label = PlanningAccessLevel.Label(a), help = PlanningAccessLevel.Help(a), canGrant = PlanningAccess.CanGrant(c, a),
                 }),
                 regions = PlanningAccess.CanReadContent(c) && !c.ViaLink ? AllRegions().Select(r => new { id = r.Id, name = r.Name }) : null,
+                inviteCap = PlanningInviteRules.MaxPerDay,
                 notifyModes = PlanningNotifyMode.Values.Select(v => new { value = v, label = PlanningNotifyMode.Label(v), help = PlanningNotifyMode.Help(v) }),
                 version = _planning.Version(id),
             });
@@ -310,12 +346,15 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd)
+        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? listed)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Du kan inte ändra planeringen.");
-            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), x.MemberId);
+            bool? list = listed == null ? null : listed == "1";
+            if (list.HasValue && list.Value != x.Planning.ListedForMembers && !PlanningAccess.CanManagePlanning(x.Caller))
+                return No("Bara den sammankallande väljer om planeringen visas för alla medlemmar.");
+            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), x.MemberId, list);
             return err == null ? Ok() : No(err);
         }
 
@@ -379,6 +418,8 @@ namespace HpskSite.Controllers
             var m = memberId > 0 ? _memberService.GetById(memberId) : null;
             if (m == null || !m.IsApproved) return No("Medlemmen finns inte.");
             if (RepresentsError(representsClubId, representsRegionId) is { } repErr) return No(repErr);
+            if (_planning.ParticipantForMember(id, memberId) is not { IsActive: true } && _planning.InvitesLastDay(id) >= PlanningInviteRules.MaxPerDay)
+                return No(PlanningInviteRules.LimitMessage);
             // Inget angivet = hens egen klubb. "Inget särskilt" skickas uttryckligen (representsNothing = "1").
             var given = representsClubId > 0 || representsRegionId > 0 || !string.IsNullOrWhiteSpace(representsText) || representsNothing == "1";
             var rc = representsClubId > 0 ? representsClubId : (!given && _memberClubs.GetPrimaryClubId(m) is var pc && pc > 0 ? pc : null);
@@ -399,12 +440,11 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> InviteByEmail(int id, string name, string email, string? access, string? representsText, int? representsRegionId)
+        public async Task<IActionResult> InviteByEmail(int id, string name, string email, string? message)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            var acc = PlanningAccessLevel.Normalize(access) ?? PlanningAccessLevel.Participant;
-            if (!PlanningAccess.CanGrant(x.Caller, acc)) return No("Du kan inte bjuda in med den rätten.");
+            if (!PlanningAccess.CanInvite(x.Caller)) return No("Du kan inte bjuda in.");
             var addr = (email ?? "").Trim();
             if (addr.Length == 0 || !addr.Contains('@')) return No("Ange en giltig e-postadress.");
             if ((name ?? "").Trim().Length == 0) return No("Skriv personens namn.");
@@ -415,18 +455,198 @@ namespace HpskSite.Controllers
                 {
                     success = false, isMember = true,
                     message = existing.IsApproved
-                        ? "Adressen hör till en medlem på pistol.nu. Bjud in hen på vanligt sätt: välj Bjud in en medlem och sök på namnet. Då deltar hen med sitt eget konto."
-                        : "Adressen hör till ett konto på pistol.nu som ännu inte är godkänt av klubben. När kontot är godkänt bjuder du in hen på vanligt sätt: Bjud in en medlem och sök på namnet.",
+                        ? "Adressen hör till en medlem på pistol.nu. Bjud in hen som medlem i stället: välj En medlem på pistol.nu och sök på namnet. Då deltar hen med sitt eget konto."
+                        : "Adressen hör till ett konto på pistol.nu som ännu inte är godkänt av klubben. När kontot är godkänt bjuder du in hen som medlem.",
                 });
-            if (RepresentsError(null, representsRegionId) is { } repErr) return No(repErr);
-            var r = _planning.AddParticipant(id, 0, name!, addr, acc, null, representsRegionId > 0 ? representsRegionId : null, representsText, x.MemberId);
+            var r = _planning.CreateInvite(id, name!, addr, message, x.MemberId);
             if (r.Error != null) return No(r.Error);
-            var mailed = false;
-            if (r.Created || r.Reactivated) mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
-            // Supportvägen (som kretsgranskningens caseLinks): sajtadministratören får gästens länk i svaret,
-            // så att den går att lämna vidare när mejlet inte når fram — och så att flödet går att pröva utan SMTP.
-            var supportLink = await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna") : null;
-            return Ok(new { success = true, participantId = r.ParticipantId, alreadyIn = !r.Created && !r.Reactivated, mailed, supportLink });
+            var mailed = await _notify.InviteGuestAsync(r.RequestId, x.Caller.Participant);
+            // Supportvägen: sajtadministratören får länken i svaret, så att den går att lämna vidare när
+            // mejlet inte når fram — och så att flödet går att pröva utan SMTP. Länken ger ingen tillgång.
+            var supportLink = await _auth.IsCurrentUserAdminAsync() ? _links.InviteUrl(r.RequestId, id, Request.PublicBase()) : null;
+            return Ok(new { success = true, requestId = r.RequestId, mailed, supportLink });
+        }
+
+        /// <summary>Vad en medlem kan företräda: hens klubbar och kretsarna de ligger i (guidens steg 2).</summary>
+        [HttpGet]
+        public async Task<IActionResult> RepresentOptions(int id, int memberId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanInvite(x.Caller)) return No("Du kan inte bjuda in.");
+            return Ok(new { success = true, primaryClubId = PrimaryClub(memberId), clubs = ClubChoices(memberId), regions = RegionChoices(memberId) });
+        }
+
+        private int PrimaryClub(int memberId)
+        {
+            try { var m = _memberService.GetById(memberId); return m == null ? 0 : _memberClubs.GetPrimaryClubId(m); }
+            catch { return 0; }
+        }
+
+        /// <summary>Kretsarna medlemmens klubbar ligger i.</summary>
+        private List<object> RegionChoices(int memberId)
+        {
+            var list = new List<object>();
+            try
+            {
+                var m = _memberService.GetById(memberId);
+                if (m == null) return list;
+                var seen = new HashSet<int>();
+                foreach (var c in _memberClubs.GetAllClubIds(m))
+                {
+                    var r = _board.RegionIdForClub(c);
+                    if (r > 0 && seen.Add(r)) list.Add(new { id = r, name = OrgName(DocumentOwnerType.Region, r) });
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering: medlemmens kretsar kunde inte läsas."); }
+            return list;
+        }
+
+        // =====================================================================================
+        //  Förfrågningar — inbjudan med e-post och "be om att få vara med" (Stefan 2026-10-23)
+        //  Godkänns av den sammankallande, eller av sajtadmin som SUPPORT (loggat, ingen läsrätt).
+        // =====================================================================================
+
+        private sealed record Approver(PlanningRow Planning, PlanningCaller Caller, int MemberId, bool Support);
+
+        private async Task<Approver?> ResolveApproverAsync(int planningId)
+        {
+            var p = _planning.Get(planningId);
+            if (p == null) return null;
+            var me = await MemberIdAsync();
+            if (me <= 0) return null;
+            var row = _planning.ParticipantForMember(planningId, me);
+            var c = new PlanningCaller(row is { IsActive: true } ? row : null, false);
+            if (PlanningAccess.CanManagePlanning(c)) return new Approver(p, c, me, false);
+            if (await _auth.IsCurrentUserAdminAsync()) return new Approver(p, c, me, true);
+            return null;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> Requests(int id)
+        {
+            var a = await ResolveApproverAsync(id);
+            if (a == null)
+            {
+                // En som kan bjuda in ser sina skickade inbjudningar (för att kunna dra tillbaka dem).
+                var x = await ResolveAsync(id, null);
+                if (x == null || !PlanningAccess.CanInvite(x.Caller)) return Missing();
+            }
+            var people = _planning.Participants(id, includeRemoved: true);
+            string ByName(int memberId) => people.FirstOrDefault(p => p.MemberId == memberId)?.DisplayName ?? "";
+            var canDecide = a != null;
+            return Ok(new
+            {
+                success = true, canDecide, support = a?.Support ?? false,
+                requests = _planning.OpenRequests(id).Where(r => canDecide || r.Status == PlanningRequestStatus.Sent).Select(r => new
+                {
+                    id = r.Id, kind = r.Kind, status = r.Status, name = r.Name, email = r.Email, memberId = r.MemberId,
+                    club = r.MemberId > 0 ? OrgName(DocumentOwnerType.Club, PrimaryClub(r.MemberId.Value)) : "",
+                    message = r.Message, proposedRepresents = r.ProposedRepresents,
+                    createdAt = DT(r.CreatedAt), respondedAt = DT(r.RespondedAt), invitedBy = r.Kind == PlanningRequestKind.Invite ? ByName(r.CreatedBy) : "",
+                    clubChoices = canDecide && r.MemberId > 0 ? ClubChoices(r.MemberId.Value) : null,
+                    regionChoices = canDecide && r.MemberId > 0 ? RegionChoices(r.MemberId.Value) : null,
+                }),
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApproveRequest(int id, int requestId, string? access, int? representsClubId, int? representsRegionId, string? representsText)
+        {
+            var a = await ResolveApproverAsync(id);
+            if (a == null) return No("Bara den sammankallande godkänner.");
+            var acc = PlanningAccessLevel.Normalize(access) ?? PlanningAccessLevel.Participant;
+            if (!a.Support && !PlanningAccess.CanGrant(a.Caller, acc)) return No("Du kan inte ge den nivån.");
+            if (RepresentsError(representsClubId, representsRegionId) is { } repErr) return No(repErr);
+            var req = _planning.Request(id, requestId);
+            if (req == null) return No("Förfrågan finns inte.");
+            var display = req.Name;
+            if (req.Kind == PlanningRequestKind.Request && req.MemberId > 0)
+            {
+                var m = _memberService.GetById(req.MemberId.Value);
+                if (m == null || !m.IsApproved) return No("Medlemmen finns inte längre.");
+                display = MemberDisplayName(m);
+            }
+            var r = _planning.ApproveRequest(id, requestId, acc, representsClubId > 0 ? representsClubId : null,
+                representsRegionId > 0 ? representsRegionId : null, representsText, display, a.MemberId);
+            if (r.Error != null) return No(r.Error);
+            if (a.Support) _logger.LogWarning("Planering {PlanningId}: sajtadmin {MemberId} godkände förfrågan {RequestId} som support ({Access}).", id, a.MemberId, requestId, acc);
+            var mailed = await _notify.InviteAsync(id, r.ParticipantId, a.Caller.Participant, false, approved: true);
+            // Supportvägen: sajtadmin får gästens länk in (som förut vid inbjudan med e-post).
+            var supportLink = req.Kind == PlanningRequestKind.Invite && await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna") : null;
+            return Ok(new { success = true, participantId = r.ParticipantId, mailed, supportLink });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RejectRequest(int id, int requestId, string? note)
+        {
+            var a = await ResolveApproverAsync(id);
+            if (a == null) return No("Bara den sammankallande avböjer.");
+            var err = _planning.RejectRequest(id, requestId, note, a.MemberId);
+            if (err != null) return No(err);
+            if (a.Support) _logger.LogWarning("Planering {PlanningId}: sajtadmin {MemberId} avböjde förfrågan {RequestId} som support.", id, a.MemberId, requestId);
+            var req = _planning.Request(id, requestId);
+            var mailed = req != null && await _notify.RequestRejectedAsync(req, a.Caller.Participant);
+            return Ok(new { success = true, mailed });
+        }
+
+        /// <summary>Den som kan bjuda in drar tillbaka en inbjudan som inte besvarats.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WithdrawInvite(int id, int requestId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanInvite(x.Caller)) return No("Du kan inte bjuda in.");
+            var req = _planning.Request(id, requestId);
+            if (req == null || req.Kind != PlanningRequestKind.Invite) return No("Inbjudan finns inte.");
+            var err = _planning.WithdrawRequest(id, requestId);
+            return err == null ? Ok() : No(err);
+        }
+
+        /// <summary>En medlem ber om att få vara med i en planering som visas för alla medlemmar.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RequestAccess(int id, string? message)
+        {
+            var me = await MemberIdAsync();
+            if (me <= 0) return No("Logga in först.");
+            var m = _memberService.GetById(me);
+            var r = _planning.CreateMemberRequest(id, me, MemberDisplayName(m), message);
+            if (r.Error != null) return No(r.Error);
+            var reached = await _notify.RequestToConvenersAsync(id, r.RequestId);
+            return Ok(new { success = true, requestId = r.RequestId, reached });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WithdrawMyRequest(int id)
+        {
+            var me = await MemberIdAsync();
+            if (me <= 0) return No("Logga in först.");
+            if (!_planning.OpenRequestsByMember(me).TryGetValue(id, out var req)) return No("Du har ingen förfrågan som väntar.");
+            var err = _planning.WithdrawRequest(id, req.Id);
+            return err == null ? Ok() : No(err);
+        }
+
+        /// <summary>
+        /// Den inbjudna svarar — UTAN inloggning, med länken i inbjudan. Ett ja ger ingen tillgång: förfrågan
+        /// väntar på den sammankallande, som får ett mejl.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AnswerInvite(string? t, string? accept, string? represents)
+        {
+            var target = _links.ParseInvite(t);
+            var req = target == null ? null : _planning.Request(target.PlanningId, target.ParticipantId);
+            if (req == null) return No("Länken gäller inte längre. Be den som bjöd in dig att skicka en ny inbjudan.");
+            var yes = accept == "1";
+            var err = _planning.AnswerInvite(req.Id, yes, represents);
+            if (err != null) return No(err);
+            var reached = yes ? await _notify.RequestToConvenersAsync(req.PlanningId, req.Id) : 0;
+            return Ok(new { success = true, accepted = yes, reached });
         }
 
         [HttpPost]

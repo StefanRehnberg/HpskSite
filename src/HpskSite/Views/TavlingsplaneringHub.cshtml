@@ -4,39 +4,60 @@
     ViewBag.Title = "Tävlingsplanering";
 }
 @*
-    Tävling → Tävlingsplanering (P1, 2026-10-21): "Mina planeringar" och "Ny planering".
-    Adminlistans förlaga (Träningar): rubrik + förklarande rad, blå knapp, lista med en rad per
-    planering och det som väntar på mig. Planeringar som hör till en tävling nås fortfarande från
-    tävlingens knapp Planering (/tavlingsplanering?c=…).
+    Tävling → Tävlingsplanering (2026-10-23): listan i ADMINLISTANS FORM (förlagan Träningar): rubrik +
+    förklarande rad, blå Åtgärder, filter och antal ovanför tabellen, grå Åtgärder per rad.
+    Visas: mina planeringar; andras bara när den sammankallande valt att visa dem för alla medlemmar
+    (då kan man be om att få vara med); och för sajtadmin, som SUPPORT, planeringar med förfrågningar
+    som väntar. Andras planeringar visar bara namn, tid och sammankallande — aldrig innehållet.
+    Planeringar som hör till en tävling nås från tävlingens knapp Planering (/tavlingsplanering?c=…).
 *@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <style>
-    .plh-page { font-size: 1.05rem; padding-bottom: 5rem; }
-    .plh-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;
-        padding: .85rem 1rem; border: 1px solid var(--bs-border-color); border-radius: .6rem; margin-bottom: .6rem;
-        text-decoration: none; color: var(--bs-body-color); background: var(--bs-body-bg); }
-    .plh-row:hover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
-    .plh-row .nm { font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
-    .plh-row .meta { color: var(--bs-secondary-color); font-size: .9rem; }
-    .plh-badge { background: var(--bs-warning); color: #1b1206; font-weight: 700; font-size: .8rem; border-radius: 1rem; padding: .1rem .55rem; white-space: nowrap; }
-    .plh-kind { display: block; border: 1px solid var(--bs-border-color); border-radius: .6rem; padding: .8rem 1rem; margin-bottom: .5rem; cursor: pointer; }
-    .plh-kind:has(input:checked) { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
-    .plh-help { color: var(--bs-secondary-color); font-size: .95rem; }
+    .plh-page { padding-bottom: 5rem; }
+    .plh-help { color: var(--bs-secondary-color); }
+    .plh-badge { background: var(--bs-warning); color: #1b1206; font-weight: 700; font-size: .8rem; border-radius: 1rem; padding: .1rem .55rem; white-space: nowrap; display: inline-block; margin: 1px 0; }
+    .plh-table td a.plh-name { font-weight: 600; text-decoration: none; }
+    .plh-table td a.plh-name:hover { text-decoration: underline; }
 </style>
 
-<div class="plh-page container py-4" style="max-width: 960px;">
+<div class="plh-page container-fluid px-lg-4 py-4">
     @Html.AntiForgeryToken()
-    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
-        <div>
-            <h1 class="h2 mb-1"><i class="bi bi-diagram-3 me-2 text-primary"></i>Tävlingsplanering</h1>
-            <p class="plh-help mb-0">Planera en tävling långt innan den finns — SM, kretsmästerskap eller klubbens egen tävling. Bjud in de som ska vara med, skriv till varandra och hitta en tid för mötena, i stället för långa mejltrådar.</p>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h1 class="h3 mb-0"><i class="bi bi-diagram-3 me-2 text-primary"></i>Tävlingsplanering</h1>
+        <div class="dropdown">
+            <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-sliders me-1"></i>Åtgärder
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                <li><button class="dropdown-item" type="button" id="plhNew"><i class="bi bi-plus-circle me-2"></i>Ny planering</button></li>
+            </ul>
         </div>
-        <button class="btn btn-primary shadow" id="plhNew"><i class="bi bi-plus-lg me-1"></i>Ny planering</button>
     </div>
-    <div id="plhMsg" class="mt-3"></div>
-    <div id="plhList" class="mt-3"><div class="text-center py-5"><div class="spinner-border"></div></div></div>
+    <p class="plh-help mb-3">Planera en tävling långt innan den finns — SM, kretsmästerskap eller klubbens egen tävling. Bjud in de som ska vara med, skriv till varandra och hitta tider för mötena.
+        Bara de som är med ser innehållet. Vissa planeringar visas för alla medlemmar, och då kan du be om att få vara med.</p>
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+        <input type="search" class="form-control form-control-sm" id="plhSearch" placeholder="Sök på namn, plats eller sammankallande" style="max-width:320px" aria-label="Sök">
+        <select class="form-select form-select-sm w-auto" id="plhFilter" aria-label="Visa"></select>
+        <span class="small text-muted ms-auto" id="plhCount"></span>
+    </div>
+    <div id="plhMsg"></div>
+    <div id="plhList"><div class="text-center py-5"><div class="spinner-border"></div></div></div>
+</div>
+
+<div class="modal fade" id="plhDlg" tabindex="-1" aria-hidden="true" aria-labelledby="plhDlgTitle">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5" id="plhDlgTitle"></h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+            <div class="modal-body"><div class="alert alert-danger d-none" id="plhDlgErr" role="alert"></div><div id="plhDlgBody"></div></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="plhDlgOk">OK</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="modal fade" id="plhModal" tabindex="-1" aria-hidden="true" aria-labelledby="plhModalTitle">
@@ -87,30 +108,155 @@
         return r.json();
     }
     const fmt = s => { if (!s) return ''; const d = new Date(s.replace(' ', 'T')); return isNaN(d) ? s : d.toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
-    let data = null;
+    const post = (action, params) => req('/umbraco/surface/Planning/' + action, { method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: new URLSearchParams(params).toString() });
+    let data = null, rows = [], fns = [];
+    const LEVELS = [['Follower', 'Följer'], ['Participant', 'Deltar'], ['Editor', 'Kan ändra'], ['Owner', 'Sammankallande']];
 
-    function row(p) {
-        const waits = [];
-        if (p.votesOwed) waits.push(`<span class="plh-badge">Svara på ${p.votesOwed === 1 ? 'en mötestid' : p.votesOwed + ' möten'}</span>`);
-        if (p.unread) waits.push(`<span class="plh-badge">${p.unread} ${p.unread === 1 ? 'nytt meddelande' : 'nya meddelanden'}</span>`);
-        return `<a class="plh-row" href="/tavlingsplanering/${p.id}">
-            <div><div class="nm">${esc(p.name)}</div>
-            <div class="meta">${p.targetText ? esc(p.targetText) + ' · ' : ''}${esc(p.accessLabel)}${p.status === 'Archived' ? ' · arkiverad' : ''}
-            ${p.nextMeetingAt ? ' · nästa möte ' + esc(fmt(p.nextMeetingAt)) : ''}</div></div>
-            <div class="d-flex gap-2 flex-wrap">${waits.join('')}</div></a>`;
+    function say(html, kind) { $('plhMsg').innerHTML = html ? `<div class="alert alert-${kind || 'success'} alert-dismissible">${html}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button></div>` : ''; }
+
+    // Dialogen: en för allt (fråga, förfrågan, support). onOk returnerar true = stäng, text = visa felet.
+    function dialog(title, html, okLabel, onOk, okClass) {
+        $('plhDlgTitle').textContent = title;
+        $('plhDlgBody').innerHTML = html;
+        const err = $('plhDlgErr'); err.classList.add('d-none');
+        const ok = $('plhDlgOk');
+        ok.textContent = okLabel || 'OK'; ok.className = 'btn ' + (okClass || 'btn-primary'); ok.classList.toggle('d-none', !onOk);
+        const m = bootstrap.Modal.getOrCreateInstance($('plhDlg'));
+        ok.onclick = async () => {
+            ok.disabled = true;
+            try { const r = await onOk($('plhDlgBody')); if (r === true) m.hide(); else if (typeof r === 'string') { err.textContent = r; err.classList.remove('d-none'); } }
+            catch (e) { err.textContent = e.message; err.classList.remove('d-none'); }
+            finally { ok.disabled = false; }
+        };
+        m.show();
+    }
+
+    function filters() {
+        const mine = data.plannings.filter(p => p.status !== 'Archived'), arch = data.plannings.filter(p => p.status === 'Archived');
+        const f = [['mine', `Mina planeringar (${mine.length})`], ['listed', `Kan be om att vara med (${data.listed.length})`], ['archived', `Arkiverade (${arch.length})`]];
+        if (data.isSiteAdmin) f.push(['support', `Förfrågningar som väntar — support (${data.support.length})`]);
+        return f;
+    }
+    function current() {
+        const f = $('plhFilter').value;
+        if (f === 'listed') return data.listed.map(p => Object.assign({ kind: 'listed' }, p));
+        if (f === 'support') return data.support.map(p => Object.assign({ kind: 'support' }, p));
+        return data.plannings.filter(p => (p.status === 'Archived') === (f === 'archived')).map(p => Object.assign({ kind: 'mine' }, p));
+    }
+    function menu(items) {
+        const html = items.filter(Boolean).map(it => {
+            if (it.divider) return '<li><hr class="dropdown-divider"></li>';
+            if (it.href) return `<li><a class="dropdown-item" href="${it.href}"><i class="bi ${it.icon} me-2"></i>${esc(it.label)}</a></li>`;
+            fns.push(it.fn);
+            return `<li><button class="dropdown-item${it.danger ? ' text-danger' : ''}" type="button" data-plh-fn="${fns.length - 1}"><i class="bi ${it.icon} me-2"></i>${esc(it.label)}</button></li>`;
+        }).join('');
+        return `<div class="dropdown"><button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+            data-bs-popper-config='{"strategy":"fixed"}'>Åtgärder</button><ul class="dropdown-menu dropdown-menu-end">${html}</ul></div>`;
+    }
+    function waits(p) {
+        const w = [];
+        if (p.pendingRequests) w.push(`<span class="plh-badge">${p.pendingRequests} väntar på godkännande</span>`);
+        if (p.votesOwed) w.push(`<span class="plh-badge">Svara på ${p.votesOwed === 1 ? 'en mötestid' : p.votesOwed + ' möten'}</span>`);
+        if (p.unread) w.push(`<span class="plh-badge">${p.unread} ${p.unread === 1 ? 'nytt meddelande' : 'nya meddelanden'}</span>`);
+        if (p.kind === 'listed' && p.requested) w.push('<span class="badge bg-info-subtle text-info-emphasis">Förfrågan skickad</span>');
+        return w.join(' ');
     }
     function render() {
-        const html = [];
-        if (!data.plannings.length) {
-            html.push(`<div class="border rounded-3 p-4 text-center"><p class="mb-2" style="font-size:1.15rem">Du är inte med i någon planering ännu.</p>
-                <p class="plh-help">Skapa en med <b>Ny planering</b>, eller vänta på en inbjudan — den kommer med mejl.</p></div>`);
-        } else {
-            const active = data.plannings.filter(p => p.status !== 'Archived'), arch = data.plannings.filter(p => p.status === 'Archived');
-            html.push(active.map(row).join(''));
-            if (arch.length) html.push(`<details class="mt-3"><summary class="plh-help">Arkiverade (${arch.length})</summary><div class="mt-2">${arch.map(row).join('')}</div></details>`);
+        fns = [];
+        const sel = $('plhFilter'), cur = sel.value;
+        sel.innerHTML = filters().map(([v, l]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('');
+        const all = current();
+        const q = $('plhSearch').value.trim().toLowerCase();
+        rows = q ? all.filter(p => [p.name, p.targetText, p.conveners].join(' ').toLowerCase().includes(q)) : all;
+        $('plhCount').textContent = rows.length === all.length ? `${all.length} ${all.length === 1 ? 'planering' : 'planeringar'}` : `Visar ${rows.length} av ${all.length}`;
+        if (!all.length) {
+            const f = sel.value;
+            $('plhList').innerHTML = `<div class="text-center text-muted py-4 border rounded">${
+                f === 'listed' ? 'Ingen planering visas för alla medlemmar just nu.'
+                : f === 'archived' ? 'Inga arkiverade planeringar.'
+                : f === 'support' ? 'Inga förfrågningar väntar.'
+                : 'Du är inte med i någon planering ännu. Skapa en under <b>Åtgärder → Ny planering</b>, eller vänta på en inbjudan — den kommer med mejl.'}</div>`;
+            return;
         }
-        $('plhList').innerHTML = html.join('');
+        const body = rows.map(p => {
+            const mine = p.kind === 'mine';
+            const open = mine ? `/tavlingsplanering/${p.id}` : '';
+            const name = mine ? `<a class="plh-name" href="${open}">${esc(p.name)}</a>` : `<span class="fw-semibold">${esc(p.name)}</span>`;
+            const level = mine ? esc(p.accessLabel) : p.kind === 'listed' ? '<span class="text-muted">Inte med</span>' : '<span class="text-muted">Support</span>';
+            const next = p.nextMeetingAt ? esc(fmt(p.nextMeetingAt)) : '<span class="text-muted">—</span>';
+            const items = mine ? [
+                { href: open, icon: 'bi-box-arrow-up-right', label: 'Öppna' },
+                { divider: true },
+                { icon: 'bi-box-arrow-right', label: 'Lämna planeringen…', danger: true, fn: () => leave(p) },
+            ] : p.kind === 'listed' ? [
+                p.requested ? { icon: 'bi-x-circle', label: 'Dra tillbaka förfrågan', fn: () => withdraw(p) }
+                            : { icon: 'bi-person-plus', label: 'Be om att få vara med…', fn: () => ask(p) },
+            ] : [{ icon: 'bi-person-check', label: 'Hantera förfrågningar…', fn: () => support(p) }];
+            return `<tr><td>${name}<div class="small text-muted">${esc(p.targetText || '')}</div>
+                    <div class="d-md-none small mt-1">${p.conveners ? 'Sammankallande: ' + esc(p.conveners) + ' · ' : ''}Du: ${level}${p.nextMeetingAt ? ' · nästa möte ' + esc(fmt(p.nextMeetingAt)) : ''}</div>
+                    <div class="d-md-none mt-1">${waits(p)}</div></td>
+                <td class="d-none d-md-table-cell">${esc(p.conveners || '')}</td>
+                <td class="d-none d-md-table-cell">${level}</td>
+                <td class="d-none d-md-table-cell text-nowrap">${next}</td>
+                <td class="d-none d-md-table-cell">${waits(p)}</td>
+                <td class="text-end">${menu(items)}</td></tr>`;
+        }).join('');
+        $('plhList').innerHTML = `<div class="table-responsive"><table class="table align-middle plh-table"><thead><tr>
+            <th>Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th class="d-none d-md-table-cell">Din nivå</th>
+            <th class="d-none d-md-table-cell">Nästa möte</th><th class="d-none d-md-table-cell">Väntar</th><th class="text-end"></th></tr></thead><tbody>${body}</tbody></table></div>`;
     }
+    document.addEventListener('click', e => { const b = e.target.closest('[data-plh-fn]'); if (b) fns[+b.dataset.plhFn](); });
+    $('plhFilter').addEventListener('change', render);
+    $('plhSearch').addEventListener('input', render);
+
+    function ask(p) {
+        dialog('Be om att få vara med', `<p>Du ber om att få vara med i <b>${esc(p.name)}</b>. ${p.conveners ? 'Den sammankallande (' + esc(p.conveners) + ')' : 'Den sammankallande'} får ett mejl och släpper in dig — du får ett mejl när det är gjort.</p>
+            <label class="form-label" for="plhAskMsg">Varför vill du vara med? (valfritt)</label>
+            <textarea id="plhAskMsg" class="form-control" rows="3" maxlength="1000" placeholder="Till exempel: jag är banansvarig i klubben som har banan"></textarea>`,
+            'Skicka förfrågan', async body => {
+                const r = await post('RequestAccess', { id: p.id, message: body.querySelector('#plhAskMsg').value });
+                if (!r.success) return r.message;
+                say(`Din förfrågan om att vara med i <b>${esc(p.name)}</b> är skickad.`); await load(); return true;
+            });
+    }
+    async function withdraw(p) {
+        const r = await post('WithdrawMyRequest', { id: p.id });
+        if (!r.success) { say(esc(r.message), 'danger'); return; }
+        say('Förfrågan är tillbakadragen.'); await load();
+    }
+    function leave(p) {
+        dialog('Lämna planeringen?', `<p>Du lämnar <b>${esc(p.name)}</b> och får inga fler mejl därifrån. Dina meddelanden står kvar.</p>`, 'Lämna', async () => {
+            const r = await post('RemoveParticipant', { id: p.id, participantId: p.participantId });
+            if (!r.success) return r.message;
+            say(`Du har lämnat ${esc(p.name)}.`); await load(); return true;
+        }, 'btn-danger');
+    }
+    // Sajtadmin som SUPPORT: godkänner eller avböjer, men ser inget av planeringens innehåll.
+    async function support(p) {
+        const r = await req('/umbraco/surface/Planning/Requests?' + new URLSearchParams({ id: p.id }));
+        if (!r.success) { say(esc(r.message || 'Det gick inte.'), 'danger'); return; }
+        const pend = r.requests.filter(x => x.status === 'Pending');
+        dialog('Förfrågningar — ' + p.name, `<p class="small text-muted">Du hanterar förfrågningarna som sajtens administratör (support). Det loggas. Du ser inget av planeringens innehåll.</p>
+            ${pend.length ? pend.map(x => `<div class="border rounded p-2 mb-2" data-sup="${x.id}"><div><b>${esc(x.name)}</b> ${x.club ? '<span class="small text-muted">(' + esc(x.club) + ')</span>' : ''}</div>
+                <div class="small">${x.kind === 'Invite' ? 'Har tackat ja till inbjudan' : 'Ber om att få vara med'}${x.message && x.kind === 'Request' ? ': ”' + esc(x.message) + '”' : ''}</div>
+                <div class="row g-2 mt-1"><div class="col-sm-5"><select class="form-select form-select-sm" data-sup-level aria-label="Nivå">${LEVELS.map(([v, l]) => `<option value="${v}"${v === 'Participant' ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+                    <div class="col-sm-7"><input class="form-control form-control-sm" data-sup-rep maxlength="200" value="${esc(x.proposedRepresents || '')}" placeholder="Företräder (valfritt)" aria-label="Företräder"></div></div>
+                <div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-primary btn-sm" data-sup-ok="${x.id}">Godkänn</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-sup-no="${x.id}">Avböj</button></div></div>`).join('') : '<p class="mb-0">Inga förfrågningar väntar.</p>'}`, null);
+        $('plhDlgBody').onclick = async ev => {
+            const okb = ev.target.closest('[data-sup-ok]'), nob = ev.target.closest('[data-sup-no]');
+            if (!okb && !nob) return;
+            const box = ev.target.closest('[data-sup]');
+            const res = okb
+                ? await post('ApproveRequest', { id: p.id, requestId: box.dataset.sup, access: box.querySelector('[data-sup-level]').value, representsText: box.querySelector('[data-sup-rep]').value })
+                : await post('RejectRequest', { id: p.id, requestId: box.dataset.sup });
+            if (!res.success) { $('plhDlgErr').textContent = res.message; $('plhDlgErr').classList.remove('d-none'); return; }
+            box.innerHTML = `<span class="text-success">${okb ? 'Godkänd' : 'Avböjd'}.</span>`;
+            load();
+        };
+    }
+
     async function load() {
         try {
             data = await req('/umbraco/surface/Planning/MyPlannings');

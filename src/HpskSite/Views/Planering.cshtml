@@ -177,7 +177,8 @@
                 token: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token)),
                 startView: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(startView)),
                 startMeeting: @startMeeting,
-                reply: @reply
+                reply: @reply,
+                leave: @((ViewData["PlanningLeave"] as bool? == true) ? "true" : "false")
             };
         </script>
         <script src="~/js/planering.js" asp-append-version="true"></script>

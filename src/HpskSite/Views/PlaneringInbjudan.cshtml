@@ -1,0 +1,98 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Inbjudan till planering";
+    var token = ViewData["InviteToken"] as string ?? "";
+    var planning = ViewData["InvitePlanning"] as string ?? "";
+    var target = ViewData["InviteTarget"] as string ?? "";
+    var name = ViewData["InviteName"] as string ?? "";
+    var by = ViewData["InviteBy"] as string ?? "";
+    var message = ViewData["InviteMessage"] as string ?? "";
+    var status = ViewData["InviteStatus"] as string ?? "";
+    var firstName = name.Split(' ')[0];
+}
+@*
+    Svar på en inbjudan med e-post (Stefan 2026-10-23). UTAN inloggning: länken är den inbjudnas nyckel, men
+    den ger INGEN tillgång till planeringen. Ett ja lägger förfrågan hos den sammankallande, som väljer nivå
+    och vad personen företräder och släpper in hen — först då kommer ett mejl med länk in.
+*@
+<div class="container py-4" style="max-width:720px">
+    @Html.AntiForgeryToken()
+    @if (string.IsNullOrEmpty(planning))
+    {
+        <h1 class="h3">Länken fungerar inte längre</h1>
+        <p>Inbjudan har gått ut eller dragits tillbaka. Be den som bjöd in dig att skicka en ny.</p>
+    }
+    else
+    {
+        <p class="text-muted small mb-1">Inbjudan på pistol.nu</p>
+        <h1 class="h3 mb-3">@planning</h1>
+        <div class="card"><div class="card-body" id="piBody">
+            @if (status == "Sent")
+            {
+                <p>Hej @firstName! @(string.IsNullOrEmpty(by) ? "Du är inbjuden" : by + " har bjudit in dig") att vara med i planeringen <b>@planning</b>@(string.IsNullOrEmpty(target) ? "" : " (" + target + ")").</p>
+                @if (!string.IsNullOrWhiteSpace(message))
+                {
+                    <blockquote class="border-start border-3 ps-3 text-body-secondary" style="white-space:pre-wrap">@message</blockquote>
+                }
+                <p>I planeringen skriver ni till varandra och hittar tider för möten. Du behöver inget konto.</p>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" for="piRep">Vem företräder du? (valfritt)</label>
+                    <input id="piRep" class="form-control" maxlength="200" autocomplete="off" placeholder="Till exempel Gislaveds kommun eller markägaren">
+                    <div class="form-text">Den som leder planeringen ser det och kan ändra det.</div>
+                </div>
+                <div class="alert alert-danger d-none" id="piErr" role="alert"></div>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-primary" id="piYes">Ja, jag vill vara med</button>
+                    <button type="button" class="btn btn-outline-secondary" id="piNo">Nej tack</button>
+                </div>
+                <p class="text-muted small mt-3 mb-0">När du har svarat ja släpper den som leder planeringen in dig. Då får du ett mejl med en länk in.</p>
+            }
+            else if (status == "Pending")
+            {
+                <p class="mb-0">Tack, du har svarat ja. Den som leder planeringen släpper in dig, och då får du ett mejl med en länk in.</p>
+            }
+            else if (status == "Approved")
+            {
+                <p class="mb-0">Du är med i planeringen. Använd länken i mejlet <i>Du är med i planeringen</i> för att komma in.</p>
+            }
+            else if (status == "Declined")
+            {
+                <p class="mb-0">Du har tackat nej. Ändrar du dig kan du be den som bjöd in dig att skicka en ny inbjudan.</p>
+            }
+            else
+            {
+                <p class="mb-0">Inbjudan gäller inte längre.</p>
+            }
+        </div></div>
+        @if (status == "Sent")
+        {
+            <script>
+            (function () {
+                const tok = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+                async function answer(yes) {
+                    const err = document.getElementById('piErr'); err.classList.add('d-none');
+                    document.querySelectorAll('#piYes,#piNo').forEach(b => b.disabled = true);
+                    try {
+                        const r = await fetch('/umbraco/surface/Planning/AnswerInvite', { method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded', RequestVerificationToken: tok() },
+                            body: new URLSearchParams({ t: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token)), accept: yes ? '1' : '0',
+                                represents: document.getElementById('piRep').value }) });
+                        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Fel ' + r.status);
+                        const j = await r.json();
+                        if (!j.success) throw new Error(j.message || 'Det gick inte att svara.');
+                        document.getElementById('piBody').innerHTML = yes
+                            ? '<p class="mb-0">Tack, du har svarat ja. Den som leder planeringen släpper in dig, och då får du ett mejl med en länk in.</p>'
+                            : '<p class="mb-0">Du har tackat nej. Tack för att du svarade.</p>';
+                    } catch (e) {
+                        err.textContent = e.message; err.classList.remove('d-none');
+                        document.querySelectorAll('#piYes,#piNo').forEach(b => b.disabled = false);
+                    }
+                }
+                document.getElementById('piYes').addEventListener('click', () => answer(true));
+                document.getElementById('piNo').addEventListener('click', () => answer(false));
+            })();
+            </script>
+        }
+    }
+</div>

@@ -188,8 +188,11 @@ namespace HpskSite.Services.Planning
         //  Händelser som aviseras direkt
         // =====================================================================================
 
-        /// <summary>Inbjudan till en ny deltagare. Returnerar om mejlet gick iväg.</summary>
-        public async Task<bool> InviteAsync(int planningId, int participantId, PlanningMemberRow? invitedBy, bool resend)
+        /// <summary>
+        /// Inbjudan till en ny deltagare — eller beskedet att en förfrågan godkänts (<paramref name="approved"/>).
+        /// Returnerar om mejlet gick iväg.
+        /// </summary>
+        public async Task<bool> InviteAsync(int planningId, int participantId, PlanningMemberRow? invitedBy, bool resend, bool approved = false)
         {
             var p = _planning.Get(planningId);
             var who = _planning.Participant(planningId, participantId);
@@ -197,20 +200,95 @@ namespace HpskSite.Services.Planning
             var r = ResolveRecipient(who);
             if (r == null) return false;
             var byName = invitedBy?.DisplayName ?? "Någon";
+            var target = string.IsNullOrWhiteSpace(p.TargetText) ? "" : $" ({H(p.TargetText)})";
             var inner = new StringBuilder();
-            inner.Append($"<p>{H(byName)} har bjudit in dig till planeringen <b>{H(p.Name)}</b>"
-                + (string.IsNullOrWhiteSpace(p.TargetText) ? "" : $" ({H(p.TargetText)})") + ".</p>");
+            inner.Append(approved
+                ? $"<p>Du är nu med i planeringen <b>{H(p.Name)}</b>{target}. {H(byName)} har släppt in dig som <b>{H(PlanningAccessLevel.Label(who.Access).ToLowerInvariant())}</b>.</p>"
+                : $"<p>{H(byName)} har bjudit in dig till planeringen <b>{H(p.Name)}</b>{target}.</p>");
             inner.Append("<p>Där skriver ni till varandra, hittar en tid för möten och håller ordning på vem som gör vad — i stället för långa mejltrådar.</p>");
             inner.Append(r.Row.IsGuest
                 ? "<p>Du behöver inget konto. Knappen nedan tar dig direkt in; spara gärna mejlet.</p>"
                 : "<p>Logga in med ditt vanliga konto på pistol.nu.</p>");
             inner.Append($"<p>{Button("Öppna planeringen", OpenUrl(r, planningId))}</p>");
             inner.Append($"<p style=\"color:#555\">Du får <b>ett mejl om dagen</b> med det som är nytt. Det kan du ändra i planeringen.</p>");
-            var html = Page(r.Name, p.Name, inner.ToString(), "");
+            // Den som inte vill vara med blir av med det med ett klick (inbjudningstaket, Stefan 2026-10-23).
+            var footer = $"Vill du inte vara med? <a href=\"{H(_links.MailUrl(r.Pid, planningId, "lamna"))}\">Lämna planeringen</a>.";
+            var html = Page(r.Name, p.Name, inner.ToString(), footer);
             var ok = await SendMail(r, planningId, "invite", "participant", participantId, resend ? DateTime.Now : null,
-                $"Du är inbjuden till planeringen {p.Name}", html, ReplyToFor(invitedBy, p.Name));
+                approved ? $"Du är med i planeringen {p.Name}" : $"Du är inbjuden till planeringen {p.Name}", html, ReplyToFor(invitedBy, p.Name));
             if (ok) _planning.MarkInviteSent(participantId);
             return ok;
+        }
+
+        /// <summary>
+        /// En inbjudan med e-post: ber personen svara. Länken ger INGEN tillgång — den sammankallande
+        /// godkänner först (Stefan 2026-10-23). Returnerar om mejlet gick iväg.
+        /// </summary>
+        public async Task<bool> InviteGuestAsync(int requestId, PlanningMemberRow? invitedBy)
+        {
+            var req = _planning.RequestById(requestId);
+            var p = req == null ? null : _planning.Get(req.PlanningId);
+            if (req == null || p == null || string.IsNullOrWhiteSpace(req.Email)) return false;
+            var byName = invitedBy?.DisplayName ?? "Någon";
+            var inner = new StringBuilder();
+            inner.Append($"<p>{H(byName)} vill att du är med i planeringen <b>{H(p.Name)}</b>"
+                + (string.IsNullOrWhiteSpace(p.TargetText) ? "" : $" ({H(p.TargetText)})") + " på pistol.nu.</p>");
+            if (!string.IsNullOrWhiteSpace(req.Message))
+                inner.Append($"<div style=\"border-left:3px solid #ccc;margin:10px 0;padding:2px 12px;white-space:pre-wrap\">{H(req.Message)}</div>");
+            inner.Append("<p>Svara med knappen nedan om du vill vara med. Du behöver inget konto.</p>");
+            inner.Append($"<p>{Button("Svara på inbjudan", _links.InviteUrl(req.Id, p.Id))}</p>");
+            inner.Append("<p style=\"color:#555\">När du har svarat ja släpper den som leder planeringen in dig, och då får du ett mejl med en länk in.</p>");
+            var ok = await _email.SendPlanningMailAsync(req.Email!, $"Inbjudan till planeringen {p.Name}",
+                Page(req.Name, p.Name, inner.ToString(), "Vill du inte vara med behöver du inte göra något — eller tryck på knappen och svara nej."),
+                ReplyToFor(invitedBy, p.Name));
+            if (!ok) _logger.LogWarning("Planering: inbjudan {RequestId} gick inte iväg.", requestId);
+            return ok;
+        }
+
+        /// <summary>Till de sammankallande: någon väntar på att bli godkänd. Returnerar hur många som nåddes.</summary>
+        public async Task<int> RequestToConvenersAsync(int planningId, int requestId)
+        {
+            var p = _planning.Get(planningId);
+            var req = _planning.Request(planningId, requestId);
+            if (p == null || req == null) return 0;
+            var what = req.Kind == PlanningRequestKind.Invite
+                ? $"<b>{H(req.Name)}</b> har tackat ja till inbjudan till <b>{H(p.Name)}</b>"
+                : $"<b>{H(req.Name)}</b> ber om att få vara med i <b>{H(p.Name)}</b>";
+            var reached = 0;
+            foreach (var who in _planning.Participants(planningId).Where(x => x.Access == PlanningAccessLevel.Owner))
+            {
+                var r = ResolveRecipient(who);
+                if (r == null) continue;
+                var inner = new StringBuilder($"<p>{what}.</p>");
+                var note = req.Kind == PlanningRequestKind.Invite ? req.ProposedRepresents : req.Message;
+                if (!string.IsNullOrWhiteSpace(note))
+                    inner.Append($"<div style=\"border-left:3px solid #ccc;margin:10px 0;padding:2px 12px;white-space:pre-wrap\">"
+                        + (req.Kind == PlanningRequestKind.Invite ? "Företräder: " : "") + $"{H(note)}</div>");
+                inner.Append("<p>Hen kommer inte in förrän du har godkänt. Då väljer du också nivå och vad hen företräder.</p>");
+                inner.Append($"<p>{Button("Godkänn eller avböj", $"{_links.SiteUrl}/tavlingsplanering/{planningId}#vy=deltagare")}</p>");
+                if (await SendMail(r, planningId, "request", "request", requestId, null,
+                        $"{req.Name} vill vara med i {p.Name}", Page(r.Name, p.Name, inner.ToString(), ""), MailReplyTo.NoReply)) reached++;
+            }
+            return reached;
+        }
+
+        /// <summary>Beskedet att en förfrågan avböjts. Returnerar om mejlet gick iväg.</summary>
+        public async Task<bool> RequestRejectedAsync(PlanningRequestRow req, PlanningMemberRow? decidedBy)
+        {
+            var p = _planning.Get(req.PlanningId);
+            if (p == null) return false;
+            var email = req.Email;
+            if (string.IsNullOrWhiteSpace(email) && req.MemberId > 0)
+            {
+                try { email = _members.GetById(req.MemberId!.Value)?.Email; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Planering: kunde inte slå upp medlem {MemberId}.", req.MemberId); }
+            }
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            var inner = new StringBuilder($"<p>Din förfrågan om att vara med i planeringen <b>{H(p.Name)}</b> blev inte godkänd.</p>");
+            if (!string.IsNullOrWhiteSpace(req.DecisionNote))
+                inner.Append($"<div style=\"border-left:3px solid #ccc;margin:10px 0;padding:2px 12px;white-space:pre-wrap\">{H(req.DecisionNote)}</div>");
+            if (decidedBy != null) inner.Append("<p>Har du frågor kan du svara på det här mejlet.</p>");
+            return await _email.SendPlanningMailAsync(email!, $"Planeringen {p.Name}", Page(req.Name, p.Name, inner.ToString(), ""), ReplyToFor(decidedBy, p.Name));
         }
 
         /// <summary>Den som nämns får det direkt (i lägena Allt direkt och Bara när någon nämner mig).</summary>

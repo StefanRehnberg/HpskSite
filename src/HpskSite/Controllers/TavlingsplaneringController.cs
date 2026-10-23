@@ -135,10 +135,40 @@ namespace HpskSite.Controllers
             _planningService.TouchSeen(row.Id);
             ViewData["PlanningId"] = target.PlanningId;
             ViewData["PlanningToken"] = t;
-            ViewData["PlanningStartView"] = a switch { "svara" => "meddelanden", "rosta" => "moten", "notiser" => "notiser", _ => "oversikt" };
+            ViewData["PlanningStartView"] = a switch { "svara" => "meddelanden", "rosta" => "moten", "notiser" => "notiser", "lamna" => "deltagare", _ => "oversikt" };
+            // "Lämna planeringen" i inbjudan: sidan frågar direkt (inbjudningstaket, Stefan 2026-10-23).
+            ViewData["PlanningLeave"] = a == "lamna";
             ViewData["PlanningStartMeeting"] = m ?? 0;
             ViewData["PlanningReply"] = a == "svara" ? (m ?? 0) : 0;
             return View("Planering", rootNode);
+        }
+
+        /// <summary>
+        /// Svar på en inbjudan med e-post, UTAN inloggning (Stefan 2026-10-23). Länken ger ingen tillgång:
+        /// ett ja lägger förfrågan hos den sammankallande, som släpper in personen.
+        /// </summary>
+        [HttpGet("inbjudan")]
+        public IActionResult Inbjudan(string? t)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var target = _links.ParseInvite(t);
+            var req = target == null ? null : _planningService.Request(target.PlanningId, target.ParticipantId);
+            var planning = req == null ? null : _planningService.Get(req.PlanningId);
+            if (req != null && planning != null && req.Kind == HpskSite.Models.Planning.PlanningRequestKind.Invite)
+            {
+                var inviter = _planningService.Participants(planning.Id, includeRemoved: true).FirstOrDefault(p => p.MemberId == req.CreatedBy);
+                ViewData["InviteToken"] = t;
+                ViewData["InvitePlanning"] = planning.Name;
+                ViewData["InviteTarget"] = planning.TargetText ?? "";
+                ViewData["InviteName"] = req.Name;
+                ViewData["InviteBy"] = inviter?.DisplayName ?? "";
+                ViewData["InviteMessage"] = req.Message ?? "";
+                ViewData["InviteStatus"] = req.Status;
+            }
+            return View("PlaneringInbjudan", rootNode);
         }
 
         /// <summary>

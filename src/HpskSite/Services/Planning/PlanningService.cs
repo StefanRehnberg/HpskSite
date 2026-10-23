@@ -41,15 +41,19 @@ namespace HpskSite.Services.Planning
         {
             "Planning", "PlanningActivity", "PlanningPart", "PlanningMember", "PlanningMessage",
             "PlanningMessageMention", "PlanningMessageRead", "PlanningMeeting", "PlanningMeetingOption",
-            "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink",
+            "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>
         public List<string> MissingSchema()
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            return Tables.Where(t => s.Database.ExecuteScalar<int>(
+            var missing = Tables.Where(t => s.Database.ExecuteScalar<int>(
                 "SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0).ToList();
+            // NPoco skriver kolumnen vid varje sparning av en planering — utan den faller allt.
+            if (!missing.Contains("Planning") && s.Database.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Planning','ListedForMembers') IS NULL THEN 0 ELSE 1 END") == 0)
+                missing.Add("Planning.ListedForMembers");
+            return missing;
         }
 
         // =====================================================================================
@@ -109,7 +113,7 @@ namespace HpskSite.Services.Planning
             return (p.Id, me.Id);
         }
 
-        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId)
+        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId, bool? listed = null)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
@@ -122,6 +126,7 @@ namespace HpskSite.Services.Planning
             p.TargetText = Clean(targetText, 200);
             p.TargetStart = start?.Date;
             p.TargetEnd = end?.Date;
+            if (listed.HasValue) p.ListedForMembers = listed.Value;
             p.UpdatedAt = Now;
             p.UpdatedBy = byMemberId;
             db.Update(p);
@@ -281,6 +286,208 @@ namespace HpskSite.Services.Planning
             Bump(db, planningId);
             return null;
         }
+
+        // =====================================================================================
+        //  Förfrågningar: inbjudan med e-post och "be om att få vara med" (Stefan 2026-10-23)
+        //  ⚠️ En förfrågan ger ALDRIG tillgång. Först Approve skapar en deltagarrad.
+        // =====================================================================================
+
+        /// <summary>Hur många som bjudits in det senaste dygnet (medlemmar som lagts till av någon annan + e-postinbjudningar).</summary>
+        public int InvitesLastDay(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return InvitesLastDayIn(s.Database, planningId);
+        }
+
+        public PlanningRequestRow? Request(int planningId, int requestId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.SingleOrDefault<PlanningRequestRow>(
+                "SELECT * FROM PlanningRequest WHERE Id = @0 AND PlanningId = @1", requestId, planningId);
+        }
+
+        public PlanningRequestRow? RequestById(int requestId)
+        {
+            if (requestId <= 0) return null;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.SingleOrDefault<PlanningRequestRow>("SELECT * FROM PlanningRequest WHERE Id = @0", requestId);
+        }
+
+        /// <summary>Öppna förfrågningar (väntar på svar eller godkännande), äldst först.</summary>
+        public List<PlanningRequestRow> OpenRequests(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<PlanningRequestRow>(
+                "SELECT * FROM PlanningRequest WHERE PlanningId = @0 AND Status IN (N'Sent', N'Pending') ORDER BY CreatedAt", planningId);
+        }
+
+        /// <summary>Antal som väntar på godkännande, per planering (en fråga för hela listan).</summary>
+        public Dictionary<int, int> PendingCounts(IEnumerable<int> planningIds)
+        {
+            var ids = planningIds.Distinct().ToList();
+            var map = new Dictionary<int, int>();
+            if (ids.Count == 0) return map;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            foreach (var r in s.Database.Fetch<IdCount>(
+                "SELECT PlanningId AS Id, COUNT(*) AS N FROM PlanningRequest WHERE Status = N'Pending' AND PlanningId IN (@0) GROUP BY PlanningId", ids))
+                map[r.Id] = r.N;
+            return map;
+        }
+
+        /// <summary>Alla planeringar med förfrågningar som väntar på godkännande (sajtadmins supportlista).</summary>
+        public Dictionary<int, int> AllPendingCounts()
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<IdCount>(@"SELECT r.PlanningId AS Id, COUNT(*) AS N FROM PlanningRequest r
+                    JOIN Planning p ON p.Id = r.PlanningId AND p.DeletedAt IS NULL
+                   WHERE r.Status = N'Pending' GROUP BY r.PlanningId")
+                .ToDictionary(r => r.Id, r => r.N);
+        }
+
+        /// <summary>Medlemmens egna öppna förfrågningar, per planering.</summary>
+        public Dictionary<int, PlanningRequestRow> OpenRequestsByMember(int memberId)
+        {
+            if (memberId <= 0) return new();
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<PlanningRequestRow>(
+                    "SELECT * FROM PlanningRequest WHERE MemberId = @0 AND Kind = N'Request' AND Status = N'Pending'", memberId)
+                .GroupBy(r => r.PlanningId).ToDictionary(g => g.Key, g => g.First());
+        }
+
+        /// <summary>Planeringar som den sammankallande valt att visa för alla medlemmar (aktiva).</summary>
+        public List<PlanningRow> Listed()
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<PlanningRow>(
+                "SELECT * FROM Planning WHERE ListedForMembers = 1 AND Status = N'Active' AND DeletedAt IS NULL ORDER BY UpdatedAt DESC");
+        }
+
+        /// <summary>De sammankallande per planering (namnen), för listan.</summary>
+        public Dictionary<int, List<string>> ConvenerNames(IEnumerable<int> planningIds)
+        {
+            var ids = planningIds.Distinct().ToList();
+            if (ids.Count == 0) return new();
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<PlanningMemberRow>(
+                    "SELECT * FROM PlanningMember WHERE Access = N'Owner' AND RemovedAt IS NULL AND PlanningId IN (@0) ORDER BY DisplayName", ids)
+                .GroupBy(r => r.PlanningId).ToDictionary(g => g.Key, g => g.Select(r => r.DisplayName).ToList());
+        }
+
+        public sealed record RequestResult(int RequestId, string? Error);
+
+        /// <summary>En inbjudan med e-post: väntar på svar. Ingen tillgång förrän den godkänts.</summary>
+        public RequestResult CreateInvite(int planningId, string name, string email, string? message, int byMemberId)
+        {
+            var n = Clean(name, 200);
+            var e = Clean(email, 256)?.ToLowerInvariant();
+            if (n == null) return new RequestResult(0, "Skriv personens namn.");
+            if (e == null || !e.Contains('@') || e.Contains(' ')) return new RequestResult(0, "Ange en giltig e-postadress.");
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            db.Execute("SELECT Id FROM Planning WITH (UPDLOCK, HOLDLOCK) WHERE Id = @0", planningId);
+            if (InvitesLastDayIn(db, planningId) >= PlanningInviteRules.MaxPerDay) return new RequestResult(0, PlanningInviteRules.LimitMessage);
+            if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMember WHERE PlanningId = @0 AND MemberId IS NULL AND GuestEmail = @1 AND RemovedAt IS NULL", planningId, e) > 0)
+                return new RequestResult(0, "Personen är redan med i planeringen.");
+            if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningRequest WHERE PlanningId = @0 AND Email = @1 AND Status IN (N'Sent', N'Pending')", planningId, e) > 0)
+                return new RequestResult(0, "Personen är redan inbjuden och har inte svarat än.");
+            var row = new PlanningRequestRow
+            {
+                PlanningId = planningId, Kind = PlanningRequestKind.Invite, Name = n, Email = e, Message = Clean(message, 1000),
+                Status = PlanningRequestStatus.Sent, CreatedAt = Now, CreatedBy = byMemberId,
+            };
+            db.Insert(row);
+            Bump(db, planningId);
+            return new RequestResult(row.Id, null);
+        }
+
+        private static int InvitesLastDayIn(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int planningId) =>
+            db.ExecuteScalar<int>(@"
+                SELECT (SELECT COUNT(*) FROM PlanningMember WHERE PlanningId = @0 AND AddedAt >= @1 AND (MemberId IS NULL OR MemberId <> AddedBy))
+                     + (SELECT COUNT(*) FROM PlanningRequest WHERE PlanningId = @0 AND Kind = N'Invite' AND CreatedAt >= @1)", planningId, Now.AddDays(-1));
+
+        /// <summary>En medlem ber om att få vara med i en planering som visas för alla medlemmar.</summary>
+        public RequestResult CreateMemberRequest(int planningId, int memberId, string name, string? message)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WITH (UPDLOCK, HOLDLOCK) WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            if (p == null || !p.ListedForMembers || p.Status != "Active") return new RequestResult(0, "Planeringen tar inte emot förfrågningar.");
+            if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1 AND RemovedAt IS NULL", planningId, memberId) > 0)
+                return new RequestResult(0, "Du är redan med i planeringen.");
+            if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningRequest WHERE PlanningId = @0 AND MemberId = @1 AND Status = N'Pending'", planningId, memberId) > 0)
+                return new RequestResult(0, "Du har redan bett om att få vara med. Den sammankallande har inte svarat än.");
+            var row = new PlanningRequestRow
+            {
+                PlanningId = planningId, Kind = PlanningRequestKind.Request, MemberId = memberId, Name = Clean(name, 200) ?? "Medlem",
+                Message = Clean(message, 1000), Status = PlanningRequestStatus.Pending, CreatedAt = Now, CreatedBy = memberId,
+            };
+            db.Insert(row);
+            Bump(db, planningId);
+            return new RequestResult(row.Id, null);
+        }
+
+        /// <summary>Den inbjudna svarar. Ja → väntar på godkännande; nej → avböjd.</summary>
+        public string? AnswerInvite(int requestId, bool accept, string? proposedRepresents)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var r = db.SingleOrDefault<PlanningRequestRow>("SELECT * FROM PlanningRequest WITH (UPDLOCK, HOLDLOCK) WHERE Id = @0", requestId);
+            if (r == null || r.Kind != PlanningRequestKind.Invite) return "Inbjudan finns inte.";
+            if (r.Status != PlanningRequestStatus.Sent) return "Inbjudan är redan besvarad.";
+            r.Status = accept ? PlanningRequestStatus.Pending : PlanningRequestStatus.Declined;
+            r.RespondedAt = Now;
+            if (accept) r.ProposedRepresents = Clean(proposedRepresents, 200);
+            db.Update(r);
+            Bump(db, r.PlanningId);
+            return null;
+        }
+
+        /// <summary>Den som bjöd in drar tillbaka inbjudan, eller medlemmen sin förfrågan.</summary>
+        public string? WithdrawRequest(int planningId, int requestId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var n = s.Database.Execute(
+                "UPDATE PlanningRequest SET Status = N'Withdrawn', DecidedAt = @2 WHERE Id = @0 AND PlanningId = @1 AND Status IN (N'Sent', N'Pending')",
+                requestId, planningId, Now);
+            if (n == 0) return "Förfrågan är redan avgjord.";
+            Bump(s.Database, planningId);
+            return null;
+        }
+
+        public string? RejectRequest(int planningId, int requestId, string? note, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var n = s.Database.Execute(
+                "UPDATE PlanningRequest SET Status = N'Rejected', DecidedAt = @2, DecidedBy = @3, DecisionNote = @4 WHERE Id = @0 AND PlanningId = @1 AND Status = N'Pending'",
+                requestId, planningId, Now, byMemberId, Clean(note, 500));
+            if (n == 0) return "Förfrågan väntar inte på godkännande.";
+            Bump(s.Database, planningId);
+            return null;
+        }
+
+        /// <summary>
+        /// Godkänn: deltagarraden skapas med nivå och Företräder, och förfrågan pekar på den. EN transaktion.
+        /// </summary>
+        public AddResult ApproveRequest(int planningId, int requestId, string access, int? repClubId, int? repRegionId, string? repText,
+            string memberDisplayName, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var r = db.SingleOrDefault<PlanningRequestRow>(
+                "SELECT * FROM PlanningRequest WITH (UPDLOCK, HOLDLOCK) WHERE Id = @0 AND PlanningId = @1", requestId, planningId);
+            if (r == null) return new AddResult(0, false, false, "Förfrågan finns inte.");
+            if (r.Status != PlanningRequestStatus.Pending) return new AddResult(0, false, false, "Förfrågan väntar inte på godkännande.");
+            var add = r.Kind == PlanningRequestKind.Request
+                ? AddParticipant(planningId, r.MemberId ?? 0, memberDisplayName, null, access, repClubId, repRegionId, repText, byMemberId)
+                : AddParticipant(planningId, 0, r.Name, r.Email, access, repClubId, repRegionId, repText, byMemberId);
+            if (add.Error != null) return add;
+            r.Status = PlanningRequestStatus.Approved;
+            r.DecidedAt = Now; r.DecidedBy = byMemberId; r.ParticipantId = add.ParticipantId;
+            db.Update(r);
+            return add;
+        }
+
+        private sealed class IdCount { public int Id { get; set; } public int N { get; set; } }
 
         private const string NoOwnerLeft = "Det måste finnas minst en sammankallande. Gör någon annan till sammankallande först.";
 

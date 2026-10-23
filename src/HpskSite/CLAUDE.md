@@ -12355,6 +12355,27 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **Planeringens slag frågas inte** — valet ändrade ingenting; nya rader får `Planeringsgrupp`.
 - **Bjud in med e-post vägrar en medlems adress** (`isMember`, Stefan 2026-10-22): medlemmen bjuds in på
   vanligt sätt och deltar med sitt konto — aldrig som gäst, och aldrig tyst omvandlad.
+- **⚠️⚠️ Bjud in = guide, och ingen länk ger åtkomst förrän någon godkänt** (Stefan 2026-10-23). Steg 1
+  medlem eller e-post. **Medlem:** Företräder fylls med hens faktiska klubbar och deras kretsar
+  (`RepresentOptions`), nivå väljs, hen är med direkt. **E-post:** bara namn/adress/rader → en
+  `PlanningRequest` (`Kind=Invite`, `Status=Sent`) och ett mejl med **`Planning.Invite.v1`** (`inv|requestId|
+  planningId`, tidsbegränsad) till `/tavlingsplanering/inbjudan?t=` (`PlaneringInbjudan.cshtml`, ingen
+  inloggning). Länken ger **bara rätten att svara**: ja + föreslagen Företräder → `Pending`, nej → `Declined`.
+  **Bara `ApproveRequest` skapar `PlanningMember`** — då väljs nivå och Företräder (förslaget kan ändras) och
+  gästen får det vanliga mejlet med `Planning.Mail.v1`.
+- **Be om att få vara med** (`RequestAccess`, `Kind=Request`): bara på planeringar där Sammankallande slagit
+  på **"Visa planeringen för alla medlemmar"** (`Planning.ListedForMembers`, förval AV). Listningen visar
+  namn, ungefär när/var och Sammankallande — inget innehåll. Sammankallande får mejl (`kind=request`);
+  förfrågningarna ligger överst under Deltagare ("Väntar på dig"), räknas i menyn och i listan.
+- **Vem godkänner:** Sammankallande (`CanGrant`), eller **sajtadmin som support** (`ResolveApproverAsync`,
+  `Support=true`, loggas med `LogWarning`, ger ingen läsrätt — filtret *Support* i listan). Kan ändra kan
+  bjuda in men inte godkänna; den som bjöd in ser bara sina obesvarade (`Sent`) och kan dra tillbaka dem.
+- **Inbjudningstak `PlanningInviteRules.MaxPerDay = 30` per planering och dygn** (nya medlemmar som någon annan
+  lagt till + e-postinbjudningar, rullande 24 h; `UPDLOCK` på planeringen). Alla medlemmar får skapa planeringar.
+- **Mejlet "Du är nu med" har länken "Lämna planeringen"** (`Svar?a=lamna` → Deltagare + bekräftelse).
+- **Listsidan `/tavlingsplanering` = adminlistans form** (Träningar): Åtgärder → Ny planering, sök, filter
+  *Mina / Kan be om att vara med / Arkiverade / Support* (sajtadmin), radens Åtgärder (Öppna, Lämna, Be om
+  att få vara med, Dra tillbaka, Hantera förfrågningar). Öppen för alla inloggade.
 - **Notiserna = `PlanningNotifier` + `PlanningNotifyRules`** (matrisen står i klassens kommentar). Varje
   utskick **registreras i `PlanningNotifyLog` FÖRE** utskicket (`INSERT … WHERE NOT EXISTS` + unikt index),
   `Succeeded` = FAKTISKT skickat. Svepet `PlanningNotificationHostedService` (var 5:e min, `MayRunScheduled`,
@@ -12370,13 +12391,14 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **⚠️ `@@ROWCOUNT` i en NPoco-sats blir parametern `@ROWCOUNT`** ("@@" är ett escapat "@"). Skriv
   `IF EXISTS … UPDATE … ELSE INSERT`.
 - All tid är svensk tid (`…At`, `DateTime.Now`) — inga `…Utc`-kolumner.
-- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (12 tabeller, filtrerade index ⇒
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (13 tabeller inkl. `PlanningRequest` och
+  `Planning.ListedForMembers` — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒
   `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21, **EJ i prod**.
   Startkontroll: `PlanningSchemaGuardHostedService`. `PlanningLink` skapas tom (P2).
 - **Ej byggt i P1:** dokument (fråga 7), delar och milstolpar (P3), förberedelsernas och bemanningens
   flytt (P2/P2b), kopiera planeringen (P3), SignalR. Dev kan inte skicka mejl — loggraderna står på 0.
-- Svit: `hpsk-verify/tavlingsplanering-p1-verify.mjs` 79/79 (`HPSK_BASE=https://localhost:44390`; A/B utan
-  planeringsspärren i röstningen → 1 röd). Fildeploy av KB `tavlingsplanering-fristaende.md`.
+- Svit: `hpsk-verify/tavlingsplanering-p1-verify.mjs` 133/133 (`HPSK_BASE=https://localhost:44390`; A/B:
+  röstspärren, olistad förfrågan, inbjudningstaket och godkännarvakten fäller var sin). Fildeploy av KB `tavlingsplanering-fristaende.md`.
 
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.

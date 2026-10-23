@@ -152,6 +152,8 @@ namespace HpskSite.Models.Planning
         public DateTime? TargetStart { get; set; }
         public DateTime? TargetEnd { get; set; }
         public string Status { get; set; } = "Active";
+        /// <summary>Den sammankallandes val: planeringen syns i listan för alla medlemmar, som kan be om att få vara med.</summary>
+        public bool ListedForMembers { get; set; }
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -200,6 +202,65 @@ namespace HpskSite.Models.Planning
 
         [Ignore] public bool IsGuest => !(MemberId > 0);
         [Ignore] public bool IsActive => RemovedAt == null;
+    }
+
+    /// <summary>
+    /// En förfrågan om att få vara med: en inbjudan med e-post som väntar på svar (<see cref="Invite"/>),
+    /// eller en medlem som ber om att få vara med (<see cref="Request"/>). Stefan 2026-10-23: en länk i ett
+    /// mejl ska aldrig ensam ge tillgång — den sammankallande (eller sajtadmin) godkänner och sätter då nivå
+    /// och vad personen företräder. Först då skapas en <see cref="PlanningMemberRow"/>.
+    /// </summary>
+    public static class PlanningRequestKind
+    {
+        public const string Invite = "Invite";
+        public const string Request = "Request";
+    }
+
+    public static class PlanningRequestStatus
+    {
+        /// <summary>Inbjudan skickad, inget svar ännu.</summary>
+        public const string Sent = "Sent";
+        /// <summary>Väntar på godkännande: den inbjudna har tackat ja, eller medlemmen har bett om att få vara med.</summary>
+        public const string Pending = "Pending";
+        public const string Approved = "Approved";
+        public const string Rejected = "Rejected";
+        /// <summary>Den inbjudna tackade nej.</summary>
+        public const string Declined = "Declined";
+        /// <summary>Dragen tillbaka av den som bjöd in eller bad om att få vara med.</summary>
+        public const string Withdrawn = "Withdrawn";
+
+        public static bool IsOpen(string? s) => s == Sent || s == Pending;
+    }
+
+    /// <summary>Taket för inbjudningar, så att ingen kan skicka mejl till hela registret.</summary>
+    public static class PlanningInviteRules
+    {
+        public const int MaxPerDay = 30;
+        public static string LimitMessage => $"Planeringen har redan bjudit in {MaxPerDay} personer det senaste dygnet. Vänta till i morgon, eller hör av dig till sajtens administratör om ni behöver fler.";
+    }
+
+    [TableName("PlanningRequest")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningRequestRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public string Kind { get; set; } = PlanningRequestKind.Request;
+        public int? MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public string? Email { get; set; }
+        public string? Message { get; set; }
+        public string? ProposedRepresents { get; set; }
+        public string Status { get; set; } = PlanningRequestStatus.Pending;
+        public DateTime CreatedAt { get; set; }
+        public int CreatedBy { get; set; }
+        public DateTime? RespondedAt { get; set; }
+        public DateTime? DecidedAt { get; set; }
+        public int? DecidedBy { get; set; }
+        public string? DecisionNote { get; set; }
+        public int? ParticipantId { get; set; }
+
+        [Ignore] public bool IsOpen => PlanningRequestStatus.IsOpen(Status);
     }
 
     [TableName("PlanningMessage")]

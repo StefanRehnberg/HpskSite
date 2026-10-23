@@ -28,10 +28,13 @@ namespace HpskSite.Services.Planning
     {
         private const string MailPurpose = "Planning.Mail.v1";
         private const string IcsPurpose = "Planning.Ics.v1";
+        /// <summary>Svar på en e-postinbjudan. Ger INGEN tillgång — bara rätt att svara ja eller nej (Stefan 2026-10-23).</summary>
+        private const string InvitePurpose = "Planning.Invite.v1";
         public static readonly TimeSpan MailLifetime = TimeSpan.FromDays(60);
 
         private readonly ITimeLimitedDataProtector _mail;
         private readonly IDataProtector _ics;
+        private readonly ITimeLimitedDataProtector _invite;
         private readonly IConfiguration _config;
         private readonly ILogger<PlanningLinkService> _logger;
 
@@ -39,6 +42,7 @@ namespace HpskSite.Services.Planning
         {
             _mail = dp.CreateProtector(MailPurpose).ToTimeLimitedDataProtector();
             _ics = dp.CreateProtector(IcsPurpose);
+            _invite = dp.CreateProtector(InvitePurpose).ToTimeLimitedDataProtector();
             _config = config;
             _logger = logger;
         }
@@ -60,6 +64,14 @@ namespace HpskSite.Services.Planning
         /// <summary>Kalenderlänken. <paramref name="baseUrl"/> = sidans egen adress (Request.PublicBase()); utan den sajtens (mejl).</summary>
         public string IcsUrl(int participantId, int planningId, string? baseUrl = null) =>
             $"{(string.IsNullOrWhiteSpace(baseUrl) ? SiteUrl : baseUrl.TrimEnd('/'))}/tavlingsplanering/kalender.ics?t={Uri.EscapeDataString(IcsToken(participantId, planningId))}";
+
+        /// <summary>Länken i en e-postinbjudan: sidan där den inbjudna svarar ja eller nej.</summary>
+        public string InviteUrl(int requestId, int planningId, string? baseUrl = null) =>
+            $"{(string.IsNullOrWhiteSpace(baseUrl) ? SiteUrl : baseUrl.TrimEnd('/'))}/tavlingsplanering/inbjudan?t="
+            + Uri.EscapeDataString(_invite.Protect($"inv|{requestId}|{planningId}", MailLifetime));
+
+        /// <summary>Tolkar inbjudningslänken. <see cref="PlanningLinkTarget.ParticipantId"/> bär FÖRFRÅGANS id.</summary>
+        public PlanningLinkTarget? ParseInvite(string? token) => Parse(token, "inv", t => _invite.Unprotect(t));
 
         public PlanningLinkTarget? ParseMail(string? token) => Parse(token, "p", t => _mail.Unprotect(t));
         public PlanningLinkTarget? ParseIcs(string? token) => Parse(token, "ics", t => _ics.Unprotect(t));

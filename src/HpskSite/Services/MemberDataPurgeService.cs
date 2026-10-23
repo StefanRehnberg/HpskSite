@@ -166,6 +166,9 @@ namespace HpskSite.Services
             // deltagaren (PlanningMember.Id), aldrig på medlemmen — de behöver ingen egen rad här.
             ("PlanningMember",  "MemberId",
                 "DisplayName = N'Borttagen medlem', GuestEmail = NULL, RemovedAt = ISNULL(RemovedAt, GETDATE())"),
+            // Medlemmens egen förfrågan om att få vara med i en planering: namn och skäl tas bort.
+            ("PlanningRequest", "MemberId",
+                "Name = N'Borttagen medlem', Message = NULL, ProposedRepresents = NULL"),
         };
 
         /// <summary>

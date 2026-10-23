@@ -213,7 +213,7 @@
         $('plOrg').textContent = s.planning.name;
         $('plRole').textContent = s.me.accessLabel || '';
         if (TOKEN) { const b = $('plBack'); b.textContent = '← Till startsidan'; b.href = '/'; }
-        const counts = { meddelanden: unreadCount(), moten: votesOwed() };
+        const counts = { meddelanden: unreadCount(), moten: votesOwed(), deltagare: s.me.pendingRequests || 0 };
         $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
             `<a href="#vy=${v.key}" class="pl-nav${v.key === view ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
             + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
@@ -797,8 +797,7 @@
     function viewPeople() {
         setHead('Deltagare', esc(S.planning.name));
         setActions([
-            S.me.canInvite && { label: 'Bjud in en medlem…', icon: 'bi-person-plus', fn: openInvite },
-            S.me.canInvite && { label: 'Bjud in med e-post…', icon: 'bi-envelope', fn: openInviteEmail },
+            S.me.canInvite && { label: 'Bjud in…', icon: 'bi-person-plus', fn: openInvite },
             S.me.isParticipant && !TOKEN && { divider: true },
             S.me.isParticipant && !TOKEN && { label: 'Lämna planeringen', icon: 'bi-box-arrow-right', danger: true, fn: leave },
         ]);
@@ -829,73 +828,185 @@
             ? `<div class="alert alert-warning d-flex gap-2 align-items-start"><i class="bi bi-exclamation-triangle mt-1"></i>
                 <div>Det finns bara en <b>sammankallande</b>${conveners[0].isMe ? ' — du' : ''}. Utse gärna en till, så att gruppen inte står utan om hen blir sjuk eller slutar:
                 välj <i>Ändra nivå</i> på personen.</div></div>` : '';
-        $('plBody').innerHTML = `${warn}<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress.
+        $('plBody').innerHTML = `<div id="plReqs"></div>${warn}<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress.
             Den som inte är skytt (t.ex. någon från kommunen eller markägaren) bjuds in med e-post och deltar via länkarna i mejlen.</p>${list}</div>
             <div class="pl-card"><h2>Nivåerna</h2><ul class="mb-0">${(S.accessLevels || []).slice().reverse().map(l =>
                 `<li class="mb-1"><b>${esc(l.label)}</b> — ${esc(l.help)}</li>`).join('')}</ul></div>`;
+        loadRequests();
+    }
+    // ================================================================ Bjud in — guiden (Stefan 2026-10-23)
+    // Steg 1: en medlem eller någon utan konto. Medlem: sök → Företräder med HENS klubbar och kretsar + nivå,
+    // och hen är med direkt. E-post: namn och adress — hen får en inbjudan att SVARA, och den sammankallande
+    // väljer nivå och Företräder när svaret kommit. En länk i ett mejl ger aldrig tillgång i sig.
+    function memberRepPicker(prefix, o) {
+        const clubs = o.clubs || [], regions = o.regions || [];
+        const first = o.primaryClubId ? 'c-' + o.primaryClubId : clubs.length ? 'c-' + clubs[0].id : 'none';
+        const opt = (v, label) => `<option value="${v}"${v === first ? ' selected' : ''}>${esc(label)}</option>`;
+        return `<div class="row g-2"><div class="col-sm-6"><select class="form-select" id="${prefix}Rep" data-pl-rep="${prefix}">
+            ${clubs.length ? `<optgroup label="Hens klubb">${clubs.map(c => opt('c-' + c.id, c.name)).join('')}</optgroup>` : ''}
+            ${regions.length ? `<optgroup label="Hens krets">${regions.map(r => opt('r-' + r.id, r.name)).join('')}</optgroup>` : ''}
+            ${opt('none', 'Inget särskilt')}
+            <option value="t">Något annat — skriv själv</option></select></div>
+            <div class="col-sm-6 d-none" id="${prefix}RepTextWrap">
+                <input class="form-control" id="${prefix}RepText" maxlength="200" placeholder="Till exempel Förbundet" aria-label="Vad personen företräder"></div></div>`;
     }
     function openInvite() {
         if (!S.me.canInvite) return;
-        let timer = null;
+        let timer = null, hits = [], chosen = null;
+        const err = m => { const e = $('plFormErr'); e.textContent = m; e.classList.toggle('d-none', !m); };
+        const step1 = () => `<p class="mb-3">Vem vill du bjuda in?</p>
+            <div class="d-grid gap-2">
+                <button type="button" class="btn btn-outline-secondary text-start p-3" data-iv-go="member">
+                    <b><i class="bi bi-person me-2"></i>En medlem på pistol.nu</b>
+                    <div class="small text-body-secondary ms-4">Sök på namnet. Hen är med direkt och deltar med sitt eget konto.</div></button>
+                <button type="button" class="btn btn-outline-secondary text-start p-3" data-iv-go="email">
+                    <b><i class="bi bi-envelope me-2"></i>Någon utan konto (e-post)</b>
+                    <div class="small text-body-secondary ms-4">Till exempel någon från kommunen eller markägaren. Hen får ett mejl och svarar om hen vill vara med. Du släpper in hen när svaret kommit.</div></button>
+            </div>
+            <p class="pl-help small mt-3 mb-0">Den som bjuds in får ett mejl med ditt namn. Högst ${S.inviteCap || 30} inbjudningar per dygn och planering.</p>`;
+        const stepSearch = () => `<label class="form-label fw-semibold" for="ivQ">Sök på namn</label>
+            <input id="ivQ" class="form-control mb-2" placeholder="Till exempel Anna Svensson" autocomplete="off">
+            <div id="ivHits" class="pl-help">Skriv minst två bokstäver.</div>
+            <button type="button" class="btn btn-link px-0 mt-2" data-iv-go="start">← Tillbaka</button>`;
+        const stepMember = o => `<p>Bjud in <b>${esc(chosen.name)}</b>${chosen.club ? ' <span class="pl-help">(' + esc(chosen.club) + ')</span>' : ''}.</p>
+            <div class="mb-3"><label class="form-label fw-semibold" for="ivRep">Företräder</label>${memberRepPicker('iv', o)}</div>
+            <div class="mb-3"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'ivAccess')}</div>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary" data-iv-go="member">Tillbaka</button>
+                <button type="button" class="btn btn-primary" data-iv-send="member">Bjud in</button></div>`;
+        const stepEmail = () => `<div class="mb-3"><label class="form-label" for="ieName">Namn</label><input id="ieName" class="form-control" maxlength="200" autocomplete="off"></div>
+            <div class="mb-3"><label class="form-label" for="ieEmail">E-post</label><input id="ieEmail" class="form-control" type="email" inputmode="email" autocomplete="off"></div>
+            <div class="mb-3"><label class="form-label" for="ieMsg">Några rader till hen (valfritt)</label>
+                <textarea id="ieMsg" class="form-control" rows="3" maxlength="1000" placeholder="Till exempel varför ni vill ha med hen"></textarea></div>
+            <p class="pl-help small">Hen får ett mejl och svarar om hen vill vara med, och kan skriva vem hen företräder. Du väljer nivå och godkänner under <b>Deltagare</b> när svaret kommit — först då kommer hen in.</p>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary" data-iv-go="start">Tillbaka</button>
+                <button type="button" class="btn btn-primary" data-iv-send="email">Skicka inbjudan</button></div>`;
+        const done = html => `${html}<div class="d-flex gap-2 mt-3"><button type="button" class="btn btn-outline-secondary" data-iv-go="start">Bjud in fler</button>
+            <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>`;
         formModal({
-            title: 'Bjud in en medlem', okLabel: null, wide: true,
-            html: `<label class="form-label fw-semibold" for="ivQ">Sök på namn</label>
-                <input id="ivQ" class="form-control mb-3" placeholder="Till exempel Anna Svensson" autocomplete="off">
-                <div class="mb-3"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'ivAccess')}</div>
-                <div class="mb-3"><label class="form-label fw-semibold" for="ivRep">Företräder</label>${repPicker('iv', {}, [], true)}</div>
-                <div id="ivHits" class="pl-help">Skriv minst två bokstäver.</div>
-                <div class="border-top mt-3 pt-3">
-                    <p class="pl-help small mb-2">Den du bjuder in får ett mejl med en länk. Är personen inte skytt och saknar konto på pistol.nu — till exempel någon från kommunen eller markägaren — bjuder du in hen med e-post.</p>
-                    <button type="button" class="btn btn-outline-secondary" data-iv-email="1"><i class="bi bi-envelope me-1"></i>Bjud in med e-post i stället</button>
-                </div>`,
+            title: 'Bjud in', okLabel: null, wide: true, html: step1(),
             onOpen: body => {
-                const q = body.querySelector('#ivQ'); q.focus();
-                q.addEventListener('input', () => {
+                const show = html => { err(''); body.innerHTML = html; };
+                body.addEventListener('input', ev => {
+                    if (ev.target.id !== 'ivQ') return;
                     clearTimeout(timer);
                     timer = setTimeout(async () => {
-                        const v = q.value.trim();
-                        if (v.length < 2) { body.querySelector('#ivHits').textContent = 'Skriv minst två bokstäver.'; return; }
+                        const v = ev.target.value.trim();
+                        const box = body.querySelector('#ivHits'); if (!box) return;
+                        if (v.length < 2) { box.textContent = 'Skriv minst två bokstäver.'; return; }
                         const r = await get('SearchMembers', { q: v });
-                        if (!r.success) { body.querySelector('#ivHits').textContent = r.message || 'Sökningen gick inte.'; return; }
-                        body.querySelector('#ivHits').innerHTML = r.members.length ? r.members.map(m =>
+                        if (!r.success) { box.textContent = r.message || 'Sökningen gick inte.'; return; }
+                        hits = r.members;
+                        box.innerHTML = hits.length ? hits.map((m, i) =>
                             `<div class="pl-person"><div><b>${esc(m.name)}</b><div class="small">${esc(m.club)}</div></div>
-                            ${m.alreadyIn ? '<span class="pl-state ok">Är med</span>' : `<button type="button" class="btn btn-primary btn-sm" data-iv-add="${m.memberId}">Bjud in</button>`}</div>`).join('')
-                            : 'Ingen medlem hittades. Saknar personen konto kan du bjuda in med e-post (knappen nedan).';
+                            ${m.alreadyIn ? '<span class="pl-state ok">Är med</span>' : `<button type="button" class="btn btn-outline-primary btn-sm" data-iv-pick="${i}">Välj</button>`}</div>`).join('')
+                            : 'Ingen medlem hittades. Saknar personen konto: gå tillbaka och välj <i>Någon utan konto</i>.';
                     }, 250);
                 });
                 body.addEventListener('click', async ev => {
-                    if (ev.target.closest('[data-iv-email]')) { openInviteEmail(); return; }
-                    const b = ev.target.closest('[data-iv-add]'); if (!b) return;
-                    b.disabled = true;
-                    const r = await post('AddMember', Object.assign({ memberId: b.dataset.ivAdd, access: readAccess(body, 'ivAccess', 'Participant') }, readRep(body, 'iv')));
-                    if (!r.success) { b.disabled = false; $('plFormErr').textContent = r.message; $('plFormErr').classList.remove('d-none'); return; }
-                    b.outerHTML = `<span class="pl-state ok">${r.mailed ? 'Inbjuden — mejl skickat' : 'Inbjuden'}</span>`;
-                    await reloadPeople();
+                    const go = ev.target.closest('[data-iv-go]');
+                    if (go) {
+                        const s = go.dataset.ivGo;
+                        show(s === 'member' ? stepSearch() : s === 'email' ? stepEmail() : step1());
+                        (body.querySelector('#ivQ') || body.querySelector('#ieName'))?.focus();
+                        return;
+                    }
+                    const pick = ev.target.closest('[data-iv-pick]');
+                    if (pick) {
+                        chosen = hits[parseInt(pick.dataset.ivPick, 10)];
+                        const o = await get('RepresentOptions', { memberId: chosen.memberId });
+                        if (!o.success) { err(o.message || 'Det gick inte.'); return; }
+                        show(stepMember(o));
+                        return;
+                    }
+                    const send = ev.target.closest('[data-iv-send]'); if (!send) return;
+                    send.disabled = true;
+                    try {
+                        if (send.dataset.ivSend === 'member') {
+                            const r = await post('AddMember', Object.assign({ memberId: chosen.memberId, access: readAccess(body, 'ivAccess', 'Participant') }, readRep(body, 'iv')));
+                            if (!r.success) { err(r.message); return; }
+                            await reloadPeople(); if (view === 'deltagare') viewPeople();
+                            show(done(`<div class="alert alert-success mb-0">${esc(chosen.name)} är med${r.mailed ? ' och har fått ett mejl' : ''}.${r.alreadyIn ? ' (Hen var redan med.)' : ''}</div>`));
+                        } else {
+                            const name = body.querySelector('#ieName').value.trim();
+                            const r = await post('InviteByEmail', { name, email: body.querySelector('#ieEmail').value, message: body.querySelector('#ieMsg').value });
+                            if (!r.success) { err(r.message); return; }
+                            if (view === 'deltagare') loadRequests();
+                            show(done(`<div class="alert alert-${r.mailed ? 'success' : 'warning'} mb-0">${r.mailed
+                                ? `Inbjudan till ${esc(name)} är skickad. När hen svarat ja ser du det under <b>Deltagare → Väntar på dig</b>.`
+                                : `Inbjudan är sparad, men mejlet till ${esc(name)} kunde inte skickas. Kontrollera adressen.`}
+                                ${r.supportLink ? `<div class="small mt-2">Länken (för support): <a href="${esc(r.supportLink)}" target="_blank" rel="noopener">svara på inbjudan</a></div>` : ''}</div>`));
+                        }
+                    } finally { send.disabled = false; }
                 });
             }
         });
     }
-    function openInviteEmail() {
+
+    // ================================================================ Förfrågningar — väntar på dig
+    async function loadRequests() {
+        const box = $('plReqs'); if (!box || !(S.me.canInvite || S.me.canManage)) return;
+        const r = await get('Requests');
+        if (!r.success || !$('plReqs')) return;
+        const pending = r.requests.filter(x => x.status === 'Pending'), sent = r.requests.filter(x => x.status === 'Sent');
+        REQS = r.requests;
+        const pend = pending.map(x => `<div class="pl-person"><div>
+                <div><b>${esc(x.name)}</b> ${x.club ? '<span class="pl-help small">(' + esc(x.club) + ')</span>' : ''}</div>
+                <div class="small">${x.kind === 'Invite' ? 'Har tackat ja till inbjudan' + (x.invitedBy ? ' från ' + esc(x.invitedBy) : '') : 'Ber om att få vara med'} · ${esc(fmtShort(x.respondedAt || x.createdAt))}</div>
+                ${x.proposedRepresents ? `<div class="small">Företräder enligt hen själv: <b>${esc(x.proposedRepresents)}</b></div>` : ''}
+                ${x.message && x.kind === 'Request' ? `<div class="small pl-help" style="white-space:pre-wrap">”${esc(x.message)}”</div>` : ''}</div>
+                ${r.canDecide ? `<div class="d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm" data-req-ok="${x.id}">Godkänn…</button>
+                    <button class="btn btn-outline-secondary btn-sm" data-req-no="${x.id}">Avböj…</button></div>` : ''}</div>`).join('');
+        const sentHtml = sent.map(x => `<div class="pl-person"><div><div><b>${esc(x.name)}</b> <span class="pl-help small">${esc(x.email || '')}</span></div>
+                <div class="small pl-help">Inbjuden ${esc(fmtShort(x.createdAt))}${x.invitedBy ? ' av ' + esc(x.invitedBy) : ''} — har inte svarat än</div></div>
+                <div>${rowMenu([{ label: 'Dra tillbaka inbjudan', danger: true, fn: () => withdrawInvite(x) }])}</div></div>`).join('');
+        box.innerHTML = (pending.length ? `<div class="pl-card border-warning"><h2>Väntar på ${r.canDecide ? 'dig' : 'den sammankallande'} (${pending.length})</h2>
+                <p class="pl-help">De här kommer inte in förrän de är godkända. När du godkänner väljer du nivå och vad personen företräder.${r.support ? ' <b>Du godkänner som sajtens administratör (support).</b>' : ''}</p>${pend}</div>` : '')
+            + (sent.length ? `<div class="pl-card"><h2>Inbjudna som inte svarat (${sent.length})</h2>${sentHtml}</div>` : '');
+    }
+    let REQS = [];
+    document.addEventListener('click', e => {
+        const ok = e.target.closest('[data-req-ok]'); if (ok) { openApprove(REQS.find(x => x.id === +ok.dataset.reqOk)); return; }
+        const no = e.target.closest('[data-req-no]'); if (no) openReject(REQS.find(x => x.id === +no.dataset.reqNo));
+    });
+    function openApprove(x) {
+        if (!x) return;
+        const member = x.kind === 'Request';
         formModal({
-            title: 'Bjud in med e-post', okLabel: 'Skicka inbjudan',
-            html: `<p class="pl-help">För den som inte är skytt och saknar konto, till exempel någon från kommunen eller markägaren. Hen deltar via länkarna i mejlen och behöver inget lösenord.
-                Är personen medlem på pistol.nu bjuder du in hen med <button type="button" class="btn btn-link p-0 align-baseline" data-ie-member="1">Bjud in en medlem</button> i stället.</p>
-                <div class="mb-3"><label class="form-label" for="ieName">Namn</label><input id="ieName" class="form-control" maxlength="200" autocomplete="off"></div>
-                <div class="mb-3"><label class="form-label" for="ieEmail">E-post</label><input id="ieEmail" class="form-control" type="email" inputmode="email" autocomplete="off"></div>
-                <div class="mb-3"><label class="form-label fw-semibold" for="ieRep">Företräder</label>${repPicker('ie', {}, [], false)}</div>
-                <div class="mb-1"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'ieAccess')}</div>`,
-            onOpen: body => body.addEventListener('click', ev => { if (ev.target.closest('[data-ie-member]')) openInvite(); }),
+            title: 'Släpp in ' + x.name, okLabel: 'Godkänn',
+            html: `<p>${member ? `${esc(x.name)} ber om att få vara med.` : `${esc(x.name)} har tackat ja till inbjudan.`} Hen får ett mejl när du har godkänt.</p>
+                <div class="mb-3"><label class="form-label fw-semibold" for="apRep">Företräder</label>
+                ${member ? memberRepPicker('ap', { clubs: x.clubChoices, regions: x.regionChoices }) : repPicker('ap', { text: x.proposedRepresents }, [], false)}
+                ${!member && x.proposedRepresents ? `<div class="form-text">Hen föreslog själv: ${esc(x.proposedRepresents)}</div>` : ''}</div>
+                <div class="mb-1"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'apAccess')}</div>`,
             onOk: async body => {
-                const r = await post('InviteByEmail', Object.assign({ name: body.querySelector('#ieName').value, email: body.querySelector('#ieEmail').value,
-                    access: readAccess(body, 'ieAccess', 'Participant') }, readRep(body, 'ie')));
-                // En medlems adress vägras (Stefan 2026-10-22): hen bjuds in på vanligt sätt, med sitt konto.
+                const r = await post('ApproveRequest', Object.assign({ requestId: x.id, access: readAccess(body, 'apAccess', 'Participant') }, readRep(body, 'ap')));
                 if (!r.success) return r.message;
-                await reloadPeople();
-                showMsg((r.alreadyIn ? 'Personen är redan med.' : 'Inbjudan är skickad.')
-                    + (!r.alreadyIn && !r.mailed ? ' Men mejlet kunde inte skickas — kontrollera adressen och försök igen under Deltagare.' : ''), r.mailed || r.alreadyIn ? 'success' : 'warning');
+                await reloadPeople(); viewPeople();
+                showMsg(`${esc(x.name)} är med${r.mailed ? ' och har fått ett mejl' : ', men mejlet kunde inte skickas'}.`, r.mailed ? 'success' : 'warning');
                 return true;
             }
         });
+    }
+    function openReject(x) {
+        if (!x) return;
+        formModal({
+            title: 'Avböj ' + x.name, okLabel: 'Avböj', okClass: 'btn-danger', wide: false,
+            html: `<p>${esc(x.name)} kommer inte in i planeringen och får ett mejl om det.</p>
+                <label class="form-label" for="rjNote">Skäl (valfritt, står i mejlet)</label>
+                <textarea id="rjNote" class="form-control" rows="3" maxlength="500"></textarea>`,
+            onOk: async body => {
+                const r = await post('RejectRequest', { requestId: x.id, note: body.querySelector('#rjNote').value });
+                if (!r.success) return r.message;
+                await reloadPeople(); viewPeople();
+                return true;
+            }
+        });
+    }
+    async function withdrawInvite(x) {
+        if (!await plConfirm('Dra tillbaka inbjudan?', `Länken i mejlet till ${x.name} slutar fungera.`, 'Dra tillbaka', true)) return;
+        const r = await post('WithdrawInvite', { requestId: x.id });
+        if (!r.success) { failMsg(r); return; }
+        loadRequests();
     }
     function openEditParticipant(p) {
         const levelEditable = S.me.canManage && !p.isMe;
@@ -991,7 +1102,7 @@
         if (!await plConfirm('Lämna planeringen?', 'Du får inga fler mejl från planeringen. Dina meddelanden står kvar.', 'Lämna', true)) return;
         const r = await post('RemoveParticipant', { participantId: S.me.participantId });
         if (!r.success) { failMsg(r); return; }
-        location.href = '/tavlingsplanering';
+        location.href = TOKEN ? '/' : '/tavlingsplanering';
     }
     async function reloadPeople() { const s = await get('Get'); if (s.success) { S = s; version = s.version; } }
 
@@ -1036,10 +1147,15 @@
                 <input id="stTarget" class="form-control" maxlength="200" value="${esc(p.targetText || '')}" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
             <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="stStart">Första dagen (om den är bestämd)</label><input id="stStart" class="form-control" value="${esc(p.targetStart || '')}"></div>
                 <div class="col-sm-6"><label class="form-label" for="stEnd">Sista dagen</label><input id="stEnd" class="form-control" value="${esc(p.targetEnd || '')}"></div></div>
+            ${S.me.canManage ? `<div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" role="switch" id="stListed"${p.listed ? ' checked' : ''}>
+                <label class="form-check-label fw-semibold" for="stListed">Visa planeringen för alla medlemmar, så att de kan be om att få vara med</label>
+                <div class="pl-help small">Då ser alla inloggade medlemmar namnet, ungefär när och var, och vem som är sammankallande — men inget av innehållet.
+                    Den som ber om att få vara med kommer in först när du har godkänt. Avstängt: bara de inbjudna vet att planeringen finns.</div></div>` : ''}
             <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>`;
         datePicker($('stStart')); datePicker($('stEnd'));
         $('stSave').onclick = async () => {
             const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };
+            if ($('stListed')) params.listed = $('stListed').checked ? '1' : '0';
             const r = await post('Update', params);
             if (!r.success) { failMsg(r); return; }
             await reloadPeople(); renderRail(); setHead('Inställningar', esc(S.planning.name)); $('stSaved').textContent = 'Sparat.';
@@ -1089,6 +1205,7 @@
             if (!await loadAll()) return;
             render(hashView() || CFG.startView || 'oversikt');
             if (CFG.startView && !hashView()) history.replaceState(null, '', '#vy=' + view);
+            if (CFG.leave && S.me.isParticipant) leave(); // "Lämna planeringen" i inbjudningsmejlet
         } catch (e) {
             $('plBody').innerHTML = `<div class="pl-card"><p class="text-danger mb-0">${esc(e.message || 'Sidan kunde inte laddas.')}</p></div>`;
         }
