@@ -26,28 +26,28 @@ namespace HpskSite.Services.Staffing
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
-        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly StaffOwnerResolver _owners;
 
         public StaffDayService(IScopeProvider scopeProvider, IContentService contentService, ILogger<StaffDayService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            StaffOwnerResolver owners)
         {
-            _competitions = competitions;
+            _owners = owners;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _logger = logger;
         }
 
-        public List<StaffDay> GetDays(int competitionId)
+        public List<StaffDay> GetDays(StaffOwner owner)
         {
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 return scope.Database.Fetch<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE CompetitionId = @0 ORDER BY DayDate, SortOrder, Id", competitionId);
+                    "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " ORDER BY DayDate, SortOrder, Id", owner.P, owner.C);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "StaffDay: read failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "StaffDay: read failed for {Owner}", owner.MemoKey);
                 return new List<StaffDay>();
             }
         }
@@ -57,28 +57,46 @@ namespace HpskSite.Services.Staffing
         /// common case needs no setup at all. Only ever runs when the list is EMPTY — once the organiser
         /// has touched the days, we never add to them behind their back (a deleted day must stay deleted).
         /// </summary>
-        public List<StaffDay> EnsureSeeded(int competitionId, int byMemberId)
+        public List<StaffDay> EnsureSeeded(StaffOwner owner, int byMemberId)
         {
-            var days = GetDays(competitionId);
+            var days = GetDays(owner);
             if (days.Count > 0) return days;
+            AddSpanDays(owner, byMemberId, days);
+            return GetDays(owner);
+        }
 
-            var (start, end) = ReadSpan(competitionId);
-            if (start == null) return days;
+        /// <summary>
+        /// P2b: när en planering kopplas till en tävling får bemanningen tävlingens dagar — de som inte
+        /// redan finns läggs till som tävlingsdagar. Inget tas bort (planeringens bygg- och rivdagar står kvar).
+        /// </summary>
+        public void AddCompetitionDays(StaffOwner owner, int byMemberId)
+        {
+            if (!owner.HasCompetition) return;
+            AddSpanDays(owner, byMemberId, GetDays(owner));
+        }
 
-            var last = end ?? start.Value;
+        private void AddSpanDays(StaffOwner owner, int byMemberId, List<StaffDay> existing)
+        {
+            var (start, end) = _owners.Span(owner);
+            if (start == null || start.Value == default) return;
+
+            var last = end is { } e && e != default ? e : start.Value;
             if (last < start.Value) last = start.Value;
             // A pathological span must not create hundreds of columns.
             if ((last - start.Value).TotalDays > 30) last = start.Value;
 
+            var have = existing.Select(d => d.DayDate.Date).ToHashSet();
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                var order = 0;
+                var order = existing.Count;
                 for (var d = start.Value.Date; d <= last.Date; d = d.AddDays(1))
                 {
+                    if (have.Contains(d)) continue;
                     scope.Database.Insert(new StaffDay
                     {
-                        CompetitionId = competitionId,
+                        PlanningId = owner.PlanningIdOrNull,
+                        CompetitionId = owner.CompetitionIdOrNull,
                         DayDate = d,
                         Label = "",
                         Kind = StaffDayKind.Competition,
@@ -90,12 +108,11 @@ namespace HpskSite.Services.Staffing
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "StaffDay: seeding failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "StaffDay: seeding failed for {Owner}", owner.MemoKey);
             }
-            return GetDays(competitionId);
         }
 
-        public (bool ok, string? message, int id) SaveDay(SaveStaffDayRequest req, int byMemberId)
+        public (bool ok, string? message, int id) SaveDay(SaveStaffDayRequest req, StaffOwner owner, int byMemberId)
         {
             if (!DateTime.TryParseExact(req.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
                 return (false, "Ange ett datum.", 0);
@@ -108,14 +125,14 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
 
             var clash = db.SingleOrDefault<StaffDay>(
-                "SELECT * FROM StaffDay WHERE CompetitionId = @0 AND DayDate = @1", req.CompetitionId, date.Date);
+                "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " AND DayDate = @2", owner.P, owner.C, date.Date);
             if (clash != null && clash.Id != req.Id)
                 return (false, $"{date.ToString("d MMMM", Sv)} finns redan i planen.", clash.Id);
 
             if (req.Id > 0)
             {
                 var row = db.SingleOrDefault<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
                 if (row == null) return (false, "Dagen hittades inte.", 0);
                 row.DayDate = date.Date; row.Label = label; row.Kind = kind;
                 db.Update(row);
@@ -124,11 +141,12 @@ namespace HpskSite.Services.Staffing
 
             var created = new StaffDay
             {
-                CompetitionId = req.CompetitionId,
+                PlanningId = owner.PlanningIdOrNull,
+                CompetitionId = owner.CompetitionIdOrNull,
                 DayDate = date.Date,
                 Label = label,
                 Kind = kind,
-                SortOrder = GetDays(req.CompetitionId).Count,
+                SortOrder = GetDays(owner).Count,
                 CreatedByMemberId = byMemberId,
                 CreatedDate = DateTime.UtcNow,
             };
@@ -148,14 +166,14 @@ namespace HpskSite.Services.Staffing
         /// returns ok=false plus the count and writes nothing, so the caller can ask first.</para>
         /// </summary>
         public (bool ok, string? message, int inUse) DeleteDay(
-            int id, int competitionId, string? dateKey, bool deleteAssignments)
+            int id, StaffOwner owner, string? dateKey, bool deleteAssignments)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
 
             var row = id > 0
                 ? db.SingleOrDefault<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", id, competitionId)
+                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C)
                 : null;
 
             DateTime date;
@@ -164,7 +182,7 @@ namespace HpskSite.Services.Staffing
                          DateTimeStyles.None, out var parsed)) date = parsed.Date;
             else return (false, "Dagen hittades inte.", 0);
 
-            var n = CountAssignmentsOn(db, competitionId, date);
+            var n = CountAssignmentsOn(db, owner, date);
             if (n > 0 && !deleteAssignments) return (false, null, n);
 
             if (n > 0)
@@ -174,19 +192,19 @@ namespace HpskSite.Services.Staffing
                 db.Execute(@"
                     DELETE sa FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE sa.CompetitionId = @0
-                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
-                    competitionId, date);
+                    WHERE " + StaffOwner.Where(0, "sa.") + @"
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @2",
+                    owner.P, owner.C, date);
             }
 
             if (row != null)
-                db.Execute("DELETE FROM StaffDay WHERE Id = @0 AND CompetitionId = @1", row.Id, competitionId);
+                db.Execute("DELETE FROM StaffDay WHERE Id = @0", row.Id);
 
             return (true, null, n);
         }
 
         /// <summary>Which of the comp's days actually carry crew (drives the delete guard in the UI).</summary>
-        public HashSet<string> DatesWithAssignments(int competitionId)
+        public HashSet<string> DatesWithAssignments(StaffOwner owner)
         {
             var set = new HashSet<string>(StringComparer.Ordinal);
             try
@@ -197,27 +215,27 @@ namespace HpskSite.Services.Staffing
                     SELECT COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))
                     FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE sa.CompetitionId = @0", competitionId);
+                    WHERE " + StaffOwner.Where(0, "sa."), owner.P, owner.C);
                 foreach (var d in rows)
                     if (d is { } v) set.Add(v.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "StaffDay: assignment-date scan failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "StaffDay: assignment-date scan failed for {Owner}", owner.MemoKey);
             }
             return set;
         }
 
-        private static int CountAssignmentsOn(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId, DateTime date)
+        private static int CountAssignmentsOn(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, StaffOwner owner, DateTime date)
         {
             try
             {
                 return db.ExecuteScalar<int>(@"
                     SELECT COUNT(1) FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE sa.CompetitionId = @0
-                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
-                    competitionId, date.Date);
+                    WHERE " + StaffOwner.Where(0, "sa.") + @"
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @2",
+                    owner.P, owner.C, date.Date);
             }
             catch { return 0; }
         }
@@ -235,19 +253,6 @@ namespace HpskSite.Services.Staffing
                 IsParticipantFacing = StaffDayKind.IsParticipantFacing(d.Kind),
                 HasAssignments = withWork?.Contains(key) == true,
             };
-        }
-
-        /// <summary>competitionDate + competitionEndDate, defensively (an unset date reads as MinValue).</summary>
-        private (DateTime? start, DateTime? end) ReadSpan(int competitionId)
-        {
-            try
-            {
-                // C3-planen §5d: ur lagringen (det sparade läget, som content service gav).
-                var c = _competitions.GetSaved(competitionId);
-                if (c == null) return (null, null);
-                return (c.CompetitionDate, c.CompetitionEndDate);
-            }
-            catch { return (null, null); }
         }
     }
 }

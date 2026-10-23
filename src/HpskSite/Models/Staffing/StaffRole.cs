@@ -46,6 +46,8 @@ namespace HpskSite.Models.Staffing
         public const string Region = "Region";
         public const string Club = "Club";
         public const string Competition = "Competition";
+        /// <summary>P2b: rollerna hör till planeringen och följer med när den kopplas loss.</summary>
+        public const string Planning = "Planning";
     }
 
     // --- Request DTOs ---

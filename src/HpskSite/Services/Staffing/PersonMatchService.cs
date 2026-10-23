@@ -38,7 +38,7 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Every distinct free-text person on the competition, with the members they might be.</summary>
-        public List<PersonMatchRow> Suggest(int competitionId, int maxCandidates = 4)
+        public List<PersonMatchRow> Suggest(StaffOwner owner, int maxCandidates = 4)
         {
             var result = new List<PersonMatchRow>();
             List<StaffAssignment> rows;
@@ -46,11 +46,11 @@ namespace HpskSite.Services.Staffing
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 rows = scope.Database.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId IS NULL", competitionId);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId IS NULL", owner.P, owner.C);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "PersonMatch: read failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "PersonMatch: read failed for {Owner}", owner.MemoKey);
                 return result;
             }
             if (rows.Count == 0) return result;
@@ -65,7 +65,7 @@ namespace HpskSite.Services.Staffing
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 everyone = scope.Database.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0", competitionId);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0), owner.P, owner.C);
             }
             catch { everyone = rows; }
 

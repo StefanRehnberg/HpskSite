@@ -56,7 +56,9 @@ namespace HpskSite.Services.Planning
             if (!missing.Contains("Planning") && s.Database.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Planning','ListedForMembers') IS NULL THEN 0 ELSE 1 END") == 0)
                 missing.Add("Planning.ListedForMembers");
             // P2: kolumnerna som NPoco skriver vid varje sparning (alter-planning-p2-tasks.sql).
-            foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId") })
+            // P2b: bemanningen i planeringen (alter-staffing-planning-p2b.sql + Planning.DisciplineKey).
+            foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId"),
+                                                 ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -139,6 +141,15 @@ namespace HpskSite.Services.Planning
             if (renamed) db.Execute("UPDATE PlanningPart SET Name = @1 WHERE PlanningId = @0 AND Kind = N'Root'", planningId, p.Name);
             Bump(db, planningId);
             return null;
+        }
+
+        /// <summary>P2b: grenen (CompetitionTypes-id, eller null). Styr bemanningens roller när planeringen saknar tävling.</summary>
+        public void SetDisciplineKey(int planningId, string? key, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE Planning SET DisciplineKey = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL",
+                planningId, key, Now, byMemberId);
+            Bump(s.Database, planningId);
         }
 
         public void SetStatus(int planningId, string status, int byMemberId)

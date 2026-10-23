@@ -4,6 +4,7 @@
     Layout = "Master.cshtml";
     ViewBag.Title = "Bemanning";
     var competitionId = ViewData["CompetitionId"];
+    var planningId = ViewData["PlanningId"] as int? ?? 0;
     var compExists = ViewData["CompetitionExists"] as bool? ?? false;
     var preview = ViewData["Preview"] as bool? ?? false;
     var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
@@ -16,7 +17,7 @@
 <div class="container mt-4 mb-5" style="max-width:760px">
     @if (!compExists)
     {
-        <div class="alert alert-warning">Tävlingen hittades inte.</div>
+        <div class="alert alert-warning">Tävlingen eller planeringen hittades inte.</div>
     }
     else
     {
@@ -52,6 +53,7 @@
 <script>
 (function () {
     var compId = @(competitionId ?? 0);
+    var planningId = @planningId;   // P2b: planeringens bemanning, även före kopplingen
     var TOKEN = '@token';
     var PREVIEW = @(preview ? "true" : "false");
     var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
@@ -75,10 +77,11 @@
 
     async function load() {
         try {
-            var r = await fetch('/mina-uppdrag/for-competition?competitionId=' + compId + (PREVIEW ? '&preview=true' : ''), { headers: { 'Accept': 'application/json' } });
+            var r = await fetch('/mina-uppdrag/for-competition?competitionId=' + compId + '&planningId=' + planningId + (PREVIEW ? '&preview=true' : ''), { headers: { 'Accept': 'application/json' } });
             var d = await r.json();
             if (!d.success) { q('beHeader').textContent = d.message || 'Kunde inte läsa.'; return; }
-            q('beHeader').innerHTML = 'Tävling: <strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
+            // En planering utan tävling heter planering — en kopplad har tävlingens namn.
+            q('beHeader').innerHTML = (planningId > 0 && compId <= 0 ? 'Planering: ' : 'Tävling: ') + '<strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
             slots = d.slots || [];
             checked = {};
             if (d.mySignup) {
@@ -198,12 +201,12 @@
             return { slotId: +sid, times: (checked[sid] || []).filter(function (t) { return (t.from && t.from.length) || (t.to && t.to.length); }) };
         });
         var btn = q('beSaveBtn'); btn.disabled = true;
-        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, comment: q('beComment').value.trim(), slots: payloadSlots });
+        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots });
         btn.disabled = false;
         if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 2500); }
         else alert(d.message || 'Kunde inte spara.');
     };
 
-    if (compId > 0) load();
+    if (compId > 0 || planningId > 0) load();
 })();
 </script>

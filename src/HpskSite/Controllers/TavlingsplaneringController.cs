@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly StaffingService _staffing;
         private readonly WorkBreakdownService _work;
         private readonly StaffingGridService _grid;
+        private readonly StaffOwnerResolver _owners;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
@@ -45,6 +46,7 @@ namespace HpskSite.Controllers
             StaffingService staffing,
             WorkBreakdownService work,
             StaffingGridService grid,
+            StaffOwnerResolver owners,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.Planning.PlanningService planningService,
@@ -60,6 +62,7 @@ namespace HpskSite.Controllers
             _staffing = staffing;
             _work = work;
             _grid = grid;
+            _owners = owners;
             _agenda = agenda;
         }
 
@@ -110,6 +113,47 @@ namespace HpskSite.Controllers
             ViewData["PlanningId"] = id;
             ViewData["PlanningToken"] = "";
             return View("Planering", rootNode);
+        }
+
+        /// <summary>
+        /// P2b (2026-10-23): planeringens bemanning — samma rutnät som tävlingens (_StaffingRoster), med
+        /// planeringen som ägare. Sidan lägger <c>planningId</c> på varje anrop till StaffingController, så
+        /// rutnätet fungerar även innan planeringen kopplats till en tävling. Behörigheten prövas här (för
+        /// sidan) och av StaffingController (för varje anrop): Kan ändra i planeringen, eller tillgång till
+        /// den kopplade tävlingen.
+        /// </summary>
+        [HttpGet("{id:int}/bemanning")]
+        public async Task<IActionResult> PlanningStaffing(int id)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/{id}/bemanning")}");
+
+            var owner = _owners.ForPlanning(id);
+            var canAccess = owner != null && await CanStaffPlanningAsync(owner, currentMember.Email);
+            ViewData["PlanningId"] = id;
+            ViewData["Exists"] = owner != null;
+            ViewData["CanAccess"] = canAccess;
+            ViewData["CompetitionId"] = owner?.Comp ?? 0;
+            ViewData["PlanningName"] = owner == null ? "" : (_owners.Planning(id)?.Name ?? "");
+            ViewData["CompetitionName"] = owner is { HasCompetition: true } ? _owners.Name(owner) : "";
+            ViewData["Discipline"] = owner == null ? "Precision" : (_owners.Discipline(owner) is { Length: > 0 } d ? d : "Precision");
+            return View("PlaneringBemanning", rootNode);
+        }
+
+        /// <summary>Samma prövning som StaffingController.RowOwnerAsync — för sidan, inte för data.</summary>
+        private async Task<bool> CanStaffPlanningAsync(HpskSite.Models.Staffing.StaffOwner owner, string email)
+        {
+            if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return true;
+            var md = _memberService.GetByEmail(email);
+            if (md == null) return false;
+            var row = _planningService.ParticipantForMember(owner.PlanningId, md.Id);
+            return HpskSite.Services.Planning.PlanningAccess.CanEditStaffing(
+                new HpskSite.Services.Planning.PlanningCaller(row is { IsActive: true } ? row : null, false));
         }
 
         /// <summary>
@@ -194,14 +238,42 @@ namespace HpskSite.Controllers
 
         /// <summary>Printable "vem gör vad"-blad — roster (Bemanning) + prep (Förberedelser) on one sheet.</summary>
         [HttpGet("blad")]
-        public async Task<IActionResult> Blad(int c, string? vy = null)
+        public async Task<IActionResult> Blad(int c, string? vy = null, int p = 0)
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/blad?c={c}")}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(p > 0 ? $"/tavlingsplanering/blad?p={p}&vy={vy}" : $"/tavlingsplanering/blad?c={c}")}");
+
+            // P2b: en planerings bemanning, även utan tävling. En kopplad planering skrivs ut som tävlingen.
+            if (p > 0)
+            {
+                var po = _owners.ForPlanning(p);
+                if (po is { HasCompetition: true }) c = po.Comp;
+                else
+                {
+                    var ok = po != null && await CanStaffPlanningAsync(po, currentMember.Email);
+                    var pm = new PlaneringBladModel
+                    {
+                        CompetitionId = 0,
+                        Vy = PlaneringBladVy.Bemanning,
+                        Exists = po != null,
+                        CanAccess = ok,
+                        CompName = po == null ? "" : _owners.Name(po),
+                        Discipline = po == null ? "Precision" : (_owners.Discipline(po) is { Length: > 0 } d ? d : "Precision"),
+                    };
+                    if (ok)
+                    {
+                        if (_owners.Span(po!).Start is { } sd && sd != default)
+                            pm.CompDate = sd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                        pm.Roster = _staffing.BuildRoster(po!, pm.Discipline, canEdit: false);
+                        pm.Grid = _grid.BuildGrid(po!, pm.Discipline, 0);
+                    }
+                    return View("TavlingsplaneringBlad", pm);
+                }
+            }
 
             var competition = c > 0 ? _competitions.Get(c) : null;
             var isCompetition = competition != null;
@@ -225,10 +297,12 @@ namespace HpskSite.Controllers
                 // Build only what this sheet shows — the grid and the prep breakdown are both expensive.
                 if (model.ShowBemanning)
                 {
-                    model.Roster = _staffing.BuildRoster(c, model.Discipline, canEdit: false);
+                    // P2b: tävlingens bemanning är dess planerings, när den har en.
+                    var owner = _owners.ForCompetition(c);
+                    model.Roster = _staffing.BuildRoster(owner, model.Discipline, canEdit: false);
                     // Same builder as the screen. A print that renders its own shape is how paper stopped
                     // resembling the plan the organiser actually built.
-                    model.Grid = _grid.BuildGrid(c, model.Discipline, 0);
+                    model.Grid = _grid.BuildGrid(owner, model.Discipline, 0);
                 }
                 if (model.ShowForberedelser) model.Work = _work.Build(c, canEdit: false);
                 if (model.ShowDagsprogram)

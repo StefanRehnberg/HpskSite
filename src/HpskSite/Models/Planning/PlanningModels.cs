@@ -159,6 +159,9 @@ namespace HpskSite.Models.Planning
         /// egen planering, där den ansvarige och Kan ändra bockar av direkt. C#-standarden måste vara PÅ.
         /// </summary>
         public bool DoneAtMeetingsOnly { get; set; } = true;
+        /// <summary>P2b: grenen (CompetitionTypes-id) — styr bemanningens roller när planeringen inte är kopplad.
+        /// En kopplad planering tar tävlingens gren.</summary>
+        public string? DisciplineKey { get; set; }
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         public DateTime CreatedAt { get; set; }

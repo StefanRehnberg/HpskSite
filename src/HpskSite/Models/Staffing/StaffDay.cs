@@ -13,7 +13,9 @@ namespace HpskSite.Models.Staffing
     public class StaffDay
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public DateTime DayDate { get; set; }
         /// <summary>Arrangör's own words — "Iordningställande", "Vapengrupp C". Empty = just the date.</summary>
         public string Label { get; set; } = "";

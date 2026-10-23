@@ -27,12 +27,14 @@ namespace HpskSite.Services.Staffing
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.ClubRosterService _roster;
+        private readonly StaffOwnerResolver _owners;
 
         public StaffRequestService(IScopeProvider scopeProvider, IMemberService memberService, IContentService contentService,
             StaffingSignupService signup, EmailService email, WebPushService webPush, BrevoEmailService brevo, ILogger<StaffRequestService> logger,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.ClubRosterService roster)
+            HpskSite.Services.ClubRosterService roster, StaffOwnerResolver owners)
         {
+            _owners = owners;
             _roster = roster;
             _competitions = competitions;
             _scopeProvider = scopeProvider;
@@ -45,30 +47,31 @@ namespace HpskSite.Services.Staffing
             _logger = logger;
         }
 
-        public StaffRequestPreview Preview(int competitionId)
+        public StaffRequestPreview Preview(StaffOwner owner)
         {
-            var scopes = _signup.GetScopes(competitionId);
+            var scopes = _signup.GetScopes(owner);
             var p = new StaffRequestPreview
             {
                 HasScopes = scopes.Count > 0,
                 AudienceLabels = scopes.Select(s => s.Label).ToList(),
                 RelayCount = ResolveRelay(scopes).Count,
                 DirectCount = ResolveDirectMemberIds(scopes).Count,
-                DirectAvailable = !string.IsNullOrWhiteSpace(HostingClubBrevoKey(competitionId)),
+                DirectAvailable = !string.IsNullOrWhiteSpace(HostingClubBrevoKey(owner.Comp)),
             };
-            var last = LatestLog(competitionId);
+            var last = LatestLog(owner);
             if (last != null)
                 p.LastSent = $"{(last.Mode == StaffRequestMode.Relay ? "Klubbansvariga" : "Direkt")} · {last.SentCount} skickade · {last.CreatedDate.ToLocalTime():yyyy-MM-dd HH:mm}";
             return p;
         }
 
-        public (bool Ok, string? Message, int Sent, int Push, int Recipients) Send(int competitionId, string mode, string? message, int byMemberId)
+        public (bool Ok, string? Message, int Sent, int Push, int Recipients) Send(StaffOwner owner, string mode, string? message, int byMemberId)
         {
-            var scopes = _signup.GetScopes(competitionId);
+            var scopes = _signup.GetScopes(owner);
             if (scopes.Count == 0) return (false, "Öppna först för självanmälan (välj klubb/krets) — då vet vi vilka som ska få förfrågan.", 0, 0, 0);
 
-            var compName = _competitions.GetSaved(competitionId)?.CompetitionName ?? "en tävling";
-            var link = $"https://pistol.nu/bemanna?c={competitionId}";
+            var competitionId = owner.Comp;
+            var compName = _owners.Name(owner);
+            var link = $"https://pistol.nu{owner.SignupPath}";
             var extra = string.IsNullOrWhiteSpace(message) ? "" : $"<p>{System.Net.WebUtility.HtmlEncode(message!.Trim())}</p>";
             int sent = 0, push = 0, recipients;
 
@@ -80,7 +83,7 @@ namespace HpskSite.Services.Staffing
                 var html = Html($"<strong>{System.Net.WebUtility.HtmlEncode(compName)}</strong> söker funktionärer. Vill du hjälpa till? Anmäl dig och ange när du kan:", extra, link, "Anmäl dig");
                 // Push-first (free/instant for opted-in members).
                 foreach (var mid in memberIds)
-                    try { push += _webPush.SendToMemberAsync(mid, "Funktionärer sökes", $"{compName} söker funktionärer", link, $"staffreq-{competitionId}").GetAwaiter().GetResult(); } catch { }
+                    try { push += _webPush.SendToMemberAsync(mid, "Funktionärer sökes", $"{compName} söker funktionärer", link, $"staffreq-{owner.MemoKey}").GetAwaiter().GetResult(); } catch { }
                 // Email via Brevo (bulk stays off the Simply relay).
                 var key = HostingClubBrevoKey(competitionId);
                 if (!string.IsNullOrWhiteSpace(key))
@@ -105,7 +108,8 @@ namespace HpskSite.Services.Staffing
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
                 scope.Database.Insert(new StaffRequestLog
                 {
-                    CompetitionId = competitionId,
+                    PlanningId = owner.PlanningIdOrNull,
+                    CompetitionId = owner.CompetitionIdOrNull,
                     Mode = string.Equals(mode, StaffRequestMode.Direct, StringComparison.OrdinalIgnoreCase) ? StaffRequestMode.Direct : StaffRequestMode.Relay,
                     RecipientCount = recipients,
                     SentCount = sent,
@@ -174,6 +178,7 @@ namespace HpskSite.Services.Staffing
 
         private string? HostingClubBrevoKey(int competitionId)
         {
+            if (competitionId <= 0) return null;   // P2b: en okopplad planering har ingen värdklubb
             try
             {
                 var clubId = _competitions.GetSaved(competitionId)?.ClubId ?? 0; // C3-planen §5d
@@ -183,11 +188,11 @@ namespace HpskSite.Services.Staffing
             catch { return null; }
         }
 
-        private StaffRequestLog? LatestLog(int competitionId)
+        private StaffRequestLog? LatestLog(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.FirstOrDefault<StaffRequestLog>(
-                "SELECT * FROM StaffRequestLog WHERE CompetitionId = @0 ORDER BY Id DESC", competitionId);
+                "SELECT * FROM StaffRequestLog WHERE " + StaffOwner.Where(0) + " ORDER BY Id DESC", owner.P, owner.C);
         }
 
         private static string Html(string lead, string extra, string link, string cta) => $@"<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222'>

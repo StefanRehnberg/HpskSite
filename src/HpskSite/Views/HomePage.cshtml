@@ -500,7 +500,7 @@ else
                     <div class="list-group list-group-flush mb-2">
                         @foreach (var it in staffVisibleRows)
                         {
-                            <a href="/bemanna?c=@it.CompetitionId" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
+                            <a href="@(string.IsNullOrEmpty(it.SignupPath) ? $"/bemanna?c={it.CompetitionId}" : it.SignupPath)" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
                                 <span>
                                     <span class="@(it.IsPast ? "fw-semibold text-body-secondary" : "fw-semibold")">@it.CompName</span>
                                     @if (!string.IsNullOrEmpty(it.CompDate)) { <span class="text-muted small ms-1">· @it.CompDate</span> }
@@ -515,7 +515,7 @@ else
                 }
                 @if (staff.OpenCount > 0)
                 {
-                    <a href="/bemanna?c=@staff.OpenFirstCompetitionId" class="small text-decoration-none">
+                    <a href="@(staff.OpenFirstPath ?? $"/bemanna?c={staff.OpenFirstCompetitionId}")" class="small text-decoration-none">
                         <i class="bi bi-clipboard-plus me-1"></i>@staff.OpenCount tävling@(staff.OpenCount == 1 ? "" : "ar") söker funktionärer — anmäl dig →
                     </a>
                 }

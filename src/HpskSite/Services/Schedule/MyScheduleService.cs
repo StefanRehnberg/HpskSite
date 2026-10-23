@@ -43,6 +43,8 @@ namespace HpskSite.Services.Schedule
         private readonly ParticipantAudienceResolver _audience;
         private readonly AppCaches _appCaches;
         private readonly HpskSite.Services.Staffing.RoleCatalogService _roles;
+        // P2b: tävlingens roller kan ligga i dess planering.
+        private readonly HpskSite.Services.Staffing.StaffOwnerResolver _owners;
         private readonly IConfiguration _configuration;
         private readonly ILogger<MyScheduleService> _logger;
 
@@ -75,8 +77,10 @@ namespace HpskSite.Services.Schedule
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.StartLists.IStartListStore startLists,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Competitions.VirtualCompetitionNodes pageNodes)
+            HpskSite.Services.Competitions.VirtualCompetitionNodes pageNodes,
+            HpskSite.Services.Staffing.StaffOwnerResolver owners)
         {
+            _owners = owners;
             _competitions = competitions;
             _pageNodes = pageNodes;
             _registrations = registrations;
@@ -784,7 +788,7 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
         /// </summary>
         private string ResolveRoleName(int competitionId, string discipline, string roleKey, string? functionTitle)
         {
-            var name = _roles.NameFor(competitionId, discipline, roleKey);
+            var name = _roles.NameFor(_owners.ForCompetition(competitionId), discipline, roleKey);
             if (string.IsNullOrWhiteSpace(name)) name = roleKey;
             return string.IsNullOrWhiteSpace(functionTitle) ? name : $"{name} — {functionTitle}";
         }

@@ -57,6 +57,8 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.MemberDirectoryService _directory;
+        private readonly StaffOwnerResolver _owners;
+        private readonly HpskSite.Services.Planning.PlanningService _planning;
 
         public StaffingController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -86,9 +88,13 @@ namespace HpskSite.Controllers
             IDataProtectionProvider dataProtection,
             ILogger<StaffingController> logger,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.MemberDirectoryService directory)
+            HpskSite.Services.MemberDirectoryService directory,
+            StaffOwnerResolver owners,
+            HpskSite.Services.Planning.PlanningService planning)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _owners = owners;
+            _planning = planning;
             _directory = directory;
             _competitions = competitions;
             _memberManager = memberManager;
@@ -119,11 +125,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetRoles(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            var discipline = GetDiscipline(competitionId);
-            var roles = _roleCatalog.ForCompetition(competitionId, discipline).Select(r => new
+            var discipline = _owners.Discipline(owner);
+            var roles = _roleCatalog.For(owner, discipline).Select(r => new
             {
                 key = r.Key,
                 name = r.DisplayName,
@@ -133,7 +140,7 @@ namespace HpskSite.Controllers
                 supportsFunctionTitle = r.SupportsFunctionTitle,
                 description = r.Description,
                 needs = r.Needs,
-                isCustom = _roleCatalog.IsCustom(competitionId, r.Key),
+                isCustom = _roleCatalog.IsCustom(owner, r.Key),
             });
             return Json(new { success = true, discipline, roles });
         }
@@ -147,16 +154,17 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveRole([FromBody] SaveStaffRoleRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
             {
-                var key = _roleCatalog.SaveRole(request, GetDiscipline(request.CompetitionId), viewer.Id);
+                var key = _roleCatalog.SaveRole(request, owner, _owners.Discipline(owner), viewer.Id);
                 return Json(new { success = true, roleKey = key });
             }
             catch (ArgumentException ax)
@@ -174,17 +182,18 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteRole([FromBody] DeleteStaffRoleRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
             {
                 var (ok, msg, inUse) = _roleCatalog.DeleteRole(
-                    request.CompetitionId, request.RoleKey, GetDiscipline(request.CompetitionId),
+                    owner, request.RoleKey, _owners.Discipline(owner),
                     viewer.Id, request.DeleteAssignments);
                 // Not an error — the row carries crew and the arrangör hasn't said what should happen to
                 // them yet. Nothing was written; the client asks and calls back with DeleteAssignments.
@@ -209,14 +218,15 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetGrid(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
             {
                 var viewer = await ResolveViewerAsync();
-                var discipline = GetDiscipline(competitionId);
-                var resp = _grid.BuildGrid(competitionId, discipline, viewer?.Id ?? 0);
+                var discipline = _owners.Discipline(owner);
+                var resp = _grid.BuildGrid(owner, discipline, viewer?.Id ?? 0);
                 return Json(resp);
             }
             catch (Exception ex)
@@ -231,11 +241,12 @@ namespace HpskSite.Controllers
         {
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            var discipline = GetDiscipline(competitionId);
-            var roster = _staffing.BuildRoster(competitionId, discipline, canEdit: true);
+            var discipline = _owners.Discipline(owner);
+            var roster = _staffing.BuildRoster(owner, discipline, canEdit: true);
             return Json(new
             {
                 success = true,
@@ -254,10 +265,11 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetPeople(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            var p = _people.Build(competitionId, GetDiscipline(competitionId), canEdit: true);
+            var p = _people.Build(owner, _owners.Discipline(owner), canEdit: true);
             return Json(new
             {
                 success = true,
@@ -278,21 +290,22 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveAssignment([FromBody] SaveStaffAssignmentRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             if (string.IsNullOrWhiteSpace(request.RoleKey))
                 return Json(new { success = false, message = "Roll saknas" });
 
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             // The role must exist in this competition's merged catalog (built-ins + arrangör-named rows).
             // It is no longer a closed set — "Vapenkontroll" is as valid as "Startledare" once someone has
             // created it — but it must still be a NAMED role, so everything downstream can group and count.
-            var discipline = GetDiscipline(request.CompetitionId);
-            var role = _roleCatalog.Resolve(request.CompetitionId, discipline, request.RoleKey);
+            var discipline = _owners.Discipline(owner);
+            var role = _roleCatalog.Resolve(owner, discipline, request.RoleKey);
             if (role == null)
                 return Json(new { success = false, message = "Rollen finns inte. Skapa den först i rutnätet." });
 
@@ -327,7 +340,7 @@ namespace HpskSite.Controllers
                     dupDay = dupStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 }
 
-                var dup = _people.FindDuplicate(request.CompetitionId, discipline, request.MemberId,
+                var dup = _people.FindDuplicate(owner, discipline, request.MemberId,
                     request.DisplayName, request.RoleKey, request.FunctionTitle,
                     request.ScopeType, request.ScopeKey, request.PassId, request.Id, dupDay);
                 if (dup != null)
@@ -343,7 +356,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var id = _staffing.Save(request, viewer.Id);
+                var id = _staffing.Save(request, owner, viewer.Id);
                 if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
                 return Json(new { success = true, id });
             }
@@ -364,11 +377,11 @@ namespace HpskSite.Controllers
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
 
-            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
-            if (!await HasCompetitionAccessAsync(compId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            _staffing.Delete(request.Id, compId);
+            _staffing.Delete(request.Id, owner);
             return Json(new { success = true });
         }
 
@@ -379,9 +392,10 @@ namespace HpskSite.Controllers
         {
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var c = _staffing.BuildDayOfCockpit(competitionId, GetDiscipline(competitionId), canEdit: true);
+            var c = _staffing.BuildDayOfCockpit(owner, _owners.Discipline(owner), canEdit: true);
             return Json(new
             {
                 success = true,
@@ -400,10 +414,10 @@ namespace HpskSite.Controllers
             if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
-            if (!await HasCompetitionAccessAsync(compId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _staffing.SetCheckedIn(request.Id, compId, request.CheckedIn);
+            _staffing.SetCheckedIn(request.Id, owner, request.CheckedIn);
             return Json(new { success = true });
         }
 
@@ -444,22 +458,24 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetPasses(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            return Json(new { success = true, passes = _pass.GetPasses(competitionId) });
+            return Json(new { success = true, passes = _pass.GetPasses(owner) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SavePass([FromBody] SavePassRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Date))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.Date))
                 return Json(new { success = false, message = "Ange ett datum för passet." });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var id = _pass.SavePass(request, viewer.Id);
+            var id = _pass.SavePass(request, owner, viewer.Id);
             if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
@@ -471,30 +487,33 @@ namespace HpskSite.Controllers
             if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _pass.DeletePass(request.Id, request.CompetitionId);
+            _pass.DeletePass(request.Id, owner);
             return Json(new { success = true });
         }
 
         [HttpGet]
         public async Task<IActionResult> GetCrewNeeds(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            return Json(new { success = true, needs = _pass.GetCrewNeeds(competitionId, GetDiscipline(competitionId)) });
+            return Json(new { success = true, needs = _pass.GetCrewNeeds(owner, _owners.Discipline(owner)) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveCrewNeeds([FromBody] SaveCrewNeedsRequest request)
         {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (request == null || !HasOwnerKey(request.CompetitionId)) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _pass.SaveCrewNeeds(request.CompetitionId, request.Needs);
+            _pass.SaveCrewNeeds(owner, request.Needs);
             return Json(new { success = true });
         }
 
@@ -502,26 +521,28 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopyPassAssignments([FromBody] CopyPassRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || request.FromPassId <= 0 || request.ToPassId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId) || request.FromPassId <= 0 || request.ToPassId <= 0)
                 return Json(new { success = false, message = "Välj pass att kopiera från och till." });
             if (request.FromPassId == request.ToPassId)
                 return Json(new { success = false, message = "Välj två olika pass." });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var copied = _staffing.CopyPassAssignments(request.CompetitionId, request.FromPassId, request.ToPassId, viewer.Id);
+            var copied = _staffing.CopyPassAssignments(owner, request.FromPassId, request.ToPassId, viewer.Id);
             return Json(new { success = true, copied });
         }
 
         [HttpGet]
         public async Task<IActionResult> GetCoverage(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var discipline = GetDiscipline(competitionId);
-            var seed = GetStationSeed(competitionId, discipline);
-            var cov = _pass.BuildCoverage(competitionId, discipline, seed?.StationCount ?? 0);
+            var discipline = _owners.Discipline(owner);
+            var seed = owner.HasCompetition ? GetStationSeed(owner.Comp, discipline) : null;
+            var cov = _pass.BuildCoverage(owner, discipline, seed?.StationCount ?? 0);
             return Json(new
             {
                 success = true,
@@ -539,22 +560,24 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetHelpSlots(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            return Json(new { success = true, slots = _help.GetSlots(competitionId) });
+            return Json(new { success = true, slots = _help.GetSlots(owner) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveHelpSlot([FromBody] SaveHelpSlotRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Headline) || string.IsNullOrWhiteSpace(request.Date))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.Headline) || string.IsNullOrWhiteSpace(request.Date))
                 return Json(new { success = false, message = "Ange datum och rubrik." });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var id = _help.SaveSlot(request, viewer.Id);
+            var id = _help.SaveSlot(request, owner, viewer.Id);
             if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
@@ -566,9 +589,10 @@ namespace HpskSite.Controllers
             if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _help.DeleteSlot(request.Id, request.CompetitionId);
+            _help.DeleteSlot(request.Id, owner);
             return Json(new { success = true });
         }
 
@@ -580,13 +604,14 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetHelpSignups(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
-            var people = _people.Build(competitionId, GetDiscipline(competitionId), canEdit: true, includePrep: false);
+            var people = _people.Build(owner, _owners.Discipline(owner), canEdit: true, includePrep: false);
             var byKey = people.People.ToDictionary(p => p.Key, p => p, StringComparer.Ordinal);
 
-            var signups = _help.GetReview(competitionId).Select(v =>
+            var signups = _help.GetReview(owner).Select(v =>
             {
                 byKey.TryGetValue(CompetitionPeopleService.KeyFor(v.MemberId, v.MemberName), out var person);
                 return new
@@ -618,21 +643,23 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSourceScopes(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            return Json(new { success = true, scopes = _signup.GetScopes(competitionId) });
+            return Json(new { success = true, scopes = _signup.GetScopes(owner) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AddSourceScope([FromBody] SaveSourceScopeRequest request)
         {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (request == null || !HasOwnerKey(request.CompetitionId)) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var (ok, msg, id) = _signup.AddScope(request.CompetitionId, request.ScopeType, request.ScopeKey, viewer.Id);
+            var (ok, msg, id) = _signup.AddScope(owner, request.ScopeType, request.ScopeKey, viewer.Id);
             return Json(new { success = ok, message = msg, id });
         }
 
@@ -643,18 +670,20 @@ namespace HpskSite.Controllers
             if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            _signup.RemoveScope(request.Id, request.CompetitionId);
+            _signup.RemoveScope(request.Id, owner);
             return Json(new { success = true });
         }
 
         [HttpGet]
         public async Task<IActionResult> PreviewStaffRequest(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var p = _request.Preview(competitionId);
+            var p = _request.Preview(owner);
             return Json(new
             {
                 success = true,
@@ -671,12 +700,13 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SendStaffRequest([FromBody] SendStaffRequestRequest request)
         {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (request == null || !HasOwnerKey(request.CompetitionId)) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var (ok, msg, sent, push, recipients) = _request.Send(request.CompetitionId, request.Mode, request.Message, viewer.Id);
+            var (ok, msg, sent, push, recipients) = _request.Send(owner, request.Mode, request.Message, viewer.Id);
             return Json(new { success = ok, message = msg, sent, push, recipients });
         }
 
@@ -697,13 +727,14 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var a = _staffing.GetById(request.Id);
             if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
-            if (!await HasCompetitionAccessAsync(a.CompetitionId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(a.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             if (a.MemberId is not > 0 && string.IsNullOrWhiteSpace(a.Email))
                 return Json(new { success = false, message = "Personen saknar konto och e-post — kan inte notifieras." });
 
-            var meta = GetCompMeta(a.CompetitionId);
-            var roleName = _roleCatalog.NameFor(a.CompetitionId, GetDiscipline(a.CompetitionId), a.RoleKey);
+            var meta = (Name: _owners.Name(owner), Url: _owners.ManageUrl(owner));
+            var roleName = _roleCatalog.NameFor(owner, _owners.Discipline(owner), a.RoleKey);
             var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
                 ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
             var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
@@ -713,7 +744,7 @@ namespace HpskSite.Controllers
             if (a.MemberId is > 0)
             {
                 // Members act on the per-comp landing page (accept/decline + availability, in context).
-                var beUrl = $"/bemanna?c={a.CompetitionId}";
+                var beUrl = owner.SignupPath;
                 var html = NotifyEmailHtml(bodyText + " Ange gärna när du kan arbeta.", "Öppna bemanningssidan", beUrl, viewer.Name);
                 (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", beUrl);
             }
@@ -730,7 +761,7 @@ namespace HpskSite.Controllers
 
             // Only flip Planerad → Inbjuden once something actually reached the person.
             if (string.Equals(a.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase))
-                _staffing.SetStatus(a.Id, a.CompetitionId, StaffAssignmentStatus.Invited);
+                _staffing.SetStatus(a.Id, owner, StaffAssignmentStatus.Invited);
 
             return Json(new { success = true, email, push });
         }
@@ -743,7 +774,7 @@ namespace HpskSite.Controllers
             if (id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var a = _staffing.GetById(id);
             if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
-            if (!await HasCompetitionAccessAsync(a.CompetitionId))
+            if (await RowOwnerAsync(_staffing.OwnerOf(a.Id)) == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
             var url = $"{Request.PublicBase()}/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}";
@@ -755,7 +786,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> SearchMembers(int competitionId, string query)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                 return Json(new { success = true, members = new List<object>() });
@@ -971,12 +1003,13 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetScheduleQuality(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
             {
-                var assignments = _staffing.BuildRoster(competitionId, GetDiscipline(competitionId), canEdit: true).Groups
+                var assignments = _staffing.BuildRoster(owner, _owners.Discipline(owner), canEdit: true).Groups
                     .SelectMany(g => g.Assignments)
                     .Where(a => !a.ReadOnly)
                     .ToList();
@@ -1058,12 +1091,12 @@ namespace HpskSite.Controllers
 
         /// <summary>Passes for a competition, never throwing. The grid builds its own copy in
         /// StaffingGridService; this one serves CopyDay and MoveAssignmentToDay.</summary>
-        private List<StaffPassView> SafeGetPasses(int competitionId)
+        private List<StaffPassView> SafeGetPasses(StaffOwner owner)
         {
-            try { return _pass.GetPasses(competitionId); }
+            try { return _pass.GetPasses(owner); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Staffing: pass lookup failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "Staffing: pass lookup failed for {Owner}", owner.MemoKey);
                 return new List<StaffPassView>();
             }
         }
@@ -1084,13 +1117,14 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetDays(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
                 var viewer = await ResolveViewerAsync();
-                var withWork = _days.DatesWithAssignments(competitionId);
-                var days = _days.EnsureSeeded(competitionId, viewer?.Id ?? 0)
+                var withWork = _days.DatesWithAssignments(owner);
+                var days = _days.EnsureSeeded(owner, viewer?.Id ?? 0)
                     .Select(d => _days.ToView(d, withWork)).ToList();
                 return Json(new { success = true, days });
             }
@@ -1106,15 +1140,16 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveDay([FromBody] SaveStaffDayRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var (ok, msg, id) = _days.SaveDay(request, viewer.Id);
+                var (ok, msg, id) = _days.SaveDay(request, owner, viewer.Id);
                 return Json(new { success = ok, message = msg, id });
             }
             catch (Exception ex)
@@ -1130,15 +1165,16 @@ namespace HpskSite.Controllers
         {
             // Id OR DateKey — a column that exists only because assignments are dated there has no StaffDay
             // row, and demanding an id made those columns permanent.
-            if (request == null || request.CompetitionId <= 0
+            if (request == null || !HasOwnerKey(request.CompetitionId)
                 || (request.Id <= 0 && string.IsNullOrWhiteSpace(request.DateKey)))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
                 var (ok, msg, inUse) = _days.DeleteDay(
-                    request.Id, request.CompetitionId, request.DateKey, request.DeleteAssignments);
+                    request.Id, owner, request.DateKey, request.DeleteAssignments);
                 if (!ok && msg == null && inUse > 0)
                     return Json(new { success = false, requiresConfirm = true, inUse });
                 return Json(new { success = ok, message = msg, removedAssignments = inUse });
@@ -1158,15 +1194,15 @@ namespace HpskSite.Controllers
         {
             if (request == null || request.Id <= 0)
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
-            if (!await HasCompetitionAccessAsync(compId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             if (!DateTime.TryParseExact(request.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
                 return Json(new { success = false, message = "Ogiltigt datum." });
             try
             {
-                var passId = SafeGetPasses(compId).FirstOrDefault(p => p.Date == request.Date)?.Id;
-                var (ok, msg) = _staffing.MoveToDay(request.Id, compId, day, passId);
+                var passId = SafeGetPasses(owner).FirstOrDefault(p => p.Date == request.Date)?.Id;
+                var (ok, msg) = _staffing.MoveToDay(request.Id, owner, day, passId);
                 return Json(new { success = ok, message = msg });
             }
             catch (Exception ex)
@@ -1184,11 +1220,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> SuggestPersonMatches(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var rows = _match.Suggest(competitionId);
+                var rows = _match.Suggest(owner);
                 return Json(new
                 {
                     success = true,
@@ -1214,9 +1251,10 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ApplyPersonIdentity([FromBody] PersonActionRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.PersonKey))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             if (request.MemberId <= 0 && string.IsNullOrWhiteSpace(request.NewName)
                 && string.IsNullOrWhiteSpace(request.Email) && string.IsNullOrWhiteSpace(request.Phone))
@@ -1228,7 +1266,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var r = _staffing.ApplyPersonIdentity(request);
+                var r = _staffing.ApplyPersonIdentity(request, owner);
                 return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
             }
             catch (Exception ex)
@@ -1244,13 +1282,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UndoPersonIdentity([FromBody] PersonActionRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.PersonKey))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var r = _staffing.UndoPersonIdentity(request.CompetitionId, request.PersonKey);
+                var r = _staffing.UndoPersonIdentity(owner, request.PersonKey);
                 return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
             }
             catch (Exception ex)
@@ -1266,13 +1305,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetPersonAdminAccess([FromBody] PersonAdminAccessRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.PersonKey))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.PersonKey))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var r = _staffing.SetPersonAdminAccess(request.CompetitionId, request.PersonKey, request.Grant);
+                var r = _staffing.SetPersonAdminAccess(owner, request.PersonKey, request.Grant);
                 return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
             }
             catch (Exception ex)
@@ -1291,15 +1331,15 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
-            if (!await HasCompetitionAccessAsync(compId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             // "12" och "1230" räcker (ClockTime) — samma tolkning som fältet i webbläsaren.
             if (HpskSite.Models.ClockTime.ToTimeSpan(request.At) is not TimeSpan at)
                 return Json(new { success = false, message = "Tiden går inte att läsa. Skriv till exempel 12 eller 12:30." });
             try
             {
-                var (ok, msg, newId) = _staffing.SplitAssignment(request.Id, compId, at,
+                var (ok, msg, newId) = _staffing.SplitAssignment(request.Id, owner, at,
                     request.MemberId > 0 ? request.MemberId : null, request.NewName, viewer.Id);
                 return Json(new { success = ok, message = msg, id = newId });
             }
@@ -1316,19 +1356,20 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetCrewNeed([FromBody] SetCrewNeedRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.RoleKey))
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.RoleKey))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var discipline = GetDiscipline(request.CompetitionId);
-                var needs = _pass.GetCrewNeeds(request.CompetitionId, discipline)
+                var discipline = _owners.Discipline(owner);
+                var needs = _pass.GetCrewNeeds(owner, discipline)
                     .Where(n => !string.Equals(n.RoleKey, request.RoleKey, StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 if (request.Count > 0)
                     needs.Add(new CrewNeedRow { ScopeKind = CrewNeedScope.All, RoleKey = request.RoleKey, Count = request.Count });
-                _pass.SaveCrewNeeds(request.CompetitionId, needs);
+                _pass.SaveCrewNeeds(owner, needs);
                 return Json(new { success = true });
             }
             catch (Exception ex)
@@ -1343,16 +1384,17 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ReorderRoles([FromBody] ReorderRolesRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var (ok, msg) = _roleCatalog.Reorder(request.CompetitionId, request.RoleKeys,
-                    GetDiscipline(request.CompetitionId), viewer.Id);
+                var (ok, msg) = _roleCatalog.Reorder(owner, request.RoleKeys,
+                    _owners.Discipline(owner), viewer.Id);
                 return Json(new { success = ok, message = msg });
             }
             catch (Exception ex)
@@ -1376,8 +1418,8 @@ namespace HpskSite.Controllers
         {
             if (request == null || request.Id <= 0)
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
-            if (!await HasCompetitionAccessAsync(compId))
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var email = (request.Email ?? "").Trim();
@@ -1385,7 +1427,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ogiltig e-postadress." });
             try
             {
-                _staffing.SetContact(request.Id, compId, email.Length == 0 ? null : email,
+                _staffing.SetContact(request.Id, owner, email.Length == 0 ? null : email,
                     string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone!.Trim());
                 return Json(new { success = true });
             }
@@ -1407,13 +1449,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopyDay([FromBody] CopyDayRequest request)
         {
-            if (request == null || request.CompetitionId <= 0)
+            if (request == null || !HasOwnerKey(request.CompetitionId))
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             if (string.IsNullOrWhiteSpace(request.ToDate) || request.FromDate == request.ToDate)
                 return Json(new { success = false, message = "Välj en annan måldag." });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             if (!DateTime.TryParseExact(request.ToDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var toDate))
@@ -1421,12 +1464,12 @@ namespace HpskSite.Controllers
 
             try
             {
-                var discipline = GetDiscipline(request.CompetitionId);
-                var passes = SafeGetPasses(request.CompetitionId);
+                var discipline = _owners.Discipline(owner);
+                var passes = SafeGetPasses(owner);
                 var targetPassId = passes.FirstOrDefault(p => p.Date == request.ToDate)?.Id;
                 var passDateById = passes.ToDictionary(p => p.Id, p => p.Date);
 
-                var rows = _staffing.GetForCompetition(request.CompetitionId);
+                var rows = _staffing.GetForOwner(owner);
 
                 string? DayOf(StaffAssignment a)
                 {
@@ -1485,7 +1528,7 @@ namespace HpskSite.Controllers
                         Status = StaffAssignmentStatus.Planned,
                         Note = a.Note,
                         AllowDuplicate = true,
-                    }, viewer.Id);
+                    }, owner, viewer.Id);
                     copied++;
                 }
 
@@ -1508,5 +1551,57 @@ namespace HpskSite.Controllers
         /// </summary>
         private Task<bool> HasCompetitionAccessAsync(int competitionId) =>
             _auth.HasCompetitionStaffAccessAsync(competitionId);
+
+        // ======================= P2b: bemanningens ägare =======================
+
+        /// <summary>
+        /// Planeringen anropet gäller — <c>?planningId=</c> i adressen. Planeringens bemanningssida lägger
+        /// till den på varje anrop hit (se Bemanning.cshtml), så de delade vyerna (_StaffingGrid,
+        /// _StaffingRoster) behöver inte veta om den.
+        /// </summary>
+        private int PlanningIdFromRequest() =>
+            int.TryParse(Request.Query["planningId"], out var p) && p > 0 ? p : 0;
+
+        /// <summary>Anropet har en ägare att pröva: en tävling, eller en planering i adressen.</summary>
+        private bool HasOwnerKey(int competitionId) => competitionId > 0 || PlanningIdFromRequest() > 0;
+
+        /// <summary>
+        /// Bemanningens ägare för anropet, efter behörighetsprövning — null = ingen behörighet (eller finns
+        /// inte; de två skiljs medvetet inte åt).
+        /// <para>Med <c>?planningId=</c>: planeringens bemanning. Den får hanteras av den som får ändra i
+        /// planeringen (Kan ändra eller mer), eller av den som har tillgång till den kopplade tävlingen
+        /// ("via kopplingen", Stefan 2026-10-23).</para>
+        /// <para>Utan: tävlingens bemanning (dess planerings, om den har en) — med tävlingens behörighet,
+        /// som förut.</para>
+        /// </summary>
+        private async Task<StaffOwner?> OwnerAsync(int competitionId)
+        {
+            var pid = PlanningIdFromRequest();
+            if (pid > 0) return await RowOwnerAsync(_owners.ForPlanning(pid));
+            if (competitionId <= 0) return null;
+            if (!await HasCompetitionAccessAsync(competitionId)) return null;
+            return _owners.ForCompetition(competitionId);
+        }
+
+        /// <summary>
+        /// Prövningen för en befintlig rad: radens EGEN ägare avgör, aldrig ett id i anropet — så ett id ur en
+        /// annan planering eller tävling ger ingen behörighet.
+        /// </summary>
+        private async Task<StaffOwner?> RowOwnerAsync(StaffOwner? owner)
+        {
+            if (owner == null) return null;
+            if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return owner;
+            if (owner.HasPlanning && await CanEditPlanningStaffAsync(owner.PlanningId)) return owner;
+            return null;
+        }
+
+        private async Task<bool> CanEditPlanningStaffAsync(int planningId)
+        {
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return false;
+            var row = _planning.ParticipantForMember(planningId, viewer.Id);
+            var caller = new HpskSite.Services.Planning.PlanningCaller(row is { IsActive: true } ? row : null, false);
+            return HpskSite.Services.Planning.PlanningAccess.CanEditStaffing(caller);
+        }
     }
 }

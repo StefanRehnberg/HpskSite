@@ -19,11 +19,13 @@ namespace HpskSite.Services.Staffing
         private readonly RoleCatalogService _roles;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly StaffOwnerResolver _owners;
 
         public StaffingSignupService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ClubService clubService, RoleCatalogService roles,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions, StaffOwnerResolver owners)
         {
             _competitions = competitions;
+            _owners = owners;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _memberService = memberService;
@@ -33,11 +35,11 @@ namespace HpskSite.Services.Staffing
 
         // ---- source scopes (organiser side) ----
 
-        public List<SourceScopeView> GetScopes(int competitionId)
+        public List<SourceScopeView> GetScopes(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var rows = scope.Database.Fetch<StaffingSourceScope>(
-                "SELECT * FROM StaffingSourceScope WHERE CompetitionId = @0 ORDER BY ScopeType, ScopeKey", competitionId);
+                "SELECT * FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " ORDER BY ScopeType, ScopeKey", owner.P, owner.C);
             return rows.Select(r => new SourceScopeView
             {
                 Id = r.Id,
@@ -47,13 +49,16 @@ namespace HpskSite.Services.Staffing
             }).ToList();
         }
 
-        public (bool Ok, string? Message, int Id) AddScope(int competitionId, string scopeType, string scopeKey, int byMemberId)
+        public (bool Ok, string? Message, int Id) AddScope(StaffOwner owner, string scopeType, string scopeKey, int byMemberId)
         {
             var type = string.Equals(scopeType, SourceScopeType.Region, StringComparison.OrdinalIgnoreCase) ? SourceScopeType.Region : SourceScopeType.Club;
             // "self"/blank = the hosting club or region, resolved from the competition.
             if (string.IsNullOrWhiteSpace(scopeKey) || string.Equals(scopeKey, "self", StringComparison.OrdinalIgnoreCase))
             {
-                var comp = _competitions.GetSaved(competitionId); // C3-planen §5d
+                // P2b: en planering utan tävling har ingen arrangör att utgå från.
+                if (!owner.HasCompetition)
+                    return (false, "Planeringen är inte kopplad till någon tävling, så arrangören är inte känd. Välj klubb eller krets i listan.", 0);
+                var comp = _competitions.GetSaved(owner.Comp); // C3-planen §5d
                 if (type == SourceScopeType.Club)
                 {
                     var clubId = comp?.ClubId ?? 0;
@@ -71,11 +76,12 @@ namespace HpskSite.Services.Staffing
             }
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM StaffingSourceScope WHERE CompetitionId=@0 AND ScopeType=@1 AND ScopeKey=@2", competitionId, type, scopeKey.Trim());
+            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " AND ScopeType=@2 AND ScopeKey=@3", owner.P, owner.C, type, scopeKey.Trim());
             if (dup > 0) return (true, null, 0);   // already present — idempotent
             var id = Convert.ToInt32(db.Insert(new StaffingSourceScope
             {
-                CompetitionId = competitionId,
+                PlanningId = owner.PlanningIdOrNull,
+                CompetitionId = owner.CompetitionIdOrNull,
                 ScopeType = type,
                 ScopeKey = scopeKey.Trim(),
                 CreatedByMemberId = byMemberId,
@@ -84,10 +90,10 @@ namespace HpskSite.Services.Staffing
             return (true, null, id);
         }
 
-        public void RemoveScope(int id, int competitionId)
+        public void RemoveScope(int id, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM StaffingSourceScope WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+            scope.Database.Execute("DELETE FROM StaffingSourceScope WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
         }
 
         // ---- member self-sign-up ----
@@ -100,35 +106,39 @@ namespace HpskSite.Services.Staffing
             if (clubIds.Count == 0 && string.IsNullOrEmpty(regionCode)) return new();
 
             List<StaffingSourceScope> scopes;
-            HashSet<int> alreadyAssigned;
+            List<(int? PlanningId, int? CompetitionId)> assigned;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
                 scopes = db.Fetch<StaffingSourceScope>("SELECT * FROM StaffingSourceScope");
-                alreadyAssigned = db.Fetch<int>("SELECT DISTINCT CompetitionId FROM StaffAssignment WHERE MemberId = @0", memberId).ToHashSet();
+                assigned = db.Fetch<StaffAssignment>("SELECT DISTINCT PlanningId, CompetitionId FROM StaffAssignment WHERE MemberId = @0", memberId)
+                    .Select(a => (a.PlanningId, a.CompetitionId)).ToList();
             }
 
+            // P2b: en öppning hör till en ägare — planeringen, eller tävlingen som ännu inte har någon.
             var clubKeys = clubIds.Select(c => c.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var compIds = scopes
+            var owners = scopes
                 .Where(s => (string.Equals(s.ScopeType, SourceScopeType.Club, StringComparison.OrdinalIgnoreCase) && clubKeys.Contains(s.ScopeKey))
                          || (string.Equals(s.ScopeType, SourceScopeType.Region, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(regionCode) && string.Equals(s.ScopeKey, regionCode, StringComparison.OrdinalIgnoreCase)))
-                .Select(s => s.CompetitionId).Distinct()
-                .Where(id => !alreadyAssigned.Contains(id));
+                .Select(s => _owners.OfRow(s.PlanningId, s.CompetitionId))
+                .Where(o => o != null).Select(o => o!)
+                .DistinctBy(o => o.MemoKey)
+                .Where(o => !assigned.Any(a => o.Owns(a.PlanningId, a.CompetitionId)));
 
             var result = new List<OpenSignupView>();
-            foreach (var compId in compIds)
+            foreach (var owner in owners)
             {
-                var comp = _competitions.GetSaved(compId);
-                if (comp == null) continue;
-                var discipline = comp.CompetitionType ?? "";
-                var date = comp.CompetitionDate;
+                if (owner.HasCompetition && _competitions.GetSaved(owner.Comp) == null) continue;
+                var discipline = _owners.Discipline(owner);
+                var (date, _) = _owners.Span(owner);
                 result.Add(new OpenSignupView
                 {
-                    CompetitionId = compId,
-                    CompName = comp.CompetitionName ?? comp.Name ?? "Tävling",
+                    CompetitionId = owner.Comp,
+                    PlanningId = owner.PlanningId,
+                    CompName = _owners.Name(owner),
                     CompDate = date is { } d && d != default ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null,
                     Discipline = discipline,
-                    Roles = _roles.ForCompetition(compId, discipline)
+                    Roles = _roles.For(owner, discipline)
                         .Where(r => r.Key != "tavlingsledning")   // self-sign-up never grants leadership/app admin
                         .Select(r => new RoleOption { Key = r.Key, Name = r.DisplayName }).ToList(),
                 });
@@ -136,15 +146,13 @@ namespace HpskSite.Services.Staffing
             return result.OrderBy(r => r.CompDate == null).ThenBy(r => r.CompDate, StringComparer.Ordinal).ToList();
         }
 
-        public (bool Ok, string? Message) SelfSignUp(int memberId, int competitionId, string roleKey)
+        public (bool Ok, string? Message) SelfSignUp(int memberId, StaffOwner owner, string roleKey)
         {
             // Re-check eligibility server-side.
-            if (!GetOpenSignups(memberId).Any(o => o.CompetitionId == competitionId))
+            if (!GetOpenSignups(memberId).Any(o => o.PlanningId == owner.PlanningId && o.CompetitionId == owner.Comp))
                 return (false, "Tävlingen är inte öppen för anmälan för dig.");
-            var comp = _competitions.GetSaved(competitionId);
-            if (comp == null) return (false, "Tävlingen hittades inte.");
-            var discipline = comp.CompetitionType ?? "";
-            var role = _roles.Resolve(competitionId, discipline, roleKey);
+            var discipline = _owners.Discipline(owner);
+            var role = _roles.Resolve(owner, discipline, roleKey);
             if (role == null || role.Key == "tavlingsledning") return (false, "Ogiltig roll.");
 
             var m = _memberService.GetById(memberId);
@@ -155,7 +163,8 @@ namespace HpskSite.Services.Staffing
             var now = DateTime.UtcNow;
             scope.Database.Insert(new StaffAssignment
             {
-                CompetitionId = competitionId,
+                PlanningId = owner.PlanningIdOrNull,
+                CompetitionId = owner.CompetitionIdOrNull,
                 MemberId = memberId,
                 DisplayName = name,
                 Phone = phone,

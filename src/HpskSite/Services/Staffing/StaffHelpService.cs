@@ -18,15 +18,15 @@ namespace HpskSite.Services.Staffing
 
         // ---- slots (organiser) ----
 
-        public List<HelpSlotView> GetSlots(int competitionId)
+        public List<HelpSlotView> GetSlots(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffHelpSlot>(
-                    "SELECT * FROM StaffHelpSlot WHERE CompetitionId = @0 ORDER BY SlotDate, SortOrder, StartTime, Id", competitionId)
+                    "SELECT * FROM StaffHelpSlot WHERE " + StaffOwner.Where(0) + " ORDER BY SlotDate, SortOrder, StartTime, Id", owner.P, owner.C)
                 .Select(ToSlotView).ToList();
         }
 
-        public int SaveSlot(SaveHelpSlotRequest req, int byMemberId)
+        public int SaveSlot(SaveHelpSlotRequest req, StaffOwner owner, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -35,16 +35,17 @@ namespace HpskSite.Services.Staffing
             {
                 // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
                 var existing = db.SingleOrDefault<StaffHelpSlot>(
-                    "SELECT * FROM StaffHelpSlot WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                    "SELECT * FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
                 if (existing == null) return 0;
                 row = existing;
             }
             else
             {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffHelpSlot WHERE CompetitionId = @0", req.CompetitionId) ?? 0;
-                row = new StaffHelpSlot { CompetitionId = req.CompetitionId, SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffHelpSlot WHERE " + StaffOwner.Where(0), owner.P, owner.C) ?? 0;
+                row = new StaffHelpSlot { SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
             }
-            row.CompetitionId = req.CompetitionId;
+            row.PlanningId = owner.PlanningIdOrNull;
+            row.CompetitionId = owner.CompetitionIdOrNull;
             row.SlotDate = ParseDate(req.Date) ?? row.SlotDate;
             row.StartTime = CleanTime(req.StartTime);
             row.EndTime = CleanTime(req.EndTime);
@@ -54,28 +55,28 @@ namespace HpskSite.Services.Staffing
             return row.Id;
         }
 
-        public void DeleteSlot(int id, int competitionId)
+        public void DeleteSlot(int id, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM StaffHelpSlot WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+            scope.Database.Execute("DELETE FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
         }
 
         // ---- member sign-up ----
 
-        public MyHelpSignupView? GetMySignup(int competitionId, int memberId)
+        public MyHelpSignupView? GetMySignup(StaffOwner owner, int memberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var row = scope.Database.SingleOrDefault<StaffHelpSignup>(
-                "SELECT * FROM StaffHelpSignup WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId);
+            var row = scope.Database.FirstOrDefault<StaffHelpSignup>(
+                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId);
             if (row == null) return null;
             return new MyHelpSignupView { Comment = row.Comment, Slots = ParseChoices(row.SlotsJson) };
         }
 
         /// <summary>Upsert a member's sign-up. Empty comment + no slots clears it (member un-signs).</summary>
-        public void SaveMySignup(int competitionId, int memberId, string memberName, string? comment, List<HelpSlotChoice> slots)
+        public void SaveMySignup(StaffOwner owner, int memberId, string memberName, string? comment, List<HelpSlotChoice> slots)
         {
             // Keep only choices for slots that still exist in this competition, and drop empty time windows.
-            var validSlotIds = GetSlots(competitionId).Select(s => s.Id).ToHashSet();
+            var validSlotIds = GetSlots(owner).Select(s => s.Id).ToHashSet();
             var clean = (slots ?? new()).Where(c => validSlotIds.Contains(c.SlotId)).Select(c => new HelpSlotChoice
             {
                 SlotId = c.SlotId,
@@ -85,8 +86,8 @@ namespace HpskSite.Services.Staffing
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var existing = db.SingleOrDefault<StaffHelpSignup>(
-                "SELECT * FROM StaffHelpSignup WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId);
+            var existing = db.FirstOrDefault<StaffHelpSignup>(
+                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId);
 
             var noContent = clean.Count == 0 && string.IsNullOrWhiteSpace(comment);
             if (noContent)
@@ -109,7 +110,8 @@ namespace HpskSite.Services.Staffing
             {
                 db.Insert(new StaffHelpSignup
                 {
-                    CompetitionId = competitionId,
+                    PlanningId = owner.PlanningIdOrNull,
+                    CompetitionId = owner.CompetitionIdOrNull,
                     MemberId = memberId,
                     MemberName = memberName,
                     Comment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim(),
@@ -122,13 +124,13 @@ namespace HpskSite.Services.Staffing
 
         // ---- manager review ----
 
-        public List<HelpSignupReviewView> GetReview(int competitionId)
+        public List<HelpSignupReviewView> GetReview(StaffOwner owner)
         {
-            var slots = GetSlots(competitionId).ToDictionary(s => s.Id);
+            var slots = GetSlots(owner).ToDictionary(s => s.Id);
             List<StaffHelpSignup> rows;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
                 rows = scope.Database.Fetch<StaffHelpSignup>(
-                    "SELECT * FROM StaffHelpSignup WHERE CompetitionId = @0 ORDER BY MemberName", competitionId);
+                    "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " ORDER BY MemberName", owner.P, owner.C);
 
             return rows.Select(r => new HelpSignupReviewView
             {

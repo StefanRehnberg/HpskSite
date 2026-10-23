@@ -8,7 +8,9 @@ namespace HpskSite.Models.Staffing
     public class StaffHelpSlot
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public DateTime SlotDate { get; set; }
         public string? StartTime { get; set; }
         public string? EndTime { get; set; }
@@ -26,7 +28,9 @@ namespace HpskSite.Models.Staffing
     public class StaffHelpSignup
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public int MemberId { get; set; }
         public string MemberName { get; set; } = "";
         public string? Comment { get; set; }
@@ -96,6 +100,8 @@ namespace HpskSite.Models.Staffing
     public class SaveHelpSignupRequest
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: planeringens bemanning (0 = tävlingens).</summary>
+        public int PlanningId { get; set; }
         public string? Comment { get; set; }
         public List<HelpSlotChoice> Slots { get; set; } = new();
     }

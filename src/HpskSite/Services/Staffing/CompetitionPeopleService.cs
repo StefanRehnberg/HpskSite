@@ -49,9 +49,10 @@ namespace HpskSite.Services.Staffing
         public static string KeyFor(int? memberId, string? displayName) =>
             memberId is > 0 ? $"m:{memberId}" : $"n:{(displayName ?? "").Trim().ToLowerInvariant()}";
 
-        public CompetitionPeopleResponse Build(int competitionId, string? discipline, bool canEdit,
+        public CompetitionPeopleResponse Build(StaffOwner owner, string? discipline, bool canEdit,
             bool includePrep = true)
         {
+            var competitionId = owner.Comp;
             var resp = new CompetitionPeopleResponse { Discipline = discipline ?? "", CanEdit = canEdit };
             var byKey = new Dictionary<string, CompetitionPersonRow>(StringComparer.Ordinal);
 
@@ -79,7 +80,7 @@ namespace HpskSite.Services.Staffing
             }
 
             // ---------- 1. the roster (StaffAssignment + Fält station-chief mirrors + pass labels) ----------
-            var roster = _staffing.BuildRoster(competitionId, discipline, canEdit);
+            var roster = _staffing.BuildRoster(owner, discipline, canEdit);
             foreach (var g in roster.Groups)
             {
                 foreach (var a in g.Assignments)
@@ -129,9 +130,9 @@ namespace HpskSite.Services.Staffing
             }
 
             // ---------- 2. self-sign-ups (/bemanna) — the link that was missing entirely ----------
-            var passes = SafePasses(competitionId);
-            var slots = SafeSlots(competitionId);
-            foreach (var v in SafeReview(competitionId))
+            var passes = SafePasses(owner);
+            var slots = SafeSlots(owner);
+            foreach (var v in SafeReview(owner))
             {
                 var row = Row(v.MemberId, v.MemberName, PersonSource.Volunteer);
                 var vol = new CompetitionPersonVolunteer
@@ -156,7 +157,7 @@ namespace HpskSite.Services.Staffing
             }
 
             // ---------- 3. declared availability (members who said when they can work) ----------
-            foreach (var grp in _staffing.GetAvailabilityForCompetition(competitionId).GroupBy(a => a.MemberId))
+            foreach (var grp in _staffing.GetAvailabilityForOwner(owner).GroupBy(a => a.MemberId))
             {
                 var name = ResolveMemberName(grp.Key);
                 var row = Row(grp.Key, name, PersonSource.Volunteer);
@@ -172,7 +173,7 @@ namespace HpskSite.Services.Staffing
             {
                 try
                 {
-                    var wb = _work.Build(competitionId, canEdit: false);
+                    var wb = _work.BuildForPlanning(owner.PlanningId, canEdit: false);
                     foreach (var area in wb.Areas)
                     {
                         if (area.ResponsibleMemberId is > 0)
@@ -266,8 +267,8 @@ namespace HpskSite.Services.Staffing
         /// first, so prep owners stop being strangers to the roster. Used by the "föreslagna" block in the
         /// member pickers before falling back to a site-wide member search.
         /// </summary>
-        public List<CompetitionPersonRow> Candidates(int competitionId, string? discipline)
-            => Build(competitionId, discipline, canEdit: false).People
+        public List<CompetitionPersonRow> Candidates(StaffOwner owner, string? discipline)
+            => Build(owner, discipline, canEdit: false).People
                 .Where(p => p.MemberId is > 0)
                 .ToList();
 
@@ -285,12 +286,12 @@ namespace HpskSite.Services.Staffing
         /// had it because they were on it on Friday. Working the same post on consecutive days is the
         /// normal case in a staffing plan, not a mistake, and a warning that cries wolf gets clicked past.
         /// </summary>
-        public CompetitionPersonAssignment? FindDuplicate(int competitionId, string? discipline,
+        public CompetitionPersonAssignment? FindDuplicate(StaffOwner owner, string? discipline,
             int? memberId, string? displayName, string roleKey, string? functionTitle,
             string? scopeType, string? scopeKey, int? passId, int excludeId, string? dateKey = null)
         {
             var key = KeyFor(memberId, displayName);
-            var person = Build(competitionId, discipline, canEdit: false, includePrep: false)
+            var person = Build(owner, discipline, canEdit: false, includePrep: false)
                 .People.FirstOrDefault(p => p.Key == key);
             if (person == null) return null;
             static string N(string? s) => (s ?? "").Trim().ToLowerInvariant();
@@ -441,21 +442,21 @@ namespace HpskSite.Services.Staffing
             return from != null ? $"från {Day(from.Value)} {T(from.Value)}" : $"till {Day(to!.Value)} {T(to.Value)}";
         }
 
-        private List<HelpSignupReviewView> SafeReview(int competitionId)
+        private List<HelpSignupReviewView> SafeReview(StaffOwner owner)
         {
-            try { return _help.GetReview(competitionId); }
-            catch (Exception ex) { _logger.LogWarning(ex, "People: sign-up read failed for {CompetitionId}", competitionId); return new(); }
+            try { return _help.GetReview(owner); }
+            catch (Exception ex) { _logger.LogWarning(ex, "People: sign-up read failed for {Owner}", owner.MemoKey); return new(); }
         }
 
-        private List<HelpSlotView> SafeSlots(int competitionId)
+        private List<HelpSlotView> SafeSlots(StaffOwner owner)
         {
-            try { return _help.GetSlots(competitionId); }
+            try { return _help.GetSlots(owner); }
             catch { return new(); }
         }
 
-        private List<StaffPassView> SafePasses(int competitionId)
+        private List<StaffPassView> SafePasses(StaffOwner owner)
         {
-            try { return _pass.GetPasses(competitionId); }
+            try { return _pass.GetPasses(owner); }
             catch { return new(); }
         }
     }

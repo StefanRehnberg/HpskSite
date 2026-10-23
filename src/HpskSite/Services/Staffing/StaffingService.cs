@@ -29,13 +29,15 @@ namespace HpskSite.Services.Staffing
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly IMemberService _memberService;
         private readonly RoleCatalogService _roles;
+        private readonly StaffOwnerResolver _owners;
         private readonly ILogger<StaffingService> _logger;
 
         private const string TavlingsledningRole = "tavlingsledning";
 
         public StaffingService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, RoleCatalogService roles, ILogger<StaffingService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions, StaffOwnerResolver owners)
         {
+            _owners = owners;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _competitions = competitions;
@@ -46,13 +48,17 @@ namespace HpskSite.Services.Staffing
 
         // ---- reads ----
 
-        public List<StaffAssignment> GetForCompetition(int competitionId)
+        /// <summary>Ägarens alla rader (P2b: planeringens, och tävlingens som ännu saknar planering).</summary>
+        public List<StaffAssignment> GetForOwner(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 ORDER BY RoleKey, ScopeKey, StartsAt, Id",
-                competitionId);
+                "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " ORDER BY RoleKey, ScopeKey, StartsAt, Id",
+                owner.P, owner.C);
         }
+
+        /// <summary>Tävlingens bemanning — dess planerings, om den har en.</summary>
+        public List<StaffAssignment> GetForCompetition(int competitionId) => GetForOwner(_owners.ForCompetition(competitionId));
 
         public StaffAssignment? GetById(int id)
         {
@@ -61,11 +67,11 @@ namespace HpskSite.Services.Staffing
                 "SELECT * FROM StaffAssignment WHERE Id = @0", id);
         }
 
-        public int? GetCompetitionIdFor(int id)
+        /// <summary>Ägaren till en rad, eller null när raden inte finns.</summary>
+        public StaffOwner? OwnerOf(int id)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.ExecuteScalar<int?>(
-                "SELECT CompetitionId FROM StaffAssignment WHERE Id = @0", id);
+            var a = GetById(id);
+            return a == null ? null : _owners.OfRow(a.PlanningId, a.CompetitionId);
         }
 
         /// <summary>
@@ -100,14 +106,14 @@ namespace HpskSite.Services.Staffing
         /// (empty groups included so the admin sees which crew a comp normally needs). Runs the
         /// one-time competitionManagers reconcile first so managers added the old way appear here.
         /// </summary>
-        public StaffRosterResponse BuildRoster(int competitionId, string? discipline, bool canEdit)
+        public StaffRosterResponse BuildRoster(StaffOwner owner, string? discipline, bool canEdit)
         {
-            ReconcileManagersIntoRoster(competitionId);
+            if (owner.HasCompetition) ReconcileManagersIntoRoster(owner);
 
-            var rows = GetForCompetition(competitionId);
+            var rows = GetForOwner(owner);
             var resp = new StaffRosterResponse { Discipline = discipline ?? "", CanEdit = canEdit };
 
-            var roles = _roles.ForCompetition(competitionId, discipline);
+            var roles = _roles.For(owner, discipline);
             var byRole = rows.GroupBy(r => r.RoleKey ?? "").ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var role in roles)
@@ -129,7 +135,7 @@ namespace HpskSite.Services.Staffing
                         .OrderBy(a => a.ScopeKey, StringComparer.OrdinalIgnoreCase)
                         .ThenBy(a => a.StartsAt ?? DateTime.MinValue)
                         .ThenByDescending(a => a.IsResponsible)
-                        .Select(a => ToView(a, competitionId, discipline))
+                        .Select(a => ToView(a, owner, discipline))
                         .ToList();
                 }
                 resp.Groups.Add(group);
@@ -146,12 +152,12 @@ namespace HpskSite.Services.Staffing
                     RoleKey = "_ovriga",
                     RoleName = "Övriga roller",
                     RolePlural = "Övriga roller",
-                    Assignments = orphans.Select(a => ToView(a, competitionId, discipline)).ToList(),
+                    Assignments = orphans.Select(a => ToView(a, owner, discipline)).ToList(),
                 });
             }
 
             // Availability (P3): show each assignee's declared windows so the organiser can plan around them.
-            var availByMember = GetAvailabilityForCompetition(competitionId)
+            var availByMember = GetAvailabilityForOwner(owner)
                 .GroupBy(a => a.MemberId)
                 .ToDictionary(g => g.Key, g => g.Select(a => BuildAvailabilityLabel(a.AvailableFrom, a.AvailableTo)).ToList());
             if (availByMember.Count > 0)
@@ -164,7 +170,7 @@ namespace HpskSite.Services.Staffing
             try
             {
                 using var pscope = _scopeProvider.CreateScope(autoComplete: true);
-                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE CompetitionId = @0", competitionId);
+                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE " + StaffOwner.Where(0), owner.P, owner.C);
                 if (passes.Count > 0)
                 {
                     var byId = passes.ToDictionary(p => p.Id, p =>
@@ -189,8 +195,8 @@ namespace HpskSite.Services.Staffing
             // Fält convergence (P2): surface station chiefs assigned on the Stationer tab
             // (faltskytteStationManagers JSON) as read-only rows in the stationschef group, so the roster
             // shows the full picture. Deduped by station — a real StaffAssignment for Station:N wins.
-            if (FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase))
-                InjectStationChiefs(competitionId, resp);
+            if (owner.HasCompetition && FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase))
+                InjectStationChiefs(owner.Comp, resp);
 
             resp.TotalAssigned = rows.Count;
             return resp;
@@ -250,7 +256,7 @@ namespace HpskSite.Services.Staffing
 
         // ---- writes ----
 
-        public int Save(SaveStaffAssignmentRequest req, int assignedByMemberId)
+        public int Save(SaveStaffAssignmentRequest req, StaffOwner owner, int assignedByMemberId)
         {
             var now = DateTime.UtcNow;
             int savedId;
@@ -265,16 +271,18 @@ namespace HpskSite.Services.Staffing
                     // kunde personal på en tävling flytta en annan tävlings tävlingsledare till sin egen
                     // (rättat 2026-10-21). Ett okänt id skapar inte heller en ny rad längre.
                     var existing = db.SingleOrDefault<StaffAssignment>(
-                        "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                        "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
                     if (existing == null) return 0;
                     row = existing;
                 }
                 else
                 {
-                    row = new StaffAssignment { CompetitionId = req.CompetitionId, CreatedDate = now, AssignedByMemberId = assignedByMemberId };
+                    row = new StaffAssignment { CreatedDate = now, AssignedByMemberId = assignedByMemberId };
                 }
 
-                row.CompetitionId = req.CompetitionId;
+                // P2b: raden bär planeringen OCH (när den är kopplad) tävlingen.
+                row.PlanningId = owner.PlanningIdOrNull;
+                row.CompetitionId = owner.CompetitionIdOrNull;
                 row.MemberId = req.MemberId is > 0 ? req.MemberId : null;
                 row.DisplayName = (req.DisplayName ?? "").Trim();
                 row.Phone = string.IsNullOrWhiteSpace(req.Phone) ? null : req.Phone.Trim();
@@ -293,14 +301,15 @@ namespace HpskSite.Services.Staffing
                 // so keeping both would let them drift apart.
                 row.DayDate = row.StartsAt != null ? null : ParseDate(req.DayDate);
                 if (req.PassId is > 0 && db.ExecuteScalar<int>(
-                        "SELECT COUNT(1) FROM StaffPass WHERE Id = @0 AND CompetitionId = @1", req.PassId, req.CompetitionId) == 0)
+                        "SELECT COUNT(1) FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.PassId, owner.P, owner.C) == 0)
                     return 0;   // ett pass i en annan tävling
                 row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
                 // App access is role-agnostic (a Kassa- or Sekretariatsansvarig needs the same management
                 // page as the tävlingsledare). It does require a linked member, though — access is granted
                 // to a pistol.nu login, so a free-text helper row can never carry it.
-                row.HasAdminAccess = req.HasAdminAccess && row.MemberId is > 0;
+                // ...och ges bara när planeringen är kopplad till en tävling (det finns ingen tävling att hantera annars).
+                row.HasAdminAccess = req.HasAdminAccess && row.MemberId is > 0 && owner.HasCompetition;
                 row.Status = NormalizeStatus(req.Status);
                 row.Note = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim();
                 row.ModifiedDate = now;
@@ -312,42 +321,58 @@ namespace HpskSite.Services.Staffing
 
             // Mirror to competitionManagers AFTER the write scope has committed, so the ContentService
             // Save+Publish runs in its own transaction (no publish nested inside the raw-SQL scope).
-            SyncCompetitionManagers(req.CompetitionId);
-            if (string.Equals(req.RoleKey, StationschefRole, StringComparison.OrdinalIgnoreCase))
-                SyncStationManagers(req.CompetitionId);
+            if (owner.HasCompetition)
+            {
+                SyncCompetitionManagers(owner.Comp);
+                if (string.Equals(req.RoleKey, StationschefRole, StringComparison.OrdinalIgnoreCase))
+                    SyncStationManagers(owner.Comp);
+            }
             return savedId;
         }
 
         /// <summary>Lightweight status update (e.g. Planned → Invited after a notification) without a full save.</summary>
-        public void SetStatus(int id, int competitionId, string status)
+        public void SetStatus(int id, StaffOwner owner, string status)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
-                "UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
-                NormalizeStatus(status), DateTime.UtcNow, id, competitionId);
+                "UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND " + StaffOwner.Where(3),
+                NormalizeStatus(status), DateTime.UtcNow, id, owner.P, owner.C);
         }
 
-        public void Delete(int id, int competitionId)
+        public void Delete(int id, StaffOwner owner)
         {
             string? roleKey;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
-                roleKey = scope.Database.ExecuteScalar<string>("SELECT RoleKey FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-                scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+                roleKey = scope.Database.ExecuteScalar<string>("SELECT RoleKey FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+                scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
             }
-            SyncCompetitionManagers(competitionId);
+            if (!owner.HasCompetition) return;
+            SyncCompetitionManagers(owner.Comp);
             if (string.Equals(roleKey, StationschefRole, StringComparison.OrdinalIgnoreCase))
-                SyncStationManagers(competitionId);
+                SyncStationManagers(owner.Comp);
+        }
+
+        /// <summary>
+        /// P2b: speglingarna till tävlingen (tävlingsansvariga och stationschefer) räknas om — efter att en
+        /// planering kopplats eller kopplats loss. Läser tävlingens rader, så en losskopplad planerings
+        /// personer försvinner ur speglingarna.
+        /// </summary>
+        public void SyncCompetitionMirrors(int competitionId)
+        {
+            if (competitionId <= 0) return;
+            SyncCompetitionManagers(competitionId);
+            SyncStationManagers(competitionId);
         }
 
         // ---- day-of cockpit: roll-call / upprop (+ overlay hook) ----
 
-        public void SetCheckedIn(int id, int competitionId, bool checkedIn)
+        public void SetCheckedIn(int id, StaffOwner owner, bool checkedIn)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
-                "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
-                checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, competitionId);
+                "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND " + StaffOwner.Where(3),
+                checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, owner.P, owner.C);
         }
 
         /// <summary>
@@ -356,10 +381,10 @@ namespace HpskSite.Services.Staffing
         /// roll-call tally (how many have checked in). Includes read-only Fält station chiefs. The live
         /// "ActiveNow" reconciliation (#1b) is merged client-side against the discipline's load endpoint.
         /// </summary>
-        public DayOfCockpitResponse BuildDayOfCockpit(int competitionId, string? discipline, bool canEdit)
+        public DayOfCockpitResponse BuildDayOfCockpit(StaffOwner owner, string? discipline, bool canEdit)
         {
             // Reuse BuildRoster so station-chief injection + availability + role resolution are consistent.
-            var roster = BuildRoster(competitionId, discipline, canEdit);
+            var roster = BuildRoster(owner, discipline, canEdit);
             var resp = new DayOfCockpitResponse { Discipline = discipline ?? "", CanEdit = canEdit };
 
             var groups = new Dictionary<string, DayOfScopeGroup>(StringComparer.OrdinalIgnoreCase);
@@ -418,15 +443,15 @@ namespace HpskSite.Services.Staffing
         /// <summary>Clone every assignment on one pass to another (e.g. copy Day 1 → Day 2). Same person +
         /// role + scope + target range + responsible, new PassId. Skips rows already present on the target
         /// (deduped by person + role + scope). Returns how many were copied.</summary>
-        public int CopyPassAssignments(int competitionId, int fromPassId, int toPassId, int byMemberId)
+        public int CopyPassAssignments(StaffOwner owner, int fromPassId, int toPassId, int byMemberId)
         {
             if (fromPassId <= 0 || toPassId <= 0 || fromPassId == toPassId) return 0;
             int copied = 0;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
-                var src = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND PassId = @1", competitionId, fromPassId);
-                var dst = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND PassId = @1", competitionId, toPassId);
+                var src = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @2", owner.P, owner.C, fromPassId);
+                var dst = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @2", owner.P, owner.C, toPassId);
                 string Key(StaffAssignment a) => $"{(a.MemberId is > 0 ? "m" + a.MemberId : "n" + (a.DisplayName ?? "").Trim().ToLowerInvariant())}|{a.RoleKey}|{a.ScopeType}|{a.ScopeKey}";
                 var have = dst.Select(Key).ToHashSet();
                 var now = DateTime.UtcNow;
@@ -435,7 +460,8 @@ namespace HpskSite.Services.Staffing
                     if (have.Contains(Key(a))) continue;
                     db.Insert(new StaffAssignment
                     {
-                        CompetitionId = competitionId,
+                        PlanningId = owner.PlanningIdOrNull,
+                        CompetitionId = owner.CompetitionIdOrNull,
                         MemberId = a.MemberId,
                         DisplayName = a.DisplayName,
                         Phone = a.Phone,
@@ -458,32 +484,33 @@ namespace HpskSite.Services.Staffing
                     copied++;
                 }
             }
-            if (copied > 0) { SyncCompetitionManagers(competitionId); SyncStationManagers(competitionId); }
+            if (copied > 0 && owner.HasCompetition) { SyncCompetitionManagers(owner.Comp); SyncStationManagers(owner.Comp); }
             return copied;
         }
 
         // ---- availability + member self-service (P3: sign-up + tillgänglighet) ----
 
-        public List<StaffAvailability> GetAvailabilityForCompetition(int competitionId)
+        public List<StaffAvailability> GetAvailabilityForOwner(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffAvailability>(
-                "SELECT * FROM StaffAvailability WHERE CompetitionId = @0 ORDER BY MemberId, AvailableFrom", competitionId);
+                "SELECT * FROM StaffAvailability WHERE " + StaffOwner.Where(0) + " ORDER BY MemberId, AvailableFrom", owner.P, owner.C);
         }
 
-        public bool MemberHasAssignment(int competitionId, int memberId)
+        public bool MemberHasAssignment(StaffOwner owner, int memberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId) > 0;
+                "SELECT COUNT(*) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId) > 0;
         }
 
-        public int AddAvailability(int competitionId, int memberId, DateTime? from, DateTime? to, string? note)
+        public int AddAvailability(StaffOwner owner, int memberId, DateTime? from, DateTime? to, string? note)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return Convert.ToInt32(scope.Database.Insert(new StaffAvailability
             {
-                CompetitionId = competitionId,
+                PlanningId = owner.PlanningIdOrNull,
+                CompetitionId = owner.CompetitionIdOrNull,
                 MemberId = memberId,
                 AvailableFrom = from,
                 AvailableTo = to,
@@ -529,12 +556,12 @@ namespace HpskSite.Services.Staffing
         /// <para>Returns a refusal for an untimed row on a day with no pass: pinning it would mean
         /// inventing a clock time, and a fake 00:00 becomes a real 23:30 reminder the night before.</para>
         /// </summary>
-        public (bool Ok, string? Message) MoveToDay(int assignmentId, int competitionId, DateTime day, int? targetPassId)
+        public (bool Ok, string? Message) MoveToDay(int assignmentId, StaffOwner owner, DateTime day, int? targetPassId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", assignmentId, competitionId);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
             if (a == null) return (false, "Uppdraget hittades inte.");
 
             DateTime? Shift(DateTime? t) => t is { } v ? day.Date.Add(v.TimeOfDay) : null;
@@ -560,18 +587,18 @@ namespace HpskSite.Services.Staffing
         /// agree with <see cref="CompetitionPeopleService"/>, which groups by the same key.
         /// </summary>
         private List<StaffAssignment> RowsForPerson(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
-            int competitionId, string personKey)
+            StaffOwner owner, string personKey)
         {
             if (string.IsNullOrWhiteSpace(personKey)) return new List<StaffAssignment>();
             if (personKey.StartsWith("m:", StringComparison.Ordinal)
                 && int.TryParse(personKey[2..], out var mid) && mid > 0)
             {
                 return db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1", competitionId, mid);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, mid);
             }
             var name = personKey.StartsWith("n:", StringComparison.Ordinal) ? personKey[2..] : personKey;
             return db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId IS NULL", competitionId)
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId IS NULL", owner.P, owner.C)
                 .Where(r => string.Equals((r.DisplayName ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
@@ -585,11 +612,11 @@ namespace HpskSite.Services.Staffing
         /// this now": their predecessor's yes means nothing, so statuses reset to Planerad and check-ins
         /// clear. Treating them the same is how a stand-in silently inherits a confirmation they never gave.</para>
         /// </summary>
-        public PersonActionResult ApplyPersonIdentity(PersonActionRequest req)
+        public PersonActionResult ApplyPersonIdentity(PersonActionRequest req, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var rows = RowsForPerson(db, req.CompetitionId, req.PersonKey);
+            var rows = RowsForPerson(db, owner, req.PersonKey);
             if (rows.Count == 0) return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
 
             string? name = string.IsNullOrWhiteSpace(req.NewName) ? null : req.NewName.Trim();
@@ -637,7 +664,7 @@ namespace HpskSite.Services.Staffing
 
             // A replacement or a link can change who holds Tävlingsledning, and that list is also the
             // public "Tävlingsansvariga" block on the competition page.
-            try { SyncCompetitionManagers(req.CompetitionId); } catch { }
+            if (owner.HasCompetition) { try { SyncCompetitionManagers(owner.Comp); } catch { } }
 
             return new PersonActionResult { Success = true, Affected = n };
         }
@@ -655,13 +682,20 @@ namespace HpskSite.Services.Staffing
         ///
         /// <para>Requires a member id: access is granted to a LOGIN, and a free-text helper has none.</para>
         /// </summary>
-        public PersonActionResult SetPersonAdminAccess(int competitionId, string personKey, bool grant)
+        public PersonActionResult SetPersonAdminAccess(StaffOwner owner, string personKey, bool grant)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var rows = RowsForPerson(db, competitionId, personKey);
+            var rows = RowsForPerson(db, owner, personKey);
             if (rows.Count == 0)
                 return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+            // P2b, Stefans svar 2: behörigheten gäller den tävling planeringen är kopplad till.
+            if (grant && !owner.HasCompetition)
+                return new PersonActionResult
+                {
+                    Success = false,
+                    Message = "Planeringen är inte kopplad till någon tävling än. Behörigheten gäller den tävling planeringen kopplas till — koppla den först.",
+                };
             if (grant && !rows.Any(r => r.MemberId is > 0))
                 return new PersonActionResult
                 {
@@ -679,7 +713,7 @@ namespace HpskSite.Services.Staffing
                 db.Update(r);
             }
 
-            SyncCompetitionManagers(competitionId);
+            if (owner.HasCompetition) SyncCompetitionManagers(owner.Comp);
             return new PersonActionResult { Success = true, Affected = rows.Count };
         }
 
@@ -687,11 +721,11 @@ namespace HpskSite.Services.Staffing
         /// Put back the name the organiser originally typed, and unlink. The escape hatch for a link that
         /// went to the wrong person — which is easy to do and, without this, impossible to notice or reverse.
         /// </summary>
-        public PersonActionResult UndoPersonIdentity(int competitionId, string personKey)
+        public PersonActionResult UndoPersonIdentity(StaffOwner owner, string personKey)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var rows = RowsForPerson(db, competitionId, personKey).Where(r => !string.IsNullOrEmpty(r.OriginalName)).ToList();
+            var rows = RowsForPerson(db, owner, personKey).Where(r => !string.IsNullOrEmpty(r.OriginalName)).ToList();
             if (rows.Count == 0)
                 return new PersonActionResult { Success = false, Message = "Det finns inget tidigare namn att gå tillbaka till." };
 
@@ -705,7 +739,7 @@ namespace HpskSite.Services.Staffing
                 r.ModifiedDate = now;
                 db.Update(r);
             }
-            try { SyncCompetitionManagers(competitionId); } catch { }
+            if (owner.HasCompetition) { try { SyncCompetitionManagers(owner.Comp); } catch { } }
             return new PersonActionResult { Success = true, Affected = rows.Count };
         }
 
@@ -716,13 +750,13 @@ namespace HpskSite.Services.Staffing
         /// <para>Refuses on an untimed row: there is no point to split at, and inventing one would invent a
         /// time the person never agreed to.</para>
         /// </summary>
-        public (bool Ok, string? Message, int NewId) SplitAssignment(int assignmentId, int competitionId,
+        public (bool Ok, string? Message, int NewId) SplitAssignment(int assignmentId, StaffOwner owner,
             TimeSpan at, int? newMemberId, string? newName, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", assignmentId, competitionId);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
             if (a == null) return (false, "Uppdraget hittades inte.", 0);
             if (a.StartsAt == null || a.EndsAt == null)
                 return (false, "Passet saknar tider. Sätt från- och till-tid först, annars finns ingen punkt att dela vid.", 0);
@@ -753,7 +787,8 @@ namespace HpskSite.Services.Staffing
 
             var tail = new StaffAssignment
             {
-                CompetitionId = competitionId,
+                PlanningId = owner.PlanningIdOrNull,
+                CompetitionId = owner.CompetitionIdOrNull,
                 MemberId = newMemberId is > 0 ? newMemberId : null,
                 DisplayName = name!,
                 Phone = phone,
@@ -783,12 +818,12 @@ namespace HpskSite.Services.Staffing
         /// Set contact details on an existing roster row. Used by the grid to rescue an account-less helper
         /// from being unreachable — with an e-mail they can at least be invited via a tokened link.
         /// </summary>
-        public void SetContact(int assignmentId, int competitionId, string? email, string? phone)
+        public void SetContact(int assignmentId, StaffOwner owner, string? email, string? phone)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
-                "UPDATE StaffAssignment SET Email = @0, Phone = @1, ModifiedDate = @2 WHERE Id = @3 AND CompetitionId = @4",
-                email, phone, DateTime.UtcNow, assignmentId, competitionId);
+                "UPDATE StaffAssignment SET Email = @0, Phone = @1, ModifiedDate = @2 WHERE Id = @3 AND " + StaffOwner.Where(4),
+                email, phone, DateTime.UtcNow, assignmentId, owner.P, owner.C);
         }
 
         /// <summary>Resolve display info for the external-invite page (comp name, role, scope, shift, status).</summary>
@@ -796,10 +831,11 @@ namespace HpskSite.Services.Staffing
         {
             var a = GetById(assignmentId);
             if (a == null) return null;
-            var content = _competitions.GetSaved(a.CompetitionId);
-            var compName = content?.CompetitionName ?? "Tävling";
-            var discipline = content?.CompetitionType ?? "";
-            var role = _roles.Resolve(a.CompetitionId, discipline, a.RoleKey);
+            var owner = _owners.OfRow(a.PlanningId, a.CompetitionId);
+            if (owner == null) return null;
+            var compName = _owners.Name(owner);
+            var discipline = _owners.Discipline(owner);
+            var role = _roles.Resolve(owner, discipline, a.RoleKey);
             return new InviteResponseModel
             {
                 Valid = true,
@@ -844,33 +880,41 @@ namespace HpskSite.Services.Staffing
                     "SELECT * FROM StaffAvailability WHERE MemberId = @0", memberId);
             }
 
-            var compIds = rows.Select(r => r.CompetitionId).Concat(avail.Select(a => a.CompetitionId)).Distinct().ToList();
-            var availByComp = avail.GroupBy(a => a.CompetitionId).ToDictionary(g => g.Key, g => g.ToList());
-            var rowsByComp = rows.GroupBy(r => r.CompetitionId).ToDictionary(g => g.Key, g => g.ToList());
+            // P2b: grupperat per ägare — en planering utan tävling är en egen grupp, en kopplad planering
+            // och dess tävling är samma grupp.
+            string KeyOf(int? p, int? c) => p is > 0 ? "p" + p : "c" + c;
+            var keys = rows.Select(r => (r.PlanningId, r.CompetitionId)).Concat(avail.Select(a => (a.PlanningId, a.CompetitionId)))
+                .GroupBy(x => KeyOf(x.PlanningId, x.CompetitionId)).Select(g => g.First()).ToList();
+            var availByComp = avail.GroupBy(a => KeyOf(a.PlanningId, a.CompetitionId)).ToDictionary(g => g.Key, g => g.ToList());
+            var rowsByComp = rows.GroupBy(r => KeyOf(r.PlanningId, r.CompetitionId)).ToDictionary(g => g.Key, g => g.ToList());
 
             var result = new List<MyCompetitionGroup>();
-            foreach (var compId in compIds)
+            foreach (var (pid, cid) in keys)
             {
-                var content = _competitions.GetSaved(compId);
-                if (content == null) continue;
-                var name = content.CompetitionName ?? "Tävling";
-                var discipline = content.CompetitionType ?? "";
-                var date = content.CompetitionDate;
+                var owner = _owners.OfRow(pid, cid);
+                if (owner == null) continue;
+                var key = KeyOf(pid, cid);
+                var discipline = _owners.Discipline(owner);
+                var (date, _) = _owners.Span(owner);
+                if (owner.HasCompetition && _competitions.GetSaved(owner.Comp) == null) continue;
+                var compId = owner.Comp;
 
                 var grp = new MyCompetitionGroup
                 {
-                    CompetitionId = compId,
-                    CompName = name,
+                    CompetitionId = owner.Comp,
+                    PlanningId = owner.PlanningId,
+                    CompName = _owners.Name(owner),
                     CompDate = date is { } d && d != default ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null,
+                    SignupPath = owner.SignupPath,
                 };
-                if (rowsByComp.TryGetValue(compId, out var rs))
+                if (rowsByComp.TryGetValue(key, out var rs))
                 {
                     grp.Assignments = rs
                         .OrderBy(r => r.RoleKey).ThenBy(r => r.ScopeKey, StringComparer.OrdinalIgnoreCase)
                         .Select(r => new MyAssignmentView
                         {
                             Id = r.Id,
-                            RoleName = _roles.NameFor(compId, discipline, r.RoleKey),
+                            RoleName = _roles.NameFor(owner, discipline, r.RoleKey),
                             FunctionTitle = r.FunctionTitle,
                             ScopeLabel = BuildScopeLabel(r),
                             ShiftLabel = BuildShiftLabel(r.StartsAt, r.EndsAt),
@@ -878,7 +922,7 @@ namespace HpskSite.Services.Staffing
                             IsResponsible = r.IsResponsible,
                         }).ToList();
                 }
-                if (availByComp.TryGetValue(compId, out var av))
+                if (availByComp.TryGetValue(key, out var av))
                 {
                     grp.Availability = av
                         .OrderBy(a => a.AvailableFrom ?? DateTime.MinValue)
@@ -900,8 +944,9 @@ namespace HpskSite.Services.Staffing
         /// competition's existing competitionManagers int[] that has no such row yet. Makes the roster the
         /// full picture before we treat it as the write source. Safe to run on every roster load.
         /// </summary>
-        private void ReconcileManagersIntoRoster(int competitionId)
+        private void ReconcileManagersIntoRoster(StaffOwner owner)
         {
+            var competitionId = owner.Comp;
             try
             {
                 var content = _competitions.GetSaved(competitionId);
@@ -916,8 +961,8 @@ namespace HpskSite.Services.Staffing
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 var db = scope.Database;
                 var existing = db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
-                    competitionId, TavlingsledningRole);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
+                    owner.P, owner.C, TavlingsledningRole);
                 var haveMemberIds = existing.Where(r => r.MemberId.HasValue).Select(r => r.MemberId!.Value).ToHashSet();
 
                 foreach (var mid in managerIds.Distinct())
@@ -931,14 +976,14 @@ namespace HpskSite.Services.Staffing
                     // the check and the write atomic.
                     db.Execute(@"
                         INSERT INTO StaffAssignment
-                            (CompetitionId, MemberId, DisplayName, RoleKey, FunctionTitle, ScopeType,
+                            (CompetitionId, PlanningId, MemberId, DisplayName, RoleKey, FunctionTitle, ScopeType,
                              IsResponsible, HasAdminAccess, Status, AssignedByMemberId, CreatedDate, ModifiedDate)
-                        SELECT @0, @1, @2, @3, @4, @5, 1, 1, @6, 0, @7, @7
+                        SELECT @0, @8, @1, @2, @3, @4, @5, 1, 1, @6, 0, @7, @7
                         WHERE NOT EXISTS (
                             SELECT 1 FROM StaffAssignment
                             WHERE CompetitionId = @0 AND RoleKey = @3 AND MemberId = @1)",
                         competitionId, mid, name, TavlingsledningRole, "Tävlingsledare",
-                        StaffScopeType.All, StaffAssignmentStatus.Confirmed, now);
+                        StaffScopeType.All, StaffAssignmentStatus.Confirmed, now, owner.PlanningIdOrNull);
                 }
             }
             catch (Exception ex)
@@ -1071,9 +1116,9 @@ namespace HpskSite.Services.Staffing
 
         // ---- mapping helpers ----
 
-        private StaffAssignmentView ToView(StaffAssignment a, int competitionId, string? discipline)
+        private StaffAssignmentView ToView(StaffAssignment a, StaffOwner owner, string? discipline)
         {
-            var role = _roles.Resolve(competitionId, discipline, a.RoleKey);
+            var role = _roles.Resolve(owner, discipline, a.RoleKey);
             return new StaffAssignmentView
             {
                 Id = a.Id,

@@ -58,6 +58,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Kretsgranskning.KretsPlanningService _kretsPlanning;
         private readonly HpskSite.Services.Staffing.PrepDocumentStorage _docs;
         private readonly Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> _archiveOptions;
+        private readonly HpskSite.Services.Staffing.StaffingService _staffing;
+        private readonly HpskSite.Services.Staffing.StaffDayService _staffDays;
 
         public PlanningController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
@@ -69,9 +71,12 @@ namespace HpskSite.Controllers
             AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.CompetitionLinks competitionLinks,
             HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs,
-            Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> archiveOptions)
+            Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> archiveOptions,
+            HpskSite.Services.Staffing.StaffingService staffing, HpskSite.Services.Staffing.StaffDayService staffDays)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _staffing = staffing;
+            _staffDays = staffDays;
             _competitions = competitions;
             _competitionLinks = competitionLinks;
             _kretsPlanning = kretsPlanning;
@@ -339,6 +344,10 @@ namespace HpskSite.Controllers
                     createdAt = D(x.Planning.CreatedAt),
                     doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
                     competition = CompetitionJson(x.Planning.Id),
+                    // P2b: grenen styr bemanningens roller tills planeringen kopplas (då gäller tävlingens).
+                    disciplineKey = x.Planning.DisciplineKey ?? "",
+                    disciplines = HpskSite.Models.CompetitionTypes.All.Select(d => new { id = d.Id, name = d.Name }),
+                    staffingUrl = $"/tavlingsplanering/{x.Planning.Id}/bemanning",
                 },
                 me = new
                 {

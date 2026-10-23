@@ -12479,8 +12479,40 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     rubriker, lagring), som pollas med resten. `Tasks` bär inte längre `documents`.
   - Svit: `hpsk-verify/tavlingsplanering-dokument-verify.mjs` 62/62 (A/B: målet prövat utan planeringen +
     vem som helst får ta bort en bifogning → 6 röda).
-- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet; dev: även
-  `alter-planning-p2-tasks.sql`) (17 tabeller inkl. `PlanningRequest`,
+- **P2b: bemanningen hör till PLANERINGEN (2026-10-23)** — även innan planeringen kopplats till en tävling.
+  - **Ägaren = `StaffOwner(PlanningId, CompetitionId?)`** (`Models/Staffing/StaffOwner.cs`). Tre lägen:
+    kopplad planering (båda), planering utan tävling (bara planeringen), tävling utan planering (bara
+    tävlingen — de äldre raderna, PlanningId NULL). De nio Staff-tabellerna har `PlanningId` och en nullbar
+    `CompetitionId` (`alter-staffing-planning-p2b.sql`); `StaffRole` har ägartypen `Planning`.
+  - ⚠️ **Varje fråga på en Staff-tabell per ägare går genom `StaffOwner.Where(i, alias)`** — "planeringens
+    rader, eller tävlingens som ännu saknar planering". Varje insättning sätter BÅDA id:na
+    (`PlanningIdOrNull`, `CompetitionIdOrNull`). En fråga direkt på `CompetitionId` är fortfarande RÄTT för
+    det som gäller tävlingen (Mitt schema, appbehörigheten, raderingsspärren): en kopplad planerings rader
+    bär tävlingens id, en losskopplad planerings rader har det inte.
+  - **`StaffOwnerResolver`** (scoped) är den ENDA platsen som tar fram ägaren (`ForCompetition`,
+    `ForPlanning`, `OfRow`) och vad ägaren vet om sig själv: gren (tävlingens, annars `Planning.DisciplineKey`),
+    namn, dagar (`Span`: tävlingens datum, annars planeringens mål i tid).
+  - **Kopplingen flyttar bemanningen** (`StaffingPlanningLink`, i PlanningService transaktion): `Adopt` tar in
+    tävlingens äldre rader (unika krockar — samma dag, behov, anmälan, källa, roll — planeringens rad vinner),
+    `Attach` sätter tävlingens id, `Detach` nollar det. Efteråt kör `PlanningController.AfterStaffingLinkChanged`
+    speglingarna (`StaffingService.SyncCompetitionMirrors`: tävlingsansvariga + stationschefer) och lägger till
+    tävlingens dagar (`StaffDayService.AddCompetitionDays`). Losskopplad = ingen appbehörighet till tävlingen.
+  - **Behörighet** (`StaffingController.OwnerAsync`/`RowOwnerAsync`): med `?planningId=` — Kan ändra i
+    planeringen (`PlanningAccess.CanEditStaffing`) ELLER tillgång till den kopplade tävlingen; utan —
+    tävlingens behörighet, som förut. **Id-baserade anrop prövas mot RADENS egen ägare**, aldrig mot ett id i
+    anropet. Appbehörighet (`HasAdminAccess`) kan bara ges när planeringen är kopplad.
+  - **Sidan `/tavlingsplanering/{id}/bemanning`** (`PlaneringBemanning.cshtml`) visar samma `_StaffingRoster`/
+    `_StaffingGrid` som tävlingens planeringssida; ett fetch-tillägg lägger `planningId` på varje anrop till
+    `/umbraco/surface/Staffing/`, så delvyerna behöver inte veta om planeringen. Planeringens meny har
+    Bemanning; Inställningar har Gren (bara utan tävling). **Dagsprogram och materiel stannar på tävlingen.**
+  - **Självanmälan:** `/bemanna?p={planering}` (`StaffOwner.SignupPath`); `/bemanna?c=` fungerar som förut och
+    leder till tävlingens planering när den har en. Mina uppdrag grupperar per ägare (`MyCompetitionGroup.PlanningId`).
+  - Svit: `hpsk-verify/tavlingsplanering-bemanning-verify.mjs` 49/49 (A/B: radägarens prövning släppt +
+    losskopplingen nollar inte tävlingen → 11 röda). ⚠️ Inte builder.claude som "utan behörighet" — hen är
+    kretsadmin i Halland och kommer åt Ankeborgs tävlingar.
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
+  `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
+  (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,
   `Planning.ListedForMembers` och de fyra ovan; för en DB som redan har de 13: `alter-planning-tasks-topics-roles.sql`
   — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒
   `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21/23, **EJ i prod**.

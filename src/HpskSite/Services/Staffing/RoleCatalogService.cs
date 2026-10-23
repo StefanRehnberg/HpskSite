@@ -32,7 +32,12 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<RoleCatalogService> _logger;
 
         private readonly Dictionary<string, List<FunctionaryRole>> _memo = new();
-        private readonly Dictionary<int, List<StaffRole>> _customMemo = new();
+        private readonly Dictionary<string, List<StaffRole>> _customMemo = new();
+
+        // P2b: rollerna hör till planeringen när det finns en, annars till tävlingen (tills planeringen startas
+        // och StaffingPlanningLink.Adopt flyttar dem).
+        private static string OwnerTypeOf(StaffOwner o) => o.HasPlanning ? RoleOwnerType.Planning : RoleOwnerType.Competition;
+        private static int OwnerIdOf(StaffOwner o) => o.HasPlanning ? o.PlanningId : o.Comp;
 
         public RoleCatalogService(IScopeProvider scopeProvider, ILogger<RoleCatalogService> logger)
         {
@@ -42,14 +47,14 @@ namespace HpskSite.Services.Staffing
 
         // ---------------------------------------------------------------- reads
 
-        /// <summary>Built-ins + this competition's own roles, merged and ordered.</summary>
-        public IReadOnlyList<FunctionaryRole> ForCompetition(int competitionId, string? discipline)
+        /// <summary>Built-ins + the owner's own roles, merged and ordered.</summary>
+        public IReadOnlyList<FunctionaryRole> For(StaffOwner owner, string? discipline)
         {
-            var memoKey = $"{competitionId}|{discipline}";
+            var memoKey = $"{owner.MemoKey}|{discipline}";
             if (_memo.TryGetValue(memoKey, out var cached)) return cached;
 
             var builtIns = FunctionaryRoles.ForDiscipline(discipline);
-            var custom = GetCustom(competitionId);
+            var custom = GetCustom(owner);
 
             var merged = new List<FunctionaryRole>();
             var byKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -102,40 +107,45 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Resolve one role. Returns null when the key is unknown — callers fall back to the key.</summary>
-        public FunctionaryRole? Resolve(int competitionId, string? discipline, string? roleKey)
+        public FunctionaryRole? Resolve(StaffOwner owner, string? discipline, string? roleKey)
         {
             if (string.IsNullOrWhiteSpace(roleKey)) return null;
-            foreach (var r in ForCompetition(competitionId, discipline))
+            foreach (var r in For(owner, discipline))
                 if (string.Equals(r.Key, roleKey, StringComparison.OrdinalIgnoreCase)) return r;
             return null;
         }
 
         /// <summary>Display name for a role key, falling back to the key itself (never empty).</summary>
-        public string NameFor(int competitionId, string? discipline, string? roleKey)
-            => Resolve(competitionId, discipline, roleKey)?.DisplayName ?? roleKey ?? "";
+        public string NameFor(StaffOwner owner, string? discipline, string? roleKey)
+            => Resolve(owner, discipline, roleKey)?.DisplayName ?? roleKey ?? "";
 
         /// <summary>True when this key is arrangör-created (used by the UI to offer rename/delete).</summary>
-        public bool IsCustom(int competitionId, string roleKey)
-            => GetCustom(competitionId).Any(c => c.IsActive && string.Equals(c.RoleKey, roleKey, StringComparison.OrdinalIgnoreCase));
+        public bool IsCustom(StaffOwner owner, string roleKey)
+            => GetCustom(owner).Any(c => c.IsActive && string.Equals(c.RoleKey, roleKey, StringComparison.OrdinalIgnoreCase));
 
-        public List<StaffRole> GetCustom(int competitionId)
+        public List<StaffRole> GetCustom(StaffOwner owner)
         {
-            if (_customMemo.TryGetValue(competitionId, out var cached)) return cached;
+            if (_customMemo.TryGetValue(owner.MemoKey, out var cached)) return cached;
             List<StaffRole> rows;
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                // Planeringens roller, och tävlingens som ännu inte flyttats in. Samma nyckel på båda: planeringens gäller.
                 rows = scope.Database.Fetch<StaffRole>(
-                    "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 ORDER BY SortOrder, DisplayName",
-                    RoleOwnerType.Competition, competitionId);
+                    @"SELECT * FROM StaffRole WHERE (OwnerType = @0 AND OwnerId = @1) OR (OwnerType = @2 AND OwnerId = @3)
+                      ORDER BY SortOrder, DisplayName",
+                    RoleOwnerType.Planning, owner.P, RoleOwnerType.Competition, owner.C)
+                    .GroupBy(r => r.RoleKey, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.OrderBy(r => r.OwnerType == RoleOwnerType.Planning ? 0 : 1).First())
+                    .ToList();
             }
             catch (Exception ex)
             {
                 // Table not created yet → behave exactly like before the feature existed.
-                _logger.LogWarning(ex, "RoleCatalog: custom role lookup failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "RoleCatalog: custom role lookup failed for {Owner}", owner.MemoKey);
                 rows = new List<StaffRole>();
             }
-            _customMemo[competitionId] = rows;
+            _customMemo[owner.MemoKey] = rows;
             return rows;
         }
 
@@ -146,7 +156,7 @@ namespace HpskSite.Services.Staffing
         /// A blank <see cref="SaveStaffRoleRequest.RoleKey"/> means "new": the key is slugified from the
         /// name and de-duplicated against BOTH the built-ins and this competition's own rows.
         /// </summary>
-        public string SaveRole(SaveStaffRoleRequest req, string? discipline, int byMemberId)
+        public string SaveRole(SaveStaffRoleRequest req, StaffOwner owner, string? discipline, int byMemberId)
         {
             var name = (req.DisplayName ?? "").Trim();
             if (name.Length == 0) throw new ArgumentException("Rollen måste ha ett namn.");
@@ -154,20 +164,20 @@ namespace HpskSite.Services.Staffing
 
             var key = (req.RoleKey ?? "").Trim();
             if (key.Length == 0)
-                key = UniqueKey(req.CompetitionId, discipline, name);
+                key = UniqueKey(owner, discipline, name);
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var existing = scope.Database.SingleOrDefault<StaffRole>(
                 "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
-                RoleOwnerType.Competition, req.CompetitionId, key);
+                OwnerTypeOf(owner), OwnerIdOf(owner), key);
 
             var now = DateTime.UtcNow;
             if (existing == null)
             {
                 scope.Database.Insert(new StaffRole
                 {
-                    OwnerType = RoleOwnerType.Competition,
-                    OwnerId = req.CompetitionId,
+                    OwnerType = OwnerTypeOf(owner),
+                    OwnerId = OwnerIdOf(owner),
                     RoleKey = key,
                     DisplayName = name,
                     PluralName = Blank(req.PluralName),
@@ -196,7 +206,7 @@ namespace HpskSite.Services.Staffing
                 scope.Database.Update(existing);
             }
 
-            Forget(req.CompetitionId);
+            Forget(owner);
             return key;
         }
 
@@ -207,18 +217,18 @@ namespace HpskSite.Services.Staffing
         /// the spot, carrying its current name, because that is the only place an order can be stored.
         /// Keys not in the list keep their existing order after the ones that are.</para>
         /// </summary>
-        public (bool ok, string? message) Reorder(int competitionId, IList<string> roleKeys, string? discipline, int byMemberId)
+        public (bool ok, string? message) Reorder(StaffOwner owner, IList<string> roleKeys, string? discipline, int byMemberId)
         {
             if (roleKeys == null || roleKeys.Count == 0) return (false, "Ingen ordning angiven.");
 
-            var known = ForCompetition(competitionId, discipline)
+            var known = For(owner, discipline)
                 .ToDictionary(r => r.Key, r => r, StringComparer.OrdinalIgnoreCase);
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var existing = db.Fetch<StaffRole>(
                     "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1",
-                    RoleOwnerType.Competition, competitionId)
+                    OwnerTypeOf(owner), OwnerIdOf(owner))
                 .ToDictionary(r => r.RoleKey, r => r, StringComparer.OrdinalIgnoreCase);
 
             var now = DateTime.UtcNow;
@@ -237,8 +247,8 @@ namespace HpskSite.Services.Staffing
                 {
                     db.Insert(new StaffRole
                     {
-                        OwnerType = RoleOwnerType.Competition,
-                        OwnerId = competitionId,
+                        OwnerType = OwnerTypeOf(owner),
+                        OwnerId = OwnerIdOf(owner),
                         RoleKey = role.Key,
                         DisplayName = role.DisplayName,
                         PluralName = role.PluralName,
@@ -255,7 +265,7 @@ namespace HpskSite.Services.Staffing
                 }
             }
 
-            Forget(competitionId);
+            Forget(owner);
             return (true, null);
         }
 
@@ -272,7 +282,7 @@ namespace HpskSite.Services.Staffing
         /// returns ok=false with the count so the caller can ask, and nothing is written.
         /// </summary>
         public (bool ok, string? message, int inUse) DeleteRole(
-            int competitionId, string roleKey, string? discipline, int byMemberId, bool deleteAssignments)
+            StaffOwner owner, string roleKey, string? discipline, int byMemberId, bool deleteAssignments)
         {
             if (string.IsNullOrWhiteSpace(roleKey)) return (false, "Roll saknas.", 0);
 
@@ -280,19 +290,19 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
 
             var inUse = db.ExecuteScalar<int>(
-                "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
-                competitionId, roleKey);
+                "SELECT COUNT(1) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
+                owner.P, owner.C, roleKey);
             if (inUse > 0 && !deleteAssignments) return (false, null, inUse);
 
-            var name = Resolve(competitionId, discipline, roleKey)?.DisplayName ?? roleKey;
+            var name = Resolve(owner, discipline, roleKey)?.DisplayName ?? roleKey;
             var row = db.SingleOrDefault<StaffRole>(
                 "SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
-                RoleOwnerType.Competition, competitionId, roleKey);
+                OwnerTypeOf(owner), OwnerIdOf(owner), roleKey);
             var isBuiltIn = FunctionaryRoles.Resolve(discipline, roleKey) != null;
 
             if (inUse > 0)
-                db.Execute("DELETE FROM StaffAssignment WHERE CompetitionId = @0 AND RoleKey = @1",
-                    competitionId, roleKey);
+                db.Execute("DELETE FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
+                    owner.P, owner.C, roleKey);
 
             var now = DateTime.UtcNow;
             if (isBuiltIn)
@@ -301,8 +311,8 @@ namespace HpskSite.Services.Staffing
                 {
                     db.Insert(new StaffRole
                     {
-                        OwnerType = RoleOwnerType.Competition,
-                        OwnerId = competitionId,
+                        OwnerType = OwnerTypeOf(owner),
+                        OwnerId = OwnerIdOf(owner),
                         RoleKey = roleKey,
                         DisplayName = name,
                         IsActive = false,
@@ -323,26 +333,26 @@ namespace HpskSite.Services.Staffing
                 db.Delete(row);
             }
 
-            Forget(competitionId);
+            Forget(owner);
             return (true, null, inUse);
         }
 
         // ---------------------------------------------------------------- helpers
 
-        private void Forget(int competitionId)
+        private void Forget(StaffOwner owner)
         {
-            _customMemo.Remove(competitionId);
-            foreach (var k in _memo.Keys.Where(k => k.StartsWith(competitionId + "|", StringComparison.Ordinal)).ToList())
+            _customMemo.Remove(owner.MemoKey);
+            foreach (var k in _memo.Keys.Where(k => k.StartsWith(owner.MemoKey + "|", StringComparison.Ordinal)).ToList())
                 _memo.Remove(k);
         }
 
-        private string UniqueKey(int competitionId, string? discipline, string name)
+        private string UniqueKey(StaffOwner owner, string? discipline, string name)
         {
             var baseKey = Slugify(name);
             if (baseKey.Length == 0) baseKey = "roll";
 
             var taken = new HashSet<string>(
-                ForCompetition(competitionId, discipline).Select(r => r.Key), StringComparer.OrdinalIgnoreCase);
+                For(owner, discipline).Select(r => r.Key), StringComparer.OrdinalIgnoreCase);
 
             if (!taken.Contains(baseKey)) return baseKey;
             for (var i = 2; i < 100; i++)

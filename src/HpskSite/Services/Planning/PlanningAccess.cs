@@ -56,6 +56,13 @@ namespace HpskSite.Services.Planning
         /// <summary>Namn, mål i tid. Kan ändra och Sammankallande.</summary>
         public static bool CanEditPlanning(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Editor) && !c.ViaLink;
 
+        /// <summary>
+        /// P2b: planeringens bemanning (roller, dagar, pass, personer). Kan ändra och Sammankallande — samma
+        /// som planeringen i övrigt. Den som har tillgång till den kopplade tävlingen prövas av
+        /// StaffingController för sig ("via kopplingen").
+        /// </summary>
+        public static bool CanEditStaffing(PlanningCaller c) => CanEditPlanning(c);
+
         /// <summary>Arkivering, borttagning. Bara Sammankallande.</summary>
         public static bool CanManagePlanning(PlanningCaller c) =>
             c.IsParticipant && c.Access == PlanningAccessLevel.Owner && !c.ViaLink;

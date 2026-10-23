@@ -242,7 +242,9 @@
         const here = view === 'mote' ? 'moten' : view;
         $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
             `<a href="#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
-            + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
+            + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('')
+            // P2b: bemanningen är ett eget rutnät på en egen sida (det behöver hela bredden).
+            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '');
     }
 
     function myOpenTasks() {
@@ -2429,11 +2431,24 @@
                 <div class="pl-help small">På: den som har uppgiften säger <i>Klar att pröva</i>, och mötet (eller du som sammankallande) bestämmer att den är utförd.
                     Av: den som har uppgiften, och den som kan ändra planeringen, bockar av den direkt — bra när en person planerar en klubbtävling ensam.</div></div>
                 <span id="stDoneSaved" class="pl-help small"></span></div>` : ''}
+            <div class="pl-card" style="max-width:720px"><h2>Gren</h2>
+                ${p.competition
+                    ? `<p class="mb-0">Bemanningens roller följer tävlingens gren: <strong>${esc((p.disciplines.find(d => d.id === p.competition.typeId) || {}).name || p.competition.typeId || '')}</strong>.</p>`
+                    : `<label class="form-label" for="stDisc">Vilken gren gäller planeringen?</label>
+                       <select id="stDisc" class="form-select" style="max-width:320px"><option value="">Inte bestämt än</option>
+                       ${p.disciplines.map(d => `<option value="${esc(d.id)}"${d.id === p.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+                       <div class="pl-help small mt-1">Styr vilka roller bemanningen föreslår (till exempel stationschef i fältskytte). När planeringen kopplas till en tävling gäller tävlingens gren.</div>
+                       <span id="stDiscSaved" class="pl-help small"></span>`}</div>
             ${p.competition ? `<div class="pl-card" style="max-width:720px"><h2>Tävlingen</h2>
                 <p class="mb-2">Planeringen hör till <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>. Den som har tillgång till tävlingen — tävlingsledning,
                     klubbens administratörer och skjutledare, kretsens administratörer — kommer in med nivån <i>Kan ändra</i> utan att bjudas in.</p>
                 ${S.me.canLinkCompetition ? '<button class="btn btn-outline-danger btn-sm" id="stUnlink">Koppla loss från tävlingen…</button>' : ''}</div>` : ''}`;
         datePicker($('stStart')); datePicker($('stEnd'));
+        $('stDisc')?.addEventListener('change', async e => {
+            const r = await post('SetDiscipline', { value: e.target.value });
+            if (!r.success) { failMsg(r); e.target.value = S.planning.disciplineKey || ''; return; }
+            S.planning.disciplineKey = e.target.value; $('stDiscSaved').textContent = 'Sparat.';
+        });
         $('stDoneMeet')?.addEventListener('change', async e => {
             const r = await post('SetDoneAtMeetingsOnly', { value: e.target.checked ? '1' : '0' });
             if (!r.success) { failMsg(r); e.target.checked = !e.target.checked; return; }

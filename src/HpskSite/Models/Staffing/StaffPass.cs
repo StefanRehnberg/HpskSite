@@ -9,7 +9,9 @@ namespace HpskSite.Models.Staffing
     public class StaffPass
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public DateTime PassDate { get; set; }
         public string? StartTime { get; set; }
         public string? EndTime { get; set; }
@@ -26,7 +28,9 @@ namespace HpskSite.Models.Staffing
     public class StaffCrewNeed
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public string ScopeKind { get; set; } = "";   // Station | All
         public string RoleKey { get; set; } = "";
         public int Count { get; set; }

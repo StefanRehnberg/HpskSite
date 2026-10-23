@@ -16,6 +16,7 @@
     //   4. Värvning        — how to GET more people: sourcing scopes, mail-out, the /bemanna sign-up page.
     //                        Reviewing who signed up happens under Personer, where the roles are.
     var competitionId = ViewData["CompetitionId"];
+    var rosterPlanningId = ViewData["PlanningId"] as int? ?? 0;
     var stfToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
 
@@ -1778,7 +1779,7 @@
 
     // ---- självanmälan: pass-konfiguration + anmälda + förhandsgranskning ----
     var slotModal = null, helpSlots = [];
-    (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = '/bemanna?c=' + compId + '&preview=1'; })();
+    (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = (@rosterPlanningId > 0 ? '/bemanna?p=@rosterPlanningId' : '/bemanna?c=' + compId) + '&preview=1'; })();
 
     // Only the organiser's slot configuration lives here now. The volunteers themselves are rendered from
     // the people layer (loadPeople → renderHelpTally), so there is no second list to fall out of sync.

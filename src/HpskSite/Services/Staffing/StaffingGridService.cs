@@ -93,9 +93,10 @@ namespace HpskSite.Services.Staffing
         /// StaffAssignment directly, so role names, scope labels, shift labels and the Fält station-chief
         /// mirror stay identical to every other surface — the grid is a second VIEW, never a second truth.
         /// </summary>
-        public GridResponse BuildGrid(int competitionId, string? discipline, int viewerId)
+        public GridResponse BuildGrid(StaffOwner owner, string? discipline, int viewerId)
         {
-            var roster = _staffing.BuildRoster(competitionId, discipline, canEdit: true);
+            var competitionId = owner.Comp;
+            var roster = _staffing.BuildRoster(owner, discipline, canEdit: true);
             var resp = new GridResponse { Discipline = discipline ?? "", CanEdit = true };
 
             var all = roster.Groups.SelectMany(g => g.Assignments).ToList();
@@ -107,11 +108,11 @@ namespace HpskSite.Services.Staffing
             // The competition date is deliberately NOT unioned in here: doing that produced a phantom
             // column the organiser never asked for and could not remove. Dates that actually CARRY crew
             // are unioned in, because work is proof that the day is part of the plan.
-            var days = _days.EnsureSeeded(competitionId, viewerId);
+            var days = _days.EnsureSeeded(owner, viewerId);
             var withWork = new HashSet<string>(
                 all.Where(a => !string.IsNullOrEmpty(a.DateKey)).Select(a => a.DateKey!), StringComparer.Ordinal);
 
-            var passes = SafeGetPasses(competitionId);
+            var passes = SafeGetPasses(owner);
             var sv = CultureInfo.GetCultureInfo("sv-SE");
             var byDate = new SortedDictionary<string, GridColumn>(StringComparer.Ordinal);
 
@@ -158,7 +159,7 @@ namespace HpskSite.Services.Staffing
                 });
 
             // ---- rows: one per role, split by scope where the role is scoped ---------------------
-            var catalog = _roles.ForCompetition(competitionId, discipline);
+            var catalog = _roles.For(owner, discipline);
             var clubs = ResolveClubNames(all);
 
             // Per-role need drives the number inside each cell. Coverage stopped being a screen of its
@@ -166,7 +167,7 @@ namespace HpskSite.Services.Staffing
             var needByRole = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                foreach (var n in _pass.GetCrewNeeds(competitionId, discipline))
+                foreach (var n in _pass.GetCrewNeeds(owner, discipline))
                     if (n.Count > 0) needByRole[n.RoleKey] = n.Count;
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: crew-need read failed for {Comp}", competitionId); }
@@ -196,7 +197,7 @@ namespace HpskSite.Services.Staffing
                         ScopeType = scopeType,
                         ScopeKey = scopeKey,
                         ScopeLabel = string.Equals(scopeLabel, "Hela tävlingen", StringComparison.OrdinalIgnoreCase) ? null : scopeLabel,
-                        IsCustom = _roles.IsCustom(competitionId, role.Key),
+                        IsCustom = _roles.IsCustom(owner, role.Key),
                         SupportsTargetRange = role.SupportsTargetRange,
                         SupportsFunctionTitle = role.SupportsFunctionTitle,
                         DefaultScopeType = role.DefaultScopeType,
@@ -314,7 +315,7 @@ namespace HpskSite.Services.Staffing
             {
                 // includePrep:false — the strip only needs who volunteered, and the prep breakdown is the
                 // expensive half of the people build.
-                var people = _people.Build(competitionId, discipline, canEdit: true, includePrep: false);
+                var people = _people.Build(owner, discipline, canEdit: true, includePrep: false);
                 resp.Volunteers = people.People
                     .Where(p => p.Volunteer != null && p.Assignments.Count == 0)
                     .Select(p => new GridVolunteer { Key = p.Key, Name = p.DisplayName, Summary = p.Volunteer?.SlotsSummary })
@@ -325,12 +326,12 @@ namespace HpskSite.Services.Staffing
             return resp;
         }
 
-        private List<StaffPassView> SafeGetPasses(int competitionId)
+        private List<StaffPassView> SafeGetPasses(StaffOwner owner)
         {
-            try { return _pass.GetPasses(competitionId); }
+            try { return _pass.GetPasses(owner); }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Staffing: pass lookup failed for competition {CompetitionId}", competitionId);
+                _logger.LogWarning(ex, "Staffing: pass lookup failed for {Owner}", owner.MemoKey);
                 return new List<StaffPassView>();
             }
         }

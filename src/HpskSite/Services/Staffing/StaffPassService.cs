@@ -22,15 +22,15 @@ namespace HpskSite.Services.Staffing
 
         // ---- passes ----
 
-        public List<StaffPassView> GetPasses(int competitionId)
+        public List<StaffPassView> GetPasses(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffPass>(
-                    "SELECT * FROM StaffPass WHERE CompetitionId = @0 ORDER BY PassDate, SortOrder, StartTime, Id", competitionId)
+                    "SELECT * FROM StaffPass WHERE " + StaffOwner.Where(0) + " ORDER BY PassDate, SortOrder, StartTime, Id", owner.P, owner.C)
                 .Select(ToPassView).ToList();
         }
 
-        public int SavePass(SavePassRequest req, int byMemberId)
+        public int SavePass(SavePassRequest req, StaffOwner owner, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -39,16 +39,17 @@ namespace HpskSite.Services.Staffing
             {
                 // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
                 var existing = db.SingleOrDefault<StaffPass>(
-                    "SELECT * FROM StaffPass WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                    "SELECT * FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
                 if (existing == null) return 0;
                 row = existing;
             }
             else
             {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffPass WHERE CompetitionId = @0", req.CompetitionId) ?? 0;
-                row = new StaffPass { CompetitionId = req.CompetitionId, SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffPass WHERE " + StaffOwner.Where(0), owner.P, owner.C) ?? 0;
+                row = new StaffPass { SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
             }
-            row.CompetitionId = req.CompetitionId;
+            row.PlanningId = owner.PlanningIdOrNull;
+            row.CompetitionId = owner.CompetitionIdOrNull;
             row.PassDate = ParseDate(req.Date) ?? row.PassDate;
             row.StartTime = CleanTime(req.StartTime);
             row.EndTime = CleanTime(req.EndTime);
@@ -57,54 +58,54 @@ namespace HpskSite.Services.Staffing
             return row.Id;
         }
 
-        public void DeletePass(int id, int competitionId)
+        public void DeletePass(int id, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("UPDATE StaffAssignment SET PassId = NULL WHERE PassId = @0 AND CompetitionId = @1", id, competitionId);
-            db.Execute("DELETE FROM StaffPass WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
+            db.Execute("UPDATE StaffAssignment SET PassId = NULL WHERE PassId = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+            db.Execute("DELETE FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
         }
 
         // ---- crew needs ----
 
-        public List<CrewNeedRow> GetCrewNeeds(int competitionId, string? discipline)
+        public List<CrewNeedRow> GetCrewNeeds(StaffOwner owner, string? discipline)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE CompetitionId = @0", competitionId)
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C)
                 .Select(n => new CrewNeedRow
                 {
                     ScopeKind = n.ScopeKind,
                     RoleKey = n.RoleKey,
-                    RoleName = _roles.NameFor(competitionId, discipline, n.RoleKey),
+                    RoleName = _roles.NameFor(owner, discipline, n.RoleKey),
                     Count = n.Count,
                 }).ToList();
         }
 
         /// <summary>Full replace of the comp's crew needs (only rows with Count &gt; 0 are kept).</summary>
-        public void SaveCrewNeeds(int competitionId, List<CrewNeedRow> needs)
+        public void SaveCrewNeeds(StaffOwner owner, List<CrewNeedRow> needs)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE CompetitionId = @0", competitionId);
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
             foreach (var n in (needs ?? new()).Where(n => n.Count > 0 && !string.IsNullOrWhiteSpace(n.RoleKey)))
             {
                 var kind = string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase) ? CrewNeedScope.Station : CrewNeedScope.All;
-                db.Insert(new StaffCrewNeed { CompetitionId = competitionId, ScopeKind = kind, RoleKey = n.RoleKey.Trim(), Count = n.Count });
+                db.Insert(new StaffCrewNeed { PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull, ScopeKind = kind, RoleKey = n.RoleKey.Trim(), Count = n.Count });
             }
         }
 
         // ---- coverage matrix ----
 
-        public CoverageResponse BuildCoverage(int competitionId, string? discipline, int stationCount)
+        public CoverageResponse BuildCoverage(StaffOwner owner, string? discipline, int stationCount)
         {
-            var passes = GetPasses(competitionId);
+            var passes = GetPasses(owner);
             List<StaffCrewNeed> needs;
             List<StaffAssignment> assignments;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
-                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE CompetitionId = @0 AND Count > 0", competitionId);
-                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE CompetitionId = @0 AND PassId IS NOT NULL", competitionId);
+                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND Count > 0", owner.P, owner.C);
+                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId IS NOT NULL", owner.P, owner.C);
             }
 
             var stationNeeds = needs.Where(n => string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -112,7 +113,7 @@ namespace HpskSite.Services.Staffing
             bool isFalt = FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase);
             int stations = isFalt ? Math.Max(0, stationCount) : 0;
 
-            string RoleName(string key) => _roles.NameFor(competitionId, discipline, key);
+            string RoleName(string key) => _roles.NameFor(owner, discipline, key);
             // filled counts keyed for fast lookup
             int FilledStation(int passId, string station, string role) => assignments.Count(a => a.PassId == passId
                 && string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase)

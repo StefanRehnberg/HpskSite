@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IDataProtectionProvider _dataProtection;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly StaffOwnerResolver _owners;
 
         public MinaUppdragController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -40,9 +41,11 @@ namespace HpskSite.Controllers
             StaffingSignupService signup,
             StaffHelpService help,
             IDataProtectionProvider dataProtection,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            StaffOwnerResolver owners)
         {
             _competitions = competitions;
+            _owners = owners;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -64,11 +67,12 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SignUp([FromBody] SelfSignUpRequest request)
         {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.RoleKey))
+            var owner = request == null ? null : OwnerOf(request.CompetitionId, request.PlanningId);
+            if (request == null || owner == null || string.IsNullOrWhiteSpace(request.RoleKey))
                 return Json(new { success = false, message = "Välj en roll." });
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
-            var (ok, msg) = _signup.SelfSignUp(memberId.Value, request.CompetitionId, request.RoleKey);
+            var (ok, msg) = _signup.SelfSignUp(memberId.Value, owner, request.RoleKey);
             return Json(new { success = ok, message = msg });
         }
 
@@ -124,9 +128,11 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>Per-competition sign-up landing page — the single action surface: accept/decline an
-        /// invitation, declare availability, and (if the comp is open for you) volunteer for a role.</summary>
+        /// invitation, declare availability, and (if the comp is open for you) volunteer for a role.
+        /// P2b: <c>?p=</c> = en planerings bemanning (även innan den kopplats till en tävling); <c>?c=</c> =
+        /// tävlingens, som leder till dess planering när den har en.</summary>
         [HttpGet("/bemanna")]
-        public async Task<IActionResult> Bemanna(int c)
+        public async Task<IActionResult> Bemanna(int c, int p)
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
@@ -134,45 +140,40 @@ namespace HpskSite.Controllers
             if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current?.Email == null)
-                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/bemanna?c={c}")}");
+            {
+                var back = p > 0 ? $"/bemanna?p={p}" : $"/bemanna?c={c}";
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(back)}");
+            }
 
-            var comp = c > 0 ? _competitions.Get(c) : null;
-            var isComp = comp != null;
-            ViewData["CompetitionId"] = c;
-            ViewData["CompetitionExists"] = isComp;
-            ViewData["CompetitionName"] = isComp ? (comp!.CompetitionName ?? "Tävling") : "";
+            var owner = p > 0 ? _owners.ForPlanning(p) : (c > 0 && _competitions.Get(c) != null ? _owners.ForCompetition(c) : null);
+            ViewData["CompetitionId"] = owner?.Comp ?? 0;
+            ViewData["PlanningId"] = owner?.PlanningId ?? 0;
+            ViewData["CompetitionExists"] = owner != null;
+            ViewData["CompetitionName"] = owner != null ? _owners.Name(owner) : "";
             // Preview mode: a manager verifying how the page looks for a fresh, not-yet-signed-up member.
             ViewData["Preview"] = Request.Query.ContainsKey("preview");
             return View("Bemanna", rootNode);
         }
 
         [HttpGet("for-competition")]
-        public async Task<IActionResult> GetForCompetition(int competitionId, bool preview = false)
+        public async Task<IActionResult> GetForCompetition(int competitionId, int planningId = 0, bool preview = false)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = OwnerOf(competitionId, planningId);
+            if (owner == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var mine = _staffing.GetMyAssignments(memberId.Value).FirstOrDefault(g => g.CompetitionId == competitionId);
-            var compName = mine?.CompName;
+            var mine = _staffing.GetMyAssignments(memberId.Value)
+                .FirstOrDefault(g => g.PlanningId == owner.PlanningId && g.CompetitionId == owner.Comp);
+            var compName = mine?.CompName ?? _owners.Name(owner);
             string? compDate = mine?.CompDate;
-            if (compName == null)
-            {
-                try
-                {
-                    {
-                        var comp = _competitions.Get(competitionId);
-                        compName = comp?.CompetitionName ?? "Tävling";
-                        var d = comp?.CompetitionDate;
-                        if (d is { } dd) compDate = dd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-                    }
-                }
-                catch { }
-            }
+            if (compDate == null && _owners.Span(owner).Start is { } dd && dd != default)
+                compDate = dd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
-            var slots = _help.GetSlots(competitionId);
+            var slots = _help.GetSlots(owner);
             // In preview a manager sees the page as a fresh member: no own assignments, no prior sign-up.
             var assignments = preview ? new List<Models.Staffing.MyAssignmentView>() : (mine?.Assignments ?? new List<Models.Staffing.MyAssignmentView>());
-            var mySignup = preview ? null : _help.GetMySignup(competitionId, memberId.Value);
+            var mySignup = preview ? null : _help.GetMySignup(owner, memberId.Value);
 
             return Json(new
             {
@@ -189,13 +190,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveHelpSignup([FromBody] SaveHelpSignupRequest request)
         {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var owner = request == null ? null : OwnerOf(request.CompetitionId, request.PlanningId);
+            if (request == null || owner == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
             var md = _memberService.GetByEmail((await _memberManager.GetCurrentMemberAsync())?.Email ?? "");
             var name = md == null ? $"Medlem {memberId}"
                 : ($"{md.GetValue<string>("firstName")} {md.GetValue<string>("lastName")}".Trim() is { Length: > 0 } n ? n : (md.Name ?? $"Medlem {memberId}"));
-            _help.SaveMySignup(request.CompetitionId, memberId.Value, name, request.Comment, request.Slots);
+            _help.SaveMySignup(owner, memberId.Value, name, request.Comment, request.Slots);
             return Json(new { success = true });
         }
 
@@ -214,18 +216,19 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AddAvailability([FromBody] SaveAvailabilityRequest request)
         {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var owner = request == null ? null : OwnerOf(request.CompetitionId, request.PlanningId);
+            if (request == null || owner == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
             // Guard: only declare availability for a competition you actually hold an assignment in.
-            if (!_staffing.MemberHasAssignment(request.CompetitionId, memberId.Value))
+            if (!_staffing.MemberHasAssignment(owner, memberId.Value))
                 return Json(new { success = false, message = "Du har inget uppdrag i den här tävlingen." });
 
             var from = ParseDateTime(request.From);
             var to = ParseDateTime(request.To);
             if (from != null && to != null && to < from)
                 return Json(new { success = false, message = "Sluttiden är före starttiden." });
-            var id = _staffing.AddAvailability(request.CompetitionId, memberId.Value, from, to, request.Note);
+            var id = _staffing.AddAvailability(owner, memberId.Value, from, to, request.Note);
             return Json(new { success = true, id });
         }
 
@@ -239,6 +242,11 @@ namespace HpskSite.Controllers
             var ok = _staffing.DeleteAvailability(request.Id, memberId.Value);
             return Json(new { success = ok, message = ok ? null : "Kunde inte ta bort." });
         }
+
+        /// <summary>P2b: planeringen när den anges, annars tävlingens bemanning (som leder till dess planering).</summary>
+        private Models.Staffing.StaffOwner? OwnerOf(int competitionId, int planningId) =>
+            planningId > 0 ? _owners.ForPlanning(planningId)
+            : competitionId > 0 ? _owners.ForCompetition(competitionId) : null;
 
         private async Task<int?> CurrentMemberIdAsync()
         {

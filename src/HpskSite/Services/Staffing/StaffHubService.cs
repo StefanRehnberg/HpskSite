@@ -38,6 +38,7 @@ namespace HpskSite.Services
                     s.Assignments.Add(new StaffHubItem
                     {
                         CompetitionId = g.CompetitionId,
+                        SignupPath = g.SignupPath,
                         CompName = g.CompName,
                         CompDate = g.CompDate,
                         IsPast = isPast,
@@ -52,6 +53,8 @@ namespace HpskSite.Services
                     .Where(o => { var d = ParseDay(o.CompDate); return d == null || d >= today; }).ToList();
                 s.OpenCount = open.Count;
                 s.OpenFirstCompetitionId = open.FirstOrDefault()?.CompetitionId;
+                if (open.FirstOrDefault() is { } first)
+                    s.OpenFirstPath = first.PlanningId > 0 ? $"/bemanna?p={first.PlanningId}" : $"/bemanna?c={first.CompetitionId}";
 
                 // Upcoming first (in GetMyAssignments' order), the recent-past tail newest-first.
                 s.Assignments = s.Assignments.Where(a => !a.IsPast)
@@ -76,6 +79,8 @@ namespace HpskSite.Services
         public List<StaffHubItem> Assignments { get; set; } = new();
         public int OpenCount { get; set; }
         public int? OpenFirstCompetitionId { get; set; }
+        /// <summary>P2b: anmälningssidan för den första öppningen (/bemanna?p= eller ?c=).</summary>
+        public string? OpenFirstPath { get; set; }
         public int NeedsResponseCount => Assignments.Count(a => a.NeedsResponse);
 
         /// <summary>
@@ -102,6 +107,8 @@ namespace HpskSite.Services
     public class StaffHubItem
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: /bemanna?p= för en planering, /bemanna?c= annars.</summary>
+        public string SignupPath { get; set; } = "";
         public string CompName { get; set; } = "";
         public string? CompDate { get; set; }
         public string RoleSummary { get; set; } = "";

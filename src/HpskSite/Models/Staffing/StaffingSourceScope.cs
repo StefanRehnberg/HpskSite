@@ -9,7 +9,9 @@ namespace HpskSite.Models.Staffing
     public class StaffingSourceScope
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public string ScopeType { get; set; } = "";   // Club | Region
         public string ScopeKey { get; set; } = "";     // clubId | regionCode
         public int CreatedByMemberId { get; set; }
@@ -42,6 +44,8 @@ namespace HpskSite.Models.Staffing
     public class OpenSignupView
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: planeringen öppningen hör till (0 = tävling utan planering).</summary>
+        public int PlanningId { get; set; }
         public string CompName { get; set; } = "";
         public string? CompDate { get; set; }
         public string Discipline { get; set; } = "";
@@ -57,6 +61,8 @@ namespace HpskSite.Models.Staffing
     public class SelfSignUpRequest
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: planeringens bemanning (0 = tävlingens).</summary>
+        public int PlanningId { get; set; }
         public string RoleKey { get; set; } = "";
     }
 }

@@ -20,6 +20,9 @@
     // Deliberately additive: the Personer/Roller/Behov/Värvning views are untouched and still work, so if
     // this misbehaves the plan can still be entered the old way.
     var competitionId = ViewData["CompetitionId"];
+    // P2b: på planeringens bemanningssida — utskriften gäller planeringen (även utan tävling).
+    var gridPlanningId = ViewData["PlanningId"] as int? ?? 0;
+    var printHref = gridPlanningId > 0 ? $"/tavlingsplanering/blad?p={gridPlanningId}&vy=bemanning" : $"/tavlingsplanering/blad?c={competitionId}&vy=bemanning";
     var grdToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
 
@@ -128,7 +131,7 @@
                 <li><button class="dropdown-item" type="button" onclick="grdAddDay()">
                     <i class="bi bi-calendar-plus me-2"></i>Lägg till dag…</button></li>
                 <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item" href="/tavlingsplanering/blad?c=@competitionId&amp;vy=bemanning" target="_blank" rel="noopener">
+                <li><a class="dropdown-item" href="@printHref" target="_blank" rel="noopener">
                     <i class="bi bi-printer me-2"></i>Skriv ut bemanningen</a></li>
                 <li><button class="dropdown-item" type="button" onclick="grdLoad()">
                     <i class="bi bi-arrow-clockwise me-2"></i>Läs om</button></li>

@@ -13,7 +13,9 @@ namespace HpskSite.Models.Staffing
     public class StaffAssignment
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
 
         public int? MemberId { get; set; }              // NULL = free-text external helper
         public string DisplayName { get; set; } = "";
@@ -60,7 +62,9 @@ namespace HpskSite.Models.Staffing
     public class StaffAvailability
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public int MemberId { get; set; }
         public DateTime? AvailableFrom { get; set; }
         public DateTime? AvailableTo { get; set; }
@@ -136,6 +140,10 @@ namespace HpskSite.Models.Staffing
     public class MyCompetitionGroup
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: planeringen raderna hör till (0 = tävling utan planering).</summary>
+        public int PlanningId { get; set; }
+        /// <summary>P2b: anmälningslänken — /bemanna?p= för en planering, /bemanna?c= annars.</summary>
+        public string SignupPath { get; set; } = "";
         public string CompName { get; set; } = "";
         public string? CompDate { get; set; }
         public List<MyAssignmentView> Assignments { get; set; } = new();
@@ -257,6 +265,8 @@ namespace HpskSite.Models.Staffing
     public class SaveAvailabilityRequest
     {
         public int CompetitionId { get; set; }
+        /// <summary>P2b: planeringens bemanning (0 = tävlingens).</summary>
+        public int PlanningId { get; set; }
         public string? From { get; set; }           // Flatpickr "Y-m-d H:i" or null
         public string? To { get; set; }
         public string? Note { get; set; }

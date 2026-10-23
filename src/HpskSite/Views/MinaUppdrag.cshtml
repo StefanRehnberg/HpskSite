@@ -164,7 +164,7 @@
         return '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">'
             + '<div><span class="text-muted small me-2"><i class="bi bi-calendar-week me-1"></i>Min tillgänglighet:</span>'
             + (chips || '<span class="text-muted small fst-italic">Ingen angiven (antas heldag)</span>') + '</div>'
-            + (readOnly ? '' : '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>')
+            + (readOnly ? '' : '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ',' + (g.planningId || 0) + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>')
             + '</div>';
     }
 
@@ -173,9 +173,11 @@
         if (d.success) await load(); else alert(d.message || 'Kunde inte spara svaret.');
     };
 
-    window.muOpenAvail = function (compId) {
+    var availPlanningId = 0;   // P2b: planeringens bemanning (0 = tävlingens)
+    window.muOpenAvail = function (compId, planningId) {
         if (!availModal) availModal = new bootstrap.Modal(q('muAvailModal'));
         q('muAvailComp').value = compId;
+        availPlanningId = planningId || 0;
         q('muAvailFrom').value = ''; q('muAvailTo').value = ''; q('muAvailNote').value = '';
         q('muAvailError').textContent = '';
         availModal.show();
@@ -186,6 +188,7 @@
         var btn = q('muAvailSaveBtn'); btn.disabled = true;
         var d = await post('/mina-uppdrag/availability', {
             competitionId: compId,
+            planningId: availPlanningId,
             from: q('muAvailFrom').value.trim(),
             to: q('muAvailTo').value.trim(),
             note: q('muAvailNote').value.trim()

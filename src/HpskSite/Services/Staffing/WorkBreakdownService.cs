@@ -25,9 +25,13 @@ namespace HpskSite.Services.Staffing
 
         /// <summary>Tävlingens planering i förberedelsernas form. Tom när tävlingen saknar planering.</summary>
         public WorkBreakdownResponse Build(int competitionId, bool canEdit)
+            => BuildForPlanning(_planning.ForCompetition(competitionId)?.Id ?? 0, canEdit);
+
+        /// <summary>P2b: planeringens förberedelser — även för en planering som inte är kopplad till en tävling.</summary>
+        public WorkBreakdownResponse BuildForPlanning(int planningId, bool canEdit)
         {
             var resp = new WorkBreakdownResponse { CanEdit = false };
-            var p = _planning.ForCompetition(competitionId);
+            var p = planningId > 0 ? _planning.Get(planningId) : null;
             if (p == null) return resp;
 
             var people = _planning.Participants(p.Id, includeRemoved: true).ToDictionary(x => x.Id);

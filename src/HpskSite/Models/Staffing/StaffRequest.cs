@@ -7,7 +7,9 @@ namespace HpskSite.Models.Staffing
     public class StaffRequestLog
     {
         public int Id { get; set; }
-        public int CompetitionId { get; set; }
+        public int? CompetitionId { get; set; }
+        /// <summary>Planeringen raden hör till (P2b). Null = en tävlings rad som ännu inte har en planering.</summary>
+        public int? PlanningId { get; set; }
         public string Mode { get; set; } = "";     // Relay | Direct
         public int RecipientCount { get; set; }
         public int SentCount { get; set; }

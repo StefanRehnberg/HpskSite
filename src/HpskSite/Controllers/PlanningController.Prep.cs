@@ -114,6 +114,7 @@ namespace HpskSite.Controllers
                     comp.ClubId > 0 ? comp.ClubId : (primary > 0 ? primary : null), null),
                 new PlanningService.WorkBreakdownImport(mid => MemberDisplayName(_memberService.GetById(mid))));
             if (r.Error != null) return No(r.Error);
+            AfterStaffingLinkChanged(r.PlanningId, competitionId, me);
             return Ok(new { success = true, id = r.PlanningId, created = r.Created, imported = r.ImportedTasks, url = $"/tavlingsplanering/{r.PlanningId}#vy=uppgifter" });
         }
 
@@ -128,7 +129,9 @@ namespace HpskSite.Controllers
             if (_competitions.GetSaved(competitionId) == null) return No("Tävlingen finns inte.");
             if (!await _auth.CanEditCompetitionAsync(competitionId)) return No("Du behöver kunna redigera tävlingen för att koppla planeringen till den.");
             var err = _planning.LinkToCompetition(id, competitionId, x.MemberId);
-            return err == null ? Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter" }) : No(err);
+            if (err != null) return No(err);
+            AfterStaffingLinkChanged(id, competitionId, x.MemberId);
+            return Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter" });
         }
 
         [HttpPost]
@@ -142,7 +145,43 @@ namespace HpskSite.Controllers
             if (link == null) return No("Planeringen är inte kopplad till någon tävling.");
             if (!await _auth.CanEditCompetitionAsync(link.TargetId)) return No("Du behöver kunna redigera tävlingen för att koppla loss planeringen.");
             var err = _planning.Unlink(id, x.MemberId);
-            return err == null ? Ok() : No(err);
+            if (err != null) return No(err);
+            AfterStaffingLinkChanged(id, link.TargetId, x.MemberId, unlinked: true);
+            return Ok();
+        }
+
+        /// <summary>
+        /// P2b: bemanningen har bytt tävling (StaffingPlanningLink körde i kopplingens transaktion). Speglingarna
+        /// till tävlingen räknas om — tävlingsansvariga och stationschefer — och en kopplad planering får
+        /// tävlingens dagar i bemanningen. Körs efter transaktionen: speglingarna skrivs genom tävlingslagringen.
+        /// Ett fel här får aldrig ångra kopplingen; nästa ändring i bemanningen räknar om speglingarna igen.
+        /// </summary>
+        private void AfterStaffingLinkChanged(int planningId, int competitionId, int byMemberId, bool unlinked = false)
+        {
+            try
+            {
+                _staffing.SyncCompetitionMirrors(competitionId);
+                if (!unlinked)
+                    _staffDays.AddCompetitionDays(new HpskSite.Models.Staffing.StaffOwner(planningId, competitionId), byMemberId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Planering {Id}: bemanningens speglingar efter kopplingen till tävling {Comp} misslyckades.", planningId, competitionId);
+            }
+        }
+
+        /// <summary>P2b: planeringens gren — styr bemanningens roller tills planeringen kopplas till en tävling.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetDiscipline(int id, string? value)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Grenen väljs av den som kan ändra planeringen.");
+            var key = string.IsNullOrWhiteSpace(value) ? null : HpskSite.Models.CompetitionTypes.GetById(value.Trim())?.Id;
+            if (!string.IsNullOrWhiteSpace(value) && key == null) return No("Grenen finns inte.");
+            _planning.SetDisciplineKey(id, key, x.MemberId);
+            return Ok();
         }
 
         [HttpPost]

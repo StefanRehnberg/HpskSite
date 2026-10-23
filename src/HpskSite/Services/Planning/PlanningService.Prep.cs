@@ -118,6 +118,8 @@ namespace HpskSite.Services.Planning
                     LinkedAt = now, LinkedBy = i.MemberId,
                 });
                 InsertSystem(db, p.Id, "planning-created", "Planeringen skapades.", me.Id, null, null, now);
+                // P2b: tävlingens bemanning hör nu till planeringen.
+                HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, p.Id, i.CompetitionId);
                 var imported = import == null ? 0 : ImportWorkBreakdown(db, p.Id, i.CompetitionId, me.Id, import, now);
                 if (imported > 0)
                     InsertSystem(db, p.Id, "prep-imported", $"Tävlingens förberedelser flyttades in: {imported} uppgifter.", null, null, null, now);
@@ -162,6 +164,8 @@ namespace HpskSite.Services.Planning
                     LinkedAt = now, LinkedBy = byMemberId,
                 });
                 InsertSystem(db, planningId, "competition-linked", "Planeringen kopplades till tävlingen.", null, null, (PlanningLinkRow.Competition, competitionId), now);
+                // P2b: planeringens bemanning får tävlingen, och tävlingens tidigare bemanning tas in.
+                HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, planningId, competitionId);
                 Bump(db, planningId);
                 return null;
             }
@@ -177,8 +181,11 @@ namespace HpskSite.Services.Planning
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
+            var oldComp = db.ExecuteScalar<int?>("SELECT TOP 1 TargetId FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId) ?? 0;
             var n = db.Execute("DELETE FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId);
             if (n == 0) return "Planeringen är inte kopplad till någon tävling.";
+            // P2b: bemanningen stannar i planeringen och tappar tävlingen (och därmed appbehörigheten till den).
+            HpskSite.Services.Staffing.StaffingPlanningLink.Detach(db, planningId, oldComp);
             db.Execute("UPDATE PlanningMember SET RemovedAt = @1, RemovedBy = @2 WHERE PlanningId = @0 AND ViaCompetition = 1 AND RemovedAt IS NULL",
                 planningId, now, byMemberId);
             InsertSystem(db, planningId, "competition-unlinked", "Planeringen kopplades loss från tävlingen.", null, null, null, now);
