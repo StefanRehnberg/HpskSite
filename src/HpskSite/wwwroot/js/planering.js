@@ -15,6 +15,9 @@
     const CFG = window.PL_CONFIG || {};
     const ID = CFG.id;
     const TOKEN = CFG.token || '';
+    // Bemanningens och dagsprogrammets sidor har samma ram och vänstermeny (Stefan 2026-10-23), men sitt
+    // eget innehåll: där ritas bara rälsen, och dess poster leder tillbaka till planeringens sida.
+    const RAIL_ONLY = CFG.railOnly || '';
     const $ = id => document.getElementById(id);
 
     // ---------------------------------------------------------------- anrop
@@ -215,9 +218,10 @@
         if (e.target.closest('.dropdown')) return; // radens Åtgärder öppnar sin meny, inte mötet
         e.preventDefault(); goMeeting(parseInt(a.dataset.plOpenMeeting, 10));
     });
-    window.addEventListener('hashchange', () => render(hashView() || 'oversikt'));
-    window.addEventListener('popstate', () => render(hashView() || 'oversikt'));
+    window.addEventListener('hashchange', () => { if (!RAIL_ONLY) render(hashView() || 'oversikt'); });
+    window.addEventListener('popstate', () => { if (!RAIL_ONLY) render(hashView() || 'oversikt'); });
     document.addEventListener('click', e => {
+        if (RAIL_ONLY) return; // vanliga länkar till planeringens sida
         const a = e.target.closest('[data-pl-go]'); if (!a) return;
         e.preventDefault();
         if (a.dataset.plFilter) tkFilter = a.dataset.plFilter;
@@ -239,15 +243,16 @@
         $('plRole').textContent = s.me.accessLabel || '';
         if (TOKEN) { const b = $('plBack'); b.textContent = '← Till startsidan'; b.href = '/'; }
         const counts = { meddelanden: unreadCount(), moten: votesOwed(), uppgifter: myOpenTasks(), deltagare: s.me.pendingRequests || 0 };
-        const here = view === 'mote' ? 'moten' : view;
+        const here = RAIL_ONLY || (view === 'mote' ? 'moten' : view);
+        const base = RAIL_ONLY ? '/tavlingsplanering/' + ID : '';
         $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
-            `<a href="#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
+            `<a href="${base}#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
             + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('')
             // P2b: bemanningen är ett eget rutnät på en egen sida (det behöver hela bredden).
             // Öppnas i samma flik (en egen sida som behöver hela bredden), därför ingen ny-flik-ikon.
-            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning</a>` : '')
+            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav${here === 'bemanning' ? ' on' : ''}">Bemanning</a>` : '')
             // Dagsprogrammet hör till tävlingen och finns här när planeringen är kopplad (Stefan 2026-10-23).
-            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav">Dagsprogram</a>` : '');
+            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav${here === 'dagsprogram' ? ' on' : ''}">Dagsprogram</a>` : '');
     }
 
     function myOpenTasks() {
@@ -2511,7 +2516,7 @@
     // ================================================================ Pollningen
     let polling = false;
     async function poll() {
-        if (polling || document.visibilityState !== 'visible' || !S) return;
+        if (RAIL_ONLY || polling || document.visibilityState !== 'visible' || !S) return;
         polling = true;
         try {
             const v = await get('Version');
@@ -2537,6 +2542,14 @@
     // ================================================================ Start
     (async () => {
         try {
+            if (RAIL_ONLY) {
+                const [s, m, tk] = await Promise.all([get('Get'), get('Meetings'), get('Tasks')]);
+                if (!s.success) return;
+                S = s; MEET = m.success ? m : { meetings: [] }; TASKS = tk.success ? tk : null;
+                if (S.me.canReadMessages) { const mm = await get('Messages'); MSG = mm.success ? mm : null; }
+                renderRail();
+                return;
+            }
             if (!await loadAll()) return;
             render(hashView() || CFG.startView || 'oversikt');
             if (CFG.startView && !hashView()) history.replaceState(null, '', '#vy=' + view);

@@ -16,57 +16,72 @@
     childVd["Discipline"] = discipline;
 }
 
-@* Planeringens dagsprogram (Stefan 2026-10-23: en planering, inte två). Dagsprogrammet hör till
-   tävlingen, så sidan har innehåll först när planeringen är kopplad. Se TavlingsplaneringController.PlanningAgenda. *@
+@* Planeringens dagsprogram (Stefan 2026-10-23: en planering, inte två), i planeringens ram med vänstermenyn.
+   Dagsprogrammet hör till tävlingen, så sidan har innehåll först när planeringen är kopplad.
+   Se TavlingsplaneringController.PlanningAgenda. *@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+@await Html.PartialAsync("_PlaneringShellStyles")
+<style>.pl-page .pl-main { min-width: 0; }</style>
 
-<div class="container mt-4 mb-5">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-        <div>
-            <h1><i class="bi bi-calendar2-event me-2"></i>Dagsprogram</h1>
-            @if (exists && canAccess)
+<div class="pl-page container-fluid py-4" id="plApp">
+    @Html.AntiForgeryToken()
+    <div class="pl-shell">
+        <nav class="pl-rail" aria-label="Planeringens delar">
+            <a href="/tavlingsplanering" class="pl-back" id="plBack">← Mina planeringar</a>
+            <div class="pl-org" id="plOrg">@planningName</div>
+            <div class="pl-role" id="plRole"></div>
+            <div id="plRail" style="display:contents"></div>
+        </nav>
+        <div class="pl-main">
+            <div class="pl-head">
+                <div>
+                    <h1>Dagsprogram</h1>
+                    @if (exists && canAccess)
+                    {
+                        <div class="pl-sub">@planningName@if (!string.IsNullOrEmpty(compName))
+                        {<span> · tävlingen <strong>@compName</strong></span>}</div>
+                    }
+                </div>
+            </div>
+
+            @if (!exists || !canAccess)
             {
-                <p class="text-muted mb-0">Planering: <strong>@planningName</strong>@if (!string.IsNullOrEmpty(compName))
-                {<span> · tävlingen <strong>@compName</strong></span>}</p>
+                <div class="alert alert-warning">Planeringen finns inte, eller så har du inte behörighet att ändra i den.</div>
+            }
+            else if (competitionId <= 0)
+            {
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-1"></i>Dagsprogrammet hör till tävlingen — vad som händer när under tävlingsdagarna,
+                    som skyttarna och funktionärerna ser i Mitt schema. Koppla planeringen till tävlingen när den är upplagd, så kan du
+                    göra dagsprogrammet här.
+                </div>
+            }
+            else
+            {
+                @* ⚠️ FÖRE delvyn: anropen får planeringens id, så den som får ändra i planeringen når tävlingens
+                   dagsprogram genom kopplingen (StaffingController.CanManageAgendaAsync). *@
+                <script>
+                    (function () {
+                        var PID = @planningId;
+                        var orig = window.fetch;
+                        window.fetch = function (u, o) {
+                            if (typeof u === 'string' && u.indexOf('/umbraco/surface/Staffing/') >= 0 && u.indexOf('planningId=') < 0)
+                                u += (u.indexOf('?') >= 0 ? '&' : '?') + 'planningId=' + PID;
+                            return orig.call(this, u, o);
+                        };
+                    })();
+                </script>
+
+                @await Html.PartialAsync("_CompetitionAgenda", childVd)
             }
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-            <a href="/tavlingsplanering/@planningId" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i> Tillbaka till planeringen
-            </a>
-        </div>
     </div>
-
-    @if (!exists || !canAccess)
-    {
-        <div class="alert alert-warning">Planeringen finns inte, eller så har du inte behörighet att ändra i den.</div>
-    }
-    else if (competitionId <= 0)
-    {
-        <div class="alert alert-info">
-            <i class="bi bi-info-circle me-1"></i>Dagsprogrammet hör till tävlingen — vad som händer när under tävlingsdagarna,
-            som skyttarna och funktionärerna ser i Mitt schema. Koppla planeringen till tävlingen när den är upplagd, så kan du
-            göra dagsprogrammet här.
-        </div>
-    }
-    else
-    {
-        @* ⚠️ FÖRE delvyn: anropen får planeringens id, så den som får ändra i planeringen når tävlingens
-           dagsprogram genom kopplingen (StaffingController.CanManageAgendaAsync). *@
-        <script>
-            (function () {
-                var PID = @planningId;
-                var orig = window.fetch;
-                window.fetch = function (u, o) {
-                    if (typeof u === 'string' && u.indexOf('/umbraco/surface/Staffing/') >= 0 && u.indexOf('planningId=') < 0)
-                        u += (u.indexOf('?') >= 0 ? '&' : '?') + 'planningId=' + PID;
-                    return orig.call(this, u, o);
-                };
-            })();
-        </script>
-
-        @await Html.PartialAsync("_CompetitionAgenda", childVd)
-    }
 </div>
+
+@if (exists && canAccess)
+{
+    <script>window.PL_CONFIG = { id: @planningId, token: '', railOnly: 'dagsprogram' };</script>
+    <script src="~/js/planering.js" asp-append-version="true"></script>
+}

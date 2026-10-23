@@ -10,7 +10,7 @@
     var compName = ViewData["CompetitionName"]?.ToString() ?? "";
     var discipline = ViewData["Discipline"]?.ToString() ?? "Precision";
 
-    // Samma delvyer som tävlingens planeringssida. CompetitionId = den kopplade tävlingen, eller 0;
+    // Samma delvyer som tävlingens bemanning. CompetitionId = den kopplade tävlingen, eller 0;
     // PlanningId gör att utskrift och förhandsvisning av anmälningssidan gäller planeringen.
     var childVd = new ViewDataDictionary(ViewData);
     childVd["CompetitionId"] = competitionId;
@@ -18,58 +18,77 @@
     childVd["Discipline"] = discipline;
 }
 
-@* P2b (2026-10-23): planeringens bemanning. Se TavlingsplaneringController.PlanningStaffing. *@
+@* P2b (2026-10-23): planeringens bemanning, i planeringens ram med vänstermenyn (Stefan 2026-10-23: sidan ska
+   inte lämna planeringen). Rutnätet rullar i sidled inne i sin ruta när dagarna inte får plats.
+   Se TavlingsplaneringController.PlanningStaffing. *@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+@await Html.PartialAsync("_PlaneringShellStyles")
+<style>
+    /* Rutnätet får hela huvudkolumnens bredd och rullar i sidled där inne, aldrig hela sidan. */
+    .pl-page .pl-main { min-width: 0; }
+</style>
 
-<div class="container-fluid mt-4 mb-5">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-        <div>
-            <h1><i class="bi bi-person-badge me-2"></i>Bemanning</h1>
-            @if (exists && canAccess)
+<div class="pl-page container-fluid py-4" id="plApp">
+    @Html.AntiForgeryToken()
+    <div class="pl-shell">
+        <nav class="pl-rail" aria-label="Planeringens delar">
+            <a href="/tavlingsplanering" class="pl-back" id="plBack">← Mina planeringar</a>
+            <div class="pl-org" id="plOrg">@planningName</div>
+            <div class="pl-role" id="plRole"></div>
+            <div id="plRail" style="display:contents"></div>
+        </nav>
+        <div class="pl-main">
+            <div class="pl-head">
+                <div>
+                    <h1>Bemanning</h1>
+                    @if (exists && canAccess)
+                    {
+                        <div class="pl-sub">@planningName@if (!string.IsNullOrEmpty(compName))
+                        {<span> · tävlingen <strong>@compName</strong></span>}</div>
+                    }
+                </div>
+            </div>
+
+            @if (!exists || !canAccess)
             {
-                <p class="text-muted mb-0">Planering: <strong>@planningName</strong>@if (!string.IsNullOrEmpty(compName))
-                {<span> · tävlingen <strong>@compName</strong></span>}</p>
+                @* Finns inte och får inte se skiljs inte åt — samma som planeringen själv. *@
+                <div class="alert alert-warning">Planeringen finns inte, eller så har du inte behörighet att ändra bemanningen i den.
+                    Bemanningen ändras av den som <em>Kan ändra</em> i planeringen.</div>
+            }
+            else
+            {
+                @if (competitionId <= 0)
+                {
+                    <div class="alert alert-info small py-2 mb-3">
+                        <i class="bi bi-info-circle me-1"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen
+                        och följer med när den kopplas. Ingen får behörighet att hantera en tävling förrän dess.
+                    </div>
+                }
+
+                @* ⚠️ FÖRE delvyerna: varje anrop till bemanningens API får planeringens id. Rutnätet och
+                   personpanelen vet inte om planeringen — de skickar tävlingens id (0 när den saknas). *@
+                <script>
+                    (function () {
+                        var PID = @planningId;
+                        var orig = window.fetch;
+                        window.fetch = function (u, o) {
+                            if (typeof u === 'string' && u.indexOf('/umbraco/surface/Staffing/') >= 0 && u.indexOf('planningId=') < 0)
+                                u += (u.indexOf('?') >= 0 ? '&' : '?') + 'planningId=' + PID;
+                            return orig.call(this, u, o);
+                        };
+                    })();
+                </script>
+
+                @await Html.PartialAsync("_StaffingRoster", childVd)
             }
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-            <a href="/tavlingsplanering/@planningId" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i> Tillbaka till planeringen
-            </a>
-        </div>
     </div>
-
-    @if (!exists || !canAccess)
-    {
-        @* Finns inte och får inte se skiljs inte åt — samma som planeringen själv. *@
-        <div class="alert alert-warning">Planeringen finns inte, eller så har du inte behörighet att ändra bemanningen i den.
-            Bemanningen ändras av den som <em>Kan ändra</em> i planeringen.</div>
-    }
-    else
-    {
-        @if (competitionId <= 0)
-        {
-            <div class="alert alert-info small py-2 mb-3">
-                <i class="bi bi-info-circle me-1"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen
-                och följer med när den kopplas. Ingen får behörighet att hantera en tävling förrän dess.
-            </div>
-        }
-
-        @* ⚠️ FÖRE delvyerna: varje anrop till bemanningens API får planeringens id. Rutnätet och
-           personpanelen vet inte om planeringen — de skickar tävlingens id (0 när den saknas). *@
-        <script>
-            (function () {
-                var PID = @planningId;
-                var orig = window.fetch;
-                window.fetch = function (u, o) {
-                    if (typeof u === 'string' && u.indexOf('/umbraco/surface/Staffing/') >= 0 && u.indexOf('planningId=') < 0)
-                        u += (u.indexOf('?') >= 0 ? '&' : '?') + 'planningId=' + PID;
-                    return orig.call(this, u, o);
-                };
-            })();
-        </script>
-
-        @await Html.PartialAsync("_StaffingRoster", childVd)
-    }
 </div>
+
+@if (exists && canAccess)
+{
+    <script>window.PL_CONFIG = { id: @planningId, token: '', railOnly: 'bemanning' };</script>
+    <script src="~/js/planering.js" asp-append-version="true"></script>
+}
