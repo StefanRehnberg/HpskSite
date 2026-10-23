@@ -86,6 +86,20 @@ namespace HpskSite.Controllers
             var competition = c > 0 ? _competitions.Get(c) : null;
             var isCompetition = competition != null;
 
+            // En planering, inte två (Stefan 2026-10-23: "de ska bli en"). Har tävlingen en planering leder
+            // tävlingens Planering-knapp dit; tävlingens funktionärer kommer in via kopplingen. ?vy= tar med
+            // den del man ville till (gamla länkar och bokmärken).
+            if (isCompetition && await HasCompetitionAccessAsync(c) && _planningService.ForCompetition(c) is { } linked)
+            {
+                var vy = (Request.Query["vy"].ToString() ?? "").ToLowerInvariant();
+                return Redirect(vy switch
+                {
+                    "bemanning" => $"/tavlingsplanering/{linked.Id}/bemanning",
+                    "dagsprogram" => $"/tavlingsplanering/{linked.Id}/dagsprogram",
+                    _ => $"/tavlingsplanering/{linked.Id}",
+                });
+            }
+
             ViewData["CompetitionId"] = c;
             ViewData["CompetitionExists"] = isCompetition;
             ViewData["CompetitionName"] = isCompetition ? (competition!.CompetitionName ?? "Tävling") : "";
@@ -143,6 +157,34 @@ namespace HpskSite.Controllers
             ViewData["CompetitionName"] = owner is { HasCompetition: true } ? _owners.Name(owner) : "";
             ViewData["Discipline"] = owner == null ? "Precision" : (_owners.Discipline(owner) is { Length: > 0 } d ? d : "Precision");
             return View("PlaneringBemanning", rootNode);
+        }
+
+        /// <summary>
+        /// Planeringens dagsprogram (Stefan 2026-10-23): dagsprogrammet hör till tävlingen, så det finns i
+        /// planeringen när den är kopplad. Samma delvy som förut; anropen bär planningId och prövas mot
+        /// kopplingen i StaffingController.
+        /// </summary>
+        [HttpGet("{id:int}/dagsprogram")]
+        public async Task<IActionResult> PlanningAgenda(int id)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/{id}/dagsprogram")}");
+
+            var owner = _owners.ForPlanning(id);
+            var canAccess = owner != null && await CanStaffPlanningAsync(owner, currentMember.Email);
+            ViewData["PlanningId"] = id;
+            ViewData["Exists"] = owner != null;
+            ViewData["CanAccess"] = canAccess;
+            ViewData["CompetitionId"] = owner?.Comp ?? 0;
+            ViewData["PlanningName"] = owner == null ? "" : (_owners.Planning(id)?.Name ?? "");
+            ViewData["CompetitionName"] = owner is { HasCompetition: true } ? _owners.Name(owner) : "";
+            ViewData["Discipline"] = owner == null ? "Precision" : (_owners.Discipline(owner) is { Length: > 0 } d ? d : "Precision");
+            return View("PlaneringDagsprogram", rootNode);
         }
 
         /// <summary>Samma prövning som StaffingController.RowOwnerAsync — för sidan, inte för data.</summary>

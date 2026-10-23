@@ -12533,6 +12533,17 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     *Jag kan hjälpa till den här dagen* (av), och "Något annat" under sin dag. Kryssrutorna bär index, aldrig text.
   - Migreringar `alter-staffcrewneed-per-day.sql` och `add-signuprolechoice-to-planning.sql` (P2c/P2d), FÖRE deploy.
   - Svit: `hpsk-verify/tavlingsplanering-hitta-verify.mjs` 47/47 (A/B: dagvalens prövning släppt → 1 röd).
+- **EN planering, inte två (Stefan 2026-10-23: "de ska bli en")**. `/tavlingsplanering?c=` (tävlingens knapp
+  Planering) **omdirigerar** till tävlingens planering när den finns och man har tillgång till tävlingen
+  (`?vy=bemanning|dagsprogram` → planeringens delar); annars visar sidan bara startkortet
+  (`_CompetitionPlanningCard`: Starta tävlingens planering / koppla en egen). Flikarna Bemanning och Dagsprogram
+  på tävlingens sida finns inte längre. **Dagsprogrammet** är en del i planeringen när den är kopplad:
+  `/tavlingsplanering/{id}/dagsprogram` (`PlaneringDagsprogram.cshtml`, samma `_CompetitionAgenda`), rälsens
+  "Dagsprogram" bara med `planning.agendaUrl` (= kopplad). Agendaanropen bär `planningId` och prövas av
+  `StaffingController.CanManageAgendaAsync`: tävlingens behörighet, eller Kan ändra i planeringen som är kopplad
+  till JUST den tävlingen. Planeringens rad om tävlingen länkar till tävlingshanteringen (inte tillbaka till
+  `?c=`, som nu är planeringen själv). Svit: `hpsk-verify/tavlingsplanering-en-verify.mjs` 26/26 (A/B utan
+  omdirigeringen → 3 röda); p2-sviten uppdaterad (86/86).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

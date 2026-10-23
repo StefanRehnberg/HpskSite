@@ -348,6 +348,8 @@ namespace HpskSite.Controllers
                     disciplineKey = x.Planning.DisciplineKey ?? "",
                     disciplines = HpskSite.Models.CompetitionTypes.All.Select(d => new { id = d.Id, name = d.Name }),
                     staffingUrl = $"/tavlingsplanering/{x.Planning.Id}/bemanning",
+                    // Dagsprogrammet hör till tävlingen — en del i planeringen när den är kopplad.
+                    agendaUrl = _planning.LinkFor(x.Planning.Id) != null ? $"/tavlingsplanering/{x.Planning.Id}/dagsprogram" : "",
                 },
                 me = new
                 {

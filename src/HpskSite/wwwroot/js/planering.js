@@ -244,7 +244,9 @@
             `<a href="#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
             + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('')
             // P2b: bemanningen är ett eget rutnät på en egen sida (det behöver hela bredden).
-            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '');
+            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '')
+            // Dagsprogrammet hör till tävlingen och finns här när planeringen är kopplad (Stefan 2026-10-23).
+            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav">Dagsprogram <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '');
     }
 
     function myOpenTasks() {
@@ -291,7 +293,7 @@
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
         if (p.competition) parts.push(`Tävlingen <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>`
-            + (TOKEN ? '' : ` · <a href="${esc(p.competition.planningUrl)}">Bemanning och dagsprogram</a>`));
+            + (TOKEN || !p.competition.manageUrl ? '' : ` · <a href="${esc(p.competition.manageUrl)}">Tävlingshanteringen</a>`));
         return parts.join(' · ');
     }
 
@@ -1017,7 +1019,7 @@
         const html = [];
         if (c) html.push(`<div class="pl-card pl-comp d-flex flex-wrap gap-2 align-items-center">
             <i class="bi bi-trophy text-secondary"></i><div class="flex-grow-1">Tävlingen <a href="${esc(c.url)}">${esc(c.name)}</a>${c.date ? ' · ' + esc(fmtDay(c.date)) : ''}</div>
-            ${TOKEN ? '' : `<a class="btn btn-sm btn-outline-secondary" href="${esc(c.planningUrl)}">Bemanning och dagsprogram</a>`}</div>`);
+            ${TOKEN || !c.manageUrl ? '' : `<a class="btn btn-sm btn-outline-secondary" href="${esc(c.manageUrl)}">Tävlingshanteringen</a>`}</div>`);
         html.push(`<p class="pl-help">Vem gör vad, och till när. ${TASKS.doneAtMeetingsOnly
             ? 'Den som har uppgiften ändrar själv hur långt hen kommit; om den är utförd bestämmer ni på ett möte, eller den sammankallande.'
             : 'Den som har uppgiften ändrar själv hur långt hen kommit och bockar av den när den är klar.'}</p>`);

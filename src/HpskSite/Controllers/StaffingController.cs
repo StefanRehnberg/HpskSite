@@ -984,7 +984,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAgenda(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            if (!await CanManageAgendaAsync(competitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var rows = _agenda.GetForCompetition(competitionId);
@@ -1013,7 +1013,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> SaveAgendaItem([FromBody] SaveAgendaItemRequest request)
         {
             if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            if (!await CanManageAgendaAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var (ok, msg, id) = _agenda.Save(request, (await ResolveViewerAsync())?.Id ?? 0);
@@ -1025,7 +1025,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> DeleteAgendaItem([FromBody] DeleteAgendaItemRequest request)
         {
             if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            if (!await CanManageAgendaAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var ok = _agenda.Delete(request.Id, request.CompetitionId);
@@ -1037,7 +1037,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> SeedAgenda([FromBody] SeedAgendaRequest request)
         {
             if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+            if (!await CanManageAgendaAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var (ok, msg, created) = _agenda.SeedDefaults(
@@ -1679,6 +1679,20 @@ namespace HpskSite.Controllers
             if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return owner;
             if (owner.HasPlanning && await CanEditPlanningStaffAsync(owner.PlanningId)) return owner;
             return null;
+        }
+
+        /// <summary>
+        /// Dagsprogrammet hör till tävlingen: tävlingens behörighet, eller (med ?planningId=) den som får ändra
+        /// bemanningen i planeringen som är kopplad till JUST den tävlingen.
+        /// </summary>
+        private async Task<bool> CanManageAgendaAsync(int competitionId)
+        {
+            if (competitionId <= 0) return false;
+            if (await HasCompetitionAccessAsync(competitionId)) return true;
+            var pid = PlanningIdFromRequest();
+            if (pid <= 0) return false;
+            var owner = _owners.ForPlanning(pid);
+            return owner is { HasCompetition: true } && owner.Comp == competitionId && await CanEditPlanningStaffAsync(pid);
         }
 
         private async Task<bool> CanEditPlanningStaffAsync(int planningId)
