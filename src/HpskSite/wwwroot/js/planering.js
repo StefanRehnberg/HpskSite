@@ -130,9 +130,10 @@
             modal.show();
         });
     }
-    function formModal({ title, html, okLabel, okClass, onOpen, onOk, wide }) {
+    function formModal({ title, html, okLabel, okClass, onOpen, onOk, wide, cancelLabel }) {
         const m = $('plFormModal');
         $('plFormTitle').textContent = title;
+        $('plFormCancel').textContent = cancelLabel || 'Avbryt';
         // Ny kropp varje gång: lyssnare från förra dialogen får inte leva kvar (bytet medlem ⇄ e-post).
         const oldBody = $('plFormBody'), fresh = oldBody.cloneNode(false);
         oldBody.replaceWith(fresh);
@@ -812,13 +813,16 @@
         const reps = [...new Set(S.participants.map(p => p.represents || ''))].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'sv'));
         if (pplFilter.startsWith('r:') && !reps.includes(pplFilter.slice(2))) pplFilter = '';
         const rowFor = p => {
-            const menu = S.me.canManage && !p.isMe ? rowMenu([
-                { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
-                { label: 'Byt ut mot någon annan…', fn: () => openReplace(p) },
-                p.isGuest && { label: 'Skicka inbjudan igen', fn: () => resend(p) },
-                { divider: true },
-                { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
-            ]) : (p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) }]) : '');
+            const mgr = S.me.canManage;
+            const menu = p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) }]) : rowMenu([
+                S.me.isParticipant && { label: 'Kontaktuppgifter…', fn: () => openContact(p) },
+                mgr && S.me.isParticipant && { divider: true },
+                mgr && { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
+                mgr && { label: 'Byt ut mot någon annan…', fn: () => openReplace(p) },
+                mgr && p.isGuest && { label: 'Skicka inbjudan igen', fn: () => resend(p) },
+                mgr && { divider: true },
+                mgr && { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
+            ]);
             const guest = p.isGuest ? ` <span class="badge rounded-pill text-bg-light border" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
             const seen = p.lastSeen ? esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
             const rep = p.represents ? esc(p.represents) : '<span class="pl-help">—</span>';
@@ -875,6 +879,24 @@
         $('plPplFilter').addEventListener('change', e => { pplFilter = e.target.value; renderRows(); });
         loadRequests();
     }
+    // Kontaktuppgifter hämtas när man frågar — de ligger aldrig i planeringens data.
+    async function openContact(p) {
+        const r = await get('ContactInfo', { participantId: p.id });
+        if (!r.success) { showMsg(esc(r.message || 'Det gick inte att hämta kontaktuppgifterna.'), 'danger'); return; }
+        const tel = (r.phone || '').replace(/[^\d+]/g, '');
+        const line = (icon, label, value, href) => `<div class="d-flex gap-3 align-items-start py-2 border-top">
+                <i class="bi ${icon} fs-5 text-body-secondary"></i><div class="flex-grow-1"><div class="small text-body-secondary">${label}</div>
+                ${value ? `<a href="${esc(href)}" class="fs-5 text-break">${esc(value)}</a>` : '<span class="pl-help">Saknas</span>'}</div></div>`;
+        formModal({
+            title: 'Kontaktuppgifter', wide: false, cancelLabel: 'Stäng',
+            html: `<div class="mb-2"><b class="fs-5">${esc(r.name)}</b>${r.isGuest ? ' <span class="badge rounded-pill text-bg-light border">Gäst</span>' : ''}
+                    ${r.club ? `<div class="pl-help">${esc(r.club)}</div>` : ''}${p.represents ? `<div class="pl-help">Företräder ${esc(p.represents)}</div>` : ''}</div>
+                ${line('bi-envelope', 'E-post', r.email, 'mailto:' + r.email)}
+                ${r.isGuest ? '' : line('bi-telephone', 'Telefon', r.phone, 'tel:' + tel)}
+                <p class="pl-help small mt-2 mb-0">Uppgifterna är till för planeringen — dela dem inte vidare.</p>`,
+        });
+    }
+
     // ================================================================ Bjud in — guiden (Stefan 2026-10-23)
     // Steg 1: en medlem eller någon utan konto. Medlem: sök → Företräder med HENS klubbar och kretsar + nivå,
     // och hen är med direkt. E-post: namn och adress — hen får en inbjudan att SVARA, och den sammankallande
@@ -1162,8 +1184,9 @@
                 <a class="btn btn-outline-secondary" href="${esc(S.me.icsUrl)}"><i class="bi bi-calendar-plus me-1"></i>Lägg till kalendern</a>
                 <div class="mt-2"><label class="form-label small" for="plIcsUrl">Eller kopiera adressen och prenumerera på den i din kalender:</label>
                 <input id="plIcsUrl" class="form-control form-control-sm" readonly value="${esc(S.me.icsUrl)}"></div></div>` : ''}
-            ${!S.me.isGuest ? `<div class="pl-card"><h2>Notiser i telefonen</h2><p class="mb-0 pl-help">Notiser i telefonen kräver att du slagit på notiser för pistol.nu på din enhet (Min sida → Notiser).
-                ${S.me.pushConfigured ? '' : 'Notiser i telefonen är inte påslagna på den här sajten ännu — du får mejl.'}</p></div>` : ''}`;
+            ${!S.me.isGuest ? `<div class="pl-card"><h2>Notiser i telefonen</h2><p class="pl-help">Notiser i telefonen kräver att du slagit på notiser för pistol.nu på den telefon eller dator du vill få dem på.
+                ${S.me.pushConfigured ? '' : 'Notiser i telefonen är inte påslagna på den här sajten ännu — du får mejl.'}</p>
+                <a class="btn btn-outline-primary" href="/user-profile-page#notiser"><i class="bi bi-bell me-1"></i>Slå på notiser på Min sida</a></div>` : ''}`;
         $('plBody').querySelectorAll('input[name="plNotify"]').forEach(r => r.addEventListener('change', async () => {
             const res = await post('SetMyNotify', { mode: r.value });
             if (!res.success) { failMsg(res); return; }

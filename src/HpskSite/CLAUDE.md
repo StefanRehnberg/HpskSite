@@ -12351,6 +12351,10 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   krets prövas (`RepresentsError`). Kretsnamn = `regionName`. Deltagarlistan = adminlistans form: en rad per
   person, nivån som färgad badge (`levelBadge`, samma färger i Nivåerna), sök + filter på nivå, gäster och
   Företräder (så syns om alla kretsar har någon med). På telefon ligger badgen under namnet.
+- **Kontaktuppgifter** (radens Åtgärder, Stefan 2026-10-23): `ContactInfo` — bara den som är med (alla nivåer,
+  även gäst via mejllänk), bara för en aktiv deltagare i SAMMA planering; medlem = kontots e-post + `phoneNumber`,
+  gäst = inbjudningsadressen. Hämtas på begäran — `Get` och `SearchMembers` lämnar aldrig ut adresser.
+- *Mina notiser* länkar till `/user-profile-page#notiser` (Profil-fliken, nedrullad till Notiser-kortet).
 - **Byt ut** (`ReplaceParticipant` → `PlanningService.ReplaceParticipant`, en transaktion): den nya (medlem
   eller gäst) får samma nivå och Företräder, den gamla lämnar, meddelandena står kvar, flödet får EN rad
   (`member-replaced`, "X ersatte Y (företräder Z)"). Bara Sammankallande, aldrig sig själv.

@@ -477,6 +477,31 @@ namespace HpskSite.Controllers
             return Ok(new { success = true, primaryClubId = PrimaryClub(memberId), clubs = ClubChoices(memberId), regions = RegionChoices(memberId) });
         }
 
+        /// <summary>
+        /// En deltagares kontaktuppgifter (radens Åtgärder → Kontaktuppgifter, Stefan 2026-10-23). Bara för den som
+        /// själv är med i planeringen, och bara för en deltagare som är med — hämtas när man frågar, ligger aldrig i
+        /// <c>Get</c>. Medlem: e-post och telefon ur kontot; gäst: adressen hen bjöds in med.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ContactInfo(int id, int participantId, string? t)
+        {
+            var x = await ResolveAsync(id, t);
+            if (x == null || !x.Caller.IsParticipant) return Missing();
+            var row = _planning.Participant(id, participantId);
+            if (row == null || !row.IsActive) return No("Personen är inte med i planeringen.");
+            if (row.MemberId is not int mid)
+                return Ok(new { success = true, name = row.DisplayName, email = row.GuestEmail ?? "", phone = "", club = "", isGuest = true });
+            var m = _memberService.GetById(mid);
+            if (m == null) return No("Personen finns inte längre.");
+            var phone = m.HasProperty("phoneNumber") ? (m.GetValue<string>("phoneNumber") ?? "") : "";
+            var clubId = PrimaryClub(mid);
+            return Ok(new
+            {
+                success = true, name = row.DisplayName, email = m.Email ?? "", phone = phone.Trim(),
+                club = clubId > 0 ? (_clubs.GetClubNameById(clubId) ?? "") : "", isGuest = false,
+            });
+        }
+
         private int PrimaryClub(int memberId)
         {
             try { var m = _memberService.GetById(memberId); return m == null ? 0 : _memberClubs.GetPrimaryClubId(m); }

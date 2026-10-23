@@ -1040,14 +1040,15 @@
                             @* Notiser — global web-push on/off. The opt-out lives here (deliberately
                                out-of-the-way; the comp page only prompts to turn them ON). Träningsmatch-
                                prefs are suppressed — they belong on the Träningsmatch page. *@
-                            <div class="card mt-3">
+                            <div class="card mt-3" id="notiser-card">
                                 <div class="card-header">
                                     <h5 class="mb-0"><i class="bi bi-bell me-2"></i>Notiser</h5>
                                 </div>
                                 <div class="card-body">
                                     <p class="small text-body-secondary mb-2">
                                         Notiser för tävlingar du är anmäld till (schemaändringar, särskjutning och
-                                        publicerade resultat) skickas till den här enheten. Du kan stänga av dem här.
+                                        publicerade resultat) och för tävlingsplaneringar du är med i skickas till den
+                                        här enheten. Du kan stänga av dem här.
                                     </p>
                                     @{ ViewData["WebPushShowMatchPrefs"] = false; }
                                     @await Html.PartialAsync("_WebPushSetup")
@@ -1843,6 +1844,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (window.location.hash === '#logga') {
             switchToTab('results-tab');
             if (typeof openTrainingScoreModal === 'function') { setTimeout(openTrainingScoreModal, 150); }
+            return;
+        }
+        // #notiser = Profil-fliken, nedrullad till Notiser (länkas från planeringens "Mina notiser")
+        if (window.location.hash === '#notiser') {
+            switchToTab('profile-tab');
+            setTimeout(() => document.getElementById('notiser-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
             return;
         }
         const tabByHash = {
