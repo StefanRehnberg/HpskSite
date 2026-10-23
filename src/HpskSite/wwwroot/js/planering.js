@@ -173,6 +173,12 @@
     let version = 0;
     let view = '';
     let replyTo = CFG.reply || 0;
+    let pplQuery = '', pplFilter = '';   // Deltagarlistans sök och filter (lever över omritningar)
+
+    // Nivåns färg — samma överallt där en nivå visas.
+    const LEVEL_RANK = { Owner: 4, Editor: 3, Participant: 2, Follower: 1 };
+    const LEVEL_BADGE = { Owner: 'text-bg-primary', Editor: 'text-bg-info', Participant: 'text-bg-success', Follower: 'text-bg-secondary' };
+    const levelBadge = p => `<span class="badge rounded-pill ${LEVEL_BADGE[p.access] || 'text-bg-secondary'}">${esc(p.accessLabel || p.access)}</span>`;
     let pendingMentions = new Map(); // participantId -> name
 
     const VIEWS = [
@@ -802,11 +808,9 @@
             S.me.isParticipant && !TOKEN && { label: 'Lämna planeringen', icon: 'bi-box-arrow-right', danger: true, fn: leave },
         ]);
         const conveners = S.participants.filter(p => p.access === 'Owner');
-        // Grupperat efter vad man företräder — då syns det om alla kretsar har någon med.
-        const groups = new Map();
-        S.participants.forEach(p => { const k = p.represents || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
-        const keys = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'sv'));
-        const grouped = keys.length > 1;
+        // En rad per deltagare, som de andra listorna. Filtret "Företräder" visar om alla kretsar har någon med.
+        const reps = [...new Set(S.participants.map(p => p.represents || ''))].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'sv'));
+        if (pplFilter.startsWith('r:') && !reps.includes(pplFilter.slice(2))) pplFilter = '';
         const rowFor = p => {
             const menu = S.me.canManage && !p.isMe ? rowMenu([
                 { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
@@ -815,15 +819,49 @@
                 { divider: true },
                 { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
             ]) : (p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) }]) : '');
-            const guest = p.isGuest ? `<span class="pl-state blue" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
-            const seen = p.lastSeen ? 'Senast inne ' + esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
-            return `<div class="pl-person"><div><div><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''} ${guest}</div>
-                <div class="small">${esc(p.accessLabel)}${!grouped && p.represents ? ' · företräder <b>' + esc(p.represents) + '</b>' : ''}</div>
-                <div class="pl-help small">${seen}${p.guestEmail ? ' · ' + esc(p.guestEmail) : ''}</div></div>
-                <div>${menu}</div></div>`;
+            const guest = p.isGuest ? ` <span class="badge rounded-pill text-bg-light border" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
+            const seen = p.lastSeen ? esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
+            const rep = p.represents ? esc(p.represents) : '<span class="pl-help">—</span>';
+            return `<tr><td><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''}${guest}
+                    ${p.guestEmail ? `<div class="pl-help small">${esc(p.guestEmail)}</div>` : ''}
+                    <div class="d-sm-none mt-1">${levelBadge(p)}</div>
+                    <div class="d-md-none small mt-1">${p.represents ? 'Företräder ' + esc(p.represents) + ' · ' : ''}${p.lastSeen ? 'Senast inne ' : ''}${seen}</div></td>
+                <td class="d-none d-md-table-cell">${rep}</td>
+                <td class="d-none d-sm-table-cell">${levelBadge(p)}</td>
+                <td class="d-none d-md-table-cell small">${seen}</td>
+                <td class="text-end">${menu}</td></tr>`;
         };
-        const list = keys.map(k => (grouped ? `<div class="fw-semibold mt-3 mb-1">${k ? esc(k) : 'Företräder inget särskilt'} <span class="pl-help small fw-normal">(${groups.get(k).length})</span></div>` : '')
-            + groups.get(k).map(rowFor).join('')).join('');
+        const shown = () => {
+            const q = pplQuery.trim().toLowerCase();
+            return S.participants.filter(p =>
+                (!q || [p.name, p.represents, p.guestEmail].some(v => (v || '').toLowerCase().includes(q)))
+                && (!pplFilter || (pplFilter === 'guest' ? p.isGuest : pplFilter.startsWith('r:') ? (p.represents || '') === pplFilter.slice(2) : p.access === pplFilter)))
+                .sort((a, b) => (LEVEL_RANK[b.access] || 0) - (LEVEL_RANK[a.access] || 0) || a.name.localeCompare(b.name, 'sv'));
+        };
+        const renderRows = () => {
+            const rows = shown();
+            $('plPplRows').innerHTML = rows.length ? rows.map(rowFor).join('')
+                : '<tr><td colspan="5" class="pl-help">Ingen deltagare matchar.</td></tr>';
+            $('plPplCount').textContent = rows.length === S.participants.length
+                ? `${rows.length} deltagare`
+                : `${rows.length} av ${S.participants.length}`;
+        };
+        const count = f => S.participants.filter(f).length;
+        const levelOpts = (S.accessLevels || []).slice().reverse()
+            .map(l => [l.value, l.label, count(p => p.access === l.value)]).filter(o => o[2] > 0);
+        const opt = (v, label) => `<option value="${esc(v)}"${v === pplFilter ? ' selected' : ''}>${esc(label)}</option>`;
+        const filter = `<select class="form-select form-select-sm" id="plPplFilter" aria-label="Visa" style="max-width:18rem">
+                ${opt('', `Alla (${S.participants.length})`)}
+                <optgroup label="Nivå">${levelOpts.map(o => opt(o[0], `${o[1]} (${o[2]})`)).join('')}</optgroup>
+                ${count(p => p.isGuest) ? opt('guest', `Gäster utan konto (${count(p => p.isGuest)})`) : ''}
+                ${reps.length > 1 ? `<optgroup label="Företräder">${reps.map(r => opt('r:' + r, `${r || 'Inget särskilt'} (${count(p => (p.represents || '') === r)})`)).join('')}</optgroup>` : ''}
+            </select>`;
+        const list = `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input type="search" class="form-control form-control-sm" id="plPplQ" placeholder="Sök på namn eller vad man företräder" style="max-width:20rem" value="${esc(pplQuery)}">
+                ${filter}<span class="ms-auto pl-help small" id="plPplCount"></span></div>
+            <div class="table-responsive"><table class="table align-middle mb-0 pl-ppl"><thead><tr>
+                <th>Namn</th><th class="d-none d-md-table-cell">Företräder</th><th class="d-none d-sm-table-cell">Nivå</th><th class="d-none d-md-table-cell">Senast inne</th><th></th>
+            </tr></thead><tbody id="plPplRows"></tbody></table></div>`;
         const warn = S.me.canManage && conveners.length === 1 && S.participants.length > 1
             ? `<div class="alert alert-warning d-flex gap-2 align-items-start"><i class="bi bi-exclamation-triangle mt-1"></i>
                 <div>Det finns bara en <b>sammankallande</b>${conveners[0].isMe ? ' — du' : ''}. Utse gärna en till, så att gruppen inte står utan om hen blir sjuk eller slutar:
@@ -831,7 +869,10 @@
         $('plBody').innerHTML = `<div id="plReqs"></div>${warn}<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress.
             Den som inte är skytt (t.ex. någon från kommunen eller markägaren) bjuds in med e-post och deltar via länkarna i mejlen.</p>${list}</div>
             <div class="pl-card"><h2>Nivåerna</h2><ul class="mb-0">${(S.accessLevels || []).slice().reverse().map(l =>
-                `<li class="mb-1"><b>${esc(l.label)}</b> — ${esc(l.help)}</li>`).join('')}</ul></div>`;
+                `<li class="mb-1">${levelBadge({ access: l.value, accessLabel: l.label })} — ${esc(l.help)}</li>`).join('')}</ul></div>`;
+        renderRows();
+        $('plPplQ').addEventListener('input', e => { pplQuery = e.target.value; renderRows(); });
+        $('plPplFilter').addEventListener('change', e => { pplFilter = e.target.value; renderRows(); });
         loadRequests();
     }
     // ================================================================ Bjud in — guiden (Stefan 2026-10-23)

@@ -12348,7 +12348,9 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   inte tas bort eller sänkas, och sidan varnar när det bara finns en. **En mejllänk ändrar aldrig planeringen.**
 - **Företräder** (klubb, krets eller egen text) anges vid inbjudan (`AddMember`: inget angivet = hens egen klubb,
   `representsNothing=1` = inget; `InviteByEmail`: krets eller text) och ändras med `UpdateParticipant`; klubb och
-  krets prövas (`RepresentsError`). Kretsnamn = `regionName`. Deltagarlistan grupperas efter vad man företräder.
+  krets prövas (`RepresentsError`). Kretsnamn = `regionName`. Deltagarlistan = adminlistans form: en rad per
+  person, nivån som färgad badge (`levelBadge`, samma färger i Nivåerna), sök + filter på nivå, gäster och
+  Företräder (så syns om alla kretsar har någon med). På telefon ligger badgen under namnet.
 - **Byt ut** (`ReplaceParticipant` → `PlanningService.ReplaceParticipant`, en transaktion): den nya (medlem
   eller gäst) får samma nivå och Företräder, den gamla lämnar, meddelandena står kvar, flödet får EN rad
   (`member-replaced`, "X ersatte Y (företräder Z)"). Bara Sammankallande, aldrig sig själv.
