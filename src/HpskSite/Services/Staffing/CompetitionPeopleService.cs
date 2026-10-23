@@ -25,6 +25,8 @@ namespace HpskSite.Services.Staffing
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
         private readonly ILogger<CompetitionPeopleService> _logger;
+        private readonly MemberClubService _memberClubs;
+        private readonly Umbraco.Cms.Core.Web.IUmbracoContextAccessor _umbraco;
 
         public CompetitionPeopleService(
             StaffingService staffing,
@@ -33,8 +35,12 @@ namespace HpskSite.Services.Staffing
             StaffPassService pass,
             IMemberService memberService,
             ClubService clubService,
-            ILogger<CompetitionPeopleService> logger)
+            ILogger<CompetitionPeopleService> logger,
+            MemberClubService memberClubs,
+            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbraco)
         {
+            _memberClubs = memberClubs;
+            _umbraco = umbraco;
             _staffing = staffing;
             _help = help;
             _work = work;
@@ -119,6 +125,9 @@ namespace HpskSite.Services.Staffing
                     row.RoleLabels.Add(flat.Label);
                     if (a.HasAdminAccess) row.HasAdminAccess = true;
                     if (a.IsResponsible) row.IsResponsible = true;
+                    // P3 steg E: ett uttryckligt "ställer upp för" på någon av personens rader gäller personen.
+                    if (row.RepresentsId == null && a.RepresentsClubId > 0) { row.RepresentsType = "club"; row.RepresentsId = a.RepresentsClubId; }
+                    else if (row.RepresentsId == null && a.RepresentsRegionId > 0) { row.RepresentsType = "region"; row.RepresentsId = a.RepresentsRegionId; }
                     if (a.AvailabilityLabels.Count > 0 && row.AvailabilityLabels.Count == 0)
                         row.AvailabilityLabels = a.AvailabilityLabels.ToList();
                     if (a.ReadOnly && row.SourceLabel == null) row.SourceLabel = a.SourceLabel;
@@ -222,6 +231,7 @@ namespace HpskSite.Services.Staffing
                 if (row.MemberId is > 0) EnrichFromMember(row);
                 (row.State, row.StatePriority) = RollUpState(row);
             }
+            FinishRepresents(byKey.Values.ToList(), resp);
 
             resp.People = byKey.Values
                 .OrderBy(p => p.StatePriority)
@@ -362,6 +372,72 @@ namespace HpskSite.Services.Staffing
 
         private static TimeSpan? ParseTime(string? s) =>
             TimeSpan.TryParse((s ?? "").Trim(), CultureInfo.InvariantCulture, out var t) ? t : null;
+
+        /// <summary>
+        /// P3 steg E (beslut 9.6): vilken förening var och en ställer upp för, valen och summeringen per förening.
+        /// Förvalet är medlemmens huvudklubb; en person utan konto har inget förval men kan väljas till de föreningar
+        /// som andra i bemanningen ställer upp för. Ett fel här får aldrig fälla personlistan.
+        /// </summary>
+        private void FinishRepresents(List<CompetitionPersonRow> rows, CompetitionPeopleResponse resp)
+        {
+            try
+            {
+                var names = new Dictionary<string, string>();
+                string Name(string type, int id)
+                {
+                    var k = type + ":" + id;
+                    if (names.TryGetValue(k, out var n)) return n;
+                    n = type == "club" ? HpskSite.Helpers.ClubNameHelper.Shorten(_clubService.GetClubNameById(id) ?? "") : RegionName(id);
+                    names[k] = n;
+                    return n;
+                }
+                foreach (var row in rows)
+                {
+                    if (row.MemberId is > 0)
+                    {
+                        var m = _memberService.GetById(row.MemberId.Value);
+                        if (m != null)
+                        {
+                            var clubs = _memberClubs.GetAllClubIds(m);
+                            foreach (var c in clubs) row.RepresentChoices.Add(new RepresentChoice { Type = "club", Id = c, Name = Name("club", c) });
+                            foreach (var reg in clubs.Select(RegionIdOfClub).Where(r => r > 0).Distinct())
+                                row.RepresentChoices.Add(new RepresentChoice { Type = "region", Id = reg, Name = Name("region", reg) });
+                            if (row.RepresentsId == null && _memberClubs.GetPrimaryClubId(m) is var pc && pc > 0)
+                            { row.RepresentsType = "club"; row.RepresentsId = pc; row.RepresentsIsDefault = true; }
+                        }
+                    }
+                    if (row.RepresentsId > 0) row.RepresentsName = Name(row.RepresentsType!, row.RepresentsId.Value);
+                    row.RepresentChoices = row.RepresentChoices.Where(c => c.Name.Length > 0).GroupBy(c => c.Type + c.Id).Select(g => g.First()).ToList();
+                }
+                // Den utan konto: de föreningar som någon annan i bemanningen ställer upp för eller kan välja.
+                var pool = rows.SelectMany(r => r.RepresentChoices).GroupBy(c => c.Type + c.Id).Select(g => g.First())
+                    .OrderBy(c => c.Type).ThenBy(c => c.Name, StringComparer.Create(CultureInfo.GetCultureInfo("sv-SE"), true)).ToList();
+                foreach (var row in rows.Where(r => !(r.MemberId > 0))) row.RepresentChoices = pool.ToList();
+
+                resp.ByOrganisation = rows.Where(r => r.Assignments.Count > 0)
+                    .GroupBy(r => string.IsNullOrEmpty(r.RepresentsName) ? "" : r.RepresentsName!)
+                    .Select(g => new RepresentSummary { Name = g.Key.Length == 0 ? "Ingen förening" : g.Key, People = g.Count(), Assignments = g.Sum(r => r.Assignments.Count) })
+                    .OrderBy(s => s.Name == "Ingen förening" ? 1 : 0).ThenByDescending(s => s.People).ThenBy(s => s.Name)
+                    .ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "People: ställer upp för kunde inte läsas."); }
+        }
+
+        /// <summary>Klubbens krets ur trädet (krets &gt; klubbar &gt; klubb) — samma källa som adressen.</summary>
+        private int RegionIdOfClub(int clubId)
+        {
+            if (!_umbraco.TryGetUmbracoContext(out var ctx)) return 0;
+            var r = ctx.Content?.GetById(clubId)?.Parent?.Parent;
+            return r != null && r.ContentType.Alias == "regionalPage" ? r.Id : 0;
+        }
+
+        private string RegionName(int regionId)
+        {
+            if (!_umbraco.TryGetUmbracoContext(out var ctx)) return "";
+            var r = ctx.Content?.GetById(regionId);
+            if (r == null || r.ContentType.Alias != "regionalPage") return "";
+            return r.Value<string>("regionName") is { Length: > 0 } n ? n : r.Name ?? "";
+        }
 
         private void EnrichFromMember(CompetitionPersonRow row)
         {

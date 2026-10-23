@@ -12601,6 +12601,15 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   för hela planeringen. Rälsposten **Delar** (synlig när det finns delar eller man kan ändra). Kopian tar med delarna
   (ansvarig bara som fritt namn) och uppgifternas del. ⚠️ Bemanning och koppling per del är INTE byggt (P4) — de gäller
   hela planeringen. Svit p3 115/115 (A/B: delens planeringsprövning + borttagningens lösgöring → 2 röda).
+- **P3 steg E, "Ställer upp för" (beslut 9.6, 2026-10-23):** `StaffAssignment.RepresentsClubId`/`RepresentsRegionId`
+  (migrering `add-represents-to-staff-assignment.sql`, körordning P3d). Gäller PERSONEN: `StaffingService.SetPersonRepresents`
+  skriver alla hens rader (samma skäl som behörigheten); båda null = förvalet, medlemmens huvudklubb (härlett, lagras
+  inte). `CompetitionPeopleService.FinishRepresents` ger `RepresentsType/Id/Name/IsDefault`, valen (medlemmens klubbar +
+  deras kretsar ur trädet; för en utan konto de föreningar andra i bemanningen har) och `ByOrganisation` (personer och
+  uppdrag per förening, i `GetPeople`). `Staffing/SetPersonRepresents` godtar bara ett av personens val. Ytor:
+  personpanelen (rullgardinen "Ställer upp för") och Mer → **Per förening…** (stänger en öppen sidopanel först).
+  Underlag när ett överskott delas — själva fördelningen (fråga 15) är inte byggd. Svit p3 129/129 (A/B: valprövningen
+  + skrivningen på alla rader → 3 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

@@ -171,6 +171,18 @@
         Who is MISSING is shown as prominently as who is included — a list that silently omits nine
         people reads as complete, and the nine are exactly the ones who then don't turn up.
     *@
+    @* ---- Per förening (P3 steg E): vilka föreningar som ställer upp, med personer och uppdrag ---- *@
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="bemRepPanel" style="width:min(560px,96vw)">
+      <div class="offcanvas-header border-bottom">
+        <div>
+          <h5 class="offcanvas-title mb-0"><i class="bi bi-flag me-2"></i>Per förening</h5>
+          <div class="small text-muted">Vilken förening var och en ställer upp för — underlaget när ett överskott delas.</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Stäng"></button>
+      </div>
+      <div class="offcanvas-body" id="stfRepBody"></div>
+    </div>
+
     <div class="offcanvas offcanvas-end" tabindex="-1" id="bemEpostPanel" style="width:min(720px,96vw)">
       <div class="offcanvas-header border-bottom">
         <div>
@@ -2226,6 +2238,26 @@
                   + 'på pistol.nu — behörigheten ges till en inloggning. Koppla personen till en medlem först.</div>')
             + '</div>';
 
+        // P3 steg E (beslut 9.6): vilken förening personen ställer upp för — underlaget när ett överskott
+        // delas mellan föreningarna. Gäller personen (alla hens uppdrag). Förvalet är huvudklubben.
+        var reps = p.representChoices || [];
+        var repVal = p.representsId ? (p.representsType + ':' + p.representsId) : '';
+        h += '<div class="border rounded p-2 mb-3"><label class="form-label small fw-semibold mb-1" for="stfPRepresents">'
+            + '<i class="bi bi-flag me-1"></i>Ställer upp för</label>'
+            + (reps.length
+                ? '<select class="form-select form-select-sm" id="stfPRepresents" style="max-width:420px" data-key="' + keyArg(p.key || '') + '">'
+                  + '<option value=""' + (p.representsIsDefault || !p.representsId ? ' selected' : '') + '>'
+                  + (p.memberId ? 'Huvudklubben' + (p.representsIsDefault && p.representsName ? ' (' + esc(p.representsName) + ')' : '') : 'Ingen förening') + '</option>'
+                  + reps.map(function (c) {
+                        var v = c.type + ':' + c.id;
+                        return '<option value="' + v + '"' + (!p.representsIsDefault && v === repVal ? ' selected' : '') + '>'
+                            + esc(c.name) + (c.type === 'region' ? ' (krets)' : '') + '</option>';
+                    }).join('') + '</select>'
+                  + '<div class="form-text mb-0">Gäller alla ' + asg.length + ' uppdrag. Underlag när ett överskott delas mellan föreningarna som bemannade tävlingen.</div>'
+                  + '<div class="small text-danger d-none" id="stfPRepresentsErr"></div>'
+                : '<div class="small text-muted">' + (p.representsName ? esc(p.representsName) : 'Ingen förening känd. Koppla personen till en medlem, så kan du välja.') + '</div>')
+            + '</div>';
+
         // It opened the BLANK add dialog — no person at all — from inside a card headed with someone's
         // name. So "ge ett uppdrag" on Hans's card let you hand it to anybody, which is what the button
         // looked least like doing. Prefilled and locked to the person whose card this is.
@@ -2264,6 +2296,14 @@
     var SV_STATUS = { Planned: 'Planerad', Invited: 'Inbjuden', Accepted: 'Accepterad', Declined: 'Avböjt', Confirmed: 'Bekräftad' };
 
     function wirePersonCard(p) {
+        var repEl = document.getElementById('stfPRepresents');
+        if (repEl) repEl.addEventListener('change', async function () {
+            var parts = repEl.value ? repEl.value.split(':') : ['', '0'];
+            var err = document.getElementById('stfPRepresentsErr');
+            var r = await stfPersonPost({ competitionId: compId, personKey: p.key, type: parts[0], id: parseInt(parts[1], 10) || 0 }, 'SetPersonRepresents');
+            if (!r.success) { err.textContent = r.message || 'Kunde inte spara föreningen.'; err.classList.remove('d-none'); return; }
+            await loadPeople(); renderPerson();
+        });
         var nameEl = document.getElementById('stfPName');
         if (nameEl) {
             nameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } });
@@ -2394,6 +2434,21 @@
     // Reads the same `people` projection every other person surface reads, so the list can't disagree
     // with what the organiser sees on screen. Addresses are deduped on the address itself — one human
     // with four shifts is one recipient, and two people sharing a household address is one mail.
+
+    window.stfOpenRep = async function () {
+        // Aldrig två sidopaneler på varandra: den andra hamnar förskjuten och klipps.
+        var open = document.querySelector('.offcanvas.show');
+        if (open && open.id !== 'bemRepPanel' && window.bootstrap) { var inst = bootstrap.Offcanvas.getInstance(open); if (inst) inst.hide(); }
+        var pnl = panel('bemRepPanel'); if (pnl) pnl.show();
+        await loadPeople();
+        var rows = (peopleMeta && peopleMeta.byOrganisation) || [];
+        var body = document.getElementById('stfRepBody');
+        body.innerHTML = rows.length
+            ? '<table class="table table-sm align-middle"><thead><tr><th>Förening</th><th class="text-end">Personer</th><th class="text-end">Uppdrag</th></tr></thead><tbody>'
+              + rows.map(function (r) { return '<tr><td>' + esc(r.name) + '</td><td class="text-end">' + r.people + '</td><td class="text-end">' + r.assignments + '</td></tr>'; }).join('')
+              + '</tbody></table><div class="form-text">Förvalet är personens huvudklubb. Ändra för en person under hens namn i personlistan.</div>'
+            : '<div class="text-muted small">Ingen har något uppdrag ännu.</div>';
+    };
 
     window.stfOpenEpost = async function () {
         var p = panel('bemEpostPanel'); if (p) p.show();

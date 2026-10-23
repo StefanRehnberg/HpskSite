@@ -69,6 +69,17 @@ namespace HpskSite.Models.Staffing
         /// <summary>Only mirror rows (e.g. a Fält station chief owned by the Stationer tab) — not editable here.</summary>
         public bool ReadOnly { get; set; }
         public string? SourceLabel { get; set; }
+
+        // --- P3 steg E: vilken förening personen ställer upp för (beslut 9.6) ---
+        /// <summary>"club" eller "region", eller null när ingen förening är känd.</summary>
+        public string? RepresentsType { get; set; }
+        public int? RepresentsId { get; set; }
+        public string? RepresentsName { get; set; }
+        /// <summary>Sant när det är förvalet (huvudklubben), inte ett uttryckligt val.</summary>
+        public bool RepresentsIsDefault { get; set; }
+        /// <summary>Föreningarna att välja bland: medlemmens klubbar och deras kretsar (för en utan konto: de föreningar
+        /// som andra i bemanningen ställer upp för).</summary>
+        public List<RepresentChoice> RepresentChoices { get; set; } = new();
     }
 
     /// <summary>One roster row, flattened for the people view (the editable identity is <see cref="Id"/>).</summary>
@@ -135,8 +146,25 @@ namespace HpskSite.Models.Staffing
         public bool IsOverdue { get; set; }
     }
 
+    public class RepresentChoice
+    {
+        public string Type { get; set; } = "club";
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    /// <summary>En rad i "Per förening": underlaget när ett överskott delas mellan föreningarna.</summary>
+    public class RepresentSummary
+    {
+        public string Name { get; set; } = "";
+        public int People { get; set; }
+        public int Assignments { get; set; }
+    }
+
     public class CompetitionPeopleResponse
     {
+        /// <summary>P3 steg E: personer och uppdrag per förening de ställer upp för; "Ingen förening" sist.</summary>
+        public List<RepresentSummary> ByOrganisation { get; set; } = new();
         public bool Success { get; set; } = true;
         public string? Message { get; set; }
         public bool CanEdit { get; set; }

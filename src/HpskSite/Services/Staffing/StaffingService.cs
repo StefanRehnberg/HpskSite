@@ -721,6 +721,30 @@ namespace HpskSite.Services.Staffing
         /// Put back the name the organiser originally typed, and unlink. The escape hatch for a link that
         /// went to the wrong person — which is easy to do and, without this, impossible to notice or reverse.
         /// </summary>
+        /// <summary>
+        /// P3 steg E (beslut 9.6): vilken förening personen ställer upp för — klubb ELLER krets, eller förvalet
+        /// (båda null = medlemmens huvudklubb). Gäller PERSONEN, så alla hens rader skrivs (samma skäl som
+        /// behörigheten). Anroparen prövar att föreningen är ett av personens val.
+        /// </summary>
+        public PersonActionResult SetPersonRepresents(StaffOwner owner, string personKey, int? clubId, int? regionId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var rows = RowsForPerson(db, owner, personKey);
+            if (rows.Count == 0)
+                return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+            var club = clubId > 0 ? clubId : null;
+            var region = club.HasValue ? null : (regionId > 0 ? regionId : null);
+            var now = DateTime.UtcNow;
+            foreach (var r in rows)
+            {
+                if (r.RepresentsClubId == club && r.RepresentsRegionId == region) continue;
+                r.RepresentsClubId = club; r.RepresentsRegionId = region; r.ModifiedDate = now;
+                db.Update(r);
+            }
+            return new PersonActionResult { Success = true, Affected = rows.Count };
+        }
+
         public PersonActionResult UndoPersonIdentity(StaffOwner owner, string personKey)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
@@ -1186,6 +1210,8 @@ namespace HpskSite.Services.Staffing
                 Status = a.Status,
                 Note = a.Note,
                 CheckedIn = a.CheckedInAt.HasValue,
+                RepresentsClubId = a.RepresentsClubId,
+                RepresentsRegionId = a.RepresentsRegionId,
             };
         }
 

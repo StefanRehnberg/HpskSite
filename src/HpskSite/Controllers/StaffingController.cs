@@ -283,6 +283,8 @@ namespace HpskSite.Controllers
                 externalCount = p.ExternalCount,
                 leadership = p.Leadership,
                 people = p.People,
+                // P3 steg E: personer och uppdrag per förening de ställer upp för.
+                byOrganisation = p.ByOrganisation,
             });
         }
 
@@ -1372,6 +1374,42 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: SetPersonAdminAccess failed for {Comp}", request.CompetitionId);
                 return Json(new { success = false, message = "Kunde inte ändra behörigheten." });
+            }
+        }
+
+        /// <summary>
+        /// P3 steg E (beslut 9.6): vilken förening personen ställer upp för. Bara ett av personens egna val
+        /// (medlemmens klubbar och deras kretsar; för en utan konto de föreningar andra i bemanningen har) —
+        /// annars kunde vem som helst skrivas in som en annan förenings funktionär i fördelningen av ett överskott.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetPersonRepresents([FromBody] PersonRepresentsRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                int? club = null, region = null;
+                if (request.Id > 0)
+                {
+                    var person = _people.Build(owner, _owners.Discipline(owner), canEdit: true, includePrep: false).People
+                        .FirstOrDefault(p => p.Key == request.PersonKey);
+                    if (person == null) return Json(new { success = false, message = "Hittade inte personen." });
+                    if (!person.RepresentChoices.Any(c => c.Type == request.Type && c.Id == request.Id))
+                        return Json(new { success = false, message = "Välj en av personens föreningar." });
+                    if (request.Type == "club") club = request.Id; else region = request.Id;
+                }
+                var r = _staffing.SetPersonRepresents(owner, request.PersonKey, club, region);
+                return Json(new { success = r.Success, message = r.Message, affected = r.Affected });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SetPersonRepresents failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara föreningen." });
             }
         }
 

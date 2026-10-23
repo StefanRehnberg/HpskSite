@@ -49,6 +49,10 @@ namespace HpskSite.Models.Staffing
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public string? Note { get; set; }
         public DateTime? CheckedInAt { get; set; }      // roll-call/upprop: set when the person shows up on the day
+        /// <summary>P3 steg E (beslut 9.6): föreningen personen ställer upp för — klubb ELLER krets. Gäller PERSONEN och
+        /// skrivs på alla hens rader. Null på alla rader = förvalet, medlemmens huvudklubb.</summary>
+        public int? RepresentsClubId { get; set; }
+        public int? RepresentsRegionId { get; set; }
 
         public int AssignedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
@@ -155,6 +159,8 @@ namespace HpskSite.Models.Staffing
     {
         public int Id { get; set; }
         public int? MemberId { get; set; }
+        public int? RepresentsClubId { get; set; }
+        public int? RepresentsRegionId { get; set; }
         public string DisplayName { get; set; } = "";
         /// <summary>The name as first typed, if an identity change has since replaced it.</summary>
         public string? OriginalName { get; set; }
