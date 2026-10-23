@@ -389,59 +389,6 @@ namespace HpskSite.Services.Planning
         private sealed class CountRow { public int Key { get; set; } public int N { get; set; } }
 
         // =====================================================================================
-        //  Dokument och länkar
-        // =====================================================================================
-
-        public List<PlanningDocumentRow> Documents(int planningId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.Fetch<PlanningDocumentRow>(
-                "SELECT * FROM PlanningDocument WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY Id", planningId);
-        }
-
-        public PlanningDocumentRow? Document(int planningId, int documentId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.SingleOrDefault<PlanningDocumentRow>(
-                "SELECT * FROM PlanningDocument WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", documentId, planningId);
-        }
-
-        public sealed record DocumentInput(string? Title, string? Url, string? StoredFileName, string? OriginalFileName, int? AreaId, int? TaskId);
-
-        public (int Id, string? Error) AddDocument(int planningId, int byParticipantId, DocumentInput d)
-        {
-            var hasFile = !string.IsNullOrEmpty(d.StoredFileName);
-            var url = Clean(d.Url, 1000);
-            if (!hasFile && url == null) return (0, "Ange en länk eller välj en fil.");
-            if (!hasFile && !IsSafeUrl(url!)) return (0, "Länken måste börja med https://.");
-            var title = Clean(d.Title, MaxDocTitle) ?? (hasFile ? Clean(d.OriginalFileName, MaxDocTitle) : url!.Length > MaxDocTitle ? url.Substring(0, MaxDocTitle) : url) ?? "Dokument";
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var db = s.Database;
-            var err = AreaError(db, planningId, d.AreaId);
-            if (err != null) return (0, err);
-            if (d.TaskId > 0 && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningTask WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", d.TaskId, planningId) != 1)
-                return (0, "Uppgiften finns inte.");
-            var row = new PlanningDocumentRow
-            {
-                PlanningId = planningId, AreaId = d.AreaId > 0 ? d.AreaId : null, TaskId = d.TaskId > 0 ? d.TaskId : null,
-                Title = title, Url = hasFile ? null : url, StoredFileName = hasFile ? d.StoredFileName : null,
-                OriginalFileName = hasFile ? Clean(d.OriginalFileName, 260) : null, AddedAt = Now, AddedBy = byParticipantId,
-            };
-            db.Insert(row);
-            Bump(db, planningId);
-            return (row.Id, null);
-        }
-
-        public string? RemoveDocument(int planningId, int documentId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var n = s.Database.Execute("UPDATE PlanningDocument SET DeletedAt = @2 WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", documentId, planningId, Now);
-            if (n == 0) return "Dokumentet finns inte.";
-            Bump(s.Database, planningId);
-            return null;
-        }
-
-        // =====================================================================================
         //  Mallar, kretsens checklista, stationer, inklistring
         // =====================================================================================
 
@@ -707,16 +654,20 @@ namespace HpskSite.Services.Planning
                 if (doneLink.Contains(l.Id)) continue;
                 var isFile = !string.IsNullOrEmpty(l.StoredFileName);
                 if (!isFile && string.IsNullOrWhiteSpace(l.Url)) continue;
-                db.Insert(new PlanningDocumentRow
+                var doc = new PlanningDocumentRow
                 {
                     PlanningId = planningId,
-                    AreaId = l.WorkAreaId.HasValue && areaMap.TryGetValue(l.WorkAreaId.Value, out var la) ? la : null,
-                    TaskId = l.WorkItemId.HasValue && taskMap.TryGetValue(l.WorkItemId.Value, out var lt) ? lt : null,
                     Title = Clean(l.Title, MaxDocTitle) ?? Clean(l.OriginalFileName, MaxDocTitle) ?? "Dokument",
                     Url = isFile ? null : Clean(l.Url, 1000), StoredFileName = isFile ? l.StoredFileName : null,
                     OriginalFileName = isFile ? Clean(l.OriginalFileName, 260) : null,
                     AddedAt = SwedishTime(l.CreatedDate, now), AddedBy = 0, ImportedFromWorkLinkId = l.Id,
-                });
+                };
+                db.Insert(doc);
+                // Var länken hängde blir en bifogning: uppgiften, annars området, annars bara arkivet.
+                if (l.WorkItemId.HasValue && taskMap.TryGetValue(l.WorkItemId.Value, out var lt))
+                    InsertRef(db, planningId, doc.Id, PlanningDocTarget.Task, lt, 0, doc.AddedAt);
+                else if (l.WorkAreaId.HasValue && areaMap.TryGetValue(l.WorkAreaId.Value, out var la))
+                    InsertRef(db, planningId, doc.Id, PlanningDocTarget.Area, la, 0, doc.AddedAt);
             }
             return imported;
         }

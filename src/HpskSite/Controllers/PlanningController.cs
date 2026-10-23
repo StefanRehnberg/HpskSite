@@ -57,6 +57,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Competitions.CompetitionLinks _competitionLinks;
         private readonly HpskSite.Services.Kretsgranskning.KretsPlanningService _kretsPlanning;
         private readonly HpskSite.Services.Staffing.PrepDocumentStorage _docs;
+        private readonly Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> _archiveOptions;
 
         public PlanningController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
@@ -67,13 +68,15 @@ namespace HpskSite.Controllers
             MemberClubService memberClubs, BoardWorkAccess board, MemberDirectoryService directory, ClubService clubs,
             AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.CompetitionLinks competitionLinks,
-            HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs)
+            HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs,
+            Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> archiveOptions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _competitions = competitions;
             _competitionLinks = competitionLinks;
             _kretsPlanning = kretsPlanning;
             _docs = docs;
+            _archiveOptions = archiveOptions;
             _planning = planning;
             _notify = notify;
             _links = links;
@@ -880,19 +883,29 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? t)
+        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? documents, string? t)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanWriteMessages(x.Caller)) return No("Bara den som är med skriver i planeringen.");
             var r = _planning.Post(id, x.Caller.ParticipantId, body, replyTo, Ids(mentions), x.Caller.ViaLink);
             if (r.Error != null) return No(r.Error);
+            // Bifogade dokument ur arkivet. Meddelandet är redan skickat; går bifogningen inte igenom sägs det.
+            string? docWarning = null;
+            var docIds = ParseIds(documents);
+            if (docIds.Count > 0)
+            {
+                var attachError = PlanningAccess.CanAttachDocument(x.Caller)
+                    ? _planning.AttachDocuments(id, docIds, PlanningDocTarget.Message, r.MessageId, x.Caller.ParticipantId).Error
+                    : "Bara den som deltar bifogar dokument.";
+                if (attachError != null) docWarning = "Meddelandet är skickat, men dokumenten kunde inte bifogas: " + attachError;
+            }
             if (r.MentionedParticipantIds.Count > 0)
             {
                 try { await _notify.MentionsAsync(id, r.MessageId, r.MentionedParticipantIds); }
                 catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: omnämnandena kunde inte aviseras.", id); }
             }
-            return Ok(new { success = true, messageId = r.MessageId });
+            return Ok(new { success = true, messageId = r.MessageId, docWarning });
         }
 
         [HttpPost]

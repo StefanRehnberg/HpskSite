@@ -77,7 +77,6 @@ namespace HpskSite.Controllers
                     responsible = a.ResponsibleParticipantId.HasValue ? names.GetValueOrDefault(a.ResponsibleParticipantId.Value, "Har lämnat planeringen") : a.ResponsibleName,
                     responsibleName = a.ResponsibleName,
                 }),
-                documents = _planning.Documents(id).Select(d => DocJson(d, x.Caller, names, t)),
                 tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg)),
             });
         }

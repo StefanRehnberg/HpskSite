@@ -127,6 +127,17 @@
     .pl-comp { padding-top: .7rem; padding-bottom: .7rem; }
     .pl-topic { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--bs-border-color); }
     .pl-topics .pl-topic:first-child { border-top: 0; }
+    /* Dokumenten: bifogade brickor och arkivets rader */
+    .pl-docs { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
+    .pl-doc { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; padding: .15rem .65rem; font-size: .875rem;
+        border: 1px solid var(--bs-border-color); border-radius: 999px; background: var(--bs-tertiary-bg); }
+    .pl-doc a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pl-doc.gone { color: var(--bs-secondary-color); font-style: italic; }
+    .pl-doc button { border: 0; background: none; padding: 0 .15rem; line-height: 1; color: var(--bs-secondary-color); }
+    .pl-doc button:hover { color: var(--bs-danger); }
+    .pl-docrow { display: flex; gap: .75rem; align-items: flex-start; padding: .65rem 0; border-top: 1px solid var(--bs-border-color); }
+    .pl-cardh + .pl-docrow { border-top: 0; }
+    .min-w-0 { min-width: 0; }
     .pl-role { display: inline-block; font-size: .8rem; padding: .1rem .6rem; border-radius: 1rem;
         background: var(--bs-secondary-bg); color: var(--bs-emphasis-color); border: 1px solid var(--bs-border-color); }
     /* Läget på telefonen: stora knappar, två i bredd */

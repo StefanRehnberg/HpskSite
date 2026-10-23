@@ -172,6 +172,8 @@
     let MSG = null;        // Messages-svaret
     let MEET = null;       // Meetings-svaret
     let TASKS = null;      // Tasks-svaret
+    let DOCS = null;       // Documents-svaret (arkivet och bifogningarna)
+    let pendingDocs = new Map(); // dokument som bifogas i meddelandet som skrivs: id -> namn
     let version = 0;
     let showPastMeetings = false;        // Möteslistans "Visa tidigare möten"
     let tkQuery = '', tkFilter = '';     // Uppgifternas sök och filter (lever över omritningar)
@@ -190,6 +192,7 @@
         { key: 'meddelanden', label: 'Meddelanden', need: s => s.me.canReadMessages },
         { key: 'moten', label: 'Möten' },
         { key: 'uppgifter', label: 'Uppgifter' },
+        { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
         { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
         { key: 'installningar', label: 'Inställningar', need: s => s.me.canEdit },
@@ -248,10 +251,11 @@
     }
 
     async function loadAll() {
-        const [s, m, tk] = await Promise.all([get('Get'), get('Meetings'), get('Tasks')]);
+        const [s, m, tk, dc] = await Promise.all([get('Get'), get('Meetings'), get('Tasks'), get('Documents')]);
         if (!s.success) { renderMissing(s.message); return false; }
         S = s; MEET = m.success ? m : { meetings: [] };
         TASKS = tk.success ? tk : { tasks: [], statuses: [], canCreate: false, canDecide: false };
+        DOCS = dc.success ? dc : null;
         version = s.version;
         if (S.me.canReadMessages) {
             const mm = await get('Messages');
@@ -275,7 +279,7 @@
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
-           uppgifter: viewTasks, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
+           uppgifter: viewTasks, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
     }
 
     function subLine() {
@@ -393,6 +397,7 @@
         const unread = m.id > MSG.myLastRead && !m.mine && !m.deleted;
         const menu = m.mine && !m.deleted ? rowMenu([
             { label: 'Ändra', fn: () => editMessage(m) },
+            canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Message', id: m.id } }) },
             { divider: true },
             { label: 'Ta bort', danger: true, fn: () => deleteMessage(m) },
         ]) : '';
@@ -400,6 +405,7 @@
             <div class="d-flex justify-content-between gap-2"><div><span class="who">${esc(m.author)}</span>
             <span class="when"> · ${esc(fmtShort(m.createdAt))}${m.edited ? ' · ändrat' : ''}${m.viaEmail ? ' · via mejl' : ''}</span></div>${menu}</div>
             <div class="body">${m.deleted ? '<i class="text-muted">Meddelandet togs bort.</i>' : renderBody(m)}</div>
+            ${m.deleted ? '' : docChips('Message', m.id)}
             <div class="meta">${!isReply && !m.deleted && S.me.canWrite ? `<button class="btn btn-link btn-sm p-0" data-pl-reply="${m.id}">Svara</button>` : ''}
             ${m.mine ? `<span>${esc(seenText(m))}</span>` : ''}</div></div>`;
     }
@@ -428,8 +434,15 @@
                         ${S.participants.filter(p => !p.isMe).map(p => `<li><button class="dropdown-item" type="button" data-pl-mention="${p.id}">${esc(p.name)}</button></li>`).join('') || '<li><span class="dropdown-item-text text-muted">Ingen annan är med ännu</span></li>'}
                     </ul>
                 </div>
+                ${canAddDocs() ? '<button class="btn btn-outline-secondary" type="button" id="plAttach"><i class="bi bi-paperclip me-1"></i>Bifoga dokument</button>' : ''}
                 <span class="pl-help small" id="plMentionNote">${pendingMentions.size ? 'Nämner: ' + esc([...pendingMentions.values()].join(', ')) : 'Den du nämner får en notis.'}</span>
-            </div></div>`;
+            </div><div id="plPendingDocs">${pendingDocsHtml()}</div></div>`;
+    }
+    function pendingDocsHtml() {
+        if (!pendingDocs.size) return '';
+        return `<div class="pl-docs mt-2" aria-label="Bifogas i meddelandet">${[...pendingDocs.entries()].map(([id, title]) => `<span class="pl-doc">
+            <i class="bi bi-paperclip" aria-hidden="true"></i>${esc(title)}
+            <button type="button" data-pending-doc="${id}" title="Ta bort ur meddelandet" aria-label="Bifoga inte ${esc(title)}">✕</button></span>`).join('')}</div>`;
     }
     function viewMessages() {
         setHead('Meddelanden', esc(S.planning.name));
@@ -449,6 +462,11 @@
     function wireComposer() {
         if (!$('plSend')) return;
         $('plSend').onclick = send;
+        const at = $('plAttach');
+        if (at) at.onclick = () => pickDocuments({
+            preselected: [...pendingDocs.keys()],
+            onPick: ids => { ids.forEach(id => { const d = docById(id); if (d) pendingDocs.set(id, d.title); }); $('plPendingDocs').innerHTML = pendingDocsHtml(); },
+        });
         const c = $('plReplyCancel'); if (c) c.onclick = () => { replyTo = 0; viewMessages(); };
     }
     document.addEventListener('click', e => {
@@ -480,10 +498,11 @@
         const mentions = [...pendingMentions.entries()].filter(([, n]) => body.includes('@' + n)).map(([id]) => id);
         const btn = $('plSend'); btn.disabled = true;
         try {
-            const r = await post('Post', { body, replyTo: replyTo || '', mentions: mentions.join(',') });
+            const r = await post('Post', { body, replyTo: replyTo || '', mentions: mentions.join(','), documents: [...pendingDocs.keys()].join(',') });
             if (!r.success) { failMsg(r); return; }
-            replyTo = 0; pendingMentions = new Map();
-            showMsg('');
+            replyTo = 0; pendingMentions = new Map(); pendingDocs = new Map();
+            showMsg(r.docWarning ? esc(r.docWarning) : '', 'warning');
+            await reloadDocs();
             await reloadMessages();
             viewMessages();
             $('plThread')?.lastElementChild?.scrollIntoView({ block: 'nearest' });
@@ -692,8 +711,9 @@
         const topics = m.topics || [];
         h.push(`<div class="pl-card"><h2>Att prata om</h2>
             <p class="pl-help">Alla i planeringen kan lägga till något före mötet. Ingen dagordning att godkänna.</p>
-            ${topics.length ? `<div class="pl-topics">${topics.map(tp => `<div class="pl-topic"><span>${esc(tp.text)}</span>
+            ${topics.length ? `<div class="pl-topics">${topics.map(tp => `<div class="pl-topic"><span>${esc(tp.text)}${docChips('Topic', tp.id)}</span>
                 <span class="d-flex align-items-center gap-2 flex-shrink-0"><span class="pl-help small">${esc(tp.by)}</span>
+                ${canTalk && canAddDocs() ? `<button type="button" class="btn btn-sm btn-link text-secondary p-0 pl-noprint" data-doc-attach="Topic:${tp.id}" title="Bifoga dokument till punkten" aria-label="Bifoga dokument till punkten"><i class="bi bi-paperclip"></i></button>` : ''}
                 ${tp.canRemove ? `<button type="button" class="btn btn-sm btn-link text-secondary p-0" data-topic-del="${tp.id}" title="Ta bort punkten" aria-label="Ta bort punkten">✕</button>` : ''}</span></div>`).join('')}</div>`
                 : '<p class="pl-help mb-2">Inget ännu.</p>'}
             ${canTalk ? `<div class="d-flex gap-2 mt-2 flex-wrap"><input type="text" class="form-control" style="flex:1 1 260px" id="plTopic${m.id}" maxlength="500"
@@ -701,6 +721,11 @@
                 <button type="button" class="btn btn-outline-primary" data-topic-add="${m.id}">Lägg till</button></div>` : ''}
             ${m.agenda ? `<div class="mt-3"><div class="fw-semibold">Dagordning</div><div style="white-space:pre-wrap">${esc(m.agenda)}</div></div>` : ''}
             </div>`);
+
+        // Underlaget: dokument till mötet
+        const meetDocs = docChips('Meeting', m.id);
+        h.push(`<div class="pl-card"><div class="pl-cardh"><h2>Underlag till mötet</h2>${m.status !== 'Cancelled' ? attachBtn('Meeting', m.id) : ''}</div>
+            ${meetDocs || '<p class="pl-help mb-0">Inga dokument bifogade. Bifoga det ni ska titta på — en karta, en offert, ett förslag till inbjudan.</p>'}</div>`);
 
         // Hur går det med uppgifterna?
         const list = tasksForMeeting(m);
@@ -952,7 +977,6 @@
         return t.due ? esc(fmtDay(t.due)) : '';
     }
     function kr(v) { return v == null ? '' : Number(v).toLocaleString('sv-SE') + ' kr'; }
-    function docsOf(kind, id) { return (TASKS.documents || []).filter(d => kind === 'task' ? d.taskId === id : kind === 'area' ? d.areaId === id && !d.taskId : !d.taskId && !d.areaId); }
     function postForm(action, fd) {
         fd.append('id', ID);
         if (TOKEN) fd.append('t', TOKEN);
@@ -973,7 +997,6 @@
             TASKS.canManageAreas && c && c.isFalt && c.stationCount > 0 && { label: `En uppgift per station (${c.stationCount})`, icon: 'bi-signpost-split', fn: seedStations },
             TASKS.canCreate && !TOKEN && { label: 'Klistra in från ett kalkylark…', icon: 'bi-clipboard', fn: () => openPaste(null) },
             { header: 'Dela och följ upp' },
-            TASKS.canAddDocument && { label: 'Lägg till dokument eller länk…', icon: 'bi-paperclip', fn: () => openDocAdd({}) },
             TASKS.canManageAreas && overdue > 0 && { label: `Påminn dem med försenade uppgifter (${overdue})`, icon: 'bi-bell', fn: remindOverdue },
             !TOKEN && c && { label: c.isFalt ? 'Materiellista för stationerna' : 'Materielberäkning…', icon: 'bi-box-seam',
                 fn: () => c.isFalt ? window.open('/faltskytte/materiel/' + c.id, '_blank', 'noopener') : openMateriel(c) },
@@ -1014,10 +1037,6 @@
                     <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th class="pl-noprint"></th></tr></thead>
                 <tbody id="tkRows"></tbody></table></div></div>`);
         }
-        const planDocs = TASKS.documents || [];
-        if (planDocs.length || TASKS.canAddDocument) html.push(`<div class="pl-card mt-3"><div class="pl-cardh"><h2>Dokument och länkar</h2>
-            ${TASKS.canAddDocument ? '<button class="btn btn-sm btn-outline-secondary pl-noprint" data-tk-doc-add="1">Lägg till…</button>' : ''}</div>
-            ${planDocs.length ? `<ul class="list-unstyled mb-0">${planDocs.map(docLine).join('')}</ul>` : '<p class="pl-help mb-0">Inbjudan, ansökan, ritningar, bokningar — lägg dem här så hittar alla dem.</p>'}</div>`);
         html.push(`<div class="pl-card mt-3"><h2>Lägena</h2><div class="d-flex gap-2 flex-wrap align-items-center">
             ${['NotStarted', 'InProgress', 'NeedsHelp', 'ReadyForReview', 'Done'].map(s => tkChip({ status: s, statusLabel: (TASKS.statuses.find(x => x.value === s) || {}).label || s })).join(' → ')}</div>
             <p class="pl-help mb-0 mt-2">${TASKS.doneAtMeetingsOnly
@@ -1028,14 +1047,6 @@
         renderTaskRows();
         $('tkQ').addEventListener('input', e => { tkQuery = e.target.value; renderTaskRows(); });
         $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderTaskRows(); });
-    }
-
-    function docLine(d) {
-        const where = d.taskId ? (findTask(d.taskId) || {}).title : d.areaId ? (areaById(d.areaId) || {}).name : '';
-        const rm = d.canRemove ? `<button type="button" class="btn btn-sm btn-link text-danger p-0 ms-2 pl-noprint" data-tk-doc-del="${d.id}" aria-label="Ta bort ${esc(d.title)}">Ta bort</button>` : '';
-        return `<li class="py-1"><i class="bi ${d.isFile ? 'bi-file-earmark' : 'bi-link-45deg'} me-1 text-secondary"></i>
-            <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>
-            ${where ? `<span class="pl-help small"> · ${esc(where)}</span>` : ''}${d.addedBy ? `<span class="pl-help small"> · ${esc(d.addedBy)}</span>` : ''}${rm}</li>`;
     }
 
     function taskMatches(t, q) {
@@ -1065,7 +1076,7 @@
         const extra = [];
         if (t.scopeType) extra.push(t.stationUrl ? `<a href="${esc(t.stationUrl)}">${esc(t.scopeType)} ${esc(t.scopeKey || '')}</a>` : esc(t.scopeType + ' ' + (t.scopeKey || '')));
         if (t.estimatedCost != null) extra.push(esc(kr(t.estimatedCost)));
-        const docs = docsOf('task', t.id).length;
+        const docs = refsOn('Task', t.id).length;
         if (t.comments || docs) extra.push(`<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-tk-thread="${t.id}">`
             + [t.comments ? `${t.comments} kommentar${t.comments === 1 ? '' : 'er'}` : '', docs ? `${docs} dokument` : ''].filter(Boolean).join(', ') + '</button>');
         // Bara på EGNA uppgifter — på varje rad blev det brus. Övriga bockas av via radens Åtgärder.
@@ -1101,13 +1112,13 @@
                     { label: 'Ändra området…', fn: () => openArea(g.area) },
                     { label: 'Flytta upp', fn: () => moveArea(g.area, -1) },
                     { label: 'Flytta ner', fn: () => moveArea(g.area, 1) },
-                    TASKS.canAddDocument && { label: 'Lägg till dokument…', fn: () => openDocAdd({ areaId: g.area.id }) },
+                    canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Area', id: g.area.id } }) },
                     { divider: true },
                     { label: 'Ta bort området…', danger: true, fn: () => deleteArea(g.area) },
                 ]) : '';
                 parts.push(`<tr class="pl-areah"><td colspan="6" class="ps-3"><div class="d-flex flex-wrap align-items-center gap-2">
                     <b>${esc(g.area.name)}</b>${g.area.responsible ? `<span class="pl-help small">Ansvarig: ${esc(g.area.responsible)}</span>` : ''}
-                    <span class="ms-auto pl-help small">${openN === 0 && allIn.length ? 'allt utfört' : openN + ' öppna'}</span>${menu}</div></td></tr>`);
+                    <span class="ms-auto pl-help small">${openN === 0 && allIn.length ? 'allt utfört' : openN + ' öppna'}</span>${menu}</div>${docChips('Area', g.area.id)}</td></tr>`);
                 parts.push(g.rows.length ? g.rows.map(taskRow).join('') : `<tr><td colspan="6" class="pl-help ps-4 small">Inga uppgifter i området ännu.</td></tr>`);
             } else if (g.rows.length) {
                 if (areas.length) parts.push(`<tr class="pl-areah"><td colspan="6" class="ps-3"><b>Utan område</b></td></tr>`);
@@ -1307,7 +1318,6 @@
         if (!r.success) { failMsg(r); return; }
         const fresh = findTask(t.id) || t;
         const comments = r.events.filter(e => e.kind === 'Comment' || e.kind === 'Report');
-        const docs = docsOf('task', t.id);
         const canComment = S.me.canWrite || fresh.mine;
         formModal({
             title: fresh.title, wide: false, cancelLabel: 'Stäng',
@@ -1317,9 +1327,9 @@
                     <div style="white-space:pre-wrap">${esc(e.note)}</div></li>`).join('')}</ul>` : '<p class="pl-help">Inga kommentarer ännu.</p>'}
                 ${canComment ? `<label class="form-label" for="thText">Skriv en kommentar</label><textarea id="thText" class="form-control" rows="3" maxlength="4000"></textarea>
                     <button type="button" class="btn btn-primary btn-sm mt-2" id="thSend">Skicka</button>` : ''}
-                <h3 class="h6 mt-4">Dokument och länkar</h3>
-                ${docs.length ? `<ul class="list-unstyled">${docs.map(docLine).join('')}</ul>` : '<p class="pl-help">Inga dokument.</p>'}
-                ${TASKS.canAddDocument ? `<button type="button" class="btn btn-outline-secondary btn-sm" data-tk-doc-add-task="${t.id}">Lägg till dokument eller länk…</button>` : ''}`,
+                <h3 class="h6 mt-4">Dokument</h3>
+                ${docChips('Task', t.id) || '<p class="pl-help">Inga dokument bifogade.</p>'}
+                ${canAddDocs() ? `<button type="button" class="btn btn-outline-secondary btn-sm mt-2" data-tk-doc-pick="${t.id}"><i class="bi bi-paperclip me-1"></i>Bifoga dokument…</button>` : ''}`,
             onOpen: body => {
                 body.querySelector('#thSend')?.addEventListener('click', async e => {
                     const text = body.querySelector('#thText').value.trim();
@@ -1457,50 +1467,347 @@
         });
     }
 
-    // ---------------------------------------------------------------- dokument
-    function openDocAdd(where) {
+    // ================================================================ Dokument
+    // Planeringens arkiv (2026-10-23): kategorier och dokument, och var de är bifogade. Ett dokument
+    // bor i arkivet och kan bifogas i ett meddelande, på ett möte, på en punkt att prata om, på en
+    // uppgift eller ett område. Alla som är med läser alla dokument.
+    async function reloadDocs() { const r = await get('Documents'); if (r.success) DOCS = r; }
+    function docById(id) { return DOCS ? DOCS.documents.find(d => d.id === id) : null; }
+    function canAddDocs() { return !!(DOCS && DOCS.canAdd && !TOKEN); }
+    function refsOn(kind, id) {
+        const out = [];
+        if (!DOCS) return out;
+        DOCS.documents.forEach(d => d.refs.forEach(r => { if (r.kind === kind && r.targetId === id) out.push({ doc: d, ref: r }); }));
+        return out;
+    }
+    function goneRefsOn(kind, id) { return DOCS ? DOCS.removedRefs.filter(r => r.kind === kind && r.targetId === id) : []; }
+    function fmtSize(b) {
+        if (!b) return '';
+        if (b < 1024 * 1024) return Math.max(1, Math.round(b / 1024)) + ' kB';
+        return (b / (1024 * 1024)).toLocaleString('sv-SE', { maximumFractionDigits: 1 }) + ' MB';
+    }
+    const DOC_ICON = { pdf: 'bi-file-earmark-pdf', doc: 'bi-file-earmark-word', docx: 'bi-file-earmark-word', xls: 'bi-file-earmark-excel',
+        xlsx: 'bi-file-earmark-excel', csv: 'bi-file-earmark-spreadsheet', ppt: 'bi-file-earmark-ppt', pptx: 'bi-file-earmark-ppt',
+        jpg: 'bi-file-earmark-image', jpeg: 'bi-file-earmark-image', png: 'bi-file-earmark-image', webp: 'bi-file-earmark-image',
+        gif: 'bi-file-earmark-image', txt: 'bi-file-earmark-text' };
+    function docExt(d) { const m = /\.([a-z0-9]+)$/i.exec(d.fileName || ''); return m ? m[1].toLowerCase() : ''; }
+    function docIcon(d) { return d.isFile ? (DOC_ICON[docExt(d)] || 'bi-file-earmark') : 'bi-link-45deg'; }
+    function docKindText(d) { return d.isFile ? (docExt(d).toUpperCase() || 'Fil') : 'Länk'; }
+    function catName(id) { const c = DOCS && DOCS.categories.find(x => x.id === id); return c ? c.name : ''; }
+
+    // Bifogade dokument som små brickor. ✕ tar bort bifogningen (aldrig dokumentet).
+    function docChips(kind, id) {
+        const items = refsOn(kind, id), gone = goneRefsOn(kind, id);
+        if (!items.length && !gone.length) return '';
+        return `<div class="pl-docs">${items.map(({ doc, ref }) => `<span class="pl-doc"><i class="bi ${docIcon(doc)}" aria-hidden="true"></i>
+                <a href="${esc(doc.url)}" target="_blank" rel="noopener" title="${esc(doc.title)}">${esc(doc.title)}</a>
+                ${ref.canDetach && !TOKEN ? `<button type="button" class="pl-noprint" data-doc-detach="${ref.refId}" title="Ta bort bifogningen" aria-label="Ta bort bifogningen av ${esc(doc.title)}">✕</button>` : ''}</span>`).join('')}
+            ${gone.map(r => `<span class="pl-doc gone"><i class="bi bi-file-earmark-x" aria-hidden="true"></i>Borttaget dokument
+                ${!TOKEN && DOCS.canManageCategories ? `<button type="button" class="pl-noprint" data-doc-detach="${r.refId}" aria-label="Ta bort raden">✕</button>` : ''}</span>`).join('')}</div>`;
+    }
+    function attachBtn(kind, id, label, small) {
+        if (!canAddDocs()) return '';
+        return `<button type="button" class="btn ${small ? 'btn-link btn-sm p-0' : 'btn-sm btn-outline-secondary'} pl-noprint" data-doc-attach="${kind}:${id}">
+            <i class="bi bi-paperclip me-1" aria-hidden="true"></i>${esc(label || 'Bifoga dokument')}</button>`;
+    }
+    document.addEventListener('click', e => {
+        const a = e.target.closest('[data-doc-attach]');
+        if (a) { const [kind, id] = a.dataset.docAttach.split(':'); pickDocuments({ attach: { kind, id: parseInt(id, 10) } }); return; }
+        const d = e.target.closest('[data-doc-detach]');
+        if (d) { detachDoc(parseInt(d.dataset.docDetach, 10)); return; }
+        const g = e.target.closest('[data-doc-goto]');
+        if (g) { e.preventDefault(); gotoRef(g.dataset.docGoto); }
+    });
+    async function detachDoc(refId) {
+        const r = await post('DetachDocument', { refId });
+        if (!r.success) { failMsg(r); return; }
+        await reloadDocs(); rerender();
+    }
+    async function afterDocChange() {
+        await reloadDocs();
+        if ($('plFormModal').classList.contains('show')) return; // en öppen dialog ritar om sig själv
+        rerender();
+    }
+
+    // Var ett dokument är bifogat, i ord — och vart man kommer om man klickar.
+    function refText(r) {
+        const t = r.title || '';
+        if (r.kind === 'Message') return `Meddelande från ${t || 'någon'}${r.at ? ', ' + fmtShort(r.at) : ''}`;
+        if (r.kind === 'Meeting') return `Möte: ${t}`;
+        if (r.kind === 'Topic') { const m = MEET && MEET.meetings.find(x => x.id === r.meetingId); return `Att prata om${m ? ' på ' + m.title : ''}: ${t}`; }
+        if (r.kind === 'Task') return `Uppgift: ${t}`;
+        if (r.kind === 'Area') return `Område: ${t}`;
+        return t;
+    }
+    function gotoRef(code) {
+        const [kind, id, meetingId] = code.split(':').map(x => parseInt(x, 10) || x);
+        if (kind === 'Meeting' || kind === 'Topic') { if (meetingId) goMeeting(meetingId); return; }
+        if (kind === 'Message') { go('meddelanden'); setTimeout(() => document.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: 'center' }), 60); return; }
+        if (kind === 'Task') { const t = findTask(id); if (t) openThread(t); else go('uppgifter'); return; }
+        if (kind === 'Area') go('uppgifter');
+    }
+
+    let docQuery = '', docCat = '';
+    function viewDocuments() {
+        setHead('Dokument', esc(S.planning.name));
+        setActions([
+            canAddDocs() && { label: 'Lägg till dokument eller länk…', icon: 'bi-upload', fn: () => openDocAdd({}) },
+            !TOKEN && DOCS && DOCS.canManageCategories && { label: 'Ny kategori…', icon: 'bi-folder-plus', fn: () => openCategory(null) },
+        ]);
+        if (!DOCS) { $('plBody').innerHTML = spinner(); return; }
+        const docs = DOCS.documents, cats = DOCS.categories;
+        const html = [`<p class="pl-help">Planeringens dokument på ett ställe — inbjudan, kartor, avtal, offerter. Bifoga dem i ett meddelande,
+            på ett möte eller på en uppgift. Alla som är med i planeringen kan läsa dem.</p>`];
+        if (!docs.length) {
+            html.push(`<div class="pl-card"><p class="mb-2"><b>Inga dokument ännu.</b></p>
+                ${canAddDocs() ? `<button type="button" class="btn btn-primary" data-doc-add="1"><i class="bi bi-upload me-1"></i>Lägg till dokument eller länk…</button>` : ''}
+                ${cats.length ? '' : `<p class="pl-help mb-0 mt-3">Många dokument? Dela upp dem i kategorier, till exempel <i>Inbjudan</i>, <i>Banor</i> och <i>Avtal</i>${DOCS.canManageCategories && !TOKEN ? ' — under Åtgärder.' : '.'}</p>`}</div>`);
+        } else {
+            const catOpts = `<option value="">Alla kategorier</option>${cats.map(c => `<option value="${c.id}"${String(c.id) === docCat ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}`
+                + (docs.some(d => !d.categoryId) && cats.length ? `<option value="none"${docCat === 'none' ? ' selected' : ''}>Utan kategori</option>` : '');
+            html.push(`<div class="d-flex flex-wrap gap-2 align-items-center mb-2 pl-noprint">
+                <input type="search" class="form-control form-control-sm" id="docQ" placeholder="Sök på namn eller beskrivning" style="max-width:20rem" value="${esc(docQuery)}" aria-label="Sök bland dokumenten">
+                ${cats.length ? `<select class="form-select form-select-sm" id="docCat" style="max-width:16rem" aria-label="Kategori">${catOpts}</select>` : ''}
+                <span class="ms-auto pl-help small" id="docCount"></span></div><div id="docGroups"></div>`);
+        }
+        if (DOCS.storage && DOCS.storage.usedBytes) html.push(`<p class="pl-help small mt-3 mb-0">Filerna tar ${esc(fmtSize(DOCS.storage.usedBytes))} av ${esc(fmtSize(DOCS.storage.limitBytes))}.</p>`);
+        $('plBody').innerHTML = html.join('');
+        if (!docs.length) return;
+        renderDocGroups();
+        $('docQ').addEventListener('input', e => { docQuery = e.target.value; renderDocGroups(); });
+        $('docCat')?.addEventListener('change', e => { docCat = e.target.value; renderDocGroups(); });
+    }
+    function renderDocGroups() {
+        const q = docQuery.trim().toLowerCase();
+        const cats = DOCS.categories;
+        const match = d => (!q || [d.title, d.description, d.fileName].some(v => (v || '').toLowerCase().includes(q)))
+            && (!docCat || (docCat === 'none' ? !d.categoryId || !cats.some(c => c.id === d.categoryId) : String(d.categoryId) === docCat));
+        const rows = DOCS.documents.filter(match);
+        rowFns = [];
+        const groups = cats.map(c => ({ cat: c, docs: rows.filter(d => d.categoryId === c.id) }));
+        groups.push({ cat: null, docs: rows.filter(d => !d.categoryId || !cats.some(c => c.id === d.categoryId)) });
+        const filtering = q || docCat;
+        const parts = groups.map((g, gi) => {
+            if (!g.docs.length && (filtering || !g.cat)) return '';
+            const menu = g.cat && DOCS.canManageCategories && !TOKEN ? rowMenu([
+                canAddDocs() && { label: 'Lägg till dokument i kategorin…', fn: () => openDocAdd({ categoryId: g.cat.id }) },
+                { label: 'Byt namn…', fn: () => openCategory(g.cat) },
+                gi > 0 && { label: 'Flytta upp', fn: () => moveCategory(g.cat, -1) },
+                gi < cats.length - 1 && { label: 'Flytta ner', fn: () => moveCategory(g.cat, 1) },
+                { divider: true },
+                { label: 'Ta bort kategorin…', danger: true, fn: () => deleteCategory(g.cat) },
+            ]) : '';
+            const title = g.cat ? g.cat.name : (cats.length ? 'Utan kategori' : 'Dokument');
+            return `<div class="pl-card mb-3"><div class="pl-cardh"><h2><i class="bi bi-folder2 me-2 text-secondary" aria-hidden="true"></i>${esc(title)}
+                    <span class="pl-help small fw-normal">${g.docs.length}</span></h2>${menu}</div>
+                ${g.docs.length ? g.docs.map(docRow).join('') : '<p class="pl-help mb-0">Inga dokument i kategorin ännu.</p>'}</div>`;
+        }).join('');
+        $('docGroups').innerHTML = parts || '<div class="pl-card"><p class="pl-help mb-0">Inget dokument matchar.</p></div>';
+        $('docCount').textContent = rows.length === 1 ? '1 dokument' : `${rows.length} dokument`;
+    }
+    function docRow(d) {
+        const meta = [docKindText(d), d.fileSize ? fmtSize(d.fileSize) : '', d.addedBy, d.addedAt ? fmtDay(d.addedAt) : ''].filter(Boolean);
+        const where = d.refs.filter(r => !r.gone);
+        const menu = rowMenu([
+            { label: d.isFile ? 'Öppna filen' : 'Öppna länken', fn: () => window.open(d.url, '_blank', 'noopener') },
+            d.canEdit && !TOKEN && { label: 'Ändra namn, beskrivning och kategori…', fn: () => openDocEdit(d) },
+            canAddDocs() && { label: 'Bifoga på ett möte eller en uppgift…', fn: () => openAttachFromDoc(d) },
+            d.canRemove && !TOKEN && { divider: true },
+            d.canRemove && !TOKEN && { label: 'Ta bort dokumentet…', danger: true, fn: () => removeDoc(d) },
+        ]);
+        return `<div class="pl-docrow"><i class="bi ${docIcon(d)} fs-4 text-secondary" aria-hidden="true"></i>
+            <div class="flex-grow-1 min-w-0"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="fw-semibold">${esc(d.title)}</a>
+                ${d.description ? `<div class="small" style="white-space:pre-wrap">${esc(d.description)}</div>` : ''}
+                <div class="pl-help small">${meta.map(esc).join(' · ')}</div>
+                ${where.length ? `<div class="small mt-1">Bifogat i: ${where.map(r => `<a href="#" data-doc-goto="${r.kind}:${r.targetId}:${r.meetingId || 0}">${esc(refText(r))}</a>`).join(' · ')}</div>` : ''}</div>
+            <div class="flex-shrink-0">${menu}</div></div>`;
+    }
+    document.addEventListener('click', e => { if (e.target.closest('[data-doc-add]')) openDocAdd({}); });
+
+    // ---------------------------------------------------------------- kategorier
+    function openCategory(c) {
+        formModal({
+            title: c ? 'Byt namn på kategorin' : 'Ny kategori', okLabel: c ? 'Spara' : 'Lägg till', wide: false,
+            html: `<label class="form-label" for="dcCatName">Vad heter kategorin?</label>
+                <input id="dcCatName" class="form-control" maxlength="200" value="${esc(c ? c.name : '')}" placeholder="Till exempel Inbjudan, Banor eller Avtal">`,
+            onOpen: body => body.querySelector('#dcCatName').focus(),
+            onOk: async body => {
+                const r = await post('SaveDocumentCategory', { categoryId: c ? c.id : '', name: body.querySelector('#dcCatName').value });
+                if (!r.success) return r.message;
+                await afterDocChange(); rerender(); return true;
+            }
+        });
+    }
+    async function moveCategory(c, dir) {
+        const r = await post('MoveDocumentCategory', { categoryId: c.id, dir });
+        if (!r.success) { failMsg(r); return; }
+        await reloadDocs(); rerender();
+    }
+    async function deleteCategory(c) {
+        if (!await plConfirm('Ta bort kategorin?', `${c.name}\n\nDokumenten i kategorin står kvar, utan kategori.`, 'Ta bort', true)) return;
+        const r = await post('DeleteDocumentCategory', { categoryId: c.id });
+        if (!r.success) { failMsg(r); return; }
+        if (docCat === String(c.id)) docCat = '';
+        await reloadDocs(); rerender();
+    }
+    function categorySelect(cur) {
+        const cats = DOCS ? DOCS.categories : [];
+        if (!cats.length) return '';
+        return `<div class="mb-3"><label class="form-label" for="dcCat">Kategori</label><select id="dcCat" class="form-select">
+            <option value="">Utan kategori</option>${cats.map(c => `<option value="${c.id}"${c.id === cur ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>`;
+    }
+
+    // ---------------------------------------------------------------- lägga till och ändra
+    // opts: { categoryId, attach: {kind, id}, onAdded(docId) } — attach bifogar direkt, onAdded tar emot det nya dokumentet.
+    function openDocAdd(opts) {
+        opts = opts || {};
+        const where = opts.attach ? `<p class="pl-help">Dokumentet läggs bland planeringens dokument och bifogas där du var.</p>` : '';
         formModal({
             title: 'Lägg till dokument eller länk', okLabel: 'Lägg till', wide: false,
-            html: `<div class="btn-group mb-3" role="group" aria-label="Sort">
-                    <input type="radio" class="btn-check" name="dcKind" id="dcLink" value="link" checked><label class="btn btn-outline-secondary btn-sm" for="dcLink">Länk</label>
-                    <input type="radio" class="btn-check" name="dcKind" id="dcFile" value="file"><label class="btn btn-outline-secondary btn-sm" for="dcFile">Fil</label></div>
+            html: `${where}<div class="btn-group mb-3" role="group" aria-label="Fil eller länk">
+                    <input type="radio" class="btn-check" name="dcKind" id="dcFile" value="file" checked><label class="btn btn-outline-secondary btn-sm" for="dcFile">Fil</label>
+                    <input type="radio" class="btn-check" name="dcKind" id="dcLink" value="link"><label class="btn btn-outline-secondary btn-sm" for="dcLink">Länk</label></div>
+                <div id="dcFileBox" class="mb-3"><label class="form-label" for="dcFileIn">Fil</label><input id="dcFileIn" type="file" class="form-control">
+                    <div class="pl-help small mt-1">PDF, bild, Word, Excel, PowerPoint eller text, högst 25 MB.</div></div>
+                <div id="dcLinkBox" class="mb-3 d-none"><label class="form-label" for="dcUrl">Länk</label><input id="dcUrl" class="form-control" placeholder="https://"></div>
                 <div class="mb-3"><label class="form-label" for="dcTitle">Namn (valfritt)</label><input id="dcTitle" class="form-control" maxlength="200" placeholder="Till exempel Inbjudan eller Banritning"></div>
-                <div id="dcLinkBox"><label class="form-label" for="dcUrl">Länk</label><input id="dcUrl" class="form-control" placeholder="https://"></div>
-                <div id="dcFileBox" class="d-none"><label class="form-label" for="dcFileIn">Fil</label><input id="dcFileIn" type="file" class="form-control">
-                    <div class="pl-help small mt-1">PDF, bild, Word, Excel, PowerPoint eller text, högst 25 MB.</div></div>`,
+                <div class="mb-3"><label class="form-label" for="dcDesc">Beskrivning (valfri)</label><textarea id="dcDesc" class="form-control" rows="2" maxlength="1000"></textarea></div>
+                ${categorySelect(opts.categoryId || null)}`,
             onOpen: body => body.querySelectorAll('[name=dcKind]').forEach(r => r.addEventListener('change', () => {
                 const file = body.querySelector('#dcFile').checked;
                 body.querySelector('#dcLinkBox').classList.toggle('d-none', file);
                 body.querySelector('#dcFileBox').classList.toggle('d-none', !file);
             })),
             onOk: async body => {
-                const title = body.querySelector('#dcTitle').value;
+                const title = body.querySelector('#dcTitle').value, description = body.querySelector('#dcDesc').value;
+                const categoryId = body.querySelector('#dcCat') ? body.querySelector('#dcCat').value : '';
                 let r;
                 if (body.querySelector('#dcFile').checked) {
                     const f = body.querySelector('#dcFileIn').files[0];
                     if (!f) return 'Välj en fil.';
+                    if (f.size > 25 * 1024 * 1024) return 'Filen är för stor (högst 25 MB).';
                     const fd = new FormData();
-                    fd.append('file', f); fd.append('title', title);
-                    if (where.areaId) fd.append('areaId', where.areaId);
-                    if (where.taskId) fd.append('taskId', where.taskId);
+                    fd.append('file', f); fd.append('title', title); fd.append('description', description);
+                    if (categoryId) fd.append('categoryId', categoryId);
                     r = await postForm('UploadDocument', fd);
                 } else {
-                    r = await post('AddDocumentLink', { title, url: body.querySelector('#dcUrl').value.trim(), areaId: where.areaId || '', taskId: where.taskId || '' });
+                    r = await post('AddDocumentLink', { title, description, categoryId, url: body.querySelector('#dcUrl').value.trim() });
                 }
                 if (!r.success) return r.message;
-                await reloadTasks(); rerender();
-                if (where.taskId) { const t = findTask(where.taskId); if (t) { openThread(t, true); return false; } }
-                return true;
+                if (opts.attach) {
+                    const a = await post('AttachDocuments', { documentIds: r.documentId, kind: opts.attach.kind, targetId: opts.attach.id });
+                    if (!a.success) { await reloadDocs(); return 'Dokumentet är tillagt, men kunde inte bifogas: ' + a.message; }
+                }
+                await reloadDocs();
+                if (opts.onAdded) { opts.onAdded(r.documentId); return false; }
+                rerender(); return true;
             }
         });
     }
-    async function removeDoc(id) {
-        const d = (TASKS.documents || []).find(x => x.id === id); if (!d) return;
-        if (!await plConfirm('Ta bort dokumentet?', d.title, 'Ta bort', true)) return;
-        const r = await post('RemoveDocument', { documentId: id });
-        if (!r.success) { failMsg(r); return; }
-        await reloadTasks(); rerender();
+    function openDocEdit(d) {
+        formModal({
+            title: 'Ändra dokumentet', okLabel: 'Spara', wide: false,
+            html: `<div class="mb-3"><label class="form-label" for="dcTitle">Namn</label><input id="dcTitle" class="form-control" maxlength="200" value="${esc(d.title)}"></div>
+                <div class="mb-3"><label class="form-label" for="dcDesc">Beskrivning (valfri)</label><textarea id="dcDesc" class="form-control" rows="3" maxlength="1000">${esc(d.description || '')}</textarea></div>
+                ${categorySelect(d.categoryId)}
+                <p class="pl-help small mb-0">Ska filen eller länken bytas? Lägg till den nya och ta bort den gamla.</p>`,
+            onOk: async body => {
+                const r = await post('UpdateDocument', { documentId: d.id, title: body.querySelector('#dcTitle').value,
+                    description: body.querySelector('#dcDesc').value, categoryId: body.querySelector('#dcCat') ? body.querySelector('#dcCat').value : '' });
+                if (!r.success) return r.message;
+                await reloadDocs(); rerender(); return true;
+            }
+        });
     }
+    async function removeDoc(d) {
+        const n = d.refs.filter(r => !r.gone).length;
+        const text = d.title + (n ? `\n\nDet är bifogat på ${n === 1 ? 'ett ställe' : n + ' ställen'}. Där står det sedan att dokumentet är borttaget.` : '');
+        if (!await plConfirm('Ta bort dokumentet?', text, 'Ta bort', true)) return;
+        const r = await post('RemoveDocument', { documentId: d.id });
+        if (!r.success) { failMsg(r); return; }
+        await reloadDocs(); rerender();
+    }
+
+    // ---------------------------------------------------------------- välja dokument
+    // opts: { attach: {kind, id} } bifogar de valda; { onPick(ids), preselected: [ids] } lämnar dem till anroparen.
+    function pickDocuments(opts) {
+        opts = opts || {};
+        const already = opts.attach ? new Set(refsOn(opts.attach.kind, opts.attach.id).map(x => x.doc.id)) : new Set();
+        const chosen = new Set(opts.preselected || []);
+        const draw = body => {
+            const q = (body.querySelector('#pkQ').value || '').trim().toLowerCase();
+            const cats = DOCS.categories;
+            const docs = DOCS.documents.filter(d => !q || [d.title, d.description, d.fileName].some(v => (v || '').toLowerCase().includes(q)));
+            const groups = cats.map(c => ({ name: c.name, docs: docs.filter(d => d.categoryId === c.id) }))
+                .concat([{ name: cats.length ? 'Utan kategori' : '', docs: docs.filter(d => !d.categoryId || !cats.some(c => c.id === d.categoryId)) }]);
+            const html = groups.filter(g => g.docs.length).map(g => `${g.name ? `<div class="fw-semibold small mt-2">${esc(g.name)}</div>` : ''}
+                ${g.docs.map(d => {
+                    const has = already.has(d.id);
+                    return `<label class="d-flex gap-2 align-items-start py-1"><input type="checkbox" class="form-check-input mt-1" data-pk="${d.id}"${has || chosen.has(d.id) ? ' checked' : ''}${has ? ' disabled' : ''}>
+                        <span><i class="bi ${docIcon(d)} text-secondary me-1" aria-hidden="true"></i>${esc(d.title)}${has ? ' <span class="pl-help small">(redan bifogat)</span>' : ''}
+                        ${d.description ? `<span class="d-block pl-help small">${esc(d.description.length > 80 ? d.description.slice(0, 80) + '…' : d.description)}</span>` : ''}</span></label>`;
+                }).join('')}`).join('');
+            body.querySelector('#pkList').innerHTML = html || `<p class="pl-help mb-0">${DOCS.documents.length ? 'Inget dokument matchar.' : 'Planeringen har inga dokument ännu.'}</p>`;
+        };
+        formModal({
+            title: 'Bifoga dokument', okLabel: 'Bifoga', wide: false,
+            html: `<p class="pl-help">Välj bland planeringens dokument${canAddDocs() ? ', eller lägg till ett nytt' : ''}.</p>
+                ${canAddDocs() ? `<button type="button" class="btn btn-outline-primary btn-sm mb-3" id="pkNew"><i class="bi bi-upload me-1"></i>Lägg till ett nytt dokument eller en länk…</button>` : ''}
+                <input type="search" class="form-control form-control-sm mb-2" id="pkQ" placeholder="Sök" aria-label="Sök bland dokumenten">
+                <div id="pkList" style="max-height:50vh;overflow:auto"></div>`,
+            onOpen: body => {
+                draw(body);
+                body.querySelector('#pkQ').addEventListener('input', () => draw(body));
+                body.addEventListener('change', e => {
+                    const cb = e.target.closest('[data-pk]'); if (!cb) return;
+                    const id = parseInt(cb.dataset.pk, 10);
+                    if (cb.checked) chosen.add(id); else chosen.delete(id);
+                });
+                body.querySelector('#pkNew')?.addEventListener('click', () => openDocAdd({
+                    // Det nya dokumentet väljs, och väljaren kommer tillbaka.
+                    onAdded: id => { chosen.add(id); pickDocuments(Object.assign({}, opts, { preselected: [...chosen] })); },
+                }));
+            },
+            onOk: async () => {
+                const ids = [...chosen].filter(id => !already.has(id));
+                if (!ids.length) return 'Välj minst ett dokument.';
+                if (opts.onPick) { opts.onPick(ids); return true; }
+                const r = await post('AttachDocuments', { documentIds: ids.join(','), kind: opts.attach.kind, targetId: opts.attach.id });
+                if (!r.success) return r.message;
+                await reloadDocs();
+                if (opts.attach.kind === 'Task' && opts.reopenThread) { const t = findTask(opts.attach.id); if (t) { openThread(t, true); return false; } }
+                rerender(); return true;
+            }
+        });
+    }
+    // Från arkivet: bifoga dokumentet på ett möte, en punkt eller en uppgift.
+    function openAttachFromDoc(d) {
+        const has = new Set(d.refs.filter(r => !r.gone).map(r => r.kind + ':' + r.targetId));
+        const meetings = (MEET ? MEET.meetings : []).filter(m => m.status !== 'Cancelled');
+        const tasks = (TASKS ? TASKS.tasks : []).filter(t => t.status !== 'Done');
+        const areas = TASKS ? TASKS.areas || [] : [];
+        const opt = (k, id, label) => has.has(k + ':' + id) ? '' : `<option value="${k}:${id}">${esc(label)}</option>`;
+        const groups = [
+            meetings.length && `<optgroup label="Möten">${meetings.map(m => opt('Meeting', m.id, m.title + (m.startsAt ? ' · ' + fmtDay(m.startsAt) : ''))).join('')}</optgroup>`,
+            tasks.length && `<optgroup label="Uppgifter">${tasks.map(t => opt('Task', t.id, t.title)).join('')}</optgroup>`,
+            areas.length && `<optgroup label="Områden">${areas.map(a => opt('Area', a.id, a.name)).join('')}</optgroup>`,
+        ].filter(Boolean).join('');
+        formModal({
+            title: 'Bifoga dokumentet', okLabel: 'Bifoga', wide: false,
+            html: `<p class="mb-2"><b>${esc(d.title)}</b></p>${groups
+                ? `<label class="form-label" for="afTarget">Var ska det bifogas?</label><select id="afTarget" class="form-select">${groups}</select>
+                   <p class="pl-help small mt-2 mb-0">Till ett meddelande bifogar du när du skriver det, under Meddelanden.</p>`
+                : '<p class="pl-help mb-0">Det finns inga möten eller öppna uppgifter att bifoga till ännu.</p>'}`,
+            onOk: groups ? async body => {
+                const [kind, id] = body.querySelector('#afTarget').value.split(':');
+                if (!kind) return 'Välj var det ska bifogas.';
+                const r = await post('AttachDocuments', { documentIds: d.id, kind, targetId: id });
+                if (!r.success) return r.message;
+                await reloadDocs(); rerender(); return true;
+            } : null,
+        });
+    }
+
     // Materielberäkningen räknas ur tävlingens anmälningar (bemanningens tjänst, tävlingens behörighet).
     async function openMateriel(c) {
         let html;
@@ -1529,11 +1836,8 @@
         const th = e.target.closest('[data-tk-thread]');
         if (th) { const t = findTask(parseInt(th.dataset.tkThread, 10)); if (t) openThread(t); return; }
         if (e.target.closest('[data-tk-template]')) { openTemplate(); return; }
-        if (e.target.closest('[data-tk-doc-add]')) { openDocAdd({}); return; }
-        const dt = e.target.closest('[data-tk-doc-add-task]');
-        if (dt) { openDocAdd({ taskId: parseInt(dt.dataset.tkDocAddTask, 10) }); return; }
-        const dd = e.target.closest('[data-tk-doc-del]');
-        if (dd) { removeDoc(parseInt(dd.dataset.tkDocDel, 10)); }
+        const dp = e.target.closest('[data-tk-doc-pick]');
+        if (dp) pickDocuments({ attach: { kind: 'Task', id: parseInt(dp.dataset.tkDocPick, 10) }, reopenThread: true });
     });
 
     // Mötessidans knappar: Klar ✓ / Fortsätter / Ångra / Berätta hur det går / Lägg till / punkterna.
@@ -2175,7 +2479,7 @@
             if (v.version !== version) {
                 version = v.version;
                 const typing = view === 'meddelanden' && $('plText') && document.activeElement === $('plText');
-                await Promise.all([reloadPeople(), reloadMeetings(), reloadTasks(), S.me.canReadMessages ? reloadMessages() : Promise.resolve()]);
+                await Promise.all([reloadPeople(), reloadMeetings(), reloadTasks(), reloadDocs(), S.me.canReadMessages ? reloadMessages() : Promise.resolve()]);
                 version = S.version;
                 // Ett fält någon skriver i ritas aldrig om (anteckningar, punkter, nya uppgifter, sök).
                 const editing = document.activeElement && $('plBody').contains(document.activeElement)

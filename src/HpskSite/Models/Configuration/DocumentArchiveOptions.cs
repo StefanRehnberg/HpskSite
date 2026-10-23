@@ -31,6 +31,11 @@ namespace HpskSite.Models.Configuration
         public int DefaultRegionStorageLimitMB { get; set; } = 200;
 
         /// <summary>
+        /// Default total storage limit per tävlingsplanering in MB (planeringens dokumentarkiv)
+        /// </summary>
+        public int DefaultPlanningStorageLimitMB { get; set; } = 200;
+
+        /// <summary>
         /// Returns the allowed extensions as an array
         /// </summary>
         public string[] GetAllowedExtensionsArray()

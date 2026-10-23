@@ -12463,7 +12463,23 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   - Test: `PlanningPrepRulesTests`. Svit: `hpsk-verify/tavlingsplanering-p2-verify.mjs` 86/86 (fixturer 2576
     och 5312; avbryter om de redan har en planering; A/B utan `DoneAtMeetingsOnly`-grenen och utan att
     tappad behörighet tar bort raden → 4 röda).
-- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (19 tabeller med P2; dev: även
+- **Dokumentarkivet (2026-10-23, Stefans önskemål):** rälsposten **Dokument** (`#vy=dokument`). Ett dokument
+  (fil eller länk) bor i arkivet med en valfri **kategori** (`PlanningDocumentCategory`) och kan **bifogas** på
+  flera ställen genom `PlanningDocumentRef` (TargetKind `Message|Meeting|Topic|Task|Area` + TargetId — sorten
+  följer alltid id:t). `PlanningDocument.AreaId/TaskId` är BORTTAGNA; P2:s import skriver bifogningar.
+  - **Inga behörighetsnivåer per dokument** (Stefan): alla som är med läser allt, även Följer och mejllänken.
+    Lägga till/bifoga = Deltar och uppåt; ändra/ta bort dokument = den som lade till eller Kan ändra;
+    kategorier = Kan ändra; ta bort en bifogning = den som bifogade eller Kan ändra. Till ett MEDDELANDE
+    bifogar bara författaren (`Post` tar `documents`, eller i efterhand ur meddelandets meny).
+  - Målet prövas mot planeringen i `TargetExists` (raderat mål vägras). En bifogning till ett borttaget
+    dokument visas som *Borttaget dokument* (`removedRefs`); att ta bort en bifogning rör aldrig dokumentet.
+  - **Utrymme per planering:** `DocumentArchive:DefaultPlanningStorageLimitMB` (300 i appsettings, 200 som
+    förval i koden); summan av `FileSize`. Filerna i `PrepDocuments` (25 MB per fil, som förut).
+  - Klienten läser allt ur EN endpoint, `Documents` (kategorier, dokument med sina bifogningar och målens
+    rubriker, lagring), som pollas med resten. `Tasks` bär inte längre `documents`.
+  - Svit: `hpsk-verify/tavlingsplanering-dokument-verify.mjs` 62/62 (A/B: målet prövat utan planeringen +
+    vem som helst får ta bort en bifogning → 6 röda).
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet; dev: även
   `alter-planning-p2-tasks.sql`) (17 tabeller inkl. `PlanningRequest`,
   `Planning.ListedForMembers` och de fyra ovan; för en DB som redan har de 13: `alter-planning-tasks-topics-roles.sql`
   — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒

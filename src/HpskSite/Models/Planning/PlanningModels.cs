@@ -547,24 +547,79 @@ namespace HpskSite.Models.Planning
         public int? ImportedFromWorkAreaId { get; set; }
     }
 
-    /// <summary>En länk eller en fil, för planeringen, ett område eller en uppgift.</summary>
+    /// <summary>
+    /// En länk eller en fil i planeringens dokumentarkiv. Var den är bifogad står i
+    /// <see cref="PlanningDocumentRefRow"/> — samma dokument kan bifogas på flera ställen.
+    /// </summary>
     [TableName("PlanningDocument")]
     [PrimaryKey("Id", AutoIncrement = true)]
     public class PlanningDocumentRow
     {
         public int Id { get; set; }
         public int PlanningId { get; set; }
-        public int? AreaId { get; set; }
-        public int? TaskId { get; set; }
+        /// <summary>Kategorin (PlanningDocumentCategory.Id). Null = utan kategori.</summary>
+        public int? CategoryId { get; set; }
         public string Title { get; set; } = "";
+        public string? Description { get; set; }
         public string? Url { get; set; }
         public string? StoredFileName { get; set; }
         public string? OriginalFileName { get; set; }
+        /// <summary>Byte. Null för länkar och för filer som flyttades in från förberedelserna.</summary>
+        public long? FileSize { get; set; }
         public DateTime AddedAt { get; set; }
         public int AddedBy { get; set; }
         public DateTime? DeletedAt { get; set; }
         public int? ImportedFromWorkLinkId { get; set; }
         [Ignore] public bool IsFile => !string.IsNullOrEmpty(StoredFileName);
+    }
+
+    /// <summary>En kategori i planeringens dokumentarkiv ("Inbjudan", "Banor", "Avtal" …).</summary>
+    [TableName("PlanningDocumentCategory")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningDocumentCategoryRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public string Name { get; set; } = "";
+        public int SortOrder { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int CreatedBy { get; set; }             // deltagare
+        public DateTime? DeletedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Var ett dokument är bifogat. Att ta bort en bifogning rör aldrig dokumentet. Id:t i
+    /// <see cref="TargetId"/> bär sin sort i <see cref="TargetKind"/> (id-lagen, regel 1).
+    /// </summary>
+    [TableName("PlanningDocumentRef")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningDocumentRefRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int DocumentId { get; set; }
+        public string TargetKind { get; set; } = PlanningDocTarget.Task;
+        public int TargetId { get; set; }
+        public DateTime AddedAt { get; set; }
+        public int AddedBy { get; set; }               // deltagare
+        public DateTime? RemovedAt { get; set; }
+    }
+
+    /// <summary>Vad ett dokument kan bifogas till.</summary>
+    public static class PlanningDocTarget
+    {
+        public const string Message = "Message";
+        public const string Meeting = "Meeting";
+        public const string Topic = "Topic";
+        public const string Task = "Task";
+        public const string Area = "Area";
+        public static readonly string[] All = { Message, Meeting, Topic, Task, Area };
+        public static string? Normalize(string? kind)
+        {
+            var k = kind?.Trim();
+            foreach (var a in All) if (string.Equals(a, k, StringComparison.OrdinalIgnoreCase)) return a;
+            return null;
+        }
     }
 
     /// <summary>

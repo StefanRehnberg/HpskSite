@@ -33,12 +33,18 @@ namespace HpskSite.Services.Staffing
             var people = _planning.Participants(p.Id, includeRemoved: true).ToDictionary(x => x.Id);
             var tasks = _planning.Tasks(p.Id);
             var docs = _planning.Documents(p.Id);
+            var docById = docs.ToDictionary(d => d.Id);
+            var refs = _planning.DocumentRefs(p.Id).Where(r => docById.ContainsKey(r.DocumentId)).ToList();
+            List<PlanningDocumentRow> DocsOn(string kind, int targetId) =>
+                refs.Where(r => r.TargetKind == kind && r.TargetId == targetId).Select(r => docById[r.DocumentId]).ToList();
+            var attachedToPrep = refs.Where(r => r.TargetKind is PlanningDocTarget.Task or PlanningDocTarget.Area)
+                .Select(r => r.DocumentId).ToHashSet();
             var today = DateTime.Today;
             (int? MemberId, string? Name) Who(int? pid, string? free) =>
                 pid.HasValue && people.TryGetValue(pid.Value, out var row) ? (row.MemberId, row.DisplayName) : (null, free);
             WorkLinkView Link(PlanningDocumentRow d) => new()
             {
-                Id = d.Id, WorkAreaId = d.AreaId, WorkItemId = d.TaskId, Title = d.Title, IsFile = d.IsFile,
+                Id = d.Id, Title = d.Title, IsFile = d.IsFile,
                 Url = d.IsFile ? $"/umbraco/surface/Planning/DownloadDocument?id={p.Id}&documentId={d.Id}" : d.Url,
             };
             WorkItemView Item(PlanningTaskRow t, int areaId)
@@ -51,7 +57,7 @@ namespace HpskSite.Services.Staffing
                     DueDate = t.DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     Status = LegacyStatus(t.Status), ScopeType = t.ScopeType, ScopeKey = t.ScopeKey,
                     IsOverdue = PlanningTaskRules.IsOverdue(t, today), EstimatedCost = t.EstimatedCost, SortOrder = t.SortOrder,
-                    Links = docs.Where(d => d.TaskId == t.Id).Select(Link).ToList(),
+                    Links = DocsOn(PlanningDocTarget.Task, t.Id).Select(Link).ToList(),
                 };
             }
             WorkAreaView Area(int id, string name, int? respPid, string? respName, int sort, List<PlanningTaskRow> items)
@@ -61,7 +67,7 @@ namespace HpskSite.Services.Staffing
                 return new WorkAreaView
                 {
                     Id = id, Name = name, ResponsibleMemberId = mid, ResponsibleName = rname, SortOrder = sort, Items = views,
-                    Links = id > 0 ? docs.Where(d => d.AreaId == id && d.TaskId == null).Select(Link).ToList() : new(),
+                    Links = id > 0 ? DocsOn(PlanningDocTarget.Area, id).Select(Link).ToList() : new(),
                     TotalCount = views.Count, DoneCount = views.Count(v => v.Status == WorkItemStatus.Klar),
                     OverdueCount = views.Count(v => v.IsOverdue), EstimatedCostSum = views.Sum(v => v.EstimatedCost ?? 0m),
                 };
@@ -73,7 +79,7 @@ namespace HpskSite.Services.Staffing
                 resp.Areas.Add(Area(a.Id, a.Name, a.ResponsibleParticipantId, a.ResponsibleName, a.SortOrder, tasks.Where(t => t.AreaId == a.Id).ToList()));
             var loose = tasks.Where(t => !t.AreaId.HasValue || !areaIds.Contains(t.AreaId.Value)).ToList();
             if (loose.Count > 0) resp.Areas.Add(Area(0, "Utan område", null, null, int.MaxValue, loose));
-            resp.CompLinks = docs.Where(d => d.AreaId == null && d.TaskId == null).Select(Link).ToList();
+            resp.CompLinks = docs.Where(d => !attachedToPrep.Contains(d.Id)).Select(Link).ToList();
             resp.TotalEstimatedCost = resp.Areas.Sum(a => a.EstimatedCostSum);
             return resp;
         }

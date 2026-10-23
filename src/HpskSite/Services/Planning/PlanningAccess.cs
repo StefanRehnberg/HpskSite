@@ -129,6 +129,22 @@ namespace HpskSite.Services.Planning
         public static bool CanRemoveDocument(PlanningCaller c, PlanningDocumentRow d) =>
             c.IsParticipant && !c.ViaLink && (d.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
 
+        /// <summary>Ändra namn, beskrivning och kategori på ett dokument: samma som att ta bort det.</summary>
+        public static bool CanEditDocument(PlanningCaller c, PlanningDocumentRow d) => CanRemoveDocument(c, d);
+
+        /// <summary>Skapa, byta namn på och ta bort kategorier i dokumentarkivet: Kan ändra och uppåt.</summary>
+        public static bool CanManageDocumentCategories(PlanningCaller c) => CanEditPlanning(c);
+
+        /// <summary>
+        /// Bifoga ett dokument till ett möte, en punkt, en uppgift eller ett område: Deltar och uppåt.
+        /// Till ett meddelande bifogar bara den som skrev det (prövas av anroparen).
+        /// </summary>
+        public static bool CanAttachDocument(PlanningCaller c) => CanAddDocument(c);
+
+        /// <summary>Ta bort en bifogning: den som bifogade, eller Kan ändra och uppåt. Dokumentet står kvar i arkivet.</summary>
+        public static bool CanDetachDocument(PlanningCaller c, PlanningDocumentRefRow r) =>
+            c.IsParticipant && !c.ViaLink && (r.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
         /// <summary>Koppla och koppla loss en tävling: den sammankallande (plus tävlingens redigerare, prövas av anroparen).</summary>
         public static bool CanLinkCompetition(PlanningCaller c) => CanManagePlanning(c);
 
