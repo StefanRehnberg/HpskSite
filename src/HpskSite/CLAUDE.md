@@ -12544,6 +12544,13 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   till JUST den tävlingen. Planeringens rad om tävlingen länkar till tävlingshanteringen (inte tillbaka till
   `?c=`, som nu är planeringen själv). Svit: `hpsk-verify/tavlingsplanering-en-verify.mjs` 26/26 (A/B utan
   omdirigeringen → 3 röda); p2-sviten uppdaterad (86/86).
+- **Småsakerna efter sammanslagningen (2026-10-23):** materielberäkningen (`GetMaterielEstimate`) går genom
+  `CanManageAgendaAsync` (kopplingen); utskriften `/tavlingsplanering/blad?p=` tar alla vyer även utan tävling
+  (`PlaneringBladModel.PlanningId`, `AgendaAvailable`; Översikt → Åtgärder → *Skriv ut hela planen*); deltagarlistan
+  visar **Under tävlingen** (`StaffingService.DutiesByMember`, `participants[].duties`). Meddelanden: skrivrutan
+  överst, trådarna efter senaste händelsen, 15 åt gången (`data-pl-older`), svaret skrivs under tråden; inte
+  längre sticky. `.pl-card.p-0 { overflow: hidden }` så tabellkort följer de rundade hörnen. Rälsens Bemanning/
+  Dagsprogram utan ny-flik-ikon (öppnas i samma flik). Svit `tavlingsplanering-en-verify.mjs` 37/37 (A/B 6 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

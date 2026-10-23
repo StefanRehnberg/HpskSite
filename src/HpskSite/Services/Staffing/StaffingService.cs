@@ -868,6 +868,48 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Every assignment the member holds, grouped by competition, with their availability windows.</summary>
+        /// <summary>
+        /// "Under tävlingen" på planeringens deltagarlista: per medlem rollerna i bemanningen, med dagarna
+        /// ("Kassa (lör 19 aug, sön 20 aug)"). Avböjda räknas inte. Läser bara.
+        /// </summary>
+        public Dictionary<int, List<string>> DutiesByMember(StaffOwner owner)
+        {
+            var result = new Dictionary<int, List<string>>();
+            List<DutyRow> rows;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                rows = scope.Database.Fetch<DutyRow>(@"
+                    SELECT sa.MemberId, sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day
+                    FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
+                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND sa.MemberId > 0 AND ISNULL(sa.Status, '') <> @2",
+                    owner.P, owner.C, StaffAssignmentStatus.Declined);
+            }
+            if (rows.Count == 0) return result;
+            var names = _roles.For(owner, _owners.Discipline(owner))
+                .ToDictionary(r => r.Key, r => r.DisplayName, StringComparer.OrdinalIgnoreCase);
+            var sv = CultureInfo.GetCultureInfo("sv-SE");
+            foreach (var m in rows.GroupBy(r => r.MemberId))
+            {
+                result[m.Key] = m.GroupBy(r => r.RoleKey ?? "", StringComparer.OrdinalIgnoreCase)
+                    .Select(g =>
+                    {
+                        var name = names.TryGetValue(g.Key, out var n) ? n : g.Key;
+                        var days = g.Where(r => r.Day.HasValue).Select(r => r.Day!.Value.Date).Distinct().OrderBy(d => d)
+                            .Select(d => d.ToString("ddd d MMM", sv)).ToList();
+                        return days.Count > 0 ? $"{name} ({string.Join(", ", days)})" : name;
+                    })
+                    .OrderBy(s => s, StringComparer.Create(sv, true)).ToList();
+            }
+            return result;
+        }
+
+        private class DutyRow
+        {
+            public int MemberId { get; set; }
+            public string? RoleKey { get; set; }
+            public DateTime? Day { get; set; }
+        }
+
         public List<MyCompetitionGroup> GetMyAssignments(int memberId)
         {
             List<StaffAssignment> rows;

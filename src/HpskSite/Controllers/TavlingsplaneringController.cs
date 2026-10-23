@@ -289,29 +289,37 @@ namespace HpskSite.Controllers
             if (currentMember?.Email == null)
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(p > 0 ? $"/tavlingsplanering/blad?p={p}&vy={vy}" : $"/tavlingsplanering/blad?c={c}")}");
 
-            // P2b: en planerings bemanning, även utan tävling. En kopplad planering skrivs ut som tävlingen.
+            // En planerings blad (bemanning, förberedelser, dagsprogram), även utan tävling. Den som får
+            // ändra i planeringen får skriva ut den — också när den är kopplad (tävlingens dagsprogram via kopplingen).
+            var planningOk = false;
             if (p > 0)
             {
                 var po = _owners.ForPlanning(p);
+                planningOk = po != null && await CanStaffPlanningAsync(po, currentMember.Email);
                 if (po is { HasCompetition: true }) c = po.Comp;
                 else
                 {
-                    var ok = po != null && await CanStaffPlanningAsync(po, currentMember.Email);
                     var pm = new PlaneringBladModel
                     {
                         CompetitionId = 0,
-                        Vy = PlaneringBladVy.Bemanning,
+                        PlanningId = p,
+                        AgendaAvailable = false,
+                        Vy = PlaneringBladVy.Normalise(vy),
                         Exists = po != null,
-                        CanAccess = ok,
-                        CompName = po == null ? "" : _owners.Name(po),
+                        CanAccess = planningOk,
+                        CompName = po == null ? "" : (_owners.Planning(p)?.Name ?? _owners.Name(po)),
                         Discipline = po == null ? "Precision" : (_owners.Discipline(po) is { Length: > 0 } d ? d : "Precision"),
                     };
-                    if (ok)
+                    if (planningOk)
                     {
                         if (_owners.Span(po!).Start is { } sd && sd != default)
                             pm.CompDate = sd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-                        pm.Roster = _staffing.BuildRoster(po!, pm.Discipline, canEdit: false);
-                        pm.Grid = _grid.BuildGrid(po!, pm.Discipline, 0);
+                        if (pm.ShowBemanning)
+                        {
+                            pm.Roster = _staffing.BuildRoster(po!, pm.Discipline, canEdit: false);
+                            pm.Grid = _grid.BuildGrid(po!, pm.Discipline, 0);
+                        }
+                        if (pm.ShowForberedelser) pm.Work = _work.BuildForPlanning(p, canEdit: false);
                     }
                     return View("TavlingsplaneringBlad", pm);
                 }
@@ -319,11 +327,12 @@ namespace HpskSite.Controllers
 
             var competition = c > 0 ? _competitions.Get(c) : null;
             var isCompetition = competition != null;
-            var canAccess = isCompetition && await HasCompetitionAccessAsync(c);
+            var canAccess = isCompetition && (planningOk || await HasCompetitionAccessAsync(c));
 
             var model = new PlaneringBladModel
             {
                 CompetitionId = c,
+                PlanningId = p,
                 Vy = PlaneringBladVy.Normalise(vy),
                 Exists = isCompetition,
                 CanAccess = canAccess,

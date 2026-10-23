@@ -91,13 +91,13 @@
     {
         <div class="toolbar no-print">
             <button class="btn" onclick="window.print()"><i class="bi bi-printer"></i> Skriv ut</button>
-            <a class="btn secondary" href="/tavlingsplanering?c=@Model.CompetitionId"><i class="bi bi-arrow-left"></i> Tillbaka till planeringen</a>
+            <a class="btn secondary" href="@(Model.PlanningId > 0 ? $"/tavlingsplanering/{Model.PlanningId}" : $"/tavlingsplanering?c={Model.CompetitionId}")"><i class="bi bi-arrow-left"></i> Tillbaka till planeringen</a>
         </div>
 
         <h1>@Model.Heading</h1>
         <div class="meta">
             <strong>@Model.CompName</strong>
-            @if (!string.IsNullOrEmpty(Model.CompDate)) { <span> · Tävlingsdatum @Model.CompDate</span> }
+            @if (!string.IsNullOrEmpty(Model.CompDate)) { <span> · @(Model.CompetitionId > 0 ? "Tävlingsdatum" : "Första dagen") @Model.CompDate</span> }
             @if (Model.ShowForberedelser && Model.Work != null && Model.Work.TotalEstimatedCost != 0)
             {
                 <span> · Budget @Kr(Model.Work.TotalEstimatedCost)</span>

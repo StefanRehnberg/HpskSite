@@ -437,7 +437,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMaterielEstimate(int competitionId)
         {
-            if (!await HasCompetitionAccessAsync(competitionId))
+            // Tävlingens behörighet, eller Kan ändra i planeringen som är kopplad till just den tävlingen.
+            if (!await CanManageAgendaAsync(competitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var est = _materiel.Estimate(competitionId);
             return Json(new

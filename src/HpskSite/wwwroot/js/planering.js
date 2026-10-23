@@ -244,9 +244,10 @@
             `<a href="#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
             + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('')
             // P2b: bemanningen är ett eget rutnät på en egen sida (det behöver hela bredden).
-            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '')
+            // Öppnas i samma flik (en egen sida som behöver hela bredden), därför ingen ny-flik-ikon.
+            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav">Bemanning</a>` : '')
             // Dagsprogrammet hör till tävlingen och finns här när planeringen är kopplad (Stefan 2026-10-23).
-            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav">Dagsprogram <i class="bi bi-box-arrow-up-right small ms-1" aria-hidden="true"></i></a>` : '');
+            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav">Dagsprogram</a>` : '');
     }
 
     function myOpenTasks() {
@@ -304,6 +305,9 @@
             S.me.canInvite && { label: 'Bjud in…', icon: 'bi-person-plus', fn: openInvite },
             S.me.canUseMeetings && { label: 'Föreslå ett möte…', icon: 'bi-calendar-plus', fn: openNewMeeting },
             S.me.canWrite && { label: 'Skriv ett meddelande', icon: 'bi-chat-left-text', fn: () => go('meddelanden') },
+            // Hela planen på papper: bemanning, förberedelser och (när planeringen är kopplad) dagsprogrammet.
+            S.me.canEdit && !TOKEN && { label: 'Skriv ut hela planen', icon: 'bi-printer',
+                fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
         ] : []);
         const p = S;
         const html = [];
@@ -417,10 +421,17 @@
         const all = MSG.messages;
         const replies = new Map();
         all.filter(m => m.replyTo).forEach(m => { if (!replies.has(m.replyTo)) replies.set(m.replyTo, []); replies.get(m.replyTo).push(m); });
-        const top = all.filter(m => !m.replyTo);
-        if (!top.length) return '<p class="pl-help">Inga meddelanden ännu. Skriv det första nedan — alla som är med får det i kvällens mejl.</p>';
-        return top.map(m => msgHtml(m, false) + ((replies.get(m.id) || []).length
-            ? `<div class="pl-reply">${replies.get(m.id).map(r => msgHtml(r, true)).join('')}</div>` : '')).join('');
+        // Trådarna i ordning efter senaste händelsen (ett nytt svar lyfter tråden), svaren i tidsordning.
+        const last = m => Math.max(m.id, ...(replies.get(m.id) || []).map(r => r.id));
+        const top = all.filter(m => !m.replyTo).sort((a, b) => last(b) - last(a));
+        if (!top.length) return '<p class="pl-help mt-3">Inga meddelanden ännu. Skriv det första ovan — alla som är med får det i kvällens mejl.</p>';
+        // Den man svarar på visas alltid, även om den ligger bland de äldre.
+        const shown = top.filter((m, i) => i < msgShown || m.id === replyTo);
+        const older = top.length - shown.length;
+        return shown.map(m => msgHtml(m, false) + ((replies.get(m.id) || []).length
+            ? `<div class="pl-reply">${replies.get(m.id).map(r => msgHtml(r, true)).join('')}</div>` : '')
+            + (replyTo === m.id ? `<div class="pl-reply">${composerHtml()}</div>` : '')).join('')
+            + (older > 0 ? `<div class="text-center mt-2"><button type="button" class="btn btn-outline-secondary" data-pl-older>Visa äldre meddelanden (${older})</button></div>` : '');
     }
     function composerHtml() {
         if (!S.me.canWrite) return `<p class="pl-help mt-3 mb-0">Du följer planeringen och läser meddelandena, men skriver inte här.</p>`;
@@ -452,11 +463,20 @@
         setHead('Meddelanden', esc(S.planning.name));
         setActions([]);
         if (!MSG) { $('plBody').innerHTML = spinner(); return; }
-        $('plBody').innerHTML = `<div class="pl-card"><div class="pl-msgs" id="plThread">${threadHtml()}</div>${composerHtml()}</div>`;
+        // Skrivrutan först och det senaste överst (Stefan 2026-10-23): med många meddelanden skulle man
+        // annars behöva rulla förbi alla för att skriva. Svarar man skrivs svaret under tråden.
+        $('plBody').innerHTML = `<div class="pl-card">${replyTo ? '' : composerHtml()}<div class="pl-msgs" id="plThread">${threadHtml()}</div></div>`;
         wireComposer();
-        if (replyTo) setTimeout(() => $('plText')?.focus(), 50);
+        if (replyTo) setTimeout(() => { $('plCompose')?.scrollIntoView({ block: 'center' }); $('plText')?.focus(); }, 50);
         markRead();
     }
+    const MSG_PAGE = 15;
+    let msgShown = MSG_PAGE;
+    document.addEventListener('click', e => {
+        if (!e.target.closest('[data-pl-older]')) return;
+        msgShown += MSG_PAGE * 2;
+        const t = $('plThread'); if (t) { rowFns = []; t.innerHTML = threadHtml(); }
+    });
     function refreshThreadOnly() {
         const t = $('plThread');
         if (t) { rowFns = []; t.innerHTML = threadHtml(); }
@@ -509,7 +529,7 @@
             await reloadDocs();
             await reloadMessages();
             viewMessages();
-            $('plThread')?.lastElementChild?.scrollIntoView({ block: 'nearest' });
+            $('plThread')?.firstElementChild?.scrollIntoView({ block: 'nearest' });
         } catch (e) { failMsg(e); }
         finally { if ($('plSend')) $('plSend').disabled = false; }
     }
@@ -2032,13 +2052,16 @@
             const seen = p.lastSeen ? esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
             const rep = p.represents ? esc(p.represents) : '<span class="pl-help">—</span>';
             const roleChips = (p.roles || []).map(r => `<span class="pl-role">${esc(r)}</span>`).join(' ');
+            // Uppdragen i bemanningen — vad personen gör under själva tävlingen.
+            const duties = (p.duties || []).length
+                ? `<div class="small mt-1"><span class="text-body-secondary">Under tävlingen:</span> ${(p.duties || []).map(esc).join(' · ')}</div>` : '';
             const tasks = p.openTasks ? `<a href="#vy=uppgifter" data-pl-go="uppgifter" class="small">${p.openTasks === 1 ? '1 öppen uppgift' : p.openTasks + ' öppna uppgifter'}</a>` : '';
             return `<tr><td><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''}${guest}
                     ${p.guestEmail ? `<div class="pl-help small">${esc(p.guestEmail)}</div>` : ''}
                     <div class="d-sm-none mt-1">${levelBadge(p)}</div>
                     ${roleChips ? `<div class="d-lg-none mt-1 d-flex gap-1 flex-wrap">${roleChips}</div>` : ''}
                     <div class="d-md-none small mt-1">${p.represents ? 'Företräder ' + esc(p.represents) + ' · ' : ''}${p.lastSeen ? 'Senast inne ' : ''}${seen}</div>
-                    ${tasks ? `<div class="mt-1">${tasks}</div>` : ''}</td>
+                    ${duties}${tasks ? `<div class="mt-1">${tasks}</div>` : ''}</td>
                 <td class="d-none d-md-table-cell">${rep}</td>
                 <td class="d-none d-sm-table-cell">${levelBadge(p)}</td>
                 <td class="d-none d-lg-table-cell">${roleChips ? `<div class="d-flex gap-1 flex-wrap">${roleChips}</div>` : '<span class="pl-help">—</span>'}</td>
@@ -2048,7 +2071,7 @@
         const shown = () => {
             const q = pplQuery.trim().toLowerCase();
             return S.participants.filter(p =>
-                (!q || [p.name, p.represents, p.guestEmail, (p.roles || []).join(' ')].some(v => (v || '').toLowerCase().includes(q)))
+                (!q || [p.name, p.represents, p.guestEmail, (p.roles || []).join(' '), (p.duties || []).join(' ')].some(v => (v || '').toLowerCase().includes(q)))
                 && (!pplFilter || (pplFilter === 'guest' ? p.isGuest : pplFilter.startsWith('r:') ? (p.represents || '') === pplFilter.slice(2) : p.access === pplFilter)))
                 .sort((a, b) => (LEVEL_RANK[b.access] || 0) - (LEVEL_RANK[a.access] || 0) || a.name.localeCompare(b.name, 'sv'));
         };

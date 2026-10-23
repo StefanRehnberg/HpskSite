@@ -80,8 +80,10 @@
     .pl-reply { margin: .4rem 0 0 1.6rem; padding-left: .8rem; border-left: 3px solid var(--bs-border-color); }
     .pl-sys { color: var(--bs-secondary-color); font-size: .9rem; font-style: italic; padding: .35rem .2rem; }
     .pl-mention { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); border-radius: .3rem; padding: 0 .25rem; font-weight: 600; }
-    .pl-compose { position: sticky; bottom: 0; background: var(--bs-body-bg); border-top: 1px solid var(--bs-border-color);
-        padding: .8rem 0 .2rem; margin-top: .6rem; }
+    /* En tabell direkt i ett kort (p-0) ska följa kortets rundade hörn. Radmenyerna är fixed-positionerade, så de klipps inte. */
+    .pl-card.p-0 { overflow: hidden; }
+    .pl-compose { background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color);
+        padding: .2rem 0 .9rem; margin: 0 0 .6rem; }
     .pl-compose textarea { font-size: 1.05rem; min-height: 5.5rem; }
     /* Mötena */
     .pl-opt { display: grid; grid-template-columns: minmax(10rem, 1fr) auto auto; gap: .5rem .8rem; align-items: center;

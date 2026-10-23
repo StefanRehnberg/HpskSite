@@ -332,6 +332,10 @@ namespace HpskSite.Controllers
             var people = _planning.Participants(id);
             var meCanManage = PlanningAccess.CanManageParticipants(c);
             var roles = _planning.Roles(id).ToLookup(r => r.ParticipantId);
+            // "Under tävlingen": uppdragen i planeringens bemanning (P2b). Ett fel får inte fälla sidan.
+            Dictionary<int, List<string>> duties;
+            try { duties = _staffing.DutiesByMember(new HpskSite.Models.Staffing.StaffOwner(id, _planning.LinkFor(id)?.TargetId)); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Bemanningens uppdrag kunde inte läsas för planering {Id}", id); duties = new(); }
             var tasks = _planning.Tasks(id);
             return Json(new
             {
@@ -383,6 +387,7 @@ namespace HpskSite.Controllers
                     // Klubbarna personen kan företräda: bara för den som får ändra raden.
                     clubChoices = (meCanManage || p.Id == c.ParticipantId) && p.MemberId > 0 ? ClubChoices(p.MemberId.Value) : null,
                     roles = roles[p.Id].Select(r => r.Name),
+                    duties = p.MemberId > 0 && duties.TryGetValue(p.MemberId.Value, out var du) ? du : new List<string>(),
                     viaCompetition = p.ViaCompetition,
                     openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),

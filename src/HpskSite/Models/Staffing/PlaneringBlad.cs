@@ -5,6 +5,10 @@ namespace HpskSite.Models.Staffing
     public class PlaneringBladModel
     {
         public int CompetitionId { get; set; }
+        /// <summary>Planeringen bladet skrivs ut ur (0 = tävlingens gamla väg). Styr "Tillbaka".</summary>
+        public int PlanningId { get; set; }
+        /// <summary>Dagsprogrammet hör till tävlingen — en planering utan tävling har inget.</summary>
+        public bool AgendaAvailable { get; set; } = true;
         public string CompName { get; set; } = "";
         public string Discipline { get; set; } = "";
         public string? CompDate { get; set; }
@@ -28,7 +32,7 @@ namespace HpskSite.Models.Staffing
 
         public bool ShowBemanning => Vy is PlaneringBladVy.Allt or PlaneringBladVy.Bemanning;
         public bool ShowForberedelser => Vy is PlaneringBladVy.Allt or PlaneringBladVy.Forberedelser;
-        public bool ShowDagsprogram => Vy is PlaneringBladVy.Allt or PlaneringBladVy.Dagsprogram;
+        public bool ShowDagsprogram => AgendaAvailable && Vy is PlaneringBladVy.Allt or PlaneringBladVy.Dagsprogram;
 
         public string Heading => Vy switch
         {
