@@ -82,7 +82,8 @@
     const tok = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
     async function req(url, opts) {
         const r = await fetch(url, opts);
-        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status) : 'Något gick fel (' + r.status + ').');
+        // hpskRequestFailureMessage ger { msg, reload } — texten är .msg.
+        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Något gick fel (' + r.status + ').');
         return r.json();
     }
     const fmt = s => { if (!s) return ''; const d = new Date(s.replace(' ', 'T')); return isNaN(d) ? s : d.toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };

@@ -438,7 +438,7 @@
     function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
     function getJson(url) {
         return fetch(url, { credentials: 'same-origin' }).then(function (r) {
-            if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status) : 'Fel ' + r.status);
+            if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Fel ' + r.status);
             return r.json();
         });
     }

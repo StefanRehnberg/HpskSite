@@ -23,7 +23,8 @@
         let r;
         try { r = await fetch(url, opts); }
         catch (e) { throw new Error('Det gick inte att nå pistol.nu. Kontrollera uppkopplingen och försök igen.'); }
-        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status) : 'Något gick fel (' + r.status + ').');
+        // hpskRequestFailureMessage ger { msg, reload } — texten är .msg.
+        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Något gick fel (' + r.status + ').');
         return r.json();
     }
     function withT(params) { const p = Object.assign({}, params || {}); if (TOKEN) p.t = TOKEN; return p; }
