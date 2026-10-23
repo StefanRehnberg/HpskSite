@@ -181,6 +181,18 @@
     let version = 0;
     let showPastMeetings = false;        // Möteslistans "Visa tidigare möten"
     let tkQuery = '', tkFilter = '';     // Uppgifternas sök och filter (lever över omritningar)
+    let tkPart = '', msgPart = '';       // P3 steg D: filtret på del ('' = alla, '0' = hela planeringen, annars delens id)
+    function parts() { return (S && S.parts) || []; }
+    function partById(id) { return parts().find(p => p.id === id); }
+    function partChip(id) {
+        const p = id ? partById(id) : null;
+        return p ? ` <span class="pl-role" title="Delen"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>${esc(p.name)}</span>` : '';
+    }
+    function partFilterOptions(cur) {
+        const o = (v, l) => `<option value="${v}"${String(cur) === String(v) ? ' selected' : ''}>${esc(l)}</option>`;
+        return o('', 'Alla delar') + o('0', 'Hela planeringen') + parts().map(p => o(p.id, p.name)).join('');
+    }
+    function partMatches(partId, f) { return f === '' || (f === '0' ? !partId : partId === parseInt(f, 10)); }
     let view = '';
     let replyTo = CFG.reply || 0;
     let pplQuery = '', pplFilter = '';   // Deltagarlistans sök och filter (lever över omritningar)
@@ -199,6 +211,7 @@
         { key: 'beslut', label: 'Förslag och beslut' },
         { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
+        { key: 'delar', label: 'Delar', need: s => s.me.canEdit || (s.parts || []).length > 0 },
         { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
         { key: 'installningar', label: 'Inställningar', need: s => s.me.canEdit },
     ];
@@ -298,7 +311,7 @@
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
-           uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
+           uppgifter: viewTasks, beslut: viewDecisions, delar: viewParts, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
     }
 
     function subLine() {
@@ -429,15 +442,17 @@
     function msgHtml(m, isReply) {
         if (m.kind === 'System') return `<div class="pl-sys">${esc(m.systemText)} <span class="when">· ${esc(fmtShort(m.createdAt))}</span></div>`;
         const unread = m.id > MSG.myLastRead && !m.mine && !m.deleted;
-        const menu = m.mine && !m.deleted ? rowMenu([
-            { label: 'Ändra', fn: () => editMessage(m) },
-            canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Message', id: m.id } }) },
-            { divider: true },
-            { label: 'Ta bort', danger: true, fn: () => deleteMessage(m) },
+        const canPart = !isReply && !m.deleted && parts().length > 0 && (m.mine || S.me.canEdit);
+        const menu = (m.mine && !m.deleted) || canPart ? rowMenu([
+            m.mine && !m.deleted && { label: 'Ändra', fn: () => editMessage(m) },
+            m.mine && !m.deleted && canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Message', id: m.id } }) },
+            canPart && { label: 'Gäller delen…', fn: () => openMessagePart(m) },
+            m.mine && !m.deleted && { divider: true },
+            m.mine && !m.deleted && { label: 'Ta bort', danger: true, fn: () => deleteMessage(m) },
         ]) : '';
         return `<div class="pl-msg${unread ? ' unread' : ''}" data-msg-id="${m.id}">
             <div class="d-flex justify-content-between gap-2"><div><span class="who">${esc(m.author)}</span>
-            <span class="when"> · ${esc(fmtShort(m.createdAt))}${m.edited ? ' · ändrat' : ''}${m.viaEmail ? ' · via mejl' : ''}</span></div>${menu}</div>
+            <span class="when"> · ${esc(fmtShort(m.createdAt))}${m.edited ? ' · ändrat' : ''}${m.viaEmail ? ' · via mejl' : ''}</span>${isReply ? '' : partChip(m.partId)}</div>${menu}</div>
             <div class="body">${m.deleted ? '<i class="text-muted">Meddelandet togs bort.</i>' : renderBody(m)}</div>
             ${m.deleted ? '' : docChips('Message', m.id)}
             <div class="meta">${!isReply && !m.deleted && S.me.canWrite ? `<button class="btn btn-link btn-sm p-0" data-pl-reply="${m.id}">Svara</button>` : ''}
@@ -449,8 +464,9 @@
         all.filter(m => m.replyTo).forEach(m => { if (!replies.has(m.replyTo)) replies.set(m.replyTo, []); replies.get(m.replyTo).push(m); });
         // Trådarna i ordning efter senaste händelsen (ett nytt svar lyfter tråden), svaren i tidsordning.
         const last = m => Math.max(m.id, ...(replies.get(m.id) || []).map(r => r.id));
-        const top = all.filter(m => !m.replyTo).sort((a, b) => last(b) - last(a));
-        if (!top.length) return '<p class="pl-help mt-3">Inga meddelanden ännu. Skriv det första ovan — alla som är med får det i kvällens mejl.</p>';
+        const top = all.filter(m => !m.replyTo && (m.kind !== 'Message' ? msgPart === '' : partMatches(m.partId, msgPart))).sort((a, b) => last(b) - last(a));
+        if (!top.length) return msgPart !== '' ? '<p class="pl-help mt-3">Inga meddelanden i den delen.</p>'
+            : '<p class="pl-help mt-3">Inga meddelanden ännu. Skriv det första ovan — alla som är med får det i kvällens mejl.</p>';
         // Den man svarar på visas alltid, även om den ligger bland de äldre.
         const shown = top.filter((m, i) => i < msgShown || m.id === replyTo);
         const older = top.length - shown.length;
@@ -476,6 +492,8 @@
                     </ul>
                 </div>
                 ${canAddDocs() ? '<button class="btn btn-outline-secondary" type="button" id="plAttach"><i class="bi bi-paperclip me-1"></i>Bifoga dokument</button>' : ''}
+                ${!target && parts().length ? `<select id="plPart" class="form-select" style="max-width:15rem" aria-label="Meddelandet gäller">
+                    <option value="">Gäller hela planeringen</option>${parts().map(p => `<option value="${p.id}"${String(p.id) === msgPart ? ' selected' : ''}>Gäller ${esc(p.name)}</option>`).join('')}</select>` : ''}
                 <span class="pl-help small" id="plMentionNote">${pendingMentions.size ? 'Nämner: ' + esc([...pendingMentions.values()].join(', ')) : 'Den du nämner får en notis.'}</span>
             </div><div id="plPendingDocs">${pendingDocsHtml()}</div></div>`;
     }
@@ -491,7 +509,10 @@
         if (!MSG) { $('plBody').innerHTML = spinner(); return; }
         // Skrivrutan först och det senaste överst (Stefan 2026-10-23): med många meddelanden skulle man
         // annars behöva rulla förbi alla för att skriva. Svarar man skrivs svaret under tråden.
-        $('plBody').innerHTML = `<div class="pl-card">${replyTo ? '' : composerHtml()}<div class="pl-msgs" id="plThread">${threadHtml()}</div></div>`;
+        const filter = parts().length ? `<div class="d-flex align-items-center gap-2 mb-2 pl-noprint"><label class="pl-help small" for="plMsgPart">Visa</label>
+            <select id="plMsgPart" class="form-select form-select-sm" style="max-width:16rem">${partFilterOptions(msgPart)}</select></div>` : '';
+        $('plBody').innerHTML = `<div class="pl-card">${replyTo ? '' : composerHtml()}${filter}<div class="pl-msgs" id="plThread">${threadHtml()}</div></div>`;
+        $('plMsgPart')?.addEventListener('change', e => { msgPart = e.target.value; refreshThreadOnly(); });
         wireComposer();
         if (replyTo) setTimeout(() => { $('plCompose')?.scrollIntoView({ block: 'center' }); $('plText')?.focus(); }, 50);
         markRead();
@@ -548,7 +569,8 @@
         const mentions = [...pendingMentions.entries()].filter(([, n]) => body.includes('@' + n)).map(([id]) => id);
         const btn = $('plSend'); btn.disabled = true;
         try {
-            const r = await post('Post', { body, replyTo: replyTo || '', mentions: mentions.join(','), documents: [...pendingDocs.keys()].join(',') });
+            const r = await post('Post', { body, replyTo: replyTo || '', mentions: mentions.join(','), documents: [...pendingDocs.keys()].join(','),
+                partId: !replyTo && $('plPart') ? $('plPart').value : '' });
             if (!r.success) { failMsg(r); return; }
             replyTo = 0; pendingMentions = new Map(); pendingDocs = new Map();
             showMsg(r.docWarning ? esc(r.docWarning) : '', 'warning');
@@ -1085,7 +1107,7 @@
                 <select class="form-select form-select-sm" id="tkFilter" aria-label="Visa" style="max-width:16rem">
                     ${opt('open', `Öppna (${n.open})`)}${opt('mine', `Mina (${n.mine})`)}${opt('overdue', `Försenade (${n.overdue})`)}
                     ${opt('help', `Behöver hjälp (${n.help})`)}${opt('ready', `Klar att pröva (${n.ready})`)}${n.milestones ? opt('milestones', `Milstolpar (${n.milestones})`) : ''}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
-                </select><span class="ms-auto pl-help small" id="tkCount"></span></div>
+                </select>${parts().length ? `<select class="form-select form-select-sm" id="tkPart" aria-label="Del" style="max-width:14rem">${partFilterOptions(tkPart)}</select>` : ''}<span class="ms-auto pl-help small" id="tkCount"></span></div>
                 <div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0 pl-tktable">
                 <thead><tr><th class="ps-3">Uppgift</th><th class="d-none d-md-table-cell">Vem</th><th class="d-none d-md-table-cell">Senast</th>
                     <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th class="pl-noprint"></th></tr></thead>
@@ -1101,6 +1123,7 @@
         renderTaskRows();
         $('tkQ').addEventListener('input', e => { tkQuery = e.target.value; renderTaskRows(); });
         $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderTaskRows(); });
+        $('tkPart')?.addEventListener('change', e => { tkPart = e.target.value; renderTaskRows(); });
     }
 
     function taskMatches(t, q) {
@@ -1109,7 +1132,8 @@
             || (f === 'help' && t.status === 'NeedsHelp') || (f === 'ready' && t.status === 'ReadyForReview')
             || (f === 'overdue' && t.overdue) || (f === 'done' && t.status === 'Done') || (f === 'milestones' && t.isMilestone);
         const area = t.areaId ? (areaById(t.areaId) || {}).name : '';
-        return okF && (!q || [t.title, t.assignee, t.report, area].some(v => (v || '').toLowerCase().includes(q)));
+        const part = t.partId ? (partById(t.partId) || {}).name : '';
+        return okF && partMatches(t.partId, tkPart) && (!q || [t.title, t.assignee, t.report, area, part].some(v => (v || '').toLowerCase().includes(q)));
     }
     function taskRow(t) {
         const open = t.status !== 'Done';
@@ -1139,7 +1163,7 @@
         const flag = t.isMilestone ? '<i class="bi bi-flag-fill text-primary me-1" aria-hidden="true"></i><span class="visually-hidden">Milstolpe: </span>' : '';
         const sent = t.sentToForbundetAt ? `<div class="small text-success">Skickad till förbundet ${esc(fmtShort(t.sentToForbundetAt))}${t.sentToForbundetBy ? ' — ' + esc(t.sentToForbundetBy) : ''}</div>`
             : (t.isMilestone && t.sendToForbundet ? '<div class="small text-body-secondary">Skickas till förbundet</div>' : '');
-        return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}${open ? '' : ' pl-tkdonerow'}"><td class="ps-3">${flag}<b>${esc(t.title)}</b>${quick}${sent}<div class="pl-help small">${origin}${extra.length ? ' · ' + extra.join(' · ') : ''}</div>${done}
+        return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}${open ? '' : ' pl-tkdonerow'}"><td class="ps-3">${flag}<b>${esc(t.title)}</b>${partChip(t.partId)}${quick}${sent}<div class="pl-help small">${origin}${extra.length ? ' · ' + extra.join(' · ') : ''}</div>${done}
                 <div class="d-sm-none mt-1">${tkChip(t)}</div>
                 <div class="d-md-none small mt-1">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}${t.overdue ? ' <span class="text-danger">försenad</span>' : ''}</div></td>
             <td class="d-none d-md-table-cell">${t.assignee ? esc(t.assignee) : '<span class="pl-help">Ingen än</span>'}</td>
@@ -1159,7 +1183,7 @@
         const areas = TASKS.areas || [];
         const groups = areas.map(a => ({ area: a, rows: sortRows(rows.filter(t => t.areaId === a.id)) }));
         groups.push({ area: null, rows: sortRows(rows.filter(t => !t.areaId || !areaById(t.areaId))) });
-        const searching = q || tkFilter !== 'open';
+        const searching = q || tkFilter !== 'open' || tkPart !== '';
         groups.forEach(g => {
             if (g.area) {
                 const allIn = TASKS.tasks.filter(t => t.areaId === g.area.id);
@@ -1249,6 +1273,8 @@
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="teTitle">Vad ska göras?</label>
                     <input id="teTitle" class="form-control" maxlength="300" value="${esc(t ? t.title : '')}"></div>
                 ${(TASKS.areas || []).length ? `<div class="mb-3"><label class="form-label" for="teArea">Område</label><select id="teArea" class="form-select">${areaOptions(t ? t.areaId : presetArea || null)}</select></div>` : ''}
+                ${parts().length ? `<div class="mb-3"><label class="form-label" for="tePart">Del</label><select id="tePart" class="form-select">
+                    <option value="0">Hela planeringen</option>${parts().map(p => `<option value="${p.id}"${(t ? t.partId === p.id : String(p.id) === tkPart) ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
                 <div class="mb-3">${whoField(t)}</div>
                 <div class="mb-3"><div class="form-label">Klart senast (valfritt)</div>
                     ${showDays ? `<div class="btn-group mb-2" role="group" aria-label="Sista dag som">
@@ -1296,7 +1322,7 @@
                     estimatedCost: body.querySelector('#teCost').value.trim(),
                     isMilestone: milestone ? '1' : '0',
                     sendToForbundet: milestone && body.querySelector('#teForbundet').checked ? '1' : '0',
-                }, w);
+                }, w, body.querySelector('#tePart') ? { partId: body.querySelector('#tePart').value } : {});
                 if (daysMode && p.dueDaysBefore === '') return 'Skriv hur många dagar före.';
                 const r = t ? await post('UpdateTask', Object.assign({ taskId: t.id }, p)) : await post('CreateTask', p);
                 if (!r.success) return r.message;
@@ -2855,6 +2881,121 @@
         const r = await post('WithdrawDecision', { decisionId: d.id });
         if (!r.success) { failMsg(r); return; }
         await reloadDecisions(); await reloadMessages(); render(view);
+    }
+
+    // ================================================================ Delar (P3 steg D)
+    // Delarna är ORGANISATION: en gren eller ett ansvar, med en ansvarig och en värd. Uppgifter och meddelanden kan
+    // märkas med en del. Bemanningen och kopplingen gäller fortfarande hela planeringen.
+    function viewParts() {
+        setHead('Delar', esc(S.planning.name));
+        setActions([S.me.canEdit && !TOKEN && { label: 'Ny del…', icon: 'bi-plus-lg', fn: () => openPart(null) }]);
+        const list = parts();
+        const html = [`<p class="pl-help">Dela upp planeringen i <b>grenar</b> (precision, fält, springskytte …) och <b>ansvar</b> (sekretariat, kiosk, prisutdelning …).
+            Varje del har en ansvarig och en värd — den klubb eller krets som står för den. Uppgifter och meddelanden kan märkas med en del och filtreras på den.</p>`];
+        if (!list.length) {
+            html.push(`<div class="pl-card"><p class="mb-2"><b>Inga delar ännu.</b></p>
+                <p class="mb-${S.me.canEdit ? '3' : '0'}">En SM-vecka kan till exempel ha delarna Precision, Fält och Sekretariatet, med var sin arrangerande klubb.</p>
+                ${S.me.canEdit && !TOKEN ? '<button class="btn btn-primary" data-part-new="1"><i class="bi bi-plus-lg me-1"></i>Ny del…</button>' : ''}</div>`);
+        } else {
+            html.push(`<div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0">
+                <thead><tr><th class="ps-3">Del</th><th class="d-none d-md-table-cell">Ansvarig</th><th class="d-none d-md-table-cell">Värd</th><th>Uppgifter</th><th class="pl-noprint"></th></tr></thead>
+                <tbody>${list.map(p => {
+                    const menu = S.me.canEdit && !TOKEN ? rowMenu([
+                        { label: 'Ändra delen…', fn: () => openPart(p) },
+                        { label: 'Visa delens uppgifter', fn: () => { tkPart = String(p.id); tkFilter = 'all'; go('uppgifter'); } },
+                        S.me.canReadMessages && { label: 'Visa delens meddelanden', fn: () => { msgPart = String(p.id); go('meddelanden'); } },
+                        { divider: true },
+                        { label: 'Ta bort delen…', danger: true, fn: () => removePart(p) },
+                    ]) : '';
+                    const sub = [p.kindLabel + (p.discipline ? ': ' + p.discipline : ''), p.responsible ? 'Ansvarig: ' + p.responsible : '', p.host ? 'Värd: ' + p.host : ''].filter(Boolean);
+                    return `<tr data-part-row="${p.id}"><td class="ps-3"><b>${esc(p.name)}</b><div class="pl-help small">${esc(sub[0])}</div>
+                            <div class="pl-help small d-md-none">${esc(sub.slice(1).join(' · '))}</div>
+                            ${p.description ? `<div class="small mt-1" style="white-space:pre-wrap;">${esc(p.description)}</div>` : ''}</td>
+                        <td class="d-none d-md-table-cell">${esc(p.responsible || '—')}</td><td class="d-none d-md-table-cell">${esc(p.host || '—')}</td>
+                        <td><a href="#vy=uppgifter" data-part-tasks="${p.id}">${p.openTasks} öppna</a><div class="pl-help small">av ${p.tasks}</div></td>
+                        <td class="text-end pe-3">${menu}</td></tr>`;
+                }).join('')}</tbody></table></div></div>
+                <p class="pl-help small mt-2">Bemanningen och kopplingen till en tävling gäller hela planeringen.</p>`);
+        }
+        $('plBody').innerHTML = html.join('');
+    }
+    document.addEventListener('click', e => { if (e.target.closest('[data-part-new]')) { e.preventDefault(); openPart(null); } });
+    document.addEventListener('click', e => {
+        const a = e.target.closest('[data-part-tasks]'); if (!a) return;
+        e.preventDefault(); tkPart = a.dataset.partTasks; tkFilter = 'open'; go('uppgifter');
+    });
+
+    async function openPart(p) {
+        const o = await get('PartHostOptions');
+        if (!o.success) { failMsg(o); return; }
+        const hostVal = p ? (p.hostClubId ? '0:' + p.hostClubId : p.hostRegionId ? '1:' + p.hostRegionId : (p.hostText ? 'text' : '')) : '';
+        const people = S.participants;
+        formModal({
+            title: p ? 'Ändra delen' : 'Ny del', okLabel: p ? 'Spara' : 'Lägg till', wide: false,
+            html: `<label class="form-label" for="ptName">Namn</label>
+                <input id="ptName" class="form-control mb-3" maxlength="200" value="${esc(p ? p.name : '')}" placeholder="Till exempel: Fält eller Sekretariatet">
+                <div class="mb-3"><div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="ptKind" id="ptKindD" value="Gren"${!p || p.kind === 'Gren' ? ' checked' : ''}><label class="form-check-label" for="ptKindD">En gren</label></div>
+                    <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="ptKind" id="ptKindR" value="Ansvar"${p && p.kind === 'Ansvar' ? ' checked' : ''}><label class="form-check-label" for="ptKindR">Ett ansvar</label></div></div>
+                <div id="ptDiscBox" class="mb-3${p && p.kind === 'Ansvar' ? ' d-none' : ''}"><label class="form-label" for="ptDisc">Gren</label>
+                    <select id="ptDisc" class="form-select"><option value="">—</option>${o.disciplines.map(d => `<option value="${esc(d.id)}"${p && p.disciplineKey === d.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
+                <label class="form-label" for="ptResp">Ansvarig</label>
+                <select id="ptResp" class="form-select mb-1"><option value="">Ingen än</option>${people.map(x => `<option value="${x.id}"${p && p.responsibleId === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}
+                    <option value="__text"${p && !p.responsibleId && p.responsibleName ? ' selected' : ''}>Någon som inte är med (skriv namnet)</option></select>
+                <input id="ptRespName" class="form-control mb-3${p && !p.responsibleId && p.responsibleName ? '' : ' d-none'}" maxlength="200" value="${esc(p && !p.responsibleId ? p.responsibleName || '' : '')}" placeholder="Namn">
+                <label class="form-label mt-2" for="ptHost">Värd</label>
+                <select id="ptHost" class="form-select mb-1"><option value="">—</option>${o.hosts.map(h => `<option value="${h.ownerType}:${h.ownerId}"${hostVal === h.ownerType + ':' + h.ownerId ? ' selected' : ''}>${esc(h.name)}</option>`).join('')}
+                    <option value="text"${hostVal === 'text' ? ' selected' : ''}>Annan (skriv)</option></select>
+                <div class="pl-help small mb-1">Klubbarna och kretsarna som någon i planeringen företräder.</div>
+                <input id="ptHostText" class="form-control mb-3${hostVal === 'text' ? '' : ' d-none'}" maxlength="200" value="${esc(p ? p.hostText || '' : '')}" placeholder="Till exempel: Förbundets kansli">
+                <label class="form-label mt-2" for="ptDesc">Beskrivning (valfri)</label>
+                <textarea id="ptDesc" class="form-control" rows="3" maxlength="2000">${esc(p ? p.description || '' : '')}</textarea>`,
+            onOpen: body => {
+                const sync = () => {
+                    body.querySelector('#ptDiscBox').classList.toggle('d-none', !body.querySelector('#ptKindD').checked);
+                    body.querySelector('#ptRespName').classList.toggle('d-none', body.querySelector('#ptResp').value !== '__text');
+                    body.querySelector('#ptHostText').classList.toggle('d-none', body.querySelector('#ptHost').value !== 'text');
+                };
+                body.querySelectorAll('input[name="ptKind"], #ptResp, #ptHost').forEach(el => el.addEventListener('change', sync));
+                body.querySelector('#ptName').focus();
+            },
+            onOk: async body => {
+                const name = body.querySelector('#ptName').value.trim();
+                if (!name) return 'Ge delen ett namn.';
+                const resp = body.querySelector('#ptResp').value, host = body.querySelector('#ptHost').value;
+                const [ht, hid] = host && host !== 'text' ? host.split(':') : ['', ''];
+                const r = await post('SavePart', {
+                    partId: p ? p.id : 0, name, kind: body.querySelector('input[name="ptKind"]:checked').value,
+                    disciplineKey: body.querySelector('#ptDisc').value, description: body.querySelector('#ptDesc').value,
+                    responsibleId: resp && resp !== '__text' ? resp : '', responsibleName: resp === '__text' ? body.querySelector('#ptRespName').value : '',
+                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#ptHostText').value : '',
+                });
+                if (!r.success) return r.message || 'Det gick inte att spara.';
+                await reloadPeople(); render(view);
+                return true;
+            }
+        });
+    }
+    async function removePart(p) {
+        if (!await plConfirm('Ta bort delen?', `${p.name} tas bort. Dess uppgifter och meddelanden står kvar och gäller då hela planeringen.`, 'Ta bort', true)) return;
+        const r = await post('RemovePart', { partId: p.id });
+        if (!r.success) { failMsg(r); return; }
+        if (tkPart === String(p.id)) tkPart = '';
+        if (msgPart === String(p.id)) msgPart = '';
+        await Promise.all([reloadPeople(), reloadTasks(), S.me.canReadMessages ? reloadMessages() : Promise.resolve()]);
+        render(view);
+    }
+    function openMessagePart(m) {
+        formModal({
+            title: 'Vilken del gäller meddelandet?', okLabel: 'Spara', wide: false,
+            html: `<select id="mpPart" class="form-select" aria-label="Del"><option value="0">Hela planeringen</option>${parts().map(p => `<option value="${p.id}"${m.partId === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+                <p class="pl-help small mt-2 mb-0">Gäller hela tråden, även svaren.</p>`,
+            onOk: async body => {
+                const r = await post('SetMessagePart', { messageId: m.id, partId: body.querySelector('#mpPart').value });
+                if (!r.success) return r.message || 'Det gick inte.';
+                await reloadMessages(); refreshThreadOnly();
+                return true;
+            }
+        });
     }
 
     // ================================================================ Pollningen

@@ -61,7 +61,8 @@ namespace HpskSite.Services.Planning
             foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId"),
                                                  ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId"),
                                                  ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate"),
-                                                 ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy") })
+                                                 ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy"),
+                                                 ("PlanningPart", "HostText"), ("PlanningTask", "PartId"), ("PlanningMessage", "PartId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -759,24 +760,32 @@ namespace HpskSite.Services.Planning
         /// namn i en notis. Bara aktiva deltagare i SAMMA planering, aldrig författaren själv.
         /// Författarens läsmärke flyttas fram — man har läst det man själv skrev.
         /// </summary>
-        public PostResult Post(int planningId, int participantId, string body, int? replyToId, IEnumerable<int>? mentionIds, bool viaEmail)
+        public PostResult Post(int planningId, int participantId, string body, int? replyToId, IEnumerable<int>? mentionIds, bool viaEmail,
+            int? partId = null)
         {
             var err = ValidateBody(body);
             if (err != null) return new PostResult(0, new List<int>(), err);
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
+            if (PartError(db, planningId, partId) is { } pe) return new PostResult(0, new List<int>(), pe);
             if (replyToId > 0)
             {
                 var parent = db.SingleOrDefault<PlanningMessageRow>(
                     "SELECT * FROM PlanningMessage WHERE Id = @0 AND PlanningId = @1", replyToId, planningId);
                 if (parent == null || parent.Kind != "Message") return new PostResult(0, new List<int>(), "Meddelandet du svarar på finns inte.");
                 if (parent.ReplyToMessageId > 0) replyToId = parent.ReplyToMessageId; // en nivå: svar på ett svar hamnar under samma tråd
+                // Ett svar hör till samma del som tråden.
+                var thread = parent.ReplyToMessageId > 0
+                    ? db.SingleOrDefault<PlanningMessageRow>("SELECT * FROM PlanningMessage WHERE Id = @0 AND PlanningId = @1", parent.ReplyToMessageId, planningId)
+                    : parent;
+                partId = thread?.PartId;
             }
             var row = new PlanningMessageRow
             {
                 PlanningId = planningId, ParticipantId = participantId, Kind = "Message", Body = body.Trim(),
                 ReplyToMessageId = replyToId > 0 ? replyToId : null, ViaEmail = viaEmail, CreatedAt = now,
+                PartId = partId > 0 ? partId : null,
             };
             db.Insert(row);
 

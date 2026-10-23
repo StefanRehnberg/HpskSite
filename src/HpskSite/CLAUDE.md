@@ -12591,6 +12591,16 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   får inbjudningsmejlet; jag är med som Kan ändra om jag vill. `HandOver`: en annan deltagare med konto blir
   sammankallande och jag Kan ändra, i ett steg. Ytor: Inställningar → Åtgärder → Kopiera planeringen…; Deltagare →
   radens Lämna över ledningen till … Svit p3 92/92 (A/B: årsflytten + sänkningen vid överlämning → 5 röda).
+- **P3 steg D, delar som organisation (2026-10-23):** `PlanningPart` fick beskrivning, gren, ansvarig (deltagare eller
+  fritt namn) och värd (klubb ELLER krets ELLER text; bara klubbar/kretsar som någon i planeringen företräder) —
+  migrering `add-planning-parts-organisation.sql` (körordning P3c), som också lägger `PartId` på `PlanningTask` och
+  `PlanningMessage`. ⚠️ `Kind` styrs av `CK_PlanningPart_Kind`: `Root`, `Gren`, `Ansvar` (`PlanningPartKind`) — grunddelen
+  är planeringen själv och visas aldrig som del. `PlanningService.Parts.cs` / `PlanningController.Parts.cs` (`SavePart`,
+  `RemovePart`, `SetMessagePart`, `PartHostOptions`); `Get` bär `parts`. Uppgifter (`partId`: utelämnat = behåll,
+  0 = hela planeringen) och meddelanden (svaret ärver trådens del) märks och filtreras; en borttagen del lämnar dem kvar
+  för hela planeringen. Rälsposten **Delar** (synlig när det finns delar eller man kan ändra). Kopian tar med delarna
+  (ansvarig bara som fritt namn) och uppgifternas del. ⚠️ Bemanning och koppling per del är INTE byggt (P4) — de gäller
+  hela planeringen. Svit p3 115/115 (A/B: delens planeringsprövning + borttagningens lösgöring → 2 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

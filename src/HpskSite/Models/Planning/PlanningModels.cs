@@ -182,11 +182,38 @@ namespace HpskSite.Models.Planning
         public int Id { get; set; }
         public int PlanningId { get; set; }
         public int? ParentPlanningPartId { get; set; }
-        public string Kind { get; set; } = "Root";
+        /// <summary><see cref="PlanningPartKind"/>: Root (planeringen själv), Discipline (en gren) eller Responsibility (ett ansvar).</summary>
+        public string Kind { get; set; } = PlanningPartKind.Root;
         public string Name { get; set; } = "";
         public int SortOrder { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? DeletedAt { get; set; }
+        // ---- P3 steg D: delen som organisation ----
+        public string? Description { get; set; }
+        /// <summary>Grenen (CompetitionTypes-id) för en del av sorten Discipline.</summary>
+        public string? DisciplineKey { get; set; }
+        /// <summary>Den som ansvarar för delen (PlanningMember.Id) — eller ett fritt namn.</summary>
+        public int? ResponsibleParticipantId { get; set; }
+        public string? ResponsibleName { get; set; }
+        /// <summary>Vem som står för delen: en klubb, en krets eller fri text ("Förbundets kansli").</summary>
+        public int? HostClubId { get; set; }
+        public int? HostRegionId { get; set; }
+        public string? HostText { get; set; }
+        public int? CreatedBy { get; set; }
+
+        [Ignore] public bool IsRoot => Kind == PlanningPartKind.Root;
+    }
+
+    public static class PlanningPartKind
+    {
+        public const string Root = "Root";
+        // ⚠️ Värdena styrs av CK_PlanningPart_Kind (create-planning-tables.sql): Root, Gren, Ansvar.
+        public const string Discipline = "Gren";
+        public const string Responsibility = "Ansvar";
+        public static string? Normalize(string? k) =>
+            string.Equals(k, Discipline, StringComparison.OrdinalIgnoreCase) ? Discipline
+            : string.Equals(k, Responsibility, StringComparison.OrdinalIgnoreCase) ? Responsibility : null;
+        public static string Label(string? k) => k == Discipline ? "Gren" : k == Responsibility ? "Ansvar" : "Hela planeringen";
     }
 
     [TableName("PlanningMember")]
@@ -293,6 +320,8 @@ namespace HpskSite.Models.Planning
         public string? RefKind { get; set; }
         public int? RefId { get; set; }
         public int? ReplyToMessageId { get; set; }
+        /// <summary>P3 steg D: delen meddelandet gäller (PlanningPart.Id, aldrig grunddelen). Null = hela planeringen.</summary>
+        public int? PartId { get; set; }
         public bool ViaEmail { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? EditedAt { get; set; }
@@ -472,6 +501,8 @@ namespace HpskSite.Models.Planning
         public string? SourceKind { get; set; }
         public string? SourceKey { get; set; }
         public int? ImportedFromWorkItemId { get; set; }
+        /// <summary>P3 steg D: delen uppgiften hör till (PlanningPart.Id, aldrig grunddelen). Null = hela planeringen.</summary>
+        public int? PartId { get; set; }
     }
 
     /// <summary>Uppgiftens historik: lägen, rapporter och beslut. Raderas aldrig.</summary>

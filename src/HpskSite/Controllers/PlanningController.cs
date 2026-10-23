@@ -401,6 +401,8 @@ namespace HpskSite.Controllers
                     viaCompetition = p.ViaCompetition,
                     openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),
+                // P3 steg D: delarna (grenar och ansvar). Grunddelen är planeringen själv och kommer inte med.
+                parts = PartsJson(id, people, tasks),
                 // Förslagen när en roll ges: bemanningens katalog + planeringens vanliga ansvar. Egen text går alltid.
                 roleSuggestions = PlanningTaskRules.RoleSuggestions().Select(r => r.Name),
                 // Nivåerna med förklaringar — texten finns bara i PlanningAccessLevel.Help.
@@ -880,7 +882,7 @@ namespace HpskSite.Controllers
                 body = m.DeletedAt == null ? m.Body : "", deleted = m.DeletedAt != null, edited = m.EditedAt != null,
                 systemText, replyTo = m.ReplyToMessageId, createdAt = DT(m.CreatedAt), viaEmail = m.ViaEmail,
                 mentions = mentions[m.Id].ToArray(), mine = m.ParticipantId == me,
-                refKind = m.RefKind, refId = m.RefId,
+                refKind = m.RefKind, refId = m.RefId, partId = m.PartId,
             };
         }
 
@@ -909,12 +911,12 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? documents, string? t)
+        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? documents, string? t, int? partId = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanWriteMessages(x.Caller)) return No("Bara den som är med skriver i planeringen.");
-            var r = _planning.Post(id, x.Caller.ParticipantId, body, replyTo, Ids(mentions), x.Caller.ViaLink);
+            var r = _planning.Post(id, x.Caller.ParticipantId, body, replyTo, Ids(mentions), x.Caller.ViaLink, partId);
             if (r.Error != null) return No(r.Error);
             // Bifogade dokument ur arkivet. Meddelandet är redan skickat; går bifogningen inte igenom sägs det.
             string? docWarning = null;

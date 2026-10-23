@@ -41,7 +41,7 @@ namespace HpskSite.Controllers
             doneAtMeetingId = t.DoneAtMeetingId,
             doneAtMeeting = t.DoneAtMeetingId.HasValue && meetings.TryGetValue(t.DoneAtMeetingId.Value, out var dm) ? dm.Title : null,
             mine = t.AssigneeParticipantId == c.ParticipantId && c.IsParticipant,
-            isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet,
+            isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet, partId = t.PartId,
             sentToForbundetAt = DT(t.SentToForbundetAt),
             sentToForbundetBy = t.SentToForbundetBy.HasValue ? names.GetValueOrDefault(t.SentToForbundetBy.Value, "Någon") : null,
             canEdit = PlanningAccess.CanEditTask(c, t),
@@ -114,13 +114,13 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateTask(int id, string title, string? description, int? assignee, string? due, int? meetingId, string? t,
             int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
-            string? isMilestone = null, string? sendToForbundet = null)
+            string? isMilestone = null, string? sendToForbundet = null, string? partId = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanCreateTasks(x.Caller)) return No("Bara den som deltar lägger till uppgifter.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
-            if (input != null) input = input with { IsMilestone = Flag(isMilestone), SendToForbundet = Flag(sendToForbundet) };
+            if (input != null) input = input with { IsMilestone = Flag(isMilestone), SendToForbundet = Flag(sendToForbundet), PartId = PartArg(partId, null) };
             if (err != null) return No(err);
             var r = _planning.CreateTask(id, x.Caller.ParticipantId, input!, meetingId, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
@@ -132,7 +132,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateTask(int id, int taskId, string title, string? description, int? assignee, string? due, string? t,
             int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
-            string? isMilestone = null, string? sendToForbundet = null)
+            string? isMilestone = null, string? sendToForbundet = null, string? partId = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
@@ -146,6 +146,7 @@ namespace HpskSite.Controllers
             {
                 IsMilestone = isMilestone == null ? task.IsMilestone : Flag(isMilestone),
                 SendToForbundet = sendToForbundet == null ? task.SendToForbundet : Flag(sendToForbundet),
+                PartId = PartArg(partId, task.PartId),
             };
             var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, input!, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);

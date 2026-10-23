@@ -55,7 +55,10 @@ namespace HpskSite.Services.Planning
             {
                 var np = new PlanningPartRow
                 {
-                    PlanningId = newId, Kind = p.Kind, Name = p.Name, SortOrder = p.SortOrder, CreatedAt = now,
+                    PlanningId = newId, Kind = p.Kind, Name = p.Name, SortOrder = p.SortOrder, CreatedAt = now, CreatedBy = ownerPid,
+                    // Delens form följer med; den ansvarige bara som fritt namn (personerna följer inte med).
+                    Description = p.Description, DisciplineKey = p.DisciplineKey, ResponsibleName = p.ResponsibleName,
+                    HostClubId = p.HostClubId, HostRegionId = p.HostRegionId, HostText = p.HostText,
                     ParentPlanningPartId = p.ParentPlanningPartId.HasValue && partMap.TryGetValue(p.ParentPlanningPartId.Value, out var pp) ? pp : newRoot,
                 };
                 db.Insert(np);
@@ -93,6 +96,7 @@ namespace HpskSite.Services.Planning
                     AreaId = t.AreaId.HasValue && areaMap.TryGetValue(t.AreaId.Value, out var am) ? am : null,
                     ScopeType = t.ScopeType, ScopeKey = t.ScopeKey, EstimatedCost = t.EstimatedCost, SortOrder = t.SortOrder,
                     IsMilestone = t.IsMilestone, SendToForbundet = t.SendToForbundet, SourceKind = t.SourceKind, SourceKey = t.SourceKey,
+                    PartId = t.PartId.HasValue && partMap.TryGetValue(t.PartId.Value, out var ptm) && ptm != newRoot ? ptm : null,
                     Status = PlanningTaskStatus.NotStarted, CreatedAt = now, CreatedBy = ownerPid, UpdatedAt = now,
                 });
                 taskCount++;
