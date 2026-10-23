@@ -12579,6 +12579,18 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   väntar / på dagordningen / behandlat (+ styrelsens beslut) / avvisat. Medan ärendet ligger hos styrelsen får
   förslaget inte ändras, dras tillbaka eller skickas igen (`IsAtBoard`). Varje händelse ger en systemrad.
   Svit `tavlingsplanering-p3-verify.mjs` 63/63 (A/B: målföreningens prövning + dubbelutskicket → 5 röda).
+- **P3 steg C, kopiera planeringen och lämna över (2026-10-23):** `PlanningService.Copy.cs` / `PlanningController.Copy.cs`
+  (`CopyPlanning`, `HandOver`), regler i `PlanningCopyRules`. Bara den sammankallande. EN transaktion (yttre scope;
+  `Create` och `AddParticipant` ansluter). Följer med: delar, områden (ansvarig bara som fritt namn), uppgifter och
+  milstolpar (från början, utan ansvarig deltagare), bemanningens roller (planeringens + tävlingens för nycklar utan
+  egen), dagar och behov. Inte: personer, meddelanden, möten, dokument, förslag, uppdrag. `CopiedFromPlanningId`.
+  ⚠️ Datumen: bemanningens dagar flyttas lika många DAGAR som första dagen (`Shift`, veckodagen behålls); en uppgifts
+  fasta datum flyttas i HELA ÅR när kopian ligger ±7 dagar från ett helt antal år senare (`ShiftDeadline` — förbundets
+  1 oktober förblir 1 oktober), annars i dagar. Utan första dag (källa eller kopia) följer fasta datum och dagar inte
+  med, och svaret räknar dem (`datesDropped`, `daysDropped`). Mottagaren (jag eller en medlem) blir sammankallande och
+  får inbjudningsmejlet; jag är med som Kan ändra om jag vill. `HandOver`: en annan deltagare med konto blir
+  sammankallande och jag Kan ändra, i ett steg. Ytor: Inställningar → Åtgärder → Kopiera planeringen…; Deltagare →
+  radens Lämna över ledningen till … Svit p3 92/92 (A/B: årsflytten + sänkningen vid överlämning → 5 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

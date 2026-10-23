@@ -2115,6 +2115,7 @@
                 S.me.canManageRoles && { label: 'Roller…', fn: () => openRoles(p) },
                 mgr && { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
                 mgr && { label: 'Byt ut mot någon annan…', fn: () => openReplace(p) },
+                mgr && !TOKEN && !p.isGuest && p.access !== 'Owner' && { label: 'Lämna över ledningen till ' + p.name + '…', fn: () => handOver(p) },
                 mgr && p.isGuest && { label: 'Skicka inbjudan igen', fn: () => resend(p) },
                 mgr && { divider: true },
                 mgr && { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
@@ -2456,6 +2457,84 @@
             }
         });
     }
+    // Lämna över (P3): den andra blir sammankallande, jag blir Kan ändra — i ett steg.
+    async function handOver(p) {
+        if (!await plConfirm('Lämna över ledningen?', `${p.name} blir sammankallande. Du blir Kan ändra och är kvar i planeringen, men kan inte längre arkivera, ta bort eller ändra andras nivå.`, 'Lämna över')) return;
+        const r = await post('HandOver', { participantId: p.id });
+        if (!r.success) { failMsg(r); return; }
+        await reloadPeople(); render(view);
+        showMsg(`${esc(p.name)} är nu sammankallande.`, 'success');
+    }
+
+    // Kopiera planeringen (P3): formen följer med, aldrig personerna eller innehållet.
+    function openCopyPlanning() {
+        const p = S.planning;
+        let chosen = 0, chosenName = '', timer = 0;
+        formModal({
+            title: 'Kopiera planeringen', okLabel: 'Kopiera', wide: true,
+            html: `<p class="mb-2">Kopian får samma <b>områden, uppgifter och milstolpar, delar</b> och bemanningens <b>roller, dagar och behov</b>.
+                    Den får <b>inte</b> med deltagarna, meddelandena, mötena, dokumenten, förslagen eller vem som gör vad.</p>
+                <label class="form-label" for="cpName">Namn på kopian</label>
+                <input id="cpName" class="form-control mb-3" maxlength="200" value="${esc((p.name.length > 190 ? p.name.slice(0, 190) : p.name) + ' (kopia)')}">
+                <div class="row g-2 mb-1"><div class="col-sm-6"><label class="form-label" for="cpStart">Första dagen</label><input id="cpStart" class="form-control" placeholder="ÅÅÅÅ-MM-DD"></div>
+                    <div class="col-sm-6"><label class="form-label" for="cpEnd">Sista dagen</label><input id="cpEnd" class="form-control" placeholder="ÅÅÅÅ-MM-DD"></div></div>
+                <div class="pl-help small mb-3">Datumen flyttas med till kopians första dag: bemanningens dagar behåller veckodagen, och en frist ett år senare behåller sitt datum (1 oktober blir 1 oktober). Utan första dag följer fasta datum och dagar inte med — "N dagar före" följer alltid med.</div>
+                <div class="fw-semibold mb-1">Vem ska leda kopian?</div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="cpWho" id="cpMe" value="me" checked><label class="form-check-label" for="cpMe">Jag</label></div>
+                <div class="form-check mb-2"><input class="form-check-input" type="radio" name="cpWho" id="cpOther" value="other"><label class="form-check-label" for="cpOther">En annan medlem — hen blir sammankallande och får ett mejl</label></div>
+                <div id="cpOtherBox" class="d-none ms-4">
+                    <input id="cpQ" class="form-control mb-2" placeholder="Sök på namn" autocomplete="off">
+                    <div id="cpHits" class="pl-help small mb-2">Skriv minst två bokstäver.</div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cpIncludeMe" checked><label class="form-check-label" for="cpIncludeMe">Jag är med i kopian som Kan ändra</label></div>
+                </div>`,
+            onOpen: body => {
+                datePicker(body.querySelector('#cpStart')); datePicker(body.querySelector('#cpEnd'));
+                body.querySelectorAll('input[name="cpWho"]').forEach(r => r.addEventListener('change', () =>
+                    body.querySelector('#cpOtherBox').classList.toggle('d-none', !body.querySelector('#cpOther').checked)));
+                const q = body.querySelector('#cpQ');
+                q.addEventListener('input', () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(async () => {
+                        const v = q.value.trim();
+                        if (v.length < 2) { body.querySelector('#cpHits').textContent = 'Skriv minst två bokstäver.'; return; }
+                        const r = await get('SearchMembers', { q: v });
+                        if (!r.success) { body.querySelector('#cpHits').textContent = r.message || 'Sökningen gick inte.'; return; }
+                        body._cpHits = r.members;
+                        body.querySelector('#cpHits').innerHTML = r.members.length ? r.members.map((m, i) =>
+                            `<div class="pl-person"><div><b>${esc(m.name)}</b><div class="small">${esc(m.club)}</div></div>
+                            <button type="button" class="btn btn-outline-primary btn-sm" data-cp-pick="${m.memberId}" data-cp-i="${i}">Välj</button></div>`).join('')
+                            : 'Ingen medlem hittades.';
+                    }, 250);
+                });
+                body.addEventListener('click', ev => {
+                    const b = ev.target.closest('[data-cp-pick]'); if (!b) return;
+                    chosen = parseInt(b.dataset.cpPick, 10);
+                    chosenName = (body._cpHits || [])[parseInt(b.dataset.cpI, 10)]?.name || '';
+                    body.querySelectorAll('[data-cp-pick]').forEach(x => { x.classList.remove('btn-primary'); x.classList.add('btn-outline-primary'); x.textContent = 'Välj'; });
+                    b.classList.remove('btn-outline-primary'); b.classList.add('btn-primary'); b.textContent = 'Vald';
+                });
+            },
+            onOk: async body => {
+                const other = body.querySelector('#cpOther').checked;
+                if (other && !chosen) return 'Sök fram och välj den som ska leda kopian.';
+                const r = await post('CopyPlanning', {
+                    name: body.querySelector('#cpName').value.trim(), targetStart: body.querySelector('#cpStart').value.trim(),
+                    targetEnd: body.querySelector('#cpEnd').value.trim(), recipientMemberId: other ? chosen : 0,
+                    includeMe: other && !body.querySelector('#cpIncludeMe').checked ? '0' : '1',
+                });
+                if (!r.success) return r.message || 'Det gick inte att kopiera.';
+                const lost = [];
+                if (r.datesDropped) lost.push(`${r.datesDropped} fasta datum följde inte med (ingen första dag att räkna från)`);
+                if (r.daysDropped) lost.push(`${r.daysDropped} av bemanningens dagar följde inte med`);
+                const what = `${r.tasks} uppgifter i ${r.areas} områden, ${r.roles} roller, ${r.days} dagar och ${r.needs} behov`;
+                showMsg(`Kopian <a href="${esc(r.url)}">${esc(body.querySelector('#cpName').value.trim())}</a> är skapad med ${what}.`
+                    + (lost.length ? ' ' + esc(lost.join('; ')) + '.' : '')
+                    + (r.toSomeoneElse ? ` ${esc(r.recipient)} är sammankallande` + (r.mailed ? ' och har fått ett mejl.' : ' — men mejlet kunde inte skickas, säg till hen.') : ''),
+                    lost.length || (r.toSomeoneElse && !r.mailed) ? 'warning' : 'success');
+                return true;
+            }
+        });
+    }
     async function resend(p) {
         const r = await post('ResendInvite', { participantId: p.id });
         if (!r.success) { failMsg(r); return; }
@@ -2507,6 +2586,7 @@
         setHead('Inställningar', esc(S.planning.name));
         const p = S.planning;
         setActions(S.me.canManage ? [
+            !TOKEN && { label: 'Kopiera planeringen…', icon: 'bi-copy', fn: openCopyPlanning },
             { label: p.status === 'Archived' ? 'Återuppta planeringen' : 'Arkivera planeringen', icon: 'bi-archive', fn: toggleArchive },
             { divider: true },
             { label: 'Ta bort planeringen…', icon: 'bi-trash', danger: true, fn: removePlanning },

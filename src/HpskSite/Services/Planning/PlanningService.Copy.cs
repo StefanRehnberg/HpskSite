@@ -1,0 +1,165 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using HpskSite.Models.Planning;
+using HpskSite.Models.Staffing;
+
+namespace HpskSite.Services.Planning
+{
+    /// <summary>
+    /// Kopiera planeringen och lämna över ledningen (P3 steg C). Behörigheten prövas av anroparen (bara den
+    /// sammankallande); inga notiser skickas härifrån.
+    /// </summary>
+    public partial class PlanningService
+    {
+        /// <param name="SourceAnchor">Källans dag: den kopplade tävlingens, annars planeringens första.</param>
+        /// <param name="SourceCompetitionId">Den kopplade tävlingen — bemanningens äldre rader kan ligga på den.</param>
+        public sealed record CopyInput(string Name, DateTime? TargetStart, DateTime? TargetEnd,
+            int RecipientMemberId, string RecipientName, int? RecipientClubId,
+            int CopierMemberId, string CopierName, int? CopierClubId, bool AddCopier,
+            DateTime? SourceAnchor, int? SourceCompetitionId);
+
+        /// <summary>
+        /// En ny planering med källans form. Mottagaren blir sammankallande; den som kopierar är med som Kan ändra
+        /// om hen vill (och inte själv är mottagaren). Allt i EN transaktion — en halv kopia är värre än ingen.
+        /// </summary>
+        public (PlanningCopyReport? Report, string? Error) Copy(int sourceId, CopyInput i)
+        {
+            var err = Validate(i.Name, i.TargetStart, i.TargetEnd);
+            if (err != null) return (null, err);
+            var now = Now;
+            using var outer = _scopes.CreateScope(autoComplete: true);
+            var db = outer.Database;
+            var src = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", sourceId);
+            if (src == null) return (null, "Planeringen finns inte.");
+
+            var (newId, ownerPid) = Create(new CreateInput(i.Name, src.Kind, null, i.TargetStart, i.TargetEnd,
+                i.RecipientMemberId, i.RecipientName, i.RecipientClubId, null));
+            var copy = db.Single<PlanningRow>("SELECT * FROM Planning WHERE Id = @0", newId);
+            copy.DisciplineKey = src.DisciplineKey;
+            copy.SignupRoleChoice = src.SignupRoleChoice;
+            copy.DoneAtMeetingsOnly = src.DoneAtMeetingsOnly;
+            copy.CopiedFromPlanningId = src.Id;
+            copy.CreatedBy = i.CopierMemberId; copy.UpdatedBy = i.CopierMemberId;
+            db.Update(copy);
+
+            var offset = PlanningCopyRules.Offset(i.SourceAnchor, i.TargetStart);
+
+            // Delarna (grunddelen finns redan i kopian).
+            var newRoot = db.ExecuteScalar<int>("SELECT Id FROM PlanningPart WHERE PlanningId = @0 AND Kind = N'Root' AND DeletedAt IS NULL", newId);
+            var parts = db.Fetch<PlanningPartRow>("SELECT * FROM PlanningPart WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY ParentPlanningPartId, SortOrder, Id", sourceId);
+            var partMap = new Dictionary<int, int>();
+            foreach (var root in parts.Where(p => p.Kind == "Root")) partMap[root.Id] = newRoot;
+            int partCount = 0;
+            foreach (var p in parts.Where(p => p.Kind != "Root").OrderBy(p => p.ParentPlanningPartId.HasValue ? 1 : 0))
+            {
+                var np = new PlanningPartRow
+                {
+                    PlanningId = newId, Kind = p.Kind, Name = p.Name, SortOrder = p.SortOrder, CreatedAt = now,
+                    ParentPlanningPartId = p.ParentPlanningPartId.HasValue && partMap.TryGetValue(p.ParentPlanningPartId.Value, out var pp) ? pp : newRoot,
+                };
+                db.Insert(np);
+                partMap[p.Id] = np.Id; partCount++;
+            }
+
+            // Områdena: namn och ordning, och en ansvarig som fritt namn — aldrig en deltagare (personerna följer inte med).
+            var areaMap = new Dictionary<int, int>();
+            foreach (var a in db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY SortOrder, Id", sourceId))
+            {
+                var na = new PlanningAreaRow
+                {
+                    PlanningId = newId, Name = a.Name, ResponsibleName = a.ResponsibleName, SortOrder = a.SortOrder,
+                    CreatedAt = now, CreatedBy = ownerPid,
+                };
+                db.Insert(na);
+                areaMap[a.Id] = na.Id;
+            }
+
+            // Uppgifterna och milstolparna: från början igen, utan ansvarig deltagare.
+            int taskCount = 0, datesDropped = 0;
+            foreach (var t in db.Fetch<PlanningTaskRow>("SELECT * FROM PlanningTask WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY SortOrder, Id", sourceId))
+            {
+                DateTime? due;
+                if (t.DueDaysBefore.HasValue) due = PlanningTaskRules.DueFromDaysBefore(t.DueDaysBefore, i.TargetStart);
+                else
+                {
+                    due = PlanningCopyRules.ShiftDeadline(t.DueDate, i.SourceAnchor, i.TargetStart);
+                    if (t.DueDate.HasValue && due == null) datesDropped++;
+                }
+                db.Insert(new PlanningTaskRow
+                {
+                    PlanningId = newId, Title = t.Title, Description = t.Description, AssigneeName = t.AssigneeName,
+                    DueDaysBefore = t.DueDaysBefore, DueDate = due,
+                    AreaId = t.AreaId.HasValue && areaMap.TryGetValue(t.AreaId.Value, out var am) ? am : null,
+                    ScopeType = t.ScopeType, ScopeKey = t.ScopeKey, EstimatedCost = t.EstimatedCost, SortOrder = t.SortOrder,
+                    IsMilestone = t.IsMilestone, SendToForbundet = t.SendToForbundet, SourceKind = t.SourceKind, SourceKey = t.SourceKey,
+                    Status = PlanningTaskStatus.NotStarted, CreatedAt = now, CreatedBy = ownerPid, UpdatedAt = now,
+                });
+                taskCount++;
+            }
+
+            // Bemanningens roller: planeringens egna, och tävlingens för de nycklar planeringen inte har egna.
+            var comp = i.SourceCompetitionId is > 0 ? i.SourceCompetitionId.Value : -1;
+            var roles = db.Execute(@"INSERT INTO StaffRole (OwnerType, OwnerId, RoleKey, DisplayName, PluralName, DefaultScopeType, SupportsTargetRange,
+                    SupportsFunctionTitle, Description, NeedsJson, Disciplines, SortOrder, IsActive, CreatedByMemberId, CreatedDate, ModifiedDate)
+                SELECT N'Planning', @0, r.RoleKey, r.DisplayName, r.PluralName, r.DefaultScopeType, r.SupportsTargetRange,
+                    r.SupportsFunctionTitle, r.Description, r.NeedsJson, r.Disciplines, r.SortOrder, r.IsActive, @3, @4, @4
+                FROM StaffRole r
+                WHERE (r.OwnerType = N'Planning' AND r.OwnerId = @1)
+                   OR (r.OwnerType = N'Competition' AND r.OwnerId = @2
+                       AND NOT EXISTS (SELECT 1 FROM StaffRole p WHERE p.OwnerType = N'Planning' AND p.OwnerId = @1 AND p.RoleKey = r.RoleKey))",
+                newId, sourceId, comp, i.CopierMemberId, now);
+
+            // Dagarna och behoven per dag flyttas; utan en dag att räkna från följer de inte med.
+            var owner = $"(PlanningId = @1 OR (PlanningId IS NULL AND CompetitionId = @2))";
+            int days = 0, daysDropped = 0;
+            if (offset.HasValue)
+                days = db.Execute($@"INSERT INTO StaffDay (CompetitionId, PlanningId, DayDate, Label, Kind, SortOrder, CreatedByMemberId, CreatedDate)
+                    SELECT NULL, @0, DATEADD(day, @3, DayDate), Label, Kind, SortOrder, @4, @5 FROM StaffDay WHERE {owner}",
+                    newId, sourceId, comp, offset.Value, i.CopierMemberId, now);
+            else daysDropped = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM StaffDay WHERE {owner}", newId, sourceId, comp);
+            var needs = offset.HasValue
+                ? db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate)
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, CASE WHEN DayDate IS NULL THEN NULL ELSE DATEADD(day, @3, DayDate) END
+                    FROM StaffCrewNeed WHERE {owner}", newId, sourceId, comp, offset.Value)
+                : db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate)
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, NULL FROM StaffCrewNeed WHERE {owner} AND DayDate IS NULL", newId, sourceId, comp);
+
+            if (i.AddCopier && i.CopierMemberId != i.RecipientMemberId)
+            {
+                var add = AddParticipant(newId, i.CopierMemberId, i.CopierName, null, PlanningAccessLevel.Editor, i.CopierClubId, null, null, i.CopierMemberId);
+                if (add.Error != null) return (null, add.Error);
+            }
+            InsertSystem(db, newId, "planning-copied", $"Planeringen är en kopia av {src.Name}.", ownerPid, null, null, now);
+            InsertSystem(db, sourceId, "planning-copy-made", $"Planeringen kopierades till {i.Name.Trim()}.", null, null, null, now);
+            Bump(db, sourceId);
+            return (new PlanningCopyReport(newId, areaMap.Count, taskCount, partCount, roles, days, needs, datesDropped, daysDropped), null);
+        }
+
+        /// <summary>
+        /// Lämnar över ledningen: en annan deltagare blir sammankallande och den som lämnar blir Kan ändra, i ett steg.
+        /// En gäst utan konto kan inte leda (ledningen kräver inloggning).
+        /// </summary>
+        public string? HandOver(int planningId, int fromParticipantId, int toParticipantId)
+        {
+            if (fromParticipantId == toParticipantId) return "Välj någon annan än dig själv.";
+            var now = Now;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var from = db.SingleOrDefault<PlanningMemberRow>(
+                "SELECT * FROM PlanningMember WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND RemovedAt IS NULL", fromParticipantId, planningId);
+            var to = db.SingleOrDefault<PlanningMemberRow>(
+                "SELECT * FROM PlanningMember WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND RemovedAt IS NULL", toParticipantId, planningId);
+            if (from == null || from.Access != PlanningAccessLevel.Owner) return "Det är den sammankallande som lämnar över.";
+            if (to == null) return "Den du valde är inte med i planeringen.";
+            if (to.IsGuest) return $"{to.DisplayName} har inget konto på pistol.nu och kan inte leda planeringen. Välj någon med konto.";
+            to.Access = PlanningAccessLevel.Owner; to.ViaCompetition = false;
+            from.Access = PlanningAccessLevel.Editor;
+            db.Update(to); db.Update(from);
+            InsertSystem(db, planningId, "handover", $"{from.DisplayName} lämnade över ledningen till {to.DisplayName}, som nu är sammankallande.",
+                from.Id, to.Id, null, now);
+            Bump(db, planningId);
+            return null;
+        }
+    }
+}
