@@ -203,15 +203,14 @@
         return MSG.messages.filter(m => m.id > MSG.myLastRead && !m.mine && !m.deleted && m.kind === 'Message').length;
     }
     function votesOwed() {
-        if (!MEET || !S || !S.me.isParticipant) return 0;
+        if (!MEET || !S || !S.me.canUseMeetings) return 0;
         return MEET.meetings.filter(m => m.status === 'Proposed' && m.options.every(o => !o.mine)).length;
     }
 
     function renderRail() {
         const s = S;
         $('plOrg').textContent = s.planning.name;
-        $('plRole').textContent = s.me.isParticipant ? s.me.accessLabel + (s.planning.ownerName ? ' · ' + s.planning.ownerName : '')
-            : 'Du läser för ' + (s.planning.ownerName || 'föreningen');
+        $('plRole').textContent = s.me.accessLabel || '';
         if (TOKEN) { const b = $('plBack'); b.textContent = '← Till startsidan'; b.href = '/'; }
         const counts = { meddelanden: unreadCount(), moten: votesOwed() };
         $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
@@ -253,7 +252,6 @@
         const parts = [];
         if (p.targetText) parts.push(esc(p.targetText));
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
-        if (p.ownerName) parts.push(esc(p.ownerName));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
         return parts.join(' · ');
     }
@@ -263,8 +261,8 @@
         setHead(S.planning.name, subLine());
         setActions(S.me.isParticipant ? [
             S.me.canInvite && { label: 'Bjud in…', icon: 'bi-person-plus', fn: openInvite },
-            { label: 'Föreslå ett möte…', icon: 'bi-calendar-plus', fn: openNewMeeting },
-            S.me.canReadMessages && { label: 'Skriv ett meddelande', icon: 'bi-chat-left-text', fn: () => go('meddelanden') },
+            S.me.canUseMeetings && { label: 'Föreslå ett möte…', icon: 'bi-calendar-plus', fn: openNewMeeting },
+            S.me.canWrite && { label: 'Skriv ett meddelande', icon: 'bi-chat-left-text', fn: () => go('meddelanden') },
         ] : []);
         const p = S;
         const html = [];
@@ -272,12 +270,19 @@
             html.push(`<div class="pl-card"><p class="mb-1"><b>Du är inne via länken i ditt mejl.</b> Du behöver inget konto.</p>
                 <p class="pl-help mb-0">Spara gärna mejlet — varje nytt mejl från planeringen har en ny länk.</p></div>`);
         }
-        if (p.me.ownerOrgReader) {
-            html.push(`<div class="pl-card"><p class="mb-0">Du ser planeringen eftersom den hör till ${esc(p.planning.ownerName)}. Meddelandena är deltagarnas och syns bara för dem.</p></div>`);
+        if (p.me.access === 'Follower') {
+            html.push(`<div class="pl-card"><p class="mb-0">Du <b>följer</b> planeringen: du läser allt, även meddelandena, men skriver inte och svarar inte på mötestider.
+                Vill du vara med och bestämma — be den sammankallande ändra din nivå till <i>Deltar</i>.</p></div>`);
+        }
+        // Bara en sammankallande: gruppen står utan ledning om hen blir sjuk eller slutar.
+        if (p.me.canManage && p.participants.filter(x => x.access === 'Owner').length === 1 && p.participants.length > 1) {
+            html.push(`<div class="alert alert-warning d-flex gap-2 align-items-start"><i class="bi bi-exclamation-triangle mt-1"></i>
+                <div>Du är ensam <b>sammankallande</b>. Utse gärna en till, så att gruppen inte står utan om du blir sjuk eller slutar.
+                <a href="#vy=deltagare" data-pl-go="deltagare">Gå till Deltagare</a></div></div>`);
         }
         // Nästa steg
         const steps = [];
-        if (MEET) MEET.meetings.filter(m => m.status === 'Proposed' && p.me.isParticipant && m.options.every(o => !o.mine))
+        if (MEET) MEET.meetings.filter(m => m.status === 'Proposed' && p.me.canUseMeetings && m.options.every(o => !o.mine))
             .forEach(m => steps.push(`<div class="pl-next warn"><div class="t"><b>Svara på tiderna:</b> ${esc(m.title)}</div>
                 <button class="btn btn-primary" data-pl-meet="${m.id}">Svara</button></div>`));
         const unread = unreadCount();
@@ -353,7 +358,7 @@
             <div class="d-flex justify-content-between gap-2"><div><span class="who">${esc(m.author)}</span>
             <span class="when"> · ${esc(fmtShort(m.createdAt))}${m.edited ? ' · ändrat' : ''}${m.viaEmail ? ' · via mejl' : ''}</span></div>${menu}</div>
             <div class="body">${m.deleted ? '<i class="text-muted">Meddelandet togs bort.</i>' : renderBody(m)}</div>
-            <div class="meta">${!isReply && !m.deleted && S.me.canReadMessages ? `<button class="btn btn-link btn-sm p-0" data-pl-reply="${m.id}">Svara</button>` : ''}
+            <div class="meta">${!isReply && !m.deleted && S.me.canWrite ? `<button class="btn btn-link btn-sm p-0" data-pl-reply="${m.id}">Svara</button>` : ''}
             ${m.mine ? `<span>${esc(seenText(m))}</span>` : ''}</div></div>`;
     }
     function threadHtml() {
@@ -366,6 +371,7 @@
             ? `<div class="pl-reply">${replies.get(m.id).map(r => msgHtml(r, true)).join('')}</div>` : '')).join('');
     }
     function composerHtml() {
+        if (!S.me.canWrite) return `<p class="pl-help mt-3 mb-0">Du följer planeringen och läser meddelandena, men skriver inte här.</p>`;
         const target = replyTo ? MSG.messages.find(m => m.id === replyTo) : null;
         return `<div class="pl-compose pl-noprint" id="plCompose">
             ${target ? `<div class="small mb-1">Svarar på <b>${esc(target.author)}</b>: <i>${esc((target.body || '').slice(0, 80))}</i>
@@ -399,6 +405,7 @@
         markRead();
     }
     function wireComposer() {
+        if (!$('plSend')) return;
         $('plSend').onclick = send;
         const c = $('plReplyCancel'); if (c) c.onclick = () => { replyTo = 0; viewMessages(); };
     }
@@ -734,6 +741,58 @@
     }
 
     // ================================================================ Deltagare
+    // Nivåerna och deras förklaringar kommer från servern (PlanningAccessLevel.Help) — en text, ett ställe.
+    function accessPicker(cur, name) {
+        const opts = (S.accessLevels || []).filter(l => l.canGrant || l.value === cur);
+        return `<div role="radiogroup" aria-label="Nivå i planeringen">${opts.map(l => `<label class="pl-radio">
+            <input type="radio" name="${name}" value="${l.value}" class="form-check-input me-2" data-pl-level="1"${l.value === cur ? ' checked' : ''}${l.canGrant ? '' : ' disabled'}>
+            <b>${esc(l.label)}</b>${l.value === 'Participant' ? ' <span class="pl-help small">(det vanliga)</span>' : ''}
+            <div class="pl-help small ms-4">${esc(l.help)}</div></label>`).join('')}
+            <div class="alert alert-warning small py-2 mt-2${cur === 'Owner' ? '' : ' d-none'}" data-pl-owner-warn="1">
+                <i class="bi bi-exclamation-triangle me-1"></i>En sammankallande kan ta bort deltagare och hela planeringen. Ge det bara till den som ska leda gruppen.</div></div>`;
+    }
+    function readAccess(body, name, fallback) {
+        const r = body.querySelector(`input[name="${name}"]:checked`);
+        return r ? r.value : fallback;
+    }
+    document.addEventListener('change', e => {
+        const r = e.target.closest('[data-pl-level]');
+        if (r) {
+            const warn = r.closest('[role="radiogroup"]')?.querySelector('[data-pl-owner-warn]');
+            if (warn) warn.classList.toggle('d-none', r.value !== 'Owner');
+        }
+        const s = e.target.closest('[data-pl-rep]');
+        if (s) {
+            const w = document.getElementById(s.dataset.plRep + 'RepTextWrap');
+            if (w) w.classList.toggle('d-none', s.value !== 't');
+            if (s.value === 't') document.getElementById(s.dataset.plRep + 'RepText')?.focus();
+        }
+    });
+
+    /** Vad personen företräder: en klubb, en krets eller egen text ("Förbundet", "Markägaren"). */
+    function repPicker(prefix, cur, clubs, offerOwn) {
+        const regions = S.regions || [];
+        const sel = cur.clubId ? 'c-' + cur.clubId : cur.regionId ? 'r-' + cur.regionId : cur.text ? 't' : (offerOwn ? 'own' : '');
+        const clubOpts = (clubs || []).map(c => `<option value="c-${c.id}"${sel === 'c-' + c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+        return `<div class="row g-2"><div class="col-sm-6"><select class="form-select" id="${prefix}Rep" data-pl-rep="${prefix}">
+            ${offerOwn ? `<option value="own"${sel === 'own' ? ' selected' : ''}>Hens egen klubb</option>` : ''}
+            <option value="none"${sel === '' ? ' selected' : ''}>Inget särskilt</option>
+            ${clubOpts ? `<optgroup label="Klubb">${clubOpts}</optgroup>` : ''}
+            ${regions.length ? `<optgroup label="Krets">${regions.map(r => `<option value="r-${r.id}"${sel === 'r-' + r.id ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</optgroup>` : ''}
+            <option value="t"${sel === 't' ? ' selected' : ''}>Något annat — skriv själv</option></select></div>
+            <div class="col-sm-6${sel === 't' ? '' : ' d-none'}" id="${prefix}RepTextWrap">
+                <input class="form-control" id="${prefix}RepText" maxlength="200" value="${esc(cur.text || '')}" placeholder="Till exempel Förbundet eller Markägaren" aria-label="Vad personen företräder"></div></div>`;
+    }
+    /** Fälten till servern. "own" = skicka ingenting (servern tar hens klubb); "none" = uttryckligen inget. */
+    function readRep(body, prefix) {
+        const v = body.querySelector('#' + prefix + 'Rep').value;
+        if (v === 'own') return {};
+        if (v.startsWith('c-')) return { representsClubId: v.slice(2) };
+        if (v.startsWith('r-')) return { representsRegionId: v.slice(2) };
+        if (v === 't') return { representsText: (body.querySelector('#' + prefix + 'RepText').value || '').trim() };
+        return { representsText: '', representsNothing: '1' };
+    }
+
     function viewPeople() {
         setHead('Deltagare', esc(S.planning.name));
         setActions([
@@ -742,31 +801,37 @@
             S.me.isParticipant && !TOKEN && { divider: true },
             S.me.isParticipant && !TOKEN && { label: 'Lämna planeringen', icon: 'bi-box-arrow-right', danger: true, fn: leave },
         ]);
-        const rows = S.participants.map(p => {
+        const conveners = S.participants.filter(p => p.access === 'Owner');
+        // Grupperat efter vad man företräder — då syns det om alla kretsar har någon med.
+        const groups = new Map();
+        S.participants.forEach(p => { const k = p.represents || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
+        const keys = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'sv'));
+        const grouped = keys.length > 1;
+        const rowFor = p => {
             const menu = S.me.canManage && !p.isMe ? rowMenu([
-                { label: 'Ändra rätt och vem hen företräder…', fn: () => openEditParticipant(p) },
+                { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
+                { label: 'Byt ut mot någon annan…', fn: () => openReplace(p) },
                 p.isGuest && { label: 'Skicka inbjudan igen', fn: () => resend(p) },
                 { divider: true },
                 { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
-            ]) : (p.isMe ? rowMenu([{ label: 'Ändra vem jag företräder…', fn: () => openEditParticipant(p) }]) : '');
-            const state = p.isGuest
-                ? `<span class="pl-state blue" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
+            ]) : (p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) }]) : '');
+            const guest = p.isGuest ? `<span class="pl-state blue" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
             const seen = p.lastSeen ? 'Senast inne ' + esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
-            return `<div class="pl-person"><div><div><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''} ${state}</div>
-                <div class="pl-help small">${esc(p.accessLabel)}${p.represents ? ' · företräder ' + esc(p.represents) : ''} · ${seen}${p.guestEmail ? ' · ' + esc(p.guestEmail) : ''}</div></div>
+            return `<div class="pl-person"><div><div><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''} ${guest}</div>
+                <div class="small">${esc(p.accessLabel)}${!grouped && p.represents ? ' · företräder <b>' + esc(p.represents) + '</b>' : ''}</div>
+                <div class="pl-help small">${seen}${p.guestEmail ? ' · ' + esc(p.guestEmail) : ''}</div></div>
                 <div>${menu}</div></div>`;
-        }).join('');
-        $('plBody').innerHTML = `<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress, och en ändrad adress följer med av sig själv.
-            Den som inte är skytt (t.ex. någon från kommunen) bjuds in med e-post och deltar via länkarna i mejlen.</p>${rows}</div>
-            <div class="pl-card"><h2>Rättigheterna</h2><ul class="mb-0">
-                <li><b>Kan ändra allt</b> — även vem som är med och deras rättigheter.</li>
-                <li><b>Kan ändra</b> — planeringens namn och tid, och bjuda in.</li>
-                <li><b>Deltar</b> — skriver meddelanden, svarar på tider, föreslår och bokar möten.</li></ul></div>`;
-    }
-    function accessSelect(cur, id) {
-        const opts = [['Participant', 'Deltar'], ['Editor', 'Kan ändra'], ['Owner', 'Kan ändra allt']]
-            .filter(([k]) => k !== 'Owner' || S.me.access === 'Owner');
-        return `<select class="form-select" id="${id}">${opts.map(([k, l]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+        };
+        const list = keys.map(k => (grouped ? `<div class="fw-semibold mt-3 mb-1">${k ? esc(k) : 'Företräder inget särskilt'} <span class="pl-help small fw-normal">(${groups.get(k).length})</span></div>` : '')
+            + groups.get(k).map(rowFor).join('')).join('');
+        const warn = S.me.canManage && conveners.length === 1 && S.participants.length > 1
+            ? `<div class="alert alert-warning d-flex gap-2 align-items-start"><i class="bi bi-exclamation-triangle mt-1"></i>
+                <div>Det finns bara en <b>sammankallande</b>${conveners[0].isMe ? ' — du' : ''}. Utse gärna en till, så att gruppen inte står utan om hen blir sjuk eller slutar:
+                välj <i>Ändra nivå</i> på personen.</div></div>` : '';
+        $('plBody').innerHTML = `${warn}<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress.
+            Den som inte är skytt (t.ex. någon från kommunen eller markägaren) bjuds in med e-post och deltar via länkarna i mejlen.</p>${list}</div>
+            <div class="pl-card"><h2>Nivåerna</h2><ul class="mb-0">${(S.accessLevels || []).slice().reverse().map(l =>
+                `<li class="mb-1"><b>${esc(l.label)}</b> — ${esc(l.help)}</li>`).join('')}</ul></div>`;
     }
     function openInvite() {
         if (!S.me.canInvite) return;
@@ -774,11 +839,12 @@
         formModal({
             title: 'Bjud in en medlem', okLabel: null, wide: true,
             html: `<label class="form-label fw-semibold" for="ivQ">Sök på namn</label>
-                <input id="ivQ" class="form-control mb-2" placeholder="Till exempel Anna Svensson" autocomplete="off">
-                <div class="mb-3"><label class="form-label" for="ivAccess">Rätt i planeringen</label>${accessSelect('Participant', 'ivAccess')}</div>
+                <input id="ivQ" class="form-control mb-3" placeholder="Till exempel Anna Svensson" autocomplete="off">
+                <div class="mb-3"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'ivAccess')}</div>
+                <div class="mb-3"><label class="form-label fw-semibold" for="ivRep">Företräder</label>${repPicker('iv', {}, [], true)}</div>
                 <div id="ivHits" class="pl-help">Skriv minst två bokstäver.</div>
                 <div class="border-top mt-3 pt-3">
-                    <p class="pl-help small mb-2">Den du bjuder in får ett mejl med en länk. Är personen inte skytt och saknar konto på pistol.nu — till exempel någon från kommunen eller banan — bjuder du in hen med e-post.</p>
+                    <p class="pl-help small mb-2">Den du bjuder in får ett mejl med en länk. Är personen inte skytt och saknar konto på pistol.nu — till exempel någon från kommunen eller markägaren — bjuder du in hen med e-post.</p>
                     <button type="button" class="btn btn-outline-secondary" data-iv-email="1"><i class="bi bi-envelope me-1"></i>Bjud in med e-post i stället</button>
                 </div>`,
             onOpen: body => {
@@ -800,7 +866,7 @@
                     if (ev.target.closest('[data-iv-email]')) { openInviteEmail(); return; }
                     const b = ev.target.closest('[data-iv-add]'); if (!b) return;
                     b.disabled = true;
-                    const r = await post('AddMember', { memberId: b.dataset.ivAdd, access: body.querySelector('#ivAccess').value });
+                    const r = await post('AddMember', Object.assign({ memberId: b.dataset.ivAdd, access: readAccess(body, 'ivAccess', 'Participant') }, readRep(body, 'iv')));
                     if (!r.success) { b.disabled = false; $('plFormErr').textContent = r.message; $('plFormErr').classList.remove('d-none'); return; }
                     b.outerHTML = `<span class="pl-state ok">${r.mailed ? 'Inbjuden — mejl skickat' : 'Inbjuden'}</span>`;
                     await reloadPeople();
@@ -811,16 +877,16 @@
     function openInviteEmail() {
         formModal({
             title: 'Bjud in med e-post', okLabel: 'Skicka inbjudan',
-            html: `<p class="pl-help">För den som inte är skytt och saknar konto, till exempel någon från kommunen eller banan. Hen deltar via länkarna i mejlen och behöver inget lösenord.
+            html: `<p class="pl-help">För den som inte är skytt och saknar konto, till exempel någon från kommunen eller markägaren. Hen deltar via länkarna i mejlen och behöver inget lösenord.
                 Är personen medlem på pistol.nu bjuder du in hen med <button type="button" class="btn btn-link p-0 align-baseline" data-ie-member="1">Bjud in en medlem</button> i stället.</p>
-                <div class="mb-3"><label class="form-label" for="ieName">Namn</label><input id="ieName" class="form-control" maxlength="200"></div>
+                <div class="mb-3"><label class="form-label" for="ieName">Namn</label><input id="ieName" class="form-control" maxlength="200" autocomplete="off"></div>
                 <div class="mb-3"><label class="form-label" for="ieEmail">E-post</label><input id="ieEmail" class="form-control" type="email" inputmode="email" autocomplete="off"></div>
-                <div class="mb-3"><label class="form-label" for="ieRep">Företräder (valfritt)</label><input id="ieRep" class="form-control" maxlength="200" placeholder="Till exempel Gislaveds kommun"></div>
-                <div class="mb-1"><label class="form-label" for="ieAccess">Rätt i planeringen</label>${accessSelect('Participant', 'ieAccess')}</div>`,
+                <div class="mb-3"><label class="form-label fw-semibold" for="ieRep">Företräder</label>${repPicker('ie', {}, [], false)}</div>
+                <div class="mb-1"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker('Participant', 'ieAccess')}</div>`,
             onOpen: body => body.addEventListener('click', ev => { if (ev.target.closest('[data-ie-member]')) openInvite(); }),
             onOk: async body => {
-                const r = await post('InviteByEmail', { name: body.querySelector('#ieName').value, email: body.querySelector('#ieEmail').value,
-                    access: body.querySelector('#ieAccess').value, representsText: body.querySelector('#ieRep').value });
+                const r = await post('InviteByEmail', Object.assign({ name: body.querySelector('#ieName').value, email: body.querySelector('#ieEmail').value,
+                    access: readAccess(body, 'ieAccess', 'Participant') }, readRep(body, 'ie')));
                 // En medlems adress vägras (Stefan 2026-10-22): hen bjuds in på vanligt sätt, med sitt konto.
                 if (!r.success) return r.message;
                 await reloadPeople();
@@ -831,18 +897,81 @@
         });
     }
     function openEditParticipant(p) {
+        const levelEditable = S.me.canManage && !p.isMe;
         formModal({
-            title: p.isMe ? 'Vem jag företräder' : 'Ändra ' + p.name, okLabel: 'Spara',
-            html: `${S.me.canManage && !p.isMe ? `<div class="mb-3"><label class="form-label" for="epAccess">Rätt i planeringen</label>${accessSelect(p.access, 'epAccess')}</div>` : ''}
-                <div class="mb-1"><label class="form-label" for="epRep">Företräder</label>
-                <input id="epRep" class="form-control" maxlength="200" value="${esc(p.representsText || p.represents || '')}" placeholder="Till exempel Hallands Pistolskyttekrets"></div>
-                <p class="pl-help small mt-2 mb-0">Syns intill namnet, så att alla ser vem som företräder vilken krets eller klubb.</p>`,
+            title: p.isMe ? 'Vad jag företräder' : 'Ändra ' + p.name, okLabel: 'Spara',
+            html: `${levelEditable ? `<div class="mb-3"><div class="form-label fw-semibold">Nivå i planeringen</div>${accessPicker(p.access, 'epAccess')}</div>` : ''}
+                <div class="mb-1"><label class="form-label fw-semibold" for="epRep">Företräder</label>
+                ${repPicker('ep', { clubId: p.representsClubId, regionId: p.representsRegionId, text: p.representsText }, p.clubChoices, false)}</div>
+                <p class="pl-help small mt-2 mb-0">Syns på deltagarlistan, så att alla ser vem som företräder vilken klubb, krets eller annan part.</p>`,
             onOk: async body => {
-                const r = await post('UpdateParticipant', { participantId: p.id,
-                    access: body.querySelector('#epAccess') ? body.querySelector('#epAccess').value : p.access,
-                    representsText: body.querySelector('#epRep').value.trim() });
+                const rep = readRep(body, 'ep');
+                const r = await post('UpdateParticipant', {
+                    participantId: p.id,
+                    access: levelEditable ? readAccess(body, 'epAccess', p.access) : p.access,
+                    representsClubId: rep.representsClubId || '', representsRegionId: rep.representsRegionId || '', representsText: rep.representsText || '',
+                });
                 if (!r.success) return r.message;
                 await reloadPeople(); viewPeople(); return true;
+            }
+        });
+    }
+    /** Byt ut: den nya får samma nivå och företräder samma; den gamla lämnar, hens meddelanden står kvar. */
+    function openReplace(p) {
+        let timer = null, chosen = 0, chosenName = '';
+        formModal({
+            title: 'Byt ut ' + p.name, okLabel: 'Byt ut', wide: true,
+            html: `<p>Den nya personen får samma nivå (<b>${esc(p.accessLabel)}</b>)${p.represents ? ` och företräder samma (<b>${esc(p.represents)}</b>)` : ''}.
+                ${esc(p.name)} lämnar planeringen; hens meddelanden står kvar. Den nya får ett mejl med inbjudan.</p>
+                <div class="mb-2"><label class="pl-radio d-inline-block me-3"><input type="radio" name="rpMode" value="member" class="form-check-input me-2" checked> En medlem</label>
+                    <label class="pl-radio d-inline-block"><input type="radio" name="rpMode" value="email" class="form-check-input me-2"> Någon utan konto (e-post)</label></div>
+                <div id="rpMember"><label class="form-label" for="rpQ">Sök på namn</label>
+                    <input id="rpQ" class="form-control mb-2" placeholder="Till exempel Anna Svensson" autocomplete="off">
+                    <div id="rpHits" class="pl-help">Skriv minst två bokstäver.</div></div>
+                <div id="rpEmail" class="d-none">
+                    <div class="mb-2"><label class="form-label" for="rpName">Namn</label><input id="rpName" class="form-control" maxlength="200" autocomplete="off"></div>
+                    <div class="mb-1"><label class="form-label" for="rpMail">E-post</label><input id="rpMail" class="form-control" type="email" inputmode="email" autocomplete="off"></div></div>`,
+            onOpen: body => {
+                body.addEventListener('change', ev => {
+                    if (!ev.target.matches('input[name="rpMode"]')) return;
+                    const email = ev.target.value === 'email';
+                    body.querySelector('#rpMember').classList.toggle('d-none', email);
+                    body.querySelector('#rpEmail').classList.toggle('d-none', !email);
+                });
+                const q = body.querySelector('#rpQ'); q.focus();
+                q.addEventListener('input', () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(async () => {
+                        const v = q.value.trim();
+                        if (v.length < 2) { body.querySelector('#rpHits').textContent = 'Skriv minst två bokstäver.'; return; }
+                        const r = await get('SearchMembers', { q: v });
+                        if (!r.success) { body.querySelector('#rpHits').textContent = r.message || 'Sökningen gick inte.'; return; }
+                        body.querySelector('#rpHits').innerHTML = r.members.length ? r.members.map((m, i) =>
+                            `<div class="pl-person"><div><b>${esc(m.name)}</b><div class="small">${esc(m.club)}</div></div>
+                            ${m.alreadyIn ? '<span class="pl-state ok">Är med</span>' : `<button type="button" class="btn btn-outline-primary btn-sm" data-rp-pick="${m.memberId}" data-rp-i="${i}">Välj</button>`}</div>`).join('')
+                            : 'Ingen medlem hittades. Saknar personen konto: välj "Någon utan konto".';
+                        body._rpHits = r.members;
+                    }, 250);
+                });
+                body.addEventListener('click', ev => {
+                    const b = ev.target.closest('[data-rp-pick]'); if (!b) return;
+                    chosen = parseInt(b.dataset.rpPick, 10);
+                    chosenName = (body._rpHits || [])[parseInt(b.dataset.rpI, 10)]?.name || '';
+                    body.querySelectorAll('[data-rp-pick]').forEach(x => { x.classList.remove('btn-primary'); x.classList.add('btn-outline-primary'); x.textContent = 'Välj'; });
+                    b.classList.remove('btn-outline-primary'); b.classList.add('btn-primary'); b.textContent = 'Vald';
+                });
+            },
+            onOk: async body => {
+                const email = body.querySelector('input[name="rpMode"]:checked').value === 'email';
+                if (!email && !chosen) return 'Sök fram och välj den som ska ta över.';
+                const r = await post('ReplaceParticipant', email
+                    ? { participantId: p.id, name: body.querySelector('#rpName').value, email: body.querySelector('#rpMail').value }
+                    : { participantId: p.id, memberId: chosen });
+                if (!r.success) return r.message;
+                await reloadPeople(); viewPeople();
+                showMsg(`${esc(email ? body.querySelector('#rpName').value : chosenName)} har ersatt ${esc(p.name)}.`
+                    + (r.mailed ? ' Ett mejl med inbjudan är skickat.' : ' Men mejlet kunde inte skickas — skicka inbjudan igen under Deltagare.'), r.mailed ? 'success' : 'warning');
+                return true;
             }
         });
     }
@@ -892,16 +1021,6 @@
     }
 
     // ================================================================ Inställningar
-    /** Föreningsväljaren: mina klubbar, och kretsarna i min landsdel (egna först). */
-    function orgSelect(id, current) {
-        const opts = S.orgOptions || [];
-        const group = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.map(o => {
-            const v = o.type + '-' + o.id;
-            return `<option value="${v}"${v === current ? ' selected' : ''}>${esc(o.name)}${o.kind === 'Krets' && o.own ? ' (din krets)' : ''}</option>`;
-        }).join('')}</optgroup>` : '';
-        return `<select class="form-select" id="${id}"><option value=""${current ? '' : ' selected'}>Nej, bara de som är inbjudna</option>
-            ${group('Klubbar', opts.filter(o => o.kind === 'Klubb'))}${group('Kretsar i landsdelen', opts.filter(o => o.kind === 'Krets'))}</select>`;
-    }
     function viewSettings() {
         setHead('Inställningar', esc(S.planning.name));
         const p = S.planning;
@@ -916,16 +1035,10 @@
                 <input id="stTarget" class="form-control" maxlength="200" value="${esc(p.targetText || '')}" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
             <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="stStart">Första dagen (om den är bestämd)</label><input id="stStart" class="form-control" value="${esc(p.targetStart || '')}"></div>
                 <div class="col-sm-6"><label class="form-label" for="stEnd">Sista dagen</label><input id="stEnd" class="form-control" value="${esc(p.targetEnd || '')}"></div></div>
-            <div class="mb-3"><label class="form-label fw-semibold" for="stOwner">Ska en förenings styrelse kunna läsa planeringen?</label>
-                ${S.me.canManage && S.orgOptions ? orgSelect('stOwner', p.ownerId ? p.ownerType + '-' + p.ownerId : '')
-                    : `<div>${p.ownerId ? esc(p.ownerName) + 's styrelse och administratörer kan läsa planeringen.' : 'Nej, bara de som är inbjudna.'}</div>`}
-                <div class="pl-help small mt-1">Styrelsen och föreningens administratörer ser deltagarna och mötena, men aldrig meddelandena. Vilka som är med påverkas inte — alla bjuds in oavsett krets.
-                    Huvudarrangören bestäms ofta efter några möten; föreningen kan bytas när som helst.</div></div>
             <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>`;
         datePicker($('stStart')); datePicker($('stEnd'));
         $('stSave').onclick = async () => {
             const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };
-            if ($('stOwner')) params.owner = $('stOwner').value;
             const r = await post('Update', params);
             if (!r.success) { failMsg(r); return; }
             await reloadPeople(); renderRail(); setHead('Inställningar', esc(S.planning.name)); $('stSaved').textContent = 'Sparat.';

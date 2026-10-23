@@ -12336,18 +12336,23 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   `GuestEmail`. Därför bär bara `PlanningMember.MemberId` en medlem — den ligger i
   `MemberDataPurgeService.AssignmentColumns` (raden står kvar som "Borttagen medlem", meddelandena behåller
   författaren) och följer med en sammanslagning.
-- **Behörigheten = `PlanningAccess`** (rena regler, `PlanningRulesTests`): Kan ändra allt / Kan ändra /
-  Deltar. **En mejllänk ändrar aldrig planeringen** (`ViaLink`). Föreningens styrelse/administratörer
-  (`Visibility = OwnerOrg`, via `BoardWorkAccess.CanAccessBoardWorkAsync`) läser innehållet men **aldrig
-  meddelandena**. Ingen underförstådd rätt för sajtadmin (som vapenregistret). Den sista med Kan ändra allt
-  kan inte tas bort eller sänkas. Varje id prövas mot planeringen (`WHERE Id = @0 AND PlanningId = @1`).
-- **⚠️ Föreningen (`OwnerType/OwnerId`) finns för EN sak: att dess styrelse får läsa** (Stefan 2026-10-22).
-  Vald förening ⇔ `Visibility = OwnerOrg` — inget separat val. Valen (`OrgChoices`): medlemmens klubbar,
-  kretsar och **alla kretsar i samma landsdel** (regionalPage-egenskapen `area`; ett SM har en hel landsdel
-  inblandad). Landsdelen själv har ingen styrelse och kan inte väljas. Kan bytas i Inställningar (bara Kan
-  ändra allt); `Update` känner igen "ingen förening" på att fältet `owner` skickades (bindningen gör "" till
-  null). Kretsnamn = egenskapen `regionName` (nodnamnen saknar å/ä/ö). **Planeringens slag frågas inte
-  längre** — valet ändrade ingenting; nya rader får `Planeringsgrupp`.
+- **⚠️⚠️ Planeringsgruppen är sin egen enhet** (Stefan 2026-10-23): den som är inbjuden är med, ingen annan.
+  Ingen förening, styrelse eller roll ger läsrätt — `PlanningCaller` har bara `Participant` och `ViaLink`
+  (`PlanningRulesTests` fäller bygget om ett fält läggs till). Kolumnerna `OwnerType/OwnerId/Visibility` är
+  borttagna. Ingen underförstådd rätt för sajtadmin (som vapenregistret). Varje id prövas mot planeringen.
+- **Nivåerna = `PlanningAccessLevel`** (lagrade strängar byts aldrig): `Follower` *Följer* < `Participant`
+  *Deltar* < `Editor` *Kan ändra* < `Owner` **Sammankallande**. Förklaringarna (`Help`) är EN text, skickas i
+  `Get.accessLevels` och visas vid varje val av nivå. Följer läser allt men skriver inte, röstar inte och är
+  **inte kallad till mötena** (`PlanningAccess.IsCalledToMeetings`: inga mötesmejl, räknas inte i
+  "har inte svarat"/`VotesOwed`, inte i Mitt schema). Bara Sammankallande ger Sammankallande; den sista kan
+  inte tas bort eller sänkas, och sidan varnar när det bara finns en. **En mejllänk ändrar aldrig planeringen.**
+- **Företräder** (klubb, krets eller egen text) anges vid inbjudan (`AddMember`: inget angivet = hens egen klubb,
+  `representsNothing=1` = inget; `InviteByEmail`: krets eller text) och ändras med `UpdateParticipant`; klubb och
+  krets prövas (`RepresentsError`). Kretsnamn = `regionName`. Deltagarlistan grupperas efter vad man företräder.
+- **Byt ut** (`ReplaceParticipant` → `PlanningService.ReplaceParticipant`, en transaktion): den nya (medlem
+  eller gäst) får samma nivå och Företräder, den gamla lämnar, meddelandena står kvar, flödet får EN rad
+  (`member-replaced`, "X ersatte Y (företräder Z)"). Bara Sammankallande, aldrig sig själv.
+- **Planeringens slag frågas inte** — valet ändrade ingenting; nya rader får `Planeringsgrupp`.
 - **Bjud in med e-post vägrar en medlems adress** (`isMember`, Stefan 2026-10-22): medlemmen bjuds in på
   vanligt sätt och deltar med sitt konto — aldrig som gäst, och aldrig tyst omvandlad.
 - **Notiserna = `PlanningNotifier` + `PlanningNotifyRules`** (matrisen står i klassens kommentar). Varje

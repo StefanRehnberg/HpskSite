@@ -16,7 +16,7 @@ namespace HpskSite.Tests.Services
             Id = id, PlanningId = 1, MemberId = memberId, DisplayName = "P" + id, Access = access,
             RemovedAt = removed ? DateTime.Now : null,
         };
-        private static PlanningCaller C(PlanningMemberRow? p, bool org = false, bool link = false) => new(p, org, link);
+        private static PlanningCaller C(PlanningMemberRow? p, bool link = false) => new(p, link);
 
         // ---------------------------------------------------------------- behörigheten
 
@@ -28,13 +28,56 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
-        public void Owner_org_reader_sees_content_but_never_messages()
+        public void Only_the_invited_read_there_is_no_other_way_in()
         {
-            var c = C(null, org: true);
+            // Stefan 2026-10-23: planeringsgruppen är sin egen enhet. Ingen förening, styrelse eller
+            // roll ger läsrätt — anroparens typ har inte ens ett fält för det.
+            typeof(PlanningCaller).GetConstructors().Single().GetParameters().Select(x => x.Name)
+                .Should().BeEquivalentTo(new[] { "Participant", "ViaLink" });
+        }
+
+        [Fact]
+        public void Follower_reads_everything_but_does_not_write_or_vote()
+        {
+            var c = C(P(1, PlanningAccessLevel.Follower));
             PlanningAccess.CanReadContent(c).Should().BeTrue();
-            PlanningAccess.CanReadMessages(c).Should().BeFalse();
+            PlanningAccess.CanReadMessages(c).Should().BeTrue();
             PlanningAccess.CanWriteMessages(c).Should().BeFalse();
             PlanningAccess.CanUseMeetings(c).Should().BeFalse();
+            PlanningAccess.CanEditPlanning(c).Should().BeFalse();
+            PlanningAccess.CanInvite(c).Should().BeFalse();
+            PlanningAccess.CanEditMeeting(c, new PlanningMeetingRow { CreatedBy = 1 }).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Followers_are_not_called_to_meetings()
+        {
+            PlanningAccess.IsCalledToMeetings(P(1, PlanningAccessLevel.Follower)).Should().BeFalse();
+            PlanningAccess.IsCalledToMeetings(P(2, PlanningAccessLevel.Participant)).Should().BeTrue();
+            PlanningAccess.IsCalledToMeetings(P(3, PlanningAccessLevel.Owner)).Should().BeTrue();
+            PlanningAccess.IsCalledToMeetings(P(4, PlanningAccessLevel.Participant, removed: true)).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Levels_are_ordered_and_explained()
+        {
+            PlanningAccessLevel.All.Should().Equal(PlanningAccessLevel.Follower, PlanningAccessLevel.Participant,
+                PlanningAccessLevel.Editor, PlanningAccessLevel.Owner);
+            PlanningAccessLevel.All.Select(PlanningAccessLevel.Rank).Should().BeInAscendingOrder();
+            PlanningAccessLevel.Label(PlanningAccessLevel.Owner).Should().Be("Sammankallande");
+            PlanningAccessLevel.Label(PlanningAccessLevel.Follower).Should().Be("Följer");
+            PlanningAccessLevel.All.Should().OnlyContain(a => PlanningAccessLevel.Help(a).Length > 20);
+            // Den lagrade strängen byts aldrig: "Owner" visas som Sammankallande.
+            PlanningAccessLevel.Normalize("owner").Should().Be("Owner");
+        }
+
+        [Fact]
+        public void Editor_can_add_followers_but_only_a_convener_makes_conveners()
+        {
+            PlanningAccess.CanGrant(C(P(1, PlanningAccessLevel.Editor)), PlanningAccessLevel.Follower).Should().BeTrue();
+            PlanningAccess.CanGrant(C(P(1, PlanningAccessLevel.Editor)), PlanningAccessLevel.Owner).Should().BeFalse();
+            PlanningAccess.CanGrant(C(P(1, PlanningAccessLevel.Owner)), PlanningAccessLevel.Owner).Should().BeTrue();
+            PlanningAccess.CanGrant(C(P(1, PlanningAccessLevel.Participant)), PlanningAccessLevel.Follower).Should().BeFalse();
         }
 
         [Fact]
@@ -193,10 +236,9 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void Planning_validation()
         {
-            PlanningService.Validate("", null, null, null, null, PlanningVisibility.Invited).Should().NotBeNull();
-            PlanningService.Validate("SM 2028", new DateTime(2028, 8, 20), new DateTime(2028, 8, 14), null, null, PlanningVisibility.Invited).Should().NotBeNull();
-            PlanningService.Validate("SM 2028", null, null, null, null, PlanningVisibility.OwnerOrg).Should().NotBeNull();
-            PlanningService.Validate("SM 2028", null, null, 1, 3788, PlanningVisibility.OwnerOrg).Should().BeNull();
+            PlanningService.Validate("", null, null).Should().NotBeNull();
+            PlanningService.Validate("SM 2028", new DateTime(2028, 8, 20), new DateTime(2028, 8, 14)).Should().NotBeNull();
+            PlanningService.Validate("SM 2028", new DateTime(2028, 8, 14), new DateTime(2028, 8, 20)).Should().BeNull();
         }
 
         // ---------------------------------------------------------------- kalenderfilen

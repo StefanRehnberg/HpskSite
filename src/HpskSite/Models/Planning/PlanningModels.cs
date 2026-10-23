@@ -41,31 +41,45 @@ namespace HpskSite.Models.Planning
     }
 
     /// <summary>
-    /// Rättigheterna. Ordet "roll" används aldrig på skärmen (Stefan 2026-10-21: "Deltar" i stället
-    /// för "Kan bara läsa" — en representant som svarar och röstar gör mer än att läsa).
+    /// Nivåerna i planeringsgruppen. Lagras som text — byt aldrig en befintlig sträng ("Owner" visas
+    /// som Sammankallande). ⚠️ Förklaringarna (<see cref="Help"/>) är det användaren väljer efter
+    /// (Stefan 2026-10-23: "så man förstår och inte ger alla fulla rättigheter") — de visas vid varje
+    /// val av nivå, och texten finns bara här.
     /// </summary>
     public static class PlanningAccessLevel
     {
-        /// <summary>Kan ändra allt — även vem som är med och deras rättigheter.</summary>
+        /// <summary>Sammankallande — leder gruppen: vem som är med, deras nivå, byta ut, arkivera, ta bort.</summary>
         public const string Owner = "Owner";
-        /// <summary>Kan ändra — planeringens uppgifter och bjuda in.</summary>
+        /// <summary>Kan ändra — planeringens namn och datum, och bjuda in.</summary>
         public const string Editor = "Editor";
         /// <summary>Deltar — skriver meddelanden, svarar på tider, skapar och bokar möten.</summary>
         public const string Participant = "Participant";
+        /// <summary>Följer — läser allt, även meddelandena, men skriver inte och svarar inte på tider.</summary>
+        public const string Follower = "Follower";
 
-        public static readonly string[] All = { Owner, Editor, Participant };
+        /// <summary>I den ordning de visas: från minst till mest.</summary>
+        public static readonly string[] All = { Follower, Participant, Editor, Owner };
 
         public static string? Normalize(string? v) =>
             Array.Find(All, k => string.Equals(k, (v ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
 
         public static string Label(string? v) => v switch
         {
-            Owner => "Kan ändra allt",
+            Owner => "Sammankallande",
             Editor => "Kan ändra",
+            Follower => "Följer",
             _ => "Deltar",
         };
 
-        public static int Rank(string? v) => v switch { Owner => 3, Editor => 2, Participant => 1, _ => 0 };
+        public static string Help(string? v) => v switch
+        {
+            Owner => "Leder gruppen. Kan dessutom ändra vem som är med och deras nivå, byta ut den som inte kan vara med längre, arkivera och ta bort planeringen. Ge det till en eller två personer — inte till alla.",
+            Editor => "Som Deltar, och kan dessutom bjuda in fler och ändra planeringens namn och datum.",
+            Follower => "Läser allt, även meddelandena, men skriver inte och svarar inte på mötestider. För den som vill hålla sig informerad, till exempel förbundets kontaktperson.",
+            _ => "Skriver meddelanden, svarar på mötestider, föreslår och bokar möten. Det vanliga — välj det för de flesta.",
+        };
+
+        public static int Rank(string? v) => v switch { Owner => 4, Editor => 3, Participant => 2, Follower => 1, _ => 0 };
     }
 
     /// <summary>
@@ -106,14 +120,6 @@ namespace HpskSite.Models.Planning
         };
     }
 
-    public static class PlanningVisibility
-    {
-        /// <summary>Bara de som är med.</summary>
-        public const string Invited = "Invited";
-        /// <summary>Föreningens styrelse och administratörer får läsa innehållet (inte meddelandena).</summary>
-        public const string OwnerOrg = "OwnerOrg";
-    }
-
     public static class PlanningMeetingStatus
     {
         public const string Proposed = "Proposed";
@@ -142,12 +148,9 @@ namespace HpskSite.Models.Planning
         public int Id { get; set; }
         public string Name { get; set; } = "";
         public string Kind { get; set; } = PlanningKind.Group;
-        public int? OwnerType { get; set; }
-        public int? OwnerId { get; set; }
         public string? TargetText { get; set; }
         public DateTime? TargetStart { get; set; }
         public DateTime? TargetEnd { get; set; }
-        public string Visibility { get; set; } = PlanningVisibility.Invited;
         public string Status { get; set; } = "Active";
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }

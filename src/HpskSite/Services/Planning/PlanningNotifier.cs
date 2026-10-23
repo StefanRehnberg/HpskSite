@@ -246,7 +246,7 @@ namespace HpskSite.Services.Planning
             var creator = _planning.Participant(planningId, m.CreatedBy);
             foreach (var who in _planning.Participants(planningId))
             {
-                if (who.Id == m.CreatedBy || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                if (who.Id == m.CreatedBy || !PlanningAccess.IsCalledToMeetings(who) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
                 var r = ResolveRecipient(who);
                 if (r == null) continue;
                 var list = string.Join("", options.Select(o => $"<li>{H(Span(o.StartsAt, o.EndsAt))}</li>"));
@@ -271,7 +271,7 @@ namespace HpskSite.Services.Planning
             var reached = 0;
             foreach (var who in _planning.Participants(planningId))
             {
-                if (voted.Contains(who.Id) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                if (voted.Contains(who.Id) || !PlanningAccess.IsCalledToMeetings(who) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
                 var r = ResolveRecipient(who);
                 if (r == null) continue;
                 var inner = $"<p>Vi väntar på ditt svar om mötet <b>{H(m.Title)}</b> — vilka tider passar dig?</p>"
@@ -294,7 +294,7 @@ namespace HpskSite.Services.Planning
             var booker = m.BookedBy.HasValue ? _planning.Participant(planningId, m.BookedBy.Value) : null;
             foreach (var who in _planning.Participants(planningId))
             {
-                if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                if (!PlanningAccess.IsCalledToMeetings(who) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
                 var r = ResolveRecipient(who);
                 if (r == null) continue;
                 var inner = new StringBuilder();
@@ -320,7 +320,7 @@ namespace HpskSite.Services.Planning
             if (p == null || m == null || m.StartsAt == null) return; // ett möte som aldrig bokades behöver ingen avbokning
             foreach (var who in _planning.Participants(planningId))
             {
-                if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                if (!PlanningAccess.IsCalledToMeetings(who) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
                 var r = ResolveRecipient(who);
                 if (r == null) continue;
                 var inner = $"<p>Mötet <b>{H(m.Title)}</b> {H(When(m.StartsAt.Value))} är <b>inställt</b>.</p>"
@@ -450,7 +450,7 @@ namespace HpskSite.Services.Planning
             var n = 0;
             foreach (var who in people)
             {
-                if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                if (!PlanningAccess.IsCalledToMeetings(who) || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
                 var r = ResolveRecipient(who);
                 if (r == null) continue;
                 var when = Span(m.StartsAt!.Value, m.EndsAt ?? m.StartsAt.Value.AddHours(1));

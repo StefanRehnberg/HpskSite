@@ -9,12 +9,10 @@ namespace HpskSite.Services.Planning
     /// signerad mejllänk — reglerna nedan vet inte vilket, och behöver inte veta det.
     /// </summary>
     /// <param name="Participant">Den aktiva deltagarraden, eller null.</param>
-    /// <param name="OwnerOrgReader">Styrelseledamot eller administratör i ägarföreningen, när planeringen
-    /// är synlig för föreningen (<see cref="PlanningVisibility.OwnerOrg"/>).</param>
     /// <param name="ViaLink">Kom in genom en signerad länk i ett mejl (utan inloggning).</param>
-    public sealed record PlanningCaller(PlanningMemberRow? Participant, bool OwnerOrgReader, bool ViaLink)
+    public sealed record PlanningCaller(PlanningMemberRow? Participant, bool ViaLink)
     {
-        public static readonly PlanningCaller Nobody = new(null, false, false);
+        public static readonly PlanningCaller Nobody = new(null, false);
         public bool IsParticipant => Participant is { IsActive: true };
         public int ParticipantId => Participant?.Id ?? 0;
         public string Access => IsParticipant ? Participant!.Access : "";
@@ -23,56 +21,69 @@ namespace HpskSite.Services.Planning
     /// <summary>
     /// Planeringens behörighet som RENA regler, så att de går att pröva utan databas.
     ///
+    /// <para><b>⚠️ Planeringsgruppen är sin egen enhet</b> (Stefan 2026-10-23): den som är inbjuden
+    /// är med — ingen annan. Ingen förening, styrelse eller roll ger läsrätt; en krets som vill vara med
+    /// utser personer, och vad var och en företräder står på deltagarraden.</para>
+    ///
     /// <para><b>⚠️ Ingen underförstådd rätt för sajtadministratören.</b> Meddelandena är
     /// deltagarnas — samma princip som vapenregistret. En sajtadmin som behöver hjälpa till bjuds in.</para>
     ///
-    /// <para><b>⚠️ Föreningens läsrätt omfattar bara innehållet, aldrig meddelandena</b>
-    /// (Stefan 2026-10-21, beslut 10.3).</para>
-    ///
-    /// <para><b>⚠️ Alla som är med får skapa och boka möten</b> (Stefan 2026-10-21) — en
-    /// representant ska kunna föreslå tider utan att be ägaren.</para>
+    /// <para><b>⚠️ Alla som deltar får skapa och boka möten</b> (Stefan 2026-10-21) — en
+    /// representant ska kunna föreslå tider utan att be den sammankallande. <b>Följer</b> läser allt
+    /// men skriver inte, röstar inte och räknas inte bland dem vi väntar på.</para>
     /// </summary>
     public static class PlanningAccess
     {
-        public static bool CanReadContent(PlanningCaller c) => c.IsParticipant || c.OwnerOrgReader;
+        private static bool AtLeast(PlanningCaller c, string level) =>
+            c.IsParticipant && PlanningAccessLevel.Rank(c.Access) >= PlanningAccessLevel.Rank(level);
 
+        public static bool CanReadContent(PlanningCaller c) => c.IsParticipant;
         public static bool CanReadMessages(PlanningCaller c) => c.IsParticipant;
-        public static bool CanWriteMessages(PlanningCaller c) => c.IsParticipant;
 
-        public static bool CanUseMeetings(PlanningCaller c) => c.IsParticipant;
+        /// <summary>Skriva meddelanden. Deltar och uppåt — Följer läser bara.</summary>
+        public static bool CanWriteMessages(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Participant);
 
-        /// <summary>Namn, mål i tid. Kan ändra och Kan ändra allt.</summary>
-        public static bool CanEditPlanning(PlanningCaller c) =>
-            c.IsParticipant && PlanningAccessLevel.Rank(c.Access) >= 2 && !c.ViaLink;
+        /// <summary>Föreslå, rösta, boka och påminna. Deltar och uppåt.</summary>
+        public static bool CanUseMeetings(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Participant);
 
-        /// <summary>Synlighet, arkivering, borttagning. Bara Kan ändra allt.</summary>
+        /// <summary>
+        /// Är hen kallad till mötena — väntar vi på hens svar om tiderna, och får hen mötesmejlen? Inte den
+        /// som följer: hen ser mötena på sidan och får kvällsmejlet med meddelandena, men inga mötesmejl.
+        /// </summary>
+        public static bool IsCalledToMeetings(PlanningMemberRow p) =>
+            p.IsActive && PlanningAccessLevel.Rank(p.Access) >= PlanningAccessLevel.Rank(PlanningAccessLevel.Participant);
+
+        /// <summary>Namn, mål i tid. Kan ändra och Sammankallande.</summary>
+        public static bool CanEditPlanning(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Editor) && !c.ViaLink;
+
+        /// <summary>Arkivering, borttagning. Bara Sammankallande.</summary>
         public static bool CanManagePlanning(PlanningCaller c) =>
             c.IsParticipant && c.Access == PlanningAccessLevel.Owner && !c.ViaLink;
 
-        /// <summary>Bjuda in. Kan ändra och Kan ändra allt.</summary>
+        /// <summary>Bjuda in. Kan ändra och Sammankallande.</summary>
         public static bool CanInvite(PlanningCaller c) => CanEditPlanning(c);
 
         /// <summary>
-        /// Får den som frågar ge den här rättigheten? Kan ändra ger högst Kan ändra;
-        /// bara Kan ändra allt ger Kan ändra allt.
+        /// Får den som frågar ge den här nivån? Kan ändra ger högst Kan ändra;
+        /// bara Sammankallande gör någon till Sammankallande.
         /// </summary>
         public static bool CanGrant(PlanningCaller c, string access) =>
             CanInvite(c) && PlanningAccessLevel.Rank(access) > 0
             && (access != PlanningAccessLevel.Owner || c.Access == PlanningAccessLevel.Owner);
 
-        /// <summary>Ändra en annans rättighet eller ta bort hen. Bara Kan ändra allt.</summary>
+        /// <summary>Ändra en annans nivå eller vad hen företräder, byta ut eller ta bort hen. Bara Sammankallande.</summary>
         public static bool CanManageParticipants(PlanningCaller c) => CanManagePlanning(c);
 
         /// <summary>Ändra eller ställa in ett möte: den som skapade det, eller den som kan ändra planeringen.</summary>
         public static bool CanEditMeeting(PlanningCaller c, PlanningMeetingRow m) =>
-            c.IsParticipant && (m.CreatedBy == c.ParticipantId || PlanningAccessLevel.Rank(c.Access) >= 2);
+            CanUseMeetings(c) && (m.CreatedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
 
         /// <summary>Redigera eller ta bort ett meddelande: bara författaren.</summary>
         public static bool CanEditMessage(PlanningCaller c, PlanningMessageRow m) =>
             c.IsParticipant && m.Kind == "Message" && m.ParticipantId == c.ParticipantId && m.DeletedAt == null;
 
         /// <summary>
-        /// Lämnar en ändring planeringen utan någon som kan ändra allt? Den sista får varken tas bort
+        /// Lämnar en ändring planeringen utan sammankallande? Den sista får varken tas bort
         /// eller sänkas — annars kan ingen längre bjuda in eller ändra något.
         /// </summary>
         public static bool WouldLeaveNoOwner(IEnumerable<PlanningMemberRow> active, int participantId, string? newAccess)

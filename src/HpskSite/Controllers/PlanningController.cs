@@ -46,13 +46,11 @@ namespace HpskSite.Controllers
         private readonly PlanningLinkService _links;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
-        private readonly BoardWorkAccess _board;
         private readonly MemberClubService _memberClubs;
         private readonly MemberDirectoryService _directory;
         private readonly ClubService _clubs;
         private readonly AdminAuthorizationService _auth;
         private readonly HpskSite.Services.Notifications.WebPushService _pushInfo;
-        private readonly BoardRoleService _roles;
         private readonly ILogger<PlanningController> _logger;
 
         public PlanningController(
@@ -60,9 +58,9 @@ namespace HpskSite.Controllers
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             PlanningService planning, PlanningNotifier notify, PlanningLinkService links,
-            IMemberManager memberManager, IMemberService memberService, BoardWorkAccess board,
+            IMemberManager memberManager, IMemberService memberService,
             MemberClubService memberClubs, MemberDirectoryService directory, ClubService clubs,
-            AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, BoardRoleService roles, ILogger<PlanningController> logger)
+            AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _planning = planning;
@@ -70,13 +68,11 @@ namespace HpskSite.Controllers
             _links = links;
             _memberManager = memberManager;
             _memberService = memberService;
-            _board = board;
             _memberClubs = memberClubs;
             _directory = directory;
             _clubs = clubs;
             _auth = auth;
             _pushInfo = pushInfo;
-            _roles = roles;
             _logger = logger;
         }
 
@@ -110,20 +106,13 @@ namespace HpskSite.Controllers
                 if (target == null || target.PlanningId != planningId) return null;
                 var row = _planning.Participant(planningId, target.ParticipantId);
                 if (row == null || !row.IsActive) return null;
-                return new Ctx(p, new PlanningCaller(row, false, true), row.MemberId ?? 0);
+                return new Ctx(p, new PlanningCaller(row, true), row.MemberId ?? 0);
             }
 
             var me = await MemberIdAsync();
             if (me <= 0) return null;
             var participant = _planning.ParticipantForMember(planningId, me);
-            var ownerOrg = false;
-            if ((participant == null || !participant.IsActive) && p.Visibility == PlanningVisibility.OwnerOrg
-                && p.OwnerType.HasValue && p.OwnerId > 0)
-            {
-                try { ownerOrg = await _board.CanAccessBoardWorkAsync(p.OwnerType.Value, p.OwnerId!.Value); }
-                catch (Exception ex) { OpsSignals.AuthGateFailed(_logger, ex, "PlanningOwnerOrg", $"{planningId}/{me}"); }
-            }
-            var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, ownerOrg, false);
+            var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, false);
             if (!PlanningAccess.CanReadContent(c)) return null;
             return new Ctx(p, c, me);
         }
@@ -162,6 +151,18 @@ namespace HpskSite.Controllers
         private static string RegionName(IPublishedContent r) =>
             r.Value<string>("regionName") is { Length: > 0 } n ? n : r.Name ?? "";
 
+        /// <summary>Medlemmens klubbar, för valet av vad hen företräder.</summary>
+        private List<object> ClubChoices(int memberId)
+        {
+            try
+            {
+                var m = _memberService.GetById(memberId);
+                return m == null ? new List<object>() : _memberClubs.GetAllClubIds(m)
+                    .Select(id => (object)new { id, name = OrgName(DocumentOwnerType.Club, id) }).ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering: medlemmens klubbar kunde inte läsas."); return new List<object>(); }
+        }
+
         private string Represents(PlanningMemberRow r) =>
             r.RepresentsClubId > 0 ? OrgName(DocumentOwnerType.Club, r.RepresentsClubId)
             : r.RepresentsRegionId > 0 ? OrgName(DocumentOwnerType.Region, r.RepresentsRegionId)
@@ -177,20 +178,6 @@ namespace HpskSite.Controllers
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
             var mine = _planning.ForMember(me);
-            // Föreningens planeringar som styrelsen får läsa, utom de man redan är med i.
-            var orgs = new List<object>();
-            try
-            {
-                var seen = mine.Select(m => m.PlanningId).ToHashSet();
-                foreach (var (ot, oi) in _roles.GetBoardMembershipsForMember(me))
-                    foreach (var p in _planning.VisibleToOwner(ot, oi).Where(p => !seen.Contains(p.Id)))
-                    {
-                        seen.Add(p.Id);
-                        orgs.Add(new { id = p.Id, name = p.Name, org = OrgName(p.OwnerType, p.OwnerId), targetText = p.TargetText, status = p.Status });
-                    }
-            }
-            catch (Exception ex) { _logger.LogWarning(ex, "Planering: föreningens planeringar kunde inte läsas."); }
-
             return Json(new
             {
                 success = true,
@@ -201,101 +188,47 @@ namespace HpskSite.Controllers
                     accessLabel = PlanningAccessLevel.Label(m.Access), unread = m.Unread, votesOwed = m.VotesOwed,
                     nextMeetingAt = DT(m.NextMeetingAt), nextMeetingTitle = m.NextMeetingTitle,
                 }),
-                orgPlannings = orgs,
-                orgOptions = OrgOptions(me),
             });
         }
 
-        /// <summary>
-        /// Föreningarna vars styrelse kan få läsa planeringen: medlemmens klubbar, medlemmens kretsar och
-        /// ALLA kretsar i samma landsdel (Stefan 2026-10-22: ett SM har en hel landsdel inblandad, och
-        /// huvudarrangören är ofta en annan krets än ens egen). Landsdelen själv har ingen styrelse i
-        /// pistol.nu och kan därför inte väljas.
-        /// </summary>
-        private sealed record Org(int Type, int Id, string Name, string Kind, bool Own);
-
-        private List<Org>? _orgCache;
-        private List<Org> OrgChoices(int memberId)
-        {
-            if (_orgCache != null) return _orgCache;
-            var list = new List<Org>();
-            try
-            {
-                var m = _memberService.GetById(memberId);
-                var clubs = _memberClubs.GetAllClubIds(m);
-                var myRegions = new HashSet<int>();
-                foreach (var c in clubs)
-                {
-                    list.Add(new Org(DocumentOwnerType.Club, c, OrgName(DocumentOwnerType.Club, c), "Klubb", true));
-                    var r = _board.RegionIdForClub(c);
-                    if (r > 0) myRegions.Add(r);
-                }
-                var all = AllRegions();
-                var areas = all.Where(r => myRegions.Contains(r.Id) && !string.IsNullOrWhiteSpace(r.Area))
-                    .Select(r => r.Area!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                foreach (var r in all.Where(r => myRegions.Contains(r.Id) || (r.Area != null && areas.Contains(r.Area.Trim())))
-                             .OrderByDescending(r => myRegions.Contains(r.Id)).ThenBy(r => r.Name, StringComparer.Create(Sv, false)))
-                    list.Add(new Org(DocumentOwnerType.Region, r.Id, r.Name, "Krets", myRegions.Contains(r.Id)));
-            }
-            catch (Exception ex) { _logger.LogWarning(ex, "Planering: medlemmens föreningar kunde inte läsas."); }
-            return _orgCache = list;
-        }
-
+        /// <summary>Alla kretsar (för <i>Företräder</i>), sorterade på svenska.</summary>
+        private List<(int Id, string Name, string? Area)>? _regions;
         private List<(int Id, string Name, string? Area)> AllRegions()
         {
-            var list = new List<(int, string, string?)>();
+            if (_regions != null) return _regions;
+            var list = new List<(int Id, string Name, string? Area)>();
             if (!UmbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return list;
             var root = ctx.Content.GetAtRoot().FirstOrDefault();
             if (root == null) return list;
             foreach (var r in root.Children.Where(c => c.ContentType.Alias == "regionalPage"))
                 list.Add((r.Id, RegionName(r), r.Value<string>("area")));
-            return list;
+            return _regions = list.OrderBy(r => r.Name, StringComparer.Create(Sv, false)).ToList();
         }
 
-        private List<object> OrgOptions(int memberId, int? currentType = null, int? currentId = null)
+        /// <summary>Det deltagaren företräder: en klubb, en krets eller egen text ("Förbundet", "Markägaren").</summary>
+        private string? RepresentsError(int? clubId, int? regionId)
         {
-            var list = OrgChoices(memberId).Select(o => (object)new { type = o.Type, id = o.Id, name = o.Name, kind = o.Kind, own = o.Own }).ToList();
-            // Den nuvarande föreningen ska alltid gå att se och behålla, även om den valts av någon annan.
-            if (currentId > 0 && !OrgChoices(memberId).Any(o => o.Type == currentType && o.Id == currentId))
-                list.Insert(0, new { type = currentType, id = currentId, name = OrgName(currentType, currentId), kind = currentType == DocumentOwnerType.Club ? "Klubb" : "Krets", own = false });
-            return list;
-        }
-
-        private bool OrgAllowed(int memberId, int ownerType, int ownerId) =>
-            OrgChoices(memberId).Any(o => o.Type == ownerType && o.Id == ownerId);
-
-        private static (bool Ok, int? Type, int? Id) ParseOwner(string? owner)
-        {
-            var v = (owner ?? "").Trim();
-            if (v.Length == 0) return (true, null, null);
-            var parts = v.Split('-');
-            if (parts.Length == 2 && int.TryParse(parts[0], out var a) && int.TryParse(parts[1], out var b) && b > 0 && a is 0 or 1)
-                return (true, a, b);
-            return (false, null, null);
+            if (regionId > 0 && AllRegions().All(r => r.Id != regionId)) return "Okänd krets.";
+            if (clubId > 0 && string.IsNullOrEmpty(OrgName(DocumentOwnerType.Club, clubId))) return "Okänd klubb.";
+            return null;
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create(string name, string? kind, string? owner, string? targetText,
-            string? targetStart, string? targetEnd, string? visibility)
+        public async Task<IActionResult> Create(string name, string? targetText, string? targetStart, string? targetEnd)
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
-            var (okOwner, ot, oi) = ParseOwner(owner);
-            if (!okOwner || (oi > 0 && !OrgAllowed(me, ot!.Value, oi!.Value)))
-                return No("Välj en av dina klubbar, din krets eller en krets i samma landsdel.");
-            // Föreningen finns för EN sak: att dess styrelse får läsa planeringen. Vald förening = läsrätt.
-            var vis = ot.HasValue ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
             var start = ParseDate(targetStart);
             var end = ParseDate(targetEnd);
-            var err = PlanningService.Validate(name, start, end, ot, oi, vis);
+            var err = PlanningService.Validate(name, start, end);
             if (err != null) return No(err);
 
             var member = _memberService.GetById(me);
             var display = MemberDisplayName(member);
             var primary = _memberClubs.GetPrimaryClubId(member);
-            var (pid, _) = _planning.Create(new PlanningService.CreateInput(name, PlanningKind.Normalize(kind), ot, oi, targetText,
-                start, end, vis, me, display, primary > 0 ? primary : null, null));
+            var (pid, _) = _planning.Create(new PlanningService.CreateInput(name, PlanningKind.Group, targetText,
+                start, end, me, display, primary > 0 ? primary : null, null));
             return Ok(new { success = true, id = pid, url = $"/tavlingsplanering/{pid}" });
         }
 
@@ -328,20 +261,19 @@ namespace HpskSite.Controllers
                 {
                     id = x.Planning.Id, name = x.Planning.Name, kind = x.Planning.Kind, kindLabel = PlanningKind.Label(x.Planning.Kind),
                     targetText = x.Planning.TargetText, targetStart = D(x.Planning.TargetStart), targetEnd = D(x.Planning.TargetEnd),
-                    visibility = x.Planning.Visibility, status = x.Planning.Status,
-                    ownerType = x.Planning.OwnerType, ownerId = x.Planning.OwnerId, ownerName = OrgName(x.Planning.OwnerType, x.Planning.OwnerId),
+                    status = x.Planning.Status,
                     createdAt = D(x.Planning.CreatedAt),
                 },
                 me = new
                 {
-                    participantId = c.ParticipantId, isParticipant = c.IsParticipant, ownerOrgReader = c.OwnerOrgReader && !c.IsParticipant,
+                    participantId = c.ParticipantId, isParticipant = c.IsParticipant,
                     viaLink = c.ViaLink, isGuest = c.Participant?.IsGuest ?? false, name = c.Participant?.DisplayName,
                     access = c.Access, accessLabel = PlanningAccessLevel.Label(c.Access),
                     notifyMode = c.Participant?.NotifyMode, notifyLabel = PlanningNotifyMode.Label(c.Participant?.NotifyMode),
                     canEdit = PlanningAccess.CanEditPlanning(c), canManage = PlanningAccess.CanManagePlanning(c),
                     canInvite = PlanningAccess.CanInvite(c), canReadMessages = PlanningAccess.CanReadMessages(c),
-                    canUseMeetings = PlanningAccess.CanUseMeetings(c),
-                    icsUrl = c.IsParticipant ? _links.IcsUrl(c.ParticipantId, id, Request.PublicBase()) : null,
+                    canUseMeetings = PlanningAccess.CanUseMeetings(c), canWrite = PlanningAccess.CanWriteMessages(c),
+                    icsUrl = PlanningAccess.CanUseMeetings(c) ? _links.IcsUrl(c.ParticipantId, id, Request.PublicBase()) : null,
                     pushConfigured = _pushInfo.IsConfigured,
                 },
                 participants = people.Select(p => new
@@ -353,8 +285,15 @@ namespace HpskSite.Controllers
                     // E-post visas bara för den som hanterar deltagarna, och bara gästens (medlemmens finns i registret).
                     guestEmail = meCanManage && p.IsGuest ? p.GuestEmail : null,
                     isMe = p.Id == c.ParticipantId,
+                    // Klubbarna personen kan företräda: bara för den som får ändra raden.
+                    clubChoices = (meCanManage || p.Id == c.ParticipantId) && p.MemberId > 0 ? ClubChoices(p.MemberId.Value) : null,
                 }),
-                orgOptions = PlanningAccess.CanManagePlanning(c) ? OrgOptions(x.MemberId, x.Planning.OwnerType, x.Planning.OwnerId) : null,
+                // Nivåerna med förklaringar — texten finns bara i PlanningAccessLevel.Help.
+                accessLevels = PlanningAccessLevel.All.Select(a => new
+                {
+                    value = a, label = PlanningAccessLevel.Label(a), help = PlanningAccessLevel.Help(a), canGrant = PlanningAccess.CanGrant(c, a),
+                }),
+                regions = PlanningAccess.CanReadContent(c) && !c.ViaLink ? AllRegions().Select(r => new { id = r.Id, name = r.Name }) : null,
                 notifyModes = PlanningNotifyMode.Values.Select(v => new { value = v, label = PlanningNotifyMode.Label(v), help = PlanningNotifyMode.Help(v) }),
                 version = _planning.Version(id),
             });
@@ -371,28 +310,12 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? owner)
+        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Du kan inte ändra planeringen.");
-            int? ot = x.Planning.OwnerType, oi = x.Planning.OwnerId;
-            // ⚠️ Modellbindningen gör "" till null — "ingen förening" känns igen på att fältet skickades.
-            if (owner != null || (Request.HasFormContentType && Request.Form.ContainsKey("owner")))
-            {
-                var (okOwner, nt, ni) = ParseOwner(owner);
-                if (!okOwner) return No("Okänd förening.");
-                var changed = nt != ot || ni != oi;
-                if (changed)
-                {
-                    if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den som kan ändra allt ändrar vem som får läsa planeringen.");
-                    if (ni > 0 && !OrgAllowed(x.MemberId, nt!.Value, ni!.Value))
-                        return No("Välj en av dina klubbar, din krets eller en krets i samma landsdel.");
-                    ot = nt; oi = ni;
-                }
-            }
-            var vis = ot.HasValue ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
-            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), ot, oi, vis, x.MemberId);
+            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), x.MemberId);
             return err == null ? Ok() : No(err);
         }
 
@@ -402,7 +325,7 @@ namespace HpskSite.Controllers
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den som kan ändra allt arkiverar planeringen.");
+            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den sammankallande arkiverar planeringen.");
             _planning.SetStatus(id, status, x.MemberId);
             return Ok();
         }
@@ -413,7 +336,7 @@ namespace HpskSite.Controllers
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den som kan ändra allt tar bort planeringen.");
+            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den sammankallande tar bort planeringen.");
             _planning.Delete(id, x.MemberId);
             return Ok();
         }
@@ -446,16 +369,21 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddMember(int id, int memberId, string? access, int? representsClubId, int? representsRegionId)
+        public async Task<IActionResult> AddMember(int id, int memberId, string? access, int? representsClubId, int? representsRegionId,
+            string? representsText, string? representsNothing)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             var acc = PlanningAccessLevel.Normalize(access) ?? PlanningAccessLevel.Participant;
-            if (!PlanningAccess.CanGrant(x.Caller, acc)) return No("Du kan inte bjuda in med den rätten.");
+            if (!PlanningAccess.CanGrant(x.Caller, acc)) return No("Du kan inte bjuda in med den nivån.");
             var m = memberId > 0 ? _memberService.GetById(memberId) : null;
             if (m == null || !m.IsApproved) return No("Medlemmen finns inte.");
-            var rc = representsClubId > 0 ? representsClubId : (_memberClubs.GetPrimaryClubId(m) is var pc && pc > 0 ? pc : null);
-            var r = _planning.AddParticipant(id, memberId, MemberDisplayName(m), null, acc, rc, representsRegionId > 0 ? representsRegionId : null, null, x.MemberId);
+            if (RepresentsError(representsClubId, representsRegionId) is { } repErr) return No(repErr);
+            // Inget angivet = hens egen klubb. "Inget särskilt" skickas uttryckligen (representsNothing = "1").
+            var given = representsClubId > 0 || representsRegionId > 0 || !string.IsNullOrWhiteSpace(representsText) || representsNothing == "1";
+            var rc = representsClubId > 0 ? representsClubId : (!given && _memberClubs.GetPrimaryClubId(m) is var pc && pc > 0 ? pc : null);
+            var r = _planning.AddParticipant(id, memberId, MemberDisplayName(m), null, acc, rc, representsRegionId > 0 ? representsRegionId : null,
+                representsText, x.MemberId);
             if (r.Error != null) return No(r.Error);
             var mailed = false;
             if (r.Created || r.Reactivated) mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
@@ -471,7 +399,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> InviteByEmail(int id, string name, string email, string? access, string? representsText)
+        public async Task<IActionResult> InviteByEmail(int id, string name, string email, string? access, string? representsText, int? representsRegionId)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
@@ -490,7 +418,8 @@ namespace HpskSite.Controllers
                         ? "Adressen hör till en medlem på pistol.nu. Bjud in hen på vanligt sätt: välj Bjud in en medlem och sök på namnet. Då deltar hen med sitt eget konto."
                         : "Adressen hör till ett konto på pistol.nu som ännu inte är godkänt av klubben. När kontot är godkänt bjuder du in hen på vanligt sätt: Bjud in en medlem och sök på namnet.",
                 });
-            var r = _planning.AddParticipant(id, 0, name!, addr, acc, null, null, representsText, x.MemberId);
+            if (RepresentsError(null, representsRegionId) is { } repErr) return No(repErr);
+            var r = _planning.AddParticipant(id, 0, name!, addr, acc, null, representsRegionId > 0 ? representsRegionId : null, representsText, x.MemberId);
             if (r.Error != null) return No(r.Error);
             var mailed = false;
             if (r.Created || r.Reactivated) mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
@@ -522,8 +451,10 @@ namespace HpskSite.Controllers
             if (row == null || !row.IsActive) return No("Personen är inte med i planeringen.");
             var acc = PlanningAccessLevel.Normalize(access) ?? row.Access;
             var self = participantId == x.Caller.ParticipantId;
-            if (acc != row.Access && !PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den som kan ändra allt ändrar rättigheterna.");
+            if (acc != row.Access && !PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den sammankallande ändrar nivåerna.");
             if (!self && !PlanningAccess.CanManageParticipants(x.Caller)) return No("Du kan bara ändra dina egna uppgifter.");
+            if (acc != row.Access && !PlanningAccess.CanGrant(x.Caller, acc)) return No("Du kan inte ge den nivån.");
+            if (RepresentsError(representsClubId, representsRegionId) is { } repErr) return No(repErr);
             var err = _planning.UpdateParticipant(id, participantId, acc, representsClubId > 0 ? representsClubId : null,
                 representsRegionId > 0 ? representsRegionId : null, representsText);
             return err == null ? Ok() : No(err);
@@ -536,9 +467,46 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var self = participantId == x.Caller.ParticipantId && x.Caller.IsParticipant;
-            if (!self && !PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den som kan ändra allt tar bort någon.");
+            if (!self && !PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den sammankallande tar bort någon.");
             var err = _planning.RemoveParticipant(id, participantId, x.MemberId);
             return err == null ? Ok(new { success = true, left = self }) : No(err);
+        }
+
+        /// <summary>
+        /// Byt ut en deltagare mot en medlem (<paramref name="memberId"/>) eller en gäst med e-post. Den nya får
+        /// samma nivå och samma Företräder och ett inbjudningsmejl. Bara den sammankallande, och aldrig sig själv
+        /// (den som själv slutar lämnar planeringen när någon annan är sammankallande).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReplaceParticipant(int id, int participantId, int? memberId, string? name, string? email)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den sammankallande byter ut någon.");
+            if (participantId == x.Caller.ParticipantId) return No("Du kan inte byta ut dig själv. Gör någon annan till sammankallande och lämna sedan planeringen.");
+            string display;
+            string? guestEmail = null;
+            if (memberId > 0)
+            {
+                var m = _memberService.GetById(memberId.Value);
+                if (m == null || !m.IsApproved) return No("Medlemmen finns inte.");
+                display = MemberDisplayName(m);
+            }
+            else
+            {
+                guestEmail = (email ?? "").Trim();
+                if (guestEmail.Length == 0 || !guestEmail.Contains('@')) return No("Ange en giltig e-postadress.");
+                if ((name ?? "").Trim().Length == 0) return No("Skriv personens namn.");
+                // Samma regel som Bjud in med e-post: en medlem deltar med sitt konto, aldrig som gäst.
+                if (_memberService.GetByEmail(guestEmail) != null)
+                    return Json(new { success = false, isMember = true, message = "Adressen hör till en medlem på pistol.nu. Välj hen bland medlemmarna i stället — då deltar hen med sitt eget konto." });
+                display = name!.Trim();
+            }
+            var r = _planning.ReplaceParticipant(id, participantId, memberId ?? 0, display, guestEmail, x.MemberId);
+            if (r.Error != null) return No(r.Error);
+            var mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
+            return Ok(new { success = true, participantId = r.ParticipantId, mailed });
         }
 
         [HttpPost]
@@ -570,6 +538,8 @@ namespace HpskSite.Controllers
                     "planning-created" => $"{who} skapade planeringen.",
                     "member-joined" => $"{who} är med i planeringen.",
                     "member-left" => $"{who} är inte längre med.",
+                    "member-replaced" => $"{who} ersatte {Name(m.RefId)}" + (m.RefId.HasValue && people.TryGetValue(m.RefId.Value, out var gone)
+                        && Represents(gone) is { Length: > 0 } rp ? $" ({rp})." : "."),
                     "meeting-proposed" => $"{who} föreslog ett möte: {m.Body}",
                     "meeting-booked" => $"{who} bokade mötet {m.Body}{when}.",
                     "meeting-rebooked" => $"{who} flyttade mötet {m.Body}{when}.",
@@ -703,7 +673,7 @@ namespace HpskSite.Controllers
                             mine = vs.FirstOrDefault(v => v.PlanningMeetingOptionId == o.Id && v.ParticipantId == me)?.Answer,
                         }),
                         notAnswered = m.Status == PlanningMeetingStatus.Proposed
-                            ? people.Where(p => !voters.Contains(p.Id)).Select(p => new { id = p.Id, name = p.DisplayName }) : null,
+                            ? people.Where(p => PlanningAccess.IsCalledToMeetings(p) && !voters.Contains(p.Id)).Select(p => new { id = p.Id, name = p.DisplayName }) : null,
                         answeredCount = voters.Count,
                     };
                 }),

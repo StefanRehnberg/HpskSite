@@ -59,12 +59,13 @@
                     <div class="col-sm-6"><label class="form-label" for="plhStart">Första dagen, om den är bestämd</label><input id="plhStart" class="form-control" placeholder="åååå-mm-dd"></div>
                     <div class="col-sm-6"><label class="form-label" for="plhEnd">Sista dagen</label><input id="plhEnd" class="form-control" placeholder="åååå-mm-dd"></div>
                 </div>
-                @* Föreningen finns för EN sak: att dess styrelse får läsa. Vilka som är med styrs av inbjudningarna. *@
-                <div class="mb-2"><label class="form-label fw-semibold" for="plhOwner">Ska en förenings styrelse kunna läsa planeringen?</label>
-                    <select id="plhOwner" class="form-select"><option value="">Nej, bara de vi bjuder in</option></select>
-                    <div class="plh-help small mt-1">Styrelsen ser deltagarna och mötena, men aldrig meddelandena. Du kan bjuda in vem som helst oavsett krets,
-                        och föreningen kan ändras senare under Inställningar — till exempel när huvudarrangören är bestämd.</div></div>
-                <p class="plh-help small mt-3 mb-0">Du blir den som <i>kan ändra allt</i>. Sedan bjuder du in de andra.</p>
+                @*
+                    ⚠️ Planeringsgruppen är sin egen enhet (Stefan 2026-10-23): den som är inbjuden är med, ingen
+                    annan. Ingen förening eller styrelse får läsrätt — kretsar och klubbar utser personer, och vad var
+                    och en företräder står på deltagarlistan.
+                *@
+                <p class="plh-help small mt-3 mb-0">Du blir <b>sammankallande</b> — den som leder gruppen. Sedan bjuder du in de andra och anger vad var och en företräder,
+                    till exempel en krets, en klubb eller markägaren. Bara de som är inbjudna ser planeringen.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -107,18 +108,7 @@
             html.push(active.map(row).join(''));
             if (arch.length) html.push(`<details class="mt-3"><summary class="plh-help">Arkiverade (${arch.length})</summary><div class="mt-2">${arch.map(row).join('')}</div></details>`);
         }
-        if (data.orgPlannings && data.orgPlannings.length) {
-            html.push(`<h2 class="h5 mt-4">Föreningens planeringar</h2><p class="plh-help">Du sitter i styrelsen och kan läsa de här planeringarna (inte meddelandena).</p>`);
-            html.push(data.orgPlannings.map(p => `<a class="plh-row" href="/tavlingsplanering/${p.id}"><div><div class="nm">${esc(p.name)}</div>
-                <div class="meta">${esc(p.org)}${p.targetText ? ' · ' + esc(p.targetText) : ''}</div></div></a>`).join(''));
-        }
         $('plhList').innerHTML = html.join('');
-        const sel = $('plhOwner');
-        const opts = data.orgOptions || [];
-        const group = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.map(o =>
-            `<option value="${o.type}-${o.id}">${esc(o.name)}${o.kind === 'Krets' && o.own ? ' (din krets)' : ''}</option>`).join('')}</optgroup>` : '';
-        sel.innerHTML = '<option value="">Nej, bara de vi bjuder in</option>'
-            + group('Klubbar', opts.filter(o => o.kind === 'Klubb')) + group('Kretsar i landsdelen', opts.filter(o => o.kind === 'Krets'));
     }
     async function load() {
         try {
@@ -136,8 +126,7 @@
     $('plhCreate').addEventListener('click', async () => {
         const btn = $('plhCreate'); btn.disabled = true;
         try {
-            const owner = $('plhOwner').value;
-            const body = new URLSearchParams({ name: $('plhName').value, owner, targetText: $('plhTarget').value,
+            const body = new URLSearchParams({ name: $('plhName').value, targetText: $('plhTarget').value,
                 targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim() });
             const r = await req('/umbraco/surface/Planning/Create', { method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: body.toString() });

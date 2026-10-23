@@ -64,24 +64,20 @@ namespace HpskSite.Services.Planning
                 "SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
         }
 
-        public sealed record CreateInput(string Name, string Kind, int? OwnerType, int? OwnerId, string? TargetText,
-            DateTime? TargetStart, DateTime? TargetEnd, string Visibility, int MemberId, string DisplayName,
+        public sealed record CreateInput(string Name, string Kind, string? TargetText,
+            DateTime? TargetStart, DateTime? TargetEnd, int MemberId, string DisplayName,
             int? RepresentsClubId, int? RepresentsRegionId);
 
-        public static string? Validate(string? name, DateTime? start, DateTime? end, int? ownerType, int? ownerId, string visibility)
+        public static string? Validate(string? name, DateTime? start, DateTime? end)
         {
             var n = (name ?? "").Trim();
             if (n.Length == 0) return "Ge planeringen ett namn, till exempel \"SM 2028\".";
             if (n.Length > 200) return "Namnet är för långt (högst 200 tecken).";
             if (start.HasValue && end.HasValue && end.Value.Date < start.Value.Date) return "Slutdagen ligger före startdagen.";
-            if ((ownerType.HasValue) != (ownerId > 0)) return "Välj föreningen planeringen hör till, eller ingen.";
-            if (ownerType.HasValue && ownerType is not (0 or 1)) return "Okänd förening.";
-            if (visibility == PlanningVisibility.OwnerOrg && !ownerType.HasValue)
-                return "Planeringen kan bara synas för föreningen när den hör till en förening.";
             return null;
         }
 
-        /// <summary>Skapar planeringen med grunddelen och den som skapar som <i>Kan ändra allt</i>.</summary>
+        /// <summary>Skapar planeringen med grunddelen och den som skapar som <i>Sammankallande</i>.</summary>
         public (int PlanningId, int ParticipantId) Create(CreateInput i)
         {
             var now = Now;
@@ -91,12 +87,9 @@ namespace HpskSite.Services.Planning
             {
                 Name = i.Name.Trim(),
                 Kind = PlanningKind.Normalize(i.Kind),
-                OwnerType = i.OwnerType,
-                OwnerId = i.OwnerType.HasValue ? i.OwnerId : null,
                 TargetText = Clean(i.TargetText, 200),
                 TargetStart = i.TargetStart?.Date,
                 TargetEnd = i.TargetEnd?.Date,
-                Visibility = i.Visibility,
                 Status = "Active",
                 CreatedAt = now, CreatedBy = i.MemberId, UpdatedAt = now, UpdatedBy = i.MemberId,
             };
@@ -116,23 +109,19 @@ namespace HpskSite.Services.Planning
             return (p.Id, me.Id);
         }
 
-        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end,
-            int? ownerType, int? ownerId, string visibility, int byMemberId)
+        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
             if (p == null) return "Planeringen finns inte.";
-            var err = Validate(name, start, end, ownerType, ownerId, visibility);
+            var err = Validate(name, start, end);
             if (err != null) return err;
             var renamed = !string.Equals(p.Name, name.Trim(), StringComparison.Ordinal);
             p.Name = name.Trim();
             p.TargetText = Clean(targetText, 200);
             p.TargetStart = start?.Date;
             p.TargetEnd = end?.Date;
-            p.OwnerType = ownerType;
-            p.OwnerId = ownerType.HasValue ? ownerId : null;
-            p.Visibility = visibility;
             p.UpdatedAt = Now;
             p.UpdatedBy = byMemberId;
             db.Update(p);
@@ -179,7 +168,7 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             return s.Database.Fetch<PlanningMemberRow>(
                 "SELECT * FROM PlanningMember WHERE PlanningId = @0" + (includeRemoved ? "" : " AND RemovedAt IS NULL")
-                + " ORDER BY CASE Access WHEN N'Owner' THEN 0 WHEN N'Editor' THEN 1 ELSE 2 END, DisplayName", planningId);
+                + " ORDER BY CASE Access WHEN N'Owner' THEN 0 WHEN N'Editor' THEN 1 WHEN N'Participant' THEN 2 ELSE 3 END, DisplayName", planningId);
         }
 
         public PlanningMemberRow? Participant(int planningId, int participantId)
@@ -268,7 +257,7 @@ namespace HpskSite.Services.Planning
             var row = all.FirstOrDefault(r => r.Id == participantId);
             if (row == null) return "Personen är inte med i planeringen.";
             if (PlanningAccess.WouldLeaveNoOwner(all, participantId, access))
-                return "Det måste finnas minst en som kan ändra allt. Ge någon annan den rätten först.";
+                return NoOwnerLeft;
             row.Access = access;
             row.RepresentsClubId = repClubId;
             row.RepresentsRegionId = repClubId > 0 ? null : repRegionId;
@@ -285,12 +274,64 @@ namespace HpskSite.Services.Planning
             var all = db.Fetch<PlanningMemberRow>("SELECT * FROM PlanningMember WITH (UPDLOCK, HOLDLOCK) WHERE PlanningId = @0 AND RemovedAt IS NULL", planningId);
             if (all.All(r => r.Id != participantId)) return "Personen är inte med i planeringen.";
             if (PlanningAccess.WouldLeaveNoOwner(all, participantId, null))
-                return "Det måste finnas minst en som kan ändra allt. Ge någon annan den rätten först.";
+                return NoOwnerLeft;
             db.Execute("UPDATE PlanningMember SET RemovedAt = @2, RemovedBy = @3 WHERE Id = @0 AND PlanningId = @1",
                 participantId, planningId, Now, byMemberId);
             InsertSystem(db, planningId, "member-left", "", null, participantId, null, Now);
             Bump(db, planningId);
             return null;
+        }
+
+        private const string NoOwnerLeft = "Det måste finnas minst en sammankallande. Gör någon annan till sammankallande först.";
+
+        /// <summary>
+        /// Byt ut en deltagare (Stefan 2026-10-23: "byta ut medlem om hen inte kan va med längre"). Den nya
+        /// får samma nivå och samma <i>Företräder</i>; den gamla lämnar gruppen men hens meddelanden står
+        /// kvar under hens namn. EN transaktion, och EN rad i flödet ("X ersatte Y") i stället för två.
+        /// Den nya är en medlem (<paramref name="newMemberId"/>) eller en gäst med e-post.
+        /// </summary>
+        public AddResult ReplaceParticipant(int planningId, int oldParticipantId, int newMemberId, string newName,
+            string? newGuestEmail, int byMemberId)
+        {
+            var name = Clean(newName, 200);
+            var email = Clean(newGuestEmail, 256)?.ToLowerInvariant();
+            if (name == null) return new AddResult(0, false, false, "Namnet saknas.");
+            if (newMemberId <= 0 && (email == null || !email.Contains('@') || email.Contains(' ')))
+                return new AddResult(0, false, false, "Ange en giltig e-postadress.");
+
+            var now = Now;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var all = db.Fetch<PlanningMemberRow>("SELECT * FROM PlanningMember WITH (UPDLOCK, HOLDLOCK) WHERE PlanningId = @0", planningId);
+            var old = all.FirstOrDefault(r => r.Id == oldParticipantId && r.IsActive);
+            if (old == null) return new AddResult(0, false, false, "Personen är inte med i planeringen.");
+            var existing = newMemberId > 0
+                ? all.FirstOrDefault(r => r.MemberId == newMemberId)
+                : all.FirstOrDefault(r => r.MemberId == null && string.Equals(r.GuestEmail, email, StringComparison.OrdinalIgnoreCase));
+            if (existing?.Id == old.Id) return new AddResult(0, false, false, "Välj en annan person än den som byts ut.");
+            if (existing is { IsActive: true }) return new AddResult(0, false, false, $"{existing.DisplayName} är redan med i planeringen.");
+
+            var maxId = db.ExecuteScalar<int?>("SELECT MAX(Id) FROM PlanningMessage WHERE PlanningId = @0", planningId) ?? 0;
+            var row = existing ?? new PlanningMemberRow
+            {
+                PlanningId = planningId, MemberId = newMemberId > 0 ? newMemberId : null,
+                GuestEmail = newMemberId > 0 ? null : email, NotifyMode = PlanningNotifyMode.Default,
+            };
+            row.DisplayName = name;
+            row.Access = old.Access;
+            row.RepresentsClubId = old.RepresentsClubId;
+            row.RepresentsRegionId = old.RepresentsRegionId;
+            row.RepresentsText = old.RepresentsText;
+            row.AddedAt = now; row.AddedBy = byMemberId;
+            row.RemovedAt = null; row.RemovedBy = null;
+            if (existing == null) db.Insert(row); else db.Update(row);
+            EnsureRead(db, planningId, row.Id, maxId);
+
+            db.Execute("UPDATE PlanningMember SET RemovedAt = @2, RemovedBy = @3 WHERE Id = @0 AND PlanningId = @1",
+                old.Id, planningId, now, byMemberId);
+            InsertSystem(db, planningId, "member-replaced", "", null, row.Id, ("participant", old.Id), now);
+            Bump(db, planningId);
+            return new AddResult(row.Id, existing == null, existing != null, null);
         }
 
         public void SetNotifyMode(int planningId, int participantId, string mode)
@@ -334,9 +375,10 @@ namespace HpskSite.Services.Planning
                        (SELECT COUNT(*) FROM PlanningMessage m
                          WHERE m.PlanningId = p.Id AND m.DeletedAt IS NULL AND m.Id > ISNULL(r.LastReadMessageId, 0)
                            AND ISNULL(m.ParticipantId, 0) <> pm.Id) AS Unread,
+                       CASE WHEN pm.Access = N'Follower' THEN 0 ELSE
                        (SELECT COUNT(*) FROM PlanningMeeting mt
                          WHERE mt.PlanningId = p.Id AND mt.DeletedAt IS NULL AND mt.Status = N'Proposed'
-                           AND NOT EXISTS (SELECT 1 FROM PlanningMeetingVote v WHERE v.PlanningMeetingId = mt.Id AND v.ParticipantId = pm.Id)) AS VotesOwed,
+                           AND NOT EXISTS (SELECT 1 FROM PlanningMeetingVote v WHERE v.PlanningMeetingId = mt.Id AND v.ParticipantId = pm.Id)) END AS VotesOwed,
                        (SELECT MIN(mt.StartsAt) FROM PlanningMeeting mt
                          WHERE mt.PlanningId = p.Id AND mt.DeletedAt IS NULL AND mt.Status = N'Scheduled' AND mt.StartsAt >= @1) AS NextMeetingAt,
                        (SELECT MAX(m.CreatedAt) FROM PlanningMessage m WHERE m.PlanningId = p.Id) AS LastActivityAt
@@ -396,6 +438,7 @@ namespace HpskSite.Services.Planning
                   FROM PlanningMeeting m
                   JOIN Planning p ON p.Id = m.PlanningId AND p.DeletedAt IS NULL
                   JOIN PlanningMember pm ON pm.PlanningId = p.Id AND pm.MemberId = @0 AND pm.RemovedAt IS NULL
+                                        AND pm.Access <> N'Follower' -- den som följer är inte kallad till mötena
                  WHERE m.Status = N'Scheduled' AND m.DeletedAt IS NULL AND m.StartsAt >= @1 AND m.StartsAt < @2
                  ORDER BY m.StartsAt", memberId, from, to);
         }
@@ -410,15 +453,6 @@ namespace HpskSite.Services.Planning
             public DateTime? EndsAt { get; set; }
             public string? Place { get; set; }
             public string? OnlineUrl { get; set; }
-        }
-
-        /// <summary>Planeringar som föreningens styrelse/administratörer får läsa (synliga för föreningen).</summary>
-        public List<PlanningRow> VisibleToOwner(int ownerType, int ownerId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.Fetch<PlanningRow>(
-                "SELECT * FROM Planning WHERE OwnerType = @0 AND OwnerId = @1 AND Visibility = N'OwnerOrg' AND DeletedAt IS NULL ORDER BY UpdatedAt DESC",
-                ownerType, ownerId);
         }
 
         // =====================================================================================
