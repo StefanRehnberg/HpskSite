@@ -58,7 +58,8 @@ namespace HpskSite.Services.Planning
             // P2: kolumnerna som NPoco skriver vid varje sparning (alter-planning-p2-tasks.sql).
             // P2b: bemanningen i planeringen (alter-staffing-planning-p2b.sql + Planning.DisciplineKey).
             foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId"),
-                                                 ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId") })
+                                                 ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId"),
+                                                 ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -149,6 +150,15 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             s.Database.Execute("UPDATE Planning SET DisciplineKey = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL",
                 planningId, key, Now, byMemberId);
+            Bump(s.Database, planningId);
+        }
+
+        /// <summary>Om medlemmen får välja roll vid anmälan till bemanningen.</summary>
+        public void SetSignupRoleChoice(int planningId, bool value, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE Planning SET SignupRoleChoice = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL",
+                planningId, value, Now, byMemberId);
             Bump(s.Database, planningId);
         }
 

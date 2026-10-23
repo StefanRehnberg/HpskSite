@@ -34,6 +34,8 @@ namespace HpskSite.Models.Staffing
         public string ScopeKind { get; set; } = "";   // Station | All
         public string RoleKey { get; set; } = "";
         public int Count { get; set; }
+        /// <summary>Null = antalet för alla dagar; en dag = antalet just den dagen (<see cref="CrewNeedRules"/>).</summary>
+        public DateTime? DayDate { get; set; }
     }
 
     public static class CrewNeedScope

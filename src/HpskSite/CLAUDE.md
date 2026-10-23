@@ -12510,6 +12510,29 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   - Svit: `hpsk-verify/tavlingsplanering-bemanning-verify.mjs` 49/49 (A/B: radägarens prövning släppt +
     losskopplingen nollar inte tävlingen → 11 röda). ⚠️ Inte builder.claude som "utan behörighet" — hen är
     kretsadmin i Halland och kommer åt Ankeborgs tävlingar.
+- **P2c: behovet per roll och dag, "Hitta funktionärer" och anmälan som bygger på behoven (2026-10-23)**.
+  - **`StaffCrewNeed.DayDate`**: NULL = rollens antal för alla dagar, ett datum = antalet just den dagen (0 =
+    behövs inte). Reglerna i **`CrewNeedRules`** (ren, `CrewNeedRulesTests`): `ForDay` (dagens rad, annars
+    alla dagars), `Default`, `Plan` (lagrar bara dagar som avviker), `EffectiveFor`. `SetRoleNeeds` skriver hela
+    rollens plan; `SaveCrewNeeds`/`GetCrewNeeds` gäller bara alla-dagar-raderna. Rutnätet: `GridRow.NeededByDay`
+    + `NeedFor(kolumn)`, dialogen `#grdNeedModal` (snabbval per dagens art). Kopplingen (`StaffingPlanningLink`)
+    tar med `DayDate` i nyckeln, null-säkert.
+  - **`StaffHelpService.NeedDays(owner)`** = planens dagar (eller ägarens datum, utan att skriva) × roller med
+    behov, med `Missing` = behov − bemannade (ej avböjda; dag via starttid → dag → passets dag). Det är vad
+    anmälningssidan och panelens steg 2 visar. `HelpSlotChoice` bär `Date` + `RoleKey` (SlotId 0; tom roll =
+    "var det behövs"); `SaveMySignup` godtar en dag bara när dagen har behov och rollen behövs den dagen.
+  - **`Planning.SignupRoleChoice`** (förval 1): får medlemmen välja roll? `StaffOwnerResolver.SignupRoleChoice`
+    (tävling utan planering: ja). Sätts i panelen (`Staffing/SetSignupRoleChoice`, sträng "1"/"0").
+  - **Panelen "Hitta funktionärer"** (`#bemVarvningPanel`, hette Värva funktionärer): 1. vilka som får anmäla sig
+    — klubbar och kretsar i en sökbar lista (`Staffing/GetSourceScopeOptions` = `StaffingSignupService.ScopeOptions`;
+    Ankeland utesluten; arrangörens klubb och krets som förslag bara när tävlingen finns; `AddScope` vägrar
+    okänd klubb/krets; kretsen visas med förbundsnamnet), 2. behoven (`Staffing/GetSignupOverview`) + rollvalet +
+    "Något annat ni behöver hjälp med" (de gamla hjälppassen), 3. förfrågan, kopiera länken, visa som medlem.
+    Ordet "pass" står inte där.
+  - **`/bemanna`** är opt-in, grupperad per dag: roller med "N fattas av M" + *Var det behövs* (rollval på) eller
+    *Jag kan hjälpa till den här dagen* (av), och "Något annat" under sin dag. Kryssrutorna bär index, aldrig text.
+  - Migreringar `alter-staffcrewneed-per-day.sql` och `add-signuprolechoice-to-planning.sql` (P2c/P2d), FÖRE deploy.
+  - Svit: `hpsk-verify/tavlingsplanering-hitta-verify.mjs` 47/47 (A/B: dagvalens prövning släppt → 1 röd).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

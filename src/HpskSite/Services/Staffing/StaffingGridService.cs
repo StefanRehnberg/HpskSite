@@ -164,13 +164,11 @@ namespace HpskSite.Services.Staffing
 
             // Per-role need drives the number inside each cell. Coverage stopped being a screen of its
             // own precisely because nobody ever found that screen — on every real competition it was zero.
-            var needByRole = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                foreach (var n in _pass.GetCrewNeeds(owner, discipline))
-                    if (n.Count > 0) needByRole[n.RoleKey] = n.Count;
-            }
+            // Behovet per dag (Stefan 2026-10-23): rollens antal för alla dagar, och dagar som avviker.
+            var needRows = new List<StaffCrewNeed>();
+            try { needRows = _pass.GetAllCrewNeeds(owner); }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: crew-need read failed for {Comp}", competitionId); }
+            var datedKeys = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).Select(c => c.Key).ToList();
 
             foreach (var role in catalog)
             {
@@ -201,9 +199,16 @@ namespace HpskSite.Services.Staffing
                         SupportsTargetRange = role.SupportsTargetRange,
                         SupportsFunctionTitle = role.SupportsFunctionTitle,
                         DefaultScopeType = role.DefaultScopeType,
-                        Needed = needByRole.TryGetValue(role.Key, out var nd) ? nd : 0,
+                        Needed = CrewNeedRules.Default(needRows, CrewNeedScope.All, role.Key),
                         SortOrder = role.SortOrder,
                     };
+                    foreach (var k in datedKeys)
+                    {
+                        var n = CrewNeedRules.ForDay(needRows, CrewNeedScope.All, role.Key,
+                            DateTime.ParseExact(k, "yyyy-MM-dd", CultureInfo.InvariantCulture));
+                        row.NeededByDay[k] = n;
+                    }
+                    if (!row.HasNeed) row.NeededByDay.Clear();
 
                     foreach (var a in mine.Where(a => NormScope(a.ScopeType) == scopeType && a.ScopeKey == scopeKey))
                     {

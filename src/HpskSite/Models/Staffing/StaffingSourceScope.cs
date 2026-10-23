@@ -41,6 +41,21 @@ namespace HpskSite.Models.Staffing
 
     // --- Self-sign-up (member-facing) ---
 
+    /// <summary>"1" = medlemmen får välja roll. Sträng, eftersom "1" inte binder till bool.</summary>
+    public class SetSignupRoleChoiceRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? Value { get; set; }
+    }
+
+    /// <summary>En klubb eller krets i väljaren för vilka som får anmäla sig.</summary>
+    public class SourceScopeOption
+    {
+        public string ScopeType { get; set; } = "";
+        public string ScopeKey { get; set; } = "";
+        public string Label { get; set; } = "";
+    }
+
     public class OpenSignupView
     {
         public int CompetitionId { get; set; }

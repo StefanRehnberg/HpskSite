@@ -111,6 +111,10 @@ namespace HpskSite.Services.Staffing
             return (p?.TargetStart, p?.TargetEnd);
         }
 
+        /// <summary>Får medlemmen välja roll vid anmälan? Planeringens val; en tävling utan planering: ja.</summary>
+        public bool SignupRoleChoice(StaffOwner owner) =>
+            !owner.HasPlanning || (Planning(owner.PlanningId)?.SignupRoleChoice ?? true);
+
         /// <summary>Var organisatören hanterar bemanningen.</summary>
         public string ManageUrl(StaffOwner owner) =>
             owner.HasPlanning ? $"/tavlingsplanering/{owner.PlanningId}/bemanning" : $"/tavlingsplanering?c={owner.Comp}";

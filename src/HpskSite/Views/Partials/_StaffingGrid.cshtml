@@ -107,7 +107,7 @@
     <div class="small text-muted" id="grdSummary"></div>
     <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenVarvning()">
-            <i class="bi bi-megaphone me-1"></i>Värva funktionärer
+            <i class="bi bi-megaphone me-1"></i>Hitta funktionärer
         </button>
         <div class="dropdown">
             <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
@@ -160,6 +160,32 @@
     Klicka i en ruta för att lägga till en person. Namn utan tid betyder <strong>heldag</strong>.
     Personer utan konto på pistol.nu får <strong>inget schema och inga notiser</strong> — de visas gulmarkerade.
 </p>
+
+@* ---- behovet per roll och dag (Stefan 2026-10-23) ---- *@
+<div class="modal fade" id="grdNeedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="grdNeedTitle">Hur många behövs?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <label class="form-label mb-0" for="grdNeedAll">Samma antal alla dagar:</label>
+                    <input type="number" min="0" max="999" class="form-control form-control-sm" id="grdNeedAll" style="width:90px" inputmode="numeric">
+                </div>
+                <div class="d-flex gap-1 flex-wrap mb-3" id="grdNeedQuick"></div>
+                <div id="grdNeedDays"></div>
+                <p class="text-muted small mb-0 mt-2">0 betyder att rollen inte behövs den dagen. En dag som läggs till senare får antalet för alla dagar.</p>
+                <div class="text-danger small mt-2" id="grdNeedErr"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="grdNeedSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 @* ---- floating cell editor ---- *@
 <div id="grdEditor" class="card shadow">
@@ -286,9 +312,9 @@
         // Orientation without instruction: where the plan stands, in one line.
         var s = document.getElementById('grdSummary');
         var gaps = (grid.rows || []).reduce(function (acc, r) {
-            if (!r.needed) return acc;
             return acc + cols.filter(function (c) {
-                return c.key && ((r.cells && r.cells[c.key]) || []).length < r.needed;
+                var n = needFor(r, c.key);
+                return c.key && n > 0 && ((r.cells && r.cells[c.key]) || []).length < n;
             }).length;
         }, 0);
         var clashes = grid.clashes || [];
@@ -380,9 +406,12 @@
             var entries = (row.cells && row.cells[c.key]) || [];
             // Needed-vs-filled lives HERE, in the cell, not on a separate tab. The hole is already on
             // screen; the number just names it. Shown only once a need has been set for the role.
-            var need = row.needed || 0;
+            var need = needFor(row, c.key);
             var cls = 'grd-cell';
             var tally = '';
+            // Rollen behövs andra dagar men inte den här: säg det, så att en tom ruta inte läses som ett hål.
+            if (need === 0 && c.key && hasNeed(row) && !entries.length)
+                tally = '<div class="grd-need text-muted">behövs inte</div>';
             if (need > 0 && c.key) {
                 var short = entries.length < need;
                 cls += short ? ' grd-short' : ' grd-full';
@@ -772,19 +801,87 @@
         if (el) el.scrollIntoView({ block: 'nearest' });
     };
 
-    // How many of this role do we need, per day? Feeds the number in every cell on the row.
-    window.grdSetNeed = async function (roleKey) {
+    // Behovet per dag: rollens antal för alla dagar, och dagar som avviker (NeededByDay från servern).
+    function needFor(row, key) {
+        if (!key) return 0;
+        var m = row.neededByDay || {};
+        return Object.prototype.hasOwnProperty.call(m, key) ? (m[key] || 0) : (row.needed || 0);
+    }
+    function hasNeed(row) {
+        if ((row.needed || 0) > 0) return true;
+        var m = row.neededByDay || {};
+        return Object.keys(m).some(function (k) { return m[k] > 0; });
+    }
+
+    // How many of this role do we need, per day? A dialog with one number for every day and one per day.
+    var needModal = null, needRole = null;
+    window.grdSetNeed = function (roleKey) {
         roleKey = unarg(roleKey);
         var row = (grid.rows || []).find(function (r) { return r.roleKey === roleKey; });
-        var cur = row ? (row.needed || 0) : 0;
-        var v = prompt('Hur många ' + (row ? row.roleName : 'personer') + ' behövs per dag?\n\n0 = inget angivet krav.', String(cur));
-        if (v == null) return;
-        var n = parseInt(v, 10);
-        if (isNaN(n) || n < 0) return;
-        var r = await post('SetCrewNeed', { competitionId: compId, roleKey: roleKey, count: n });
-        if (!r.success) { alert(r.message || 'Kunde inte spara behovet.'); return; }
-        await grdLoad();
+        if (!row) return;
+        needRole = row;
+        var days = (grid.columns || []).filter(function (c) { return c.key; });
+        document.getElementById('grdNeedTitle').textContent = 'Hur många behövs — ' + row.roleName + '?';
+        document.getElementById('grdNeedErr').textContent = '';
+        var all = document.getElementById('grdNeedAll');
+        all.value = String(row.needed || 0);
+        document.getElementById('grdNeedDays').innerHTML = days.length
+            ? days.map(function (c) {
+                return '<div class="d-flex justify-content-between align-items-center border-bottom py-1 gap-2">'
+                    + '<label class="mb-0" for="grdNeedDay_' + c.key + '">' + esc(c.label)
+                    + (c.dayLabel ? ' <span class="text-muted small">· ' + esc(c.dayLabel) + '</span>' : '')
+                    + ' <span class="text-muted small">' + esc(c.kindLabel || '') + '</span></label>'
+                    + '<input type="number" min="0" max="999" class="form-control form-control-sm grd-need-day" style="width:80px" inputmode="numeric"'
+                    + ' id="grdNeedDay_' + c.key + '" data-day="' + esc(c.key) + '" data-kind="' + esc(c.kind || '') + '" value="' + needFor(row, c.key) + '">'
+                    + '</div>';
+            }).join('')
+            : '<div class="text-muted small">Planen har inga dagar än — lägg till en dag först, eller ange bara antalet för alla dagar.</div>';
+        // Snabbval efter dagens art: bara de arter som finns bland dagarna.
+        var kinds = [];
+        days.forEach(function (c) { if (c.kind && kinds.indexOf(c.kind) < 0) kinds.push(c.kind); });
+        var KIND_WORD = { Tavlingsdag: 'tävlingsdagar', Forberedelse: 'förberedelsedagar', Efterarbete: 'dagar med efterarbete' };
+        document.getElementById('grdNeedQuick').innerHTML = (kinds.length > 1)
+            ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-need-quick="">Alla dagar</button>'
+              + kinds.map(function (k) { return '<button type="button" class="btn btn-sm btn-outline-secondary" data-need-quick="' + esc(k) + '">Bara ' + esc(KIND_WORD[k] || k) + '</button>'; }).join('')
+            : '';
+        if (!needModal) needModal = new bootstrap.Modal(document.getElementById('grdNeedModal'));
+        needModal.show();
     };
+    // "Samma antal alla dagar" fyller i dagarna; snabbvalen sätter antalet på dagar av en art och 0 på resten.
+    document.addEventListener('input', function (e) {
+        if (e.target && e.target.id === 'grdNeedAll') {
+            var v = e.target.value;
+            document.querySelectorAll('#grdNeedDays .grd-need-day').forEach(function (i) { i.value = v; });
+        }
+    });
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest && e.target.closest('[data-need-quick]');
+        if (!b) return;
+        var kind = b.getAttribute('data-need-quick');
+        var v = document.getElementById('grdNeedAll').value || '0';
+        document.querySelectorAll('#grdNeedDays .grd-need-day').forEach(function (i) {
+            i.value = (!kind || i.getAttribute('data-kind') === kind) ? v : '0';
+        });
+    });
+    document.addEventListener('click', async function (e) {
+        if (!e.target || e.target.id !== 'grdNeedSave' || !needRole) return;
+        var err = document.getElementById('grdNeedErr');
+        var all = parseInt(document.getElementById('grdNeedAll').value || '0', 10);
+        if (isNaN(all) || all < 0 || all > 999) { err.textContent = 'Ange ett antal mellan 0 och 999.'; return; }
+        var days = [], bad = false;
+        document.querySelectorAll('#grdNeedDays .grd-need-day').forEach(function (i) {
+            var n = parseInt(i.value || '0', 10);
+            if (isNaN(n) || n < 0 || n > 999) bad = true;
+            days.push({ date: i.getAttribute('data-day'), count: isNaN(n) ? 0 : n });
+        });
+        if (bad) { err.textContent = 'Ange ett antal mellan 0 och 999 för varje dag.'; return; }
+        e.target.disabled = true;
+        var r = await post('SetRoleNeeds', { competitionId: compId, roleKey: needRole.roleKey, all: all, days: days });
+        e.target.disabled = false;
+        if (!r.success) { err.textContent = r.message || 'Kunde inte spara behovet.'; return; }
+        needModal.hide();
+        await grdLoad();
+    });
 
     // ---------------------------------------------------------------- days of the plan
 

@@ -52,12 +52,20 @@ namespace HpskSite.Services.Staffing
         public (bool Ok, string? Message, int Id) AddScope(StaffOwner owner, string scopeType, string scopeKey, int byMemberId)
         {
             var type = string.Equals(scopeType, SourceScopeType.Region, StringComparison.OrdinalIgnoreCase) ? SourceScopeType.Region : SourceScopeType.Club;
+            // En klubb måste finnas; en krets måste vara en känd krets.
+            if (!string.IsNullOrWhiteSpace(scopeKey) && !string.Equals(scopeKey, "self", StringComparison.OrdinalIgnoreCase))
+            {
+                if (type == SourceScopeType.Club && (!int.TryParse(scopeKey, out var cid) || _clubService.GetClubNameById(cid) == null))
+                    return (false, "Klubben finns inte.", 0);
+                if (type == SourceScopeType.Region && !Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(scopeKey, true, out _))
+                    return (false, "Kretsen finns inte.", 0);
+            }
             // "self"/blank = the hosting club or region, resolved from the competition.
             if (string.IsNullOrWhiteSpace(scopeKey) || string.Equals(scopeKey, "self", StringComparison.OrdinalIgnoreCase))
             {
                 // P2b: en planering utan tävling har ingen arrangör att utgå från.
                 if (!owner.HasCompetition)
-                    return (false, "Planeringen är inte kopplad till någon tävling, så arrangören är inte känd. Välj klubb eller krets i listan.", 0);
+                    return (false, "Planeringen är inte kopplad till någon tävling, så arrangören är inte känd. Sök fram klubben eller kretsen.", 0);
                 var comp = _competitions.GetSaved(owner.Comp); // C3-planen §5d
                 if (type == SourceScopeType.Club)
                 {
@@ -209,7 +217,43 @@ namespace HpskSite.Services.Staffing
         {
             if (string.Equals(scopeType, SourceScopeType.Club, StringComparison.OrdinalIgnoreCase) && int.TryParse(scopeKey, out var clubId))
                 return _clubService.GetClubNameById(clubId) ?? $"Klubb {scopeKey}";
-            return $"Krets {scopeKey}";
+            return RegionName(scopeKey);
+        }
+
+        private static string RegionName(string code) =>
+            Enum.TryParse<HpskSite.Models.Federations.RegionalFederations>(code, true, out var r)
+                ? HpskSite.Models.Federations.GetDescription(r) : $"Krets {code}";
+
+        /// <summary>
+        /// Klubbarna och kretsarna man kan öppna anmälan för (väljaren i "Hitta funktionärer"). Demokretsen
+        /// Ankeland är inte med. Är bemanningen kopplad till en tävling följer arrangörens klubb och krets
+        /// med som förslag.
+        /// </summary>
+        public (List<SourceScopeOption> Clubs, List<SourceScopeOption> Regions, List<SourceScopeOption> Suggested) ScopeOptions(StaffOwner owner)
+        {
+            var sv = StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("sv-SE"), true);
+            var clubs = _clubService.GetAllClubs()
+                .Where(c => c.Id > 0 && !string.IsNullOrWhiteSpace(c.Name))
+                .Select(c => new SourceScopeOption { ScopeType = SourceScopeType.Club, ScopeKey = c.Id.ToString(), Label = c.Name })
+                .OrderBy(c => c.Label, sv).ToList();
+            var regions = Enum.GetValues<HpskSite.Models.Federations.RegionalFederations>()
+                .Where(r => r != HpskSite.Models.Federations.RegionalFederations.Ankeland)
+                .Select(r => new SourceScopeOption { ScopeType = SourceScopeType.Region, ScopeKey = r.ToString(), Label = HpskSite.Models.Federations.GetDescription(r) })
+                .OrderBy(r => r.Label, sv).ToList();
+            var suggested = new List<SourceScopeOption>();
+            if (owner.HasCompetition)
+            {
+                var comp = _competitions.GetSaved(owner.Comp);
+                if (comp?.ClubId > 0)
+                    suggested.Add(new SourceScopeOption { ScopeType = SourceScopeType.Club, ScopeKey = comp.ClubId.ToString(),
+                        Label = (_clubService.GetClubNameById(comp.ClubId) ?? "Arrangörsklubben") + " (arrangör)" });
+                var region = comp?.RegionalFederation;
+                if (string.IsNullOrWhiteSpace(region) && (comp?.ClubId ?? 0) > 0)
+                    try { region = _contentService.GetById(comp!.ClubId)?.GetValue<string>("regionalFederation"); } catch { }
+                if (!string.IsNullOrWhiteSpace(region))
+                    suggested.Add(new SourceScopeOption { ScopeType = SourceScopeType.Region, ScopeKey = region!, Label = RegionName(region!) });
+            }
+            return (clubs, regions, suggested);
         }
     }
 }

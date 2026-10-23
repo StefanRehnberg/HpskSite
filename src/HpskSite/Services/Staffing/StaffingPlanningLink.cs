@@ -26,7 +26,7 @@ namespace HpskSite.Services.Staffing
         private static readonly (string Table, string[] Keys)[] Unique =
         {
             ("StaffDay", new[] { "DayDate" }),
-            ("StaffCrewNeed", new[] { "ScopeKind", "RoleKey" }),
+            ("StaffCrewNeed", new[] { "ScopeKind", "RoleKey", "DayDate" }),
             ("StaffHelpSignup", new[] { "MemberId" }),
             ("StaffingSourceScope", new[] { "ScopeType", "ScopeKey" }),
         };
@@ -39,7 +39,8 @@ namespace HpskSite.Services.Staffing
             if (planningId <= 0 || competitionId <= 0) return;
             foreach (var (t, keys) in Unique)
             {
-                var match = string.Join(" AND ", keys.Select(k => $"x.{k} = d.{k}"));
+                // Null-säker: behovets DayDate är null för "alla dagar".
+                var match = string.Join(" AND ", keys.Select(k => $"(x.{k} = d.{k} OR (x.{k} IS NULL AND d.{k} IS NULL))"));
                 db.Execute($@"DELETE d FROM {t} d
                     WHERE d.CompetitionId = @1 AND d.PlanningId IS NULL
                       AND EXISTS (SELECT 1 FROM {t} x WHERE x.PlanningId = @0 AND {match})", planningId, competitionId);

@@ -183,6 +183,9 @@ namespace HpskSite.Controllers
                 assignments,
                 slots,
                 mySignup,
+                // Planens dagar med rollerna som behövs (Stefan 2026-10-23: anmälan bygger på behoven).
+                needDays = _help.NeedDays(owner),
+                roleChoice = _owners.SignupRoleChoice(owner),
             });
         }
 

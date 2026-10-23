@@ -40,10 +40,37 @@ namespace HpskSite.Models.Staffing
     }
 
     // --- JSON shape (SlotsJson) ---
+    /// <summary>
+    /// Ett val på anmälningssidan. Antingen ett av arrangörens egna tillfällen ("Något annat vi behöver hjälp
+    /// med", <see cref="SlotId"/> &gt; 0), eller en dag ur planen (<see cref="SlotId"/> = 0, <see cref="Date"/>)
+    /// med en roll som behövs den dagen — tom <see cref="RoleKey"/> = "var det behövs".
+    /// </summary>
     public class HelpSlotChoice
     {
         public int SlotId { get; set; }
+        public string? Date { get; set; }
+        public string? RoleKey { get; set; }
         public List<HelpTimeWindow> Times { get; set; } = new();
+        public bool IsDayChoice => SlotId <= 0 && !string.IsNullOrWhiteSpace(Date);
+    }
+
+    /// <summary>En dag i planen med rollerna som behövs (Stefan 2026-10-23: anmälan bygger på behoven).</summary>
+    public class NeedDayView
+    {
+        public string Date { get; set; } = "";       // "yyyy-MM-dd"
+        public string Kind { get; set; } = "";
+        public string KindLabel { get; set; } = "";
+        public string? DayLabel { get; set; }
+        public List<NeedRoleView> Roles { get; set; } = new();
+        public int Missing => Roles.Sum(r => r.Missing);
+    }
+
+    public class NeedRoleView
+    {
+        public string RoleKey { get; set; } = "";
+        public string RoleName { get; set; } = "";
+        public int Needed { get; set; }
+        public int Missing { get; set; }
     }
     public class HelpTimeWindow
     {
@@ -81,6 +108,9 @@ namespace HpskSite.Models.Staffing
     public class HelpSignupReviewSlot
     {
         public int SlotId { get; set; }
+        /// <summary>En dag ur planen (SlotId 0): dagen och rollen (tom = var det behövs).</summary>
+        public string? Date { get; set; }
+        public string? RoleKey { get; set; }
         public string Label { get; set; } = "";        // "2026-08-02 · Tävlingsdag 1 · Kansliet (06:00–22:00)"
         public string TimesText { get; set; } = "";     // "07:00–11:00, 18:00–22:00" or "" = hela passet
     }

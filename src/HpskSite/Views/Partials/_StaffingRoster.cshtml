@@ -302,31 +302,48 @@
     *@
     <div class="offcanvas offcanvas-end" tabindex="-1" id="bemVarvningPanel" style="width:min(760px,95vw)">
       <div class="offcanvas-header border-bottom">
-        <h5 class="offcanvas-title"><i class="bi bi-megaphone me-2"></i>Värva funktionärer</h5>
+        <h5 class="offcanvas-title"><i class="bi bi-megaphone me-2"></i>Hitta funktionärer</h5>
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
       </div>
       <div class="offcanvas-body">
         <p class="text-muted small mb-3">
-            Saknas funktionärer? Öppna tävlingen för självanmälan, skicka en förfrågan till klubben/kretsen,
-            och lägg upp en <strong>anmälningssida</strong> där medlemmar bockar för de pass de kan hjälpa
-            till med. De som anmäler sig dyker upp <strong>överst i rutnätet</strong>.
+            Tre steg: välj vilka som får anmäla sig, se vad ni behöver hjälp med, och be om hjälp.
+            De som anmäler sig syns <strong>överst i rutnätet</strong>, där du ger dem en uppgift.
         </p>
 
+        @* Steg 1 — vilka får anmäla sig. Klubbar och kretsar väljs i en lista (Stefan 2026-10-23). *@
         <div class="card mb-3" id="stfSourceCard">
+            <div class="card-header py-2 fw-semibold">1. Vilka får anmäla sig?</div>
             <div class="card-body py-2" id="stfSourceBody"><div class="text-muted small">Laddar…</div></div>
         </div>
 
-        <div class="card mb-3" id="stfHelpCard">
-            <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
-                <span class="fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Anmälningssida (självanmälan)</span>
-                <span class="d-flex gap-1 flex-wrap">
-                    <a class="btn btn-sm btn-outline-secondary" id="stfPreviewBtn" href="#" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Förhandsgranska</a>
-                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenSlot(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till pass</button>
-                </span>
-            </div>
+        @* Steg 2 — vad som behövs, ur behoven per roll och dag i rutnätet. *@
+        <div class="card mb-3" id="stfNeedCard">
+            <div class="card-header py-2 fw-semibold">2. Det här behöver ni hjälp med</div>
             <div class="card-body py-2">
-                <div class="text-muted small mb-2">Lägg upp de <strong>pass</strong> ni behöver hjälp med (datum, tid, rubrik, kort beskrivning — flera per datum går bra). Medlemmar bockar för de pass de kan hjälpa till med på sidan <code>/bemanna</code> och skriver en kommentar.</div>
-                <div id="stfHelpSlots" class="mb-3"><div class="text-muted small">Laddar…</div></div>
+                <div id="stfNeedBody"><div class="text-muted small">Laddar…</div></div>
+                <div class="border-top pt-2 mt-2" id="stfHelpCard">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                        <span class="fw-semibold small">Något annat ni behöver hjälp med</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="stfOpenSlot(0)"><i class="bi bi-plus-lg me-1"></i>Lägg till…</button>
+                    </div>
+                    <div class="text-muted small mb-1">Sådant som inte är en roll i rutnätet, till exempel att bygga banan eller baka till kiosken.</div>
+                    <div id="stfHelpSlots"><div class="text-muted small">Laddar…</div></div>
+                </div>
+            </div>
+        </div>
+
+        @* Steg 3 — be om hjälp: förfrågan, länken och förhandsvisningen. *@
+        <div class="card mb-3" id="stfAskCard">
+            <div class="card-header py-2 fw-semibold">3. Be om hjälp</div>
+            <div class="card-body py-2">
+                <div id="stfAskBody" class="mb-2"></div>
+                <div class="d-flex gap-2 flex-wrap mb-2">
+                    <button type="button" class="btn btn-sm btn-primary" id="stfAskSendBtn" onclick="stfOpenRequest()"><i class="bi bi-send me-1"></i>Skicka förfrågan…</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="stfCopyLinkBtn"><i class="bi bi-link-45deg me-1"></i>Kopiera länken till anmälan</button>
+                    <a class="btn btn-sm btn-outline-secondary" id="stfPreviewBtn" href="#" target="_blank" rel="noopener"><i class="bi bi-eye me-1"></i>Visa sidan som medlem</a>
+                </div>
+                <div class="small text-success mb-2" id="stfCopyLinkMsg" style="display:none"></div>
                 @* Just the tally + a way in — the volunteers themselves show above the grid. *@
                 <div id="stfHelpTally"></div>
             </div>
@@ -520,18 +537,18 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="stfSlotTitle">Lägg till pass</h5>
+                <h5 class="modal-title" id="stfSlotTitle">Något annat ni behöver hjälp med</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="stfSlotId" value="0">
                 <div class="row g-2">
                     <div class="col-sm-6 mb-2"><label class="form-label fw-semibold">Datum</label><input type="text" class="form-control" id="stfSlotDate" placeholder="2026-08-02"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från</label><input type="text" class="form-control" id="stfSlotFrom" placeholder="06:00"></div>
-                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till</label><input type="text" class="form-control" id="stfSlotTo" placeholder="22:00"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Från (valfritt)</label><input type="text" class="form-control" id="stfSlotFrom" data-hpsk-time inputmode="decimal" placeholder="09"></div>
+                    <div class="col-sm-3 mb-2"><label class="form-label fw-semibold">Till (valfritt)</label><input type="text" class="form-control" id="stfSlotTo" data-hpsk-time inputmode="decimal" placeholder="15"></div>
                 </div>
-                <div class="mb-2"><label class="form-label fw-semibold">Rubrik</label><input type="text" class="form-control" id="stfSlotHeadline" placeholder="t.ex. Tävlingsdag 1 · Kansliet"></div>
-                <div class="mb-1"><label class="form-label fw-semibold">Kort beskrivning (valfritt)</label><textarea class="form-control" id="stfSlotDesc" rows="2" placeholder="t.ex. Personal till kansliet"></textarea></div>
+                <div class="mb-2"><label class="form-label fw-semibold">Vad behöver ni hjälp med?</label><input type="text" class="form-control" id="stfSlotHeadline" placeholder="t.ex. Bygga banan"></div>
+                <div class="mb-1"><label class="form-label fw-semibold">Kort beskrivning (valfritt)</label><textarea class="form-control" id="stfSlotDesc" rows="2" placeholder="t.ex. Ta med arbetshandskar"></textarea></div>
                 <div class="text-danger small mt-2" id="stfSlotError"></div>
             </div>
             <div class="modal-footer">
@@ -565,7 +582,7 @@
                 </div>
                 <div class="mb-2">
                     <label class="form-label fw-semibold">Meddelande (valfritt)</label>
-                    <textarea class="form-control" id="stfReqMessage" rows="2" placeholder="t.ex. Vi behöver markörer och kassa till lördagens tävling."></textarea>
+                    <textarea class="form-control" id="stfReqMessage" rows="2" placeholder="t.ex. Vi behöver markörer och kassa. Anmäl dig via länken."></textarea>
                 </div>
                 <div class="small text-muted" id="stfReqLastSent"></div>
                 <div class="text-danger small mt-1" id="stfReqError"></div>
@@ -767,7 +784,7 @@
         body.innerHTML = slice.length
             ? slice.map(personRowHtml).join('')
             : '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-people me-1"></i>'
-              + (people.length ? 'Ingen person matchar filtret.' : 'Ingen är kopplad till tävlingen än. Lägg till en funktionär, eller öppna för självanmälan under Värvning.')
+              + (people.length ? 'Ingen person matchar filtret.' : 'Ingen är kopplad till tävlingen än. Lägg till en funktionär, eller använd Hitta funktionärer.')
               + '</td></tr>';
 
         var more = document.getElementById('stfPeopleMore');
@@ -1461,41 +1478,78 @@
         } catch (e) { alert('Nätverksfel.'); }
     };
 
-    // ---- sourcing scope: open the comp for member self-sign-up (Phase 3) ----
+    // ---- Hitta funktionärer, steg 1: vilka får anmäla sig? Klubbar och kretsar väljs i en lista. ----
+    var scopeOptions = null, openScopes = [], scopeMsg = '';
     async function loadScopes() {
         try {
             var r = await fetch('/umbraco/surface/Staffing/GetSourceScopes?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
             var d = await r.json();
-            renderScopes((d && d.success) ? (d.scopes || []) : []);
-        } catch (e) { /* leave as-is */ }
+            openScopes = (d && d.success) ? (d.scopes || []) : [];
+            if (!scopeOptions) {
+                var r2 = await fetch('/umbraco/surface/Staffing/GetSourceScopeOptions?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+                var d2 = await r2.json();
+                scopeOptions = (d2 && d2.success) ? d2 : { clubs: [], regions: [], suggested: [] };
+            }
+            renderScopes();
+            renderAsk();
+        } catch (e) { var b = document.getElementById('stfSourceBody'); if (b) b.innerHTML = '<div class="text-danger small">Kunde inte läsa listan.</div>'; }
     }
-    function renderScopes(scopes) {
+    function scopeIsOpen(o) {
+        return openScopes.some(function (s) { return s.scopeType === o.scopeType && String(s.scopeKey).toLowerCase() === String(o.scopeKey).toLowerCase(); });
+    }
+    function scopeOptionHtml(o, i, src) {
+        return '<button type="button" class="list-group-item list-group-item-action py-1 small stf-scope-pick" data-src="' + src + '" data-i="' + i + '">'
+            + '<i class="bi ' + (o.scopeType === 'Region' ? 'bi-diagram-3' : 'bi-house') + ' me-1"></i>' + esc(o.label) + '</button>';
+    }
+    function renderScopeResults() {
+        var host = document.getElementById('stfScopeResults'); if (!host || !scopeOptions) return;
+        var qv = ((document.getElementById('stfScopeSearch') || {}).value || '').trim().toLowerCase();
+        if (!qv) { host.innerHTML = ''; return; }
+        var all = [];
+        (scopeOptions.regions || []).forEach(function (o, i) { if (!scopeIsOpen(o) && o.label.toLowerCase().indexOf(qv) >= 0) all.push(scopeOptionHtml(o, i, 'r')); });
+        (scopeOptions.clubs || []).forEach(function (o, i) { if (!scopeIsOpen(o) && o.label.toLowerCase().indexOf(qv) >= 0) all.push(scopeOptionHtml(o, i, 'c')); });
+        host.innerHTML = all.length
+            ? '<div class="list-group mt-1" style="max-height:220px;overflow:auto">' + all.slice(0, 12).join('') + '</div>'
+              + (all.length > 12 ? '<div class="text-muted small mt-1">Skriv mer för att se fler (' + all.length + ' träffar).</div>' : '')
+            : '<div class="text-muted small mt-1">Ingen klubb eller krets heter så.</div>';
+    }
+    function renderScopes() {
         var body = document.getElementById('stfSourceBody');
         if (!body) return;
-        var chips = scopes.map(function (s) {
-            return '<span class="badge bg-success-subtle text-success-emphasis border d-inline-flex align-items-center gap-1" style="font-weight:500">'
+        var chips = openScopes.map(function (s) {
+            return '<span class="badge bg-success-subtle text-success-emphasis border d-inline-flex align-items-center gap-1 me-1 mb-1" style="font-weight:500">'
                 + '<i class="bi bi-unlock me-1"></i>' + esc(s.label)
-                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Stäng för anmälan" onclick="stfRemoveScope(' + s.id + ')"></button></span>';
+                + '<button type="button" class="btn-close" style="font-size:.6rem" title="Ta bort" aria-label="Ta bort ' + esc(s.label) + '" onclick="stfRemoveScope(' + s.id + ')"></button></span>';
+        }).join('');
+        var sugg = ((scopeOptions && scopeOptions.suggested) || []).map(function (o, i) {
+            return scopeIsOpen(o) ? '' : '<button type="button" class="btn btn-sm btn-outline-success stf-scope-pick" data-src="s" data-i="' + i + '"><i class="bi bi-plus-lg me-1"></i>' + esc(o.label) + '</button>';
         }).join(' ');
-        body.innerHTML = '<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">'
-            + '<div><div class="fw-semibold mb-1"><i class="bi bi-people-fill me-1"></i>Öppen för självanmälan</div>'
-            + (chips || '<span class="text-muted small">Ingen — bara inbjudna kan bemanna. Öppna för klubbens/kretsens medlemmar så kan de anmäla sig själva.</span>')
-            + '</div>'
-            + '<div class="d-flex gap-1 flex-wrap">'
-            + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Club\')"><i class="bi bi-plus-lg me-1"></i>Arrangörsklubben</button>'
-            + '<button type="button" class="btn btn-sm btn-outline-success" onclick="stfAddScope(\'Region\')"><i class="bi bi-plus-lg me-1"></i>Kretsen</button>'
-            + (scopes.length ? '<button type="button" class="btn btn-sm btn-primary" onclick="stfOpenRequest()"><i class="bi bi-send me-1"></i>Skicka förfrågan</button>' : '')
-            + '</div></div>';
+        body.innerHTML = '<div class="small text-muted mb-2">Medlemmar i de klubbar och kretsar du väljer kan anmäla sig. Andra kan du fortfarande lägga in själv i rutnätet.</div>'
+            + '<div class="mb-2">' + (chips || '<span class="text-muted small fst-italic">Ingen vald ännu.</span>') + '</div>'
+            + (sugg ? '<div class="d-flex gap-1 flex-wrap mb-2">' + sugg + '</div>' : '')
+            + '<label class="form-label small fw-semibold mb-1" for="stfScopeSearch">Lägg till en klubb eller krets</label>'
+            + '<input type="search" class="form-control form-control-sm" id="stfScopeSearch" placeholder="Skriv klubbens eller kretsens namn" autocomplete="off">'
+            + '<div id="stfScopeResults"></div>'
+            + (scopeMsg ? '<div class="text-danger small mt-1">' + esc(scopeMsg) + '</div>' : '');
+        scopeMsg = '';
     }
-    window.stfAddScope = async function (type) {
+    document.addEventListener('input', function (e) { if (e.target && e.target.id === 'stfScopeSearch') renderScopeResults(); });
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest && e.target.closest('.stf-scope-pick'); if (!b || !scopeOptions) return;
+        var src = b.getAttribute('data-src'), i = +b.getAttribute('data-i');
+        var o = (src === 'r' ? scopeOptions.regions : src === 'c' ? scopeOptions.clubs : scopeOptions.suggested)[i];
+        if (o) stfAddScope(o.scopeType, o.scopeKey);
+    });
+    window.stfAddScope = async function (type, key) {
         try {
             var r = await fetch('/umbraco/surface/Staffing/AddSourceScope', {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
-                body: JSON.stringify({ competitionId: compId, scopeType: type, scopeKey: 'self' })
+                body: JSON.stringify({ competitionId: compId, scopeType: type, scopeKey: key || 'self' })
             });
             var d = await r.json();
-            if (d.success) await loadScopes(); else alert(d.message || 'Kunde inte öppna.');
-        } catch (e) { alert('Nätverksfel.'); }
+            if (!d.success) scopeMsg = d.message || 'Kunde inte lägga till.';
+            await loadScopes();
+        } catch (e) { scopeMsg = 'Nätverksfel.'; renderScopes(); }
     };
     window.stfRemoveScope = async function (id) {
         try {
@@ -1779,7 +1833,77 @@
 
     // ---- självanmälan: pass-konfiguration + anmälda + förhandsgranskning ----
     var slotModal = null, helpSlots = [];
-    (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = (@rosterPlanningId > 0 ? '/bemanna?p=@rosterPlanningId' : '/bemanna?c=' + compId) + '&preview=1'; })();
+    var signupPath = (@rosterPlanningId > 0 ? '/bemanna?p=@rosterPlanningId' : '/bemanna?c=' + compId);
+    (function () { var b = document.getElementById('stfPreviewBtn'); if (b) b.href = signupPath + '&preview=1'; })();
+    (function () {
+        var b = document.getElementById('stfCopyLinkBtn'); if (!b) return;
+        b.addEventListener('click', async function () {
+            var url = location.origin + signupPath, msg = document.getElementById('stfCopyLinkMsg');
+            try { await navigator.clipboard.writeText(url); msg.className = 'small text-success mb-2'; msg.textContent = 'Länken är kopierad: ' + url; }
+            catch (e) { msg.className = 'small text-muted mb-2'; msg.textContent = 'Kopiera länken: ' + url; }
+            msg.style.display = 'block';
+        });
+    })();
+
+    // ---- Hitta funktionärer, steg 2: behoven per dag ur rutnätet, och om medlemmen får välja roll ----
+    var signupOverview = null;
+    async function loadNeedOverview() {
+        var host = document.getElementById('stfNeedBody'); if (!host) return;
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetSignupOverview?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success) { host.innerHTML = '<div class="text-danger small">' + esc(d.message || 'Kunde inte läsa.') + '</div>'; return; }
+            signupOverview = d;
+            renderNeedOverview();
+        } catch (e) { host.innerHTML = '<div class="text-danger small">Kunde inte läsa behoven.</div>'; }
+    }
+    function renderNeedOverview() {
+        var host = document.getElementById('stfNeedBody'), d = signupOverview; if (!host || !d) return;
+        var days = d.needDays || [];
+        var html = days.length
+            ? days.map(function (day) {
+                var parts = day.roles.map(function (r) {
+                    return esc(r.roleName) + ' <span class="' + (r.missing > 0 ? 'text-danger fw-semibold' : 'text-success') + '">'
+                        + (r.missing > 0 ? r.missing + ' fattas' : 'fullt') + '</span>';
+                });
+                return '<div class="border-bottom py-1 small"><span class="fw-semibold">' + esc(longDate(day.date)) + '</span>'
+                    + ' <span class="text-muted">· ' + esc(day.kindLabel) + (day.dayLabel ? ' · ' + esc(day.dayLabel) : '') + '</span>'
+                    + '<div>' + parts.join(' · ') + '</div></div>';
+            }).join('')
+            : '<div class="small text-muted">Ni har inte angett hur många som behövs. Klicka på antalet vid en roll i rutnätet och ange det per dag — då ser medlemmarna vad som behövs när de anmäler sig.</div>';
+        if (d.roleChoiceSettable) {
+            html += '<div class="form-check form-switch mt-2">'
+                + '<input class="form-check-input" type="checkbox" role="switch" id="stfRoleChoice"' + (d.roleChoice ? ' checked' : '') + '>'
+                + '<label class="form-check-label small" for="stfRoleChoice"><strong>Medlemmen väljer vilka roller hen kan ta</strong>. Av: medlemmen anger bara vilka dagar hen kan, och du väljer uppgiften.</label>'
+                + '</div><div class="small text-danger" id="stfRoleChoiceErr"></div>';
+        }
+        host.innerHTML = html;
+    }
+    document.addEventListener('change', async function (e) {
+        if (!e.target || e.target.id !== 'stfRoleChoice') return;
+        var cb = e.target, err = document.getElementById('stfRoleChoiceErr');
+        cb.disabled = true; if (err) err.textContent = '';
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/SetSignupRoleChoice', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN },
+                body: JSON.stringify({ competitionId: compId, value: cb.checked ? '1' : '0' })
+            });
+            var d = await r.json();
+            if (d.success) { if (signupOverview) signupOverview.roleChoice = d.roleChoice; }
+            else { cb.checked = !cb.checked; if (err) err.textContent = d.message || 'Kunde inte spara.'; }
+        } catch (ex) { cb.checked = !cb.checked; if (err) err.textContent = 'Nätverksfel.'; }
+        cb.disabled = false;
+    });
+
+    // ---- Hitta funktionärer, steg 3: förfrågan kräver minst en klubb eller krets i steg 1 ----
+    function renderAsk() {
+        var host = document.getElementById('stfAskBody'), btn = document.getElementById('stfAskSendBtn'); if (!host) return;
+        var n = openScopes.length;
+        if (btn) btn.disabled = n === 0;
+        host.innerHTML = n
+            ? '<div class="small text-muted">Förfrågan går till ' + openScopes.map(function (s) { return esc(s.label); }).join(', ') + ' och innehåller länken till anmälan. Du kan också dela länken själv, till exempel i klubbens grupp.</div>'
+            : '<div class="small text-muted">Välj först vilka som får anmäla sig (steg 1). Länken kan du dela redan nu.</div>';
+    }
 
     // Only the organiser's slot configuration lives here now. The volunteers themselves are rendered from
     // the people layer (loadPeople → renderHelpTally), so there is no second list to fall out of sync.
@@ -1795,7 +1919,7 @@
     function renderHelpSlots() {
         var host = document.getElementById('stfHelpSlots');
         if (!host) return;
-        if (!helpSlots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga pass ännu. Lägg till minst ett pass så kan medlemmar anmäla sig.</div>'; return; }
+        if (!helpSlots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inget utöver rollerna.</div>'; return; }
         var html = '', lastDate = null;
         helpSlots.forEach(function (s) {
             if (s.date !== lastDate) { html += '<div class="fw-semibold small mt-2"><i class="bi bi-calendar-event me-1"></i>' + esc(longDate(s.date)) + '</div>'; lastDate = s.date; }
@@ -1820,12 +1944,10 @@
         document.getElementById('stfSlotHeadline').value = s ? s.headline : '';
         document.getElementById('stfSlotDesc').value = s && s.description ? s.description : '';
         document.getElementById('stfSlotError').textContent = '';
-        document.getElementById('stfSlotTitle').textContent = s ? 'Redigera pass' : 'Lägg till pass';
+        document.getElementById('stfSlotTitle').textContent = 'Något annat ni behöver hjälp med';
         slotModal.show();
         if (typeof flatpickr !== 'undefined') {
             flatpickr('#stfSlotDate', { locale: 'sv', dateFormat: 'Y-m-d' });
-            flatpickr('#stfSlotFrom', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
-            flatpickr('#stfSlotTo', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
         }
     };
 
@@ -1839,14 +1961,14 @@
             headline: document.getElementById('stfSlotHeadline').value.trim(),
             description: document.getElementById('stfSlotDesc').value.trim()
         };
-        if (!payload.date || !payload.headline) { document.getElementById('stfSlotError').textContent = 'Ange datum och rubrik.'; return; }
+        if (!payload.date || !payload.headline) { document.getElementById('stfSlotError').textContent = 'Ange datum och vad ni behöver hjälp med.'; return; }
         var r = await fetch('/umbraco/surface/Staffing/SaveHelpSlot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify(payload) });
         var d = await r.json();
         if (d.success) { slotModal.hide(); await loadHelp(); } else document.getElementById('stfSlotError').textContent = d.message || 'Kunde inte spara.';
     };
 
     window.stfDeleteSlot = async function (id) {
-        if (!confirm('Ta bort passet? Anmälningar till det tas bort ur medlemmarnas val.')) return;
+        if (!confirm('Ta bort det här? De som anmält sig till det får det borttaget ur sina val.')) return;
         var r = await fetch('/umbraco/surface/Staffing/DeleteHelpSlot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': TOKEN }, body: JSON.stringify({ id: id, competitionId: compId }) });
         var d = await r.json();
         if (d.success) await loadHelp();
@@ -2483,7 +2605,7 @@
     };
     window.stfOpenVarvning = function () {
         var p = panel('bemVarvningPanel'); if (p) p.show();
-        loadScopes(); loadHelp();
+        loadScopes(); loadHelp(); loadNeedOverview();
     };
 
     // Only the grid and the role catalog load up front — the catalog because the add-funktionär dialog

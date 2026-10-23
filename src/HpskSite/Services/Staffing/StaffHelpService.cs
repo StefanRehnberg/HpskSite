@@ -13,8 +13,90 @@ namespace HpskSite.Services.Staffing
     public class StaffHelpService
     {
         private readonly IScopeProvider _scopeProvider;
+        private readonly StaffOwnerResolver _owners;
+        private readonly RoleCatalogService _roles;
+        private readonly StaffDayService _days;
+        private readonly StaffPassService _pass;
 
-        public StaffHelpService(IScopeProvider scopeProvider) => _scopeProvider = scopeProvider;
+        public StaffHelpService(IScopeProvider scopeProvider, StaffOwnerResolver owners, RoleCatalogService roles,
+            StaffDayService days, StaffPassService pass)
+        {
+            _scopeProvider = scopeProvider;
+            _owners = owners;
+            _roles = roles;
+            _days = days;
+            _pass = pass;
+        }
+
+        // ---- behoven per dag (det medlemmen kan anmäla sig till) ----
+
+        /// <summary>
+        /// Planens dagar med rollerna som behövs (antal &gt; 0) och hur många som fattas. Läser bara — dagarna
+        /// tas ur planen, och har planen inga dagar ännu ur ägarens datum (utan att skriva dem).
+        /// Bemannade räknas per roll och dag som rutnätet gör (starttid → dag → passets dag), utom de som tackat nej.
+        /// </summary>
+        public List<NeedDayView> NeedDays(StaffOwner owner)
+        {
+            var needs = _pass.GetAllCrewNeeds(owner);
+            if (needs.Count == 0) return new();
+
+            var days = _days.GetDays(owner)
+                .Select(d => (Date: d.DayDate.Date, d.Kind, Label: string.IsNullOrWhiteSpace(d.Label) ? null : d.Label))
+                .ToList();
+            if (days.Count == 0)
+            {
+                var (start, end) = _owners.Span(owner);
+                if (start is { } s && s != default)
+                {
+                    var last = end is { } e && e != default && e >= s ? e.Date : s.Date;
+                    if ((last - s.Date).TotalDays > 30) last = s.Date;
+                    for (var d = s.Date; d <= last; d = d.AddDays(1)) days.Add((d, StaffDayKind.Competition, null));
+                }
+            }
+
+            var assigned = new Dictionary<(string Role, DateTime Day), int>();
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var rows = scope.Database.Fetch<RoleDayCount>(@"
+                    SELECT sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day, COUNT(*) AS N
+                    FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
+                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND ISNULL(sa.Status, '') <> @2
+                    GROUP BY sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))",
+                    owner.P, owner.C, StaffAssignmentStatus.Declined);
+                foreach (var r in rows)
+                    if (r.Day is { } d) assigned[(r.RoleKey.ToLowerInvariant(), d.Date)] = r.N;
+            }
+
+            var discipline = _owners.Discipline(owner);
+            var catalog = _roles.For(owner, discipline);
+            var result = new List<NeedDayView>();
+            foreach (var (date, kind, label) in days.OrderBy(d => d.Date))
+            {
+                var view = new NeedDayView
+                {
+                    Date = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    Kind = StaffDayKind.Normalise(kind),
+                    KindLabel = StaffDayKind.Label(StaffDayKind.Normalise(kind)),
+                    DayLabel = label,
+                };
+                foreach (var role in catalog)
+                {
+                    var n = CrewNeedRules.ForDay(needs, CrewNeedScope.All, role.Key, date);
+                    if (n <= 0) continue;
+                    assigned.TryGetValue((role.Key.ToLowerInvariant(), date), out var have);
+                    view.Roles.Add(new NeedRoleView { RoleKey = role.Key, RoleName = role.DisplayName, Needed = n, Missing = Math.Max(0, n - have) });
+                }
+                if (view.Roles.Count > 0) result.Add(view);
+            }
+            return result;
+        }
+
+        private class RoleDayCount
+        {
+            public string RoleKey { get; set; } = "";
+            public DateTime? Day { get; set; }
+            public int N { get; set; }
+        }
 
         // ---- slots (organiser) ----
 
@@ -76,10 +158,18 @@ namespace HpskSite.Services.Staffing
         public void SaveMySignup(StaffOwner owner, int memberId, string memberName, string? comment, List<HelpSlotChoice> slots)
         {
             // Keep only choices for slots that still exist in this competition, and drop empty time windows.
+            // En dag ur planen godtas när dagen har ett behov, och rollen (tom = var det behövs) behövs den dagen.
             var validSlotIds = GetSlots(owner).Select(s => s.Id).ToHashSet();
-            var clean = (slots ?? new()).Where(c => validSlotIds.Contains(c.SlotId)).Select(c => new HelpSlotChoice
+            var needDays = NeedDays(owner).ToDictionary(d => d.Date, d => d.Roles.Select(r => r.RoleKey).ToHashSet(StringComparer.OrdinalIgnoreCase));
+            bool Valid(HelpSlotChoice c) => c.SlotId > 0
+                ? validSlotIds.Contains(c.SlotId)
+                : c.IsDayChoice && needDays.TryGetValue(c.Date!.Trim(), out var roles)
+                  && (string.IsNullOrWhiteSpace(c.RoleKey) || roles.Contains(c.RoleKey.Trim()));
+            var clean = (slots ?? new()).Where(Valid).Select(c => new HelpSlotChoice
             {
-                SlotId = c.SlotId,
+                SlotId = Math.Max(0, c.SlotId),
+                Date = c.SlotId > 0 ? null : c.Date!.Trim(),
+                RoleKey = c.SlotId > 0 ? null : (string.IsNullOrWhiteSpace(c.RoleKey) ? "" : c.RoleKey.Trim()),
                 Times = (c.Times ?? new()).Where(t => !string.IsNullOrWhiteSpace(t.From) || !string.IsNullOrWhiteSpace(t.To))
                     .Select(t => new HelpTimeWindow { From = CleanTime(t.From), To = CleanTime(t.To) }).ToList(),
             }).ToList();
@@ -127,6 +217,8 @@ namespace HpskSite.Services.Staffing
         public List<HelpSignupReviewView> GetReview(StaffOwner owner)
         {
             var slots = GetSlots(owner).ToDictionary(s => s.Id);
+            var roleNames = _roles.For(owner, _owners.Discipline(owner))
+                .ToDictionary(r => r.Key, r => r.DisplayName, StringComparer.OrdinalIgnoreCase);
             List<StaffHelpSignup> rows;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
                 rows = scope.Database.Fetch<StaffHelpSignup>(
@@ -140,11 +232,21 @@ namespace HpskSite.Services.Staffing
                 Updated = r.ModifiedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.GetCultureInfo("sv-SE")),
                 Slots = ParseChoices(r.SlotsJson).Select(c =>
                 {
+                    if (c.IsDayChoice)
+                        return new HelpSignupReviewSlot
+                        {
+                            SlotId = 0,
+                            Date = c.Date,
+                            RoleKey = c.RoleKey,
+                            Label = DayLabel(c.Date!) + " · " + (string.IsNullOrWhiteSpace(c.RoleKey) ? "var det behövs"
+                                : roleNames.TryGetValue(c.RoleKey, out var rn) ? rn : c.RoleKey),
+                            TimesText = string.Join(", ", (c.Times ?? new()).Select(t => $"{t.From}–{t.To}")),
+                        };
                     slots.TryGetValue(c.SlotId, out var s);
                     return new HelpSignupReviewSlot
                     {
                         SlotId = c.SlotId,
-                        Label = s == null ? $"(borttaget pass #{c.SlotId})" : SlotLabel(s),
+                        Label = s == null ? $"(borttaget, #{c.SlotId})" : SlotLabel(s),
                         TimesText = string.Join(", ", (c.Times ?? new()).Select(t => $"{t.From}–{t.To}")),
                     };
                 }).ToList(),
@@ -162,6 +264,10 @@ namespace HpskSite.Services.Staffing
             Headline = s.Headline,
             Description = s.Description,
         };
+
+        private static string DayLabel(string date) =>
+            DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+                ? d.ToString("ddd d MMM", CultureInfo.GetCultureInfo("sv-SE")) : date;
 
         private static string SlotLabel(HelpSlotView s)
         {

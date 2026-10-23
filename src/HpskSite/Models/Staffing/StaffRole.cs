@@ -152,9 +152,16 @@ namespace HpskSite.Models.Staffing
         public int Filled { get; set; }
         /// <summary>Uncovered stretches between this row's own shifts, per day.</summary>
         public List<GridGap> Gaps { get; set; } = new();
-        /// <summary>How many of this role are needed PER DAY. 0 = no stated requirement. Drives the
-        /// needed-vs-filled number rendered in each cell — coverage stopped being a separate screen.</summary>
+        /// <summary>How many of this role are needed on EVERY day (the role's own number). 0 = none stated.</summary>
         public int Needed { get; set; }
+        /// <summary>Antalet per dag (kolumnens nyckel → antal), med dagarnas avvikelser inräknade. Bär en
+        /// nyckel per daterad kolumn så fort rollen har ett behov någon dag.</summary>
+        public Dictionary<string, int> NeededByDay { get; set; } = new();
+        /// <summary>Behövs rollen någon dag alls?</summary>
+        public bool HasNeed => Needed > 0 || NeededByDay.Values.Any(v => v > 0);
+        /// <summary>Antalet som behövs i kolumnen.</summary>
+        public int NeedFor(string columnKey) =>
+            NeededByDay.TryGetValue(columnKey ?? "", out var v) ? v : (string.IsNullOrEmpty(columnKey) ? 0 : Needed);
     }
 
     /// <summary>A member who volunteered but holds no assignment — the only people the grid cannot show,
@@ -164,6 +171,21 @@ namespace HpskSite.Models.Staffing
         public string Key { get; set; } = "";
         public string Name { get; set; } = "";
         public string? Summary { get; set; }
+    }
+
+    /// <summary>Behovet för en roll: alla dagars antal och avvikande dagar ("yyyy-MM-dd").</summary>
+    public class SetRoleNeedsRequest
+    {
+        public int CompetitionId { get; set; }
+        public string RoleKey { get; set; } = "";
+        public int All { get; set; }
+        public List<RoleNeedDay> Days { get; set; } = new();
+    }
+
+    public class RoleNeedDay
+    {
+        public string Date { get; set; } = "";
+        public int Count { get; set; }
     }
 
     public class SetCrewNeedRequest

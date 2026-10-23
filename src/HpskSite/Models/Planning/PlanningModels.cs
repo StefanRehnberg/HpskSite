@@ -162,6 +162,9 @@ namespace HpskSite.Models.Planning
         /// <summary>P2b: grenen (CompetitionTypes-id) — styr bemanningens roller när planeringen inte är kopplad.
         /// En kopplad planering tar tävlingens gren.</summary>
         public string? DisciplineKey { get; set; }
+        /// <summary>Får medlemmen välja roll när hen anmäler sig till bemanningen? Av = bara dagen
+        /// ("var det behövs"). Stefan 2026-10-23: en inställning, förval på.</summary>
+        public bool SignupRoleChoice { get; set; } = true;
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         public DateTime CreatedAt { get; set; }

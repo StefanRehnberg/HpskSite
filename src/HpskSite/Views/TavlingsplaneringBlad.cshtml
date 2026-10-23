@@ -20,7 +20,7 @@
     var grid = Model.Grid;
     var gridCols = grid?.Columns?.Where(c => !string.IsNullOrEmpty(c.Key)).ToList()
                    ?? new List<HpskSite.Models.Staffing.GridColumn>();
-    var gridRows = grid?.Rows?.Where(r => r.Filled > 0 || r.Needed > 0).ToList()
+    var gridRows = grid?.Rows?.Where(r => r.Filled > 0 || r.HasNeed).ToList()
                    ?? new List<HpskSite.Models.Staffing.GridRow>();
     var unreachable = grid?.Unreachable ?? new List<string>();
 }
@@ -167,9 +167,9 @@
                                             <div class="note">@e.Note</div>
                                         }
                                     }
-                                    @if (!cell.Any() && row.Needed > 0)
+                                    @if (!cell.Any() && row.NeedFor(col.Key) > 0)
                                     {
-                                        <div class="gap">— saknas @row.Needed</div>
+                                        <div class="gap">— saknas @row.NeedFor(col.Key)</div>
                                     }
                                 </td>
                             }

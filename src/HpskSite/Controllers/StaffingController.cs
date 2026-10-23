@@ -566,6 +566,58 @@ namespace HpskSite.Controllers
             return Json(new { success = true, slots = _help.GetSlots(owner) });
         }
 
+        /// <summary>
+        /// "Hitta funktionärer": behoven per dag (det medlemmarna kan anmäla sig till), om medlemmen får välja
+        /// roll, och anmälningssidans adress.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSignupOverview(int competitionId)
+        {
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var signupPath = owner.HasPlanning ? $"/bemanna?p={owner.PlanningId}" : $"/bemanna?c={owner.Comp}";
+            return Json(new
+            {
+                success = true,
+                needDays = _help.NeedDays(owner),
+                roleChoice = _owners.SignupRoleChoice(owner),
+                roleChoiceSettable = owner.HasPlanning,
+                hasPlanning = owner.HasPlanning,
+                hasCompetition = owner.HasCompetition,
+                signupPath,
+            });
+        }
+
+        /// <summary>Klubbarna och kretsarna man kan öppna anmälan för (väljarens lista).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSourceScopeOptions(int competitionId)
+        {
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null)
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var (clubs, regions, suggested) = _signup.ScopeOptions(owner);
+            return Json(new { success = true, clubs, regions, suggested });
+        }
+
+        /// <summary>Får medlemmen välja roll vid anmälan? Bara på en planering (en tävling utan planering: alltid ja).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetSignupRoleChoice([FromBody] SetSignupRoleChoiceRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId)) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
+                return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning)
+                return Json(new { success = false, message = "Inställningen hör till planeringen. Starta tävlingens planering först." });
+            var value = string.Equals(request.Value, "1", StringComparison.Ordinal) || string.Equals(request.Value, "true", StringComparison.OrdinalIgnoreCase);
+            _planning.SetSignupRoleChoice(owner.PlanningId, value, viewer.Id);
+            return Json(new { success = true, roleChoice = value });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveHelpSlot([FromBody] SaveHelpSlotRequest request)
@@ -1347,6 +1399,40 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: SplitAssignment failed for {Id}", request.Id);
                 return Json(new { success = false, message = "Kunde inte dela passet." });
+            }
+        }
+
+        /// <summary>
+        /// Behovet för en roll: antalet för alla dagar och de dagar som avviker (Stefan 2026-10-23 — markörer
+        /// behövs bara på tävlingsdagarna). Dagarna måste vara giltiga datum.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRoleNeeds([FromBody] SetRoleNeedsRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.RoleKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (request.All < 0 || request.All > 999 || (request.Days ?? new()).Any(d => d.Count < 0 || d.Count > 999))
+                return Json(new { success = false, message = "Ange ett antal mellan 0 och 999." });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null)
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var days = new List<(DateTime, int)>();
+            foreach (var d in request.Days ?? new())
+            {
+                if (!DateTime.TryParseExact(d.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+                    return Json(new { success = false, message = "Ett datum gick inte att läsa." });
+                days.Add((day, d.Count));
+            }
+            try
+            {
+                _pass.SetRoleNeeds(owner, request.RoleKey, request.All, days);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: SetRoleNeeds failed for {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte spara behovet." });
             }
         }
 

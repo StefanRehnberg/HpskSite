@@ -10,10 +10,6 @@
     var token = Antiforgery.GetAndStoreTokens(Context).RequestToken;
 }
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
-
 <div class="container mt-4 mb-5" style="max-width:760px">
     @if (!compExists)
     {
@@ -37,7 +33,7 @@
         <div class="card mt-3">
             <div class="card-header py-2 fw-semibold"><i class="bi bi-hand-thumbs-up me-1"></i>Kan du hjälpa till?</div>
             <div class="card-body py-2">
-                <p class="text-muted small mb-2">Alla pass är förkryssade — <strong>avmarkera de pass du inte kan</strong> hjälpa till med. Du kan (valfritt) ange vilka tider du kan — flera tider per pass går bra. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra.</p>
+                <p class="text-muted small mb-2" id="beIntro">Kryssa i det du kan hjälpa till med. Du kan (valfritt) ange vilka tider du kan. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra. Arrangören fördelar uppdragen och hör av sig.</p>
                 <div id="beSlots"><div class="text-muted small">Laddar…</div></div>
                 <div class="mb-2 mt-3">
                     <label class="form-label fw-semibold">Kommentar (valfritt)</label>
@@ -59,8 +55,12 @@
     var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
     var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
 
-    var slots = [];              // help-slots from the organiser
-    var checked = {};            // { slotId: [{from,to}, ...] } — the member's current choices
+    // Det medlemmen kan anmäla sig till (Stefan 2026-10-23): planens dagar med rollerna som behövs
+    // (needDays), plus arrangörens egna "något annat"-tillfällen (slots). Ett val har en nyckel:
+    // "n:{datum}|{roll}" (tom roll = var det behövs) eller "s:{id}".
+    var slots = [], needDays = [], roleChoice = true;
+    var checked = {};            // { nyckel: [{from,to}, ...] }
+    var items = [];              // det som ritades, i ordning — kryssrutorna bär index hit, aldrig text
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
@@ -83,14 +83,17 @@
             // En planering utan tävling heter planering — en kopplad har tävlingens namn.
             q('beHeader').innerHTML = (planningId > 0 && compId <= 0 ? 'Planering: ' : 'Tävling: ') + '<strong>' + esc(d.compName) + '</strong>' + (d.compDate ? ' · ' + esc(d.compDate) : '');
             slots = d.slots || [];
+            needDays = d.needDays || [];
+            roleChoice = d.roleChoice !== false;
             checked = {};
+            // Ingenting är förkryssat: medlemmen väljer det hen kan (förut var allt förkryssat, och en
+            // stressad medlem anmälde sig då till allt).
             if (d.mySignup) {
                 q('beComment').value = d.mySignup.comment || '';
-                (d.mySignup.slots || []).forEach(function (c) { checked[c.slotId] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; }); });
-            } else {
-                // Opt-out model: a member who hasn't signed up yet sees every pass pre-checked and
-                // unchecks the ones that don't work (empty times = whole pass).
-                slots.forEach(function (s) { checked[s.id] = []; });
+                (d.mySignup.slots || []).forEach(function (c) {
+                    var key = c.slotId > 0 ? 's:' + c.slotId : 'n:' + (c.date || '') + '|' + (c.roleKey || '');
+                    checked[key] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; });
+                });
             }
             renderMine(d.assignments || []);
             renderSlots();
@@ -118,41 +121,73 @@
             + '</div></div>';
     }
 
-    function renderSlots() {
-        var host = q('beSlots');
-        if (!slots.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte lagt upp några pass att anmäla sig till ännu.</div>'; return; }
-        var html = '', lastDate = null;
-        slots.forEach(function (s) {
-            if (s.date !== lastDate) { html += '<div class="fw-semibold mt-2 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(longDate(s.date)) + '</div>'; lastDate = s.date; }
-            var isOn = Object.prototype.hasOwnProperty.call(checked, s.id);
-            var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
-            html += '<div class="border rounded p-2 mb-2">'
-                + '<div class="form-check">'
-                + '<input class="form-check-input" type="checkbox" id="beSlot' + s.id + '" ' + (isOn ? 'checked' : '') + ' onchange="beToggle(' + s.id + ',this.checked)">'
-                + '<label class="form-check-label" for="beSlot' + s.id + '"><strong>' + esc(s.headline) + '</strong>' + timeRange + '</label>'
-                + (s.description ? '<div class="text-muted small ms-1">' + esc(s.description) + '</div>' : '')
-                + '</div>'
-                + (isOn ? timesBlock(s.id) : '')
-                + '</div>';
-        });
-        host.innerHTML = html;
-        initTimePickers();
+    function isOn(key) { return Object.prototype.hasOwnProperty.call(checked, key); }
+
+    // Ett val: kryssruta + (när ikryssat) tider. Index in i items — aldrig text i ett attribut.
+    function choiceHtml(item, labelHtml, subHtml) {
+        var i = items.push(item) - 1, on = isOn(item.key);
+        return '<div class="border rounded p-2 mb-2' + (on ? ' border-primary' : '') + '">'
+            + '<div class="form-check">'
+            + '<input class="form-check-input be-choice" type="checkbox" id="beC' + i + '" data-i="' + i + '" ' + (on ? 'checked' : '') + '>'
+            + '<label class="form-check-label" for="beC' + i + '">' + labelHtml + '</label>'
+            + (subHtml ? '<div class="text-muted small">' + subHtml + '</div>' : '')
+            + '</div>'
+            + (on ? timesBlock(i, item.key) : '')
+            + '</div>';
     }
 
-    function timesBlock(slotId) {
-        var wins = checked[slotId] || [];
-        var rows = wins.map(function (w, i) {
+    function renderSlots() {
+        var host = q('beSlots');
+        items = [];
+        var byDate = {};
+        needDays.forEach(function (d) { (byDate[d.date] = byDate[d.date] || { need: null, slots: [] }).need = d; });
+        slots.forEach(function (s) { (byDate[s.date] = byDate[s.date] || { need: null, slots: [] }).slots.push(s); });
+        var dates = Object.keys(byDate).sort();
+        if (!dates.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte angett vad som behövs ännu. Titta in igen lite senare.</div>'; return; }
+        var html = '';
+        dates.forEach(function (date) {
+            var g = byDate[date], n = g.need;
+            html += '<div class="fw-semibold mt-3 mb-1"><i class="bi bi-calendar-event me-1"></i>' + esc(longDate(date))
+                + (n && n.kindLabel ? ' <span class="text-muted fw-normal small">· ' + esc(n.kindLabel) + (n.dayLabel ? ' · ' + esc(n.dayLabel) : '') + '</span>' : '')
+                + '</div>';
+            if (n) {
+                if (roleChoice) {
+                    n.roles.forEach(function (r) {
+                        var sub = r.missing > 0 ? r.missing + ' fattas av ' + r.needed : 'Alla ' + r.needed + ' platser är fyllda, men fler kan behövas';
+                        html += choiceHtml({ key: 'n:' + date + '|' + r.roleKey, date: date, roleKey: r.roleKey }, '<strong>' + esc(r.roleName) + '</strong>', esc(sub));
+                    });
+                    html += choiceHtml({ key: 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Var det behövs</strong>', 'Arrangören väljer en uppgift åt dig');
+                } else {
+                    var miss = n.roles.reduce(function (a, r) { return a + (r.missing || 0); }, 0);
+                    html += choiceHtml({ key: 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Jag kan hjälpa till den här dagen</strong>',
+                        (miss > 0 ? miss + (miss === 1 ? ' person fattas. ' : ' personer fattas. ') : '') + 'Arrangören väljer en uppgift åt dig');
+                }
+            }
+            if (g.slots.length) {
+                if (n) html += '<div class="small text-muted mt-1 mb-1">Något annat den här dagen:</div>';
+                g.slots.forEach(function (s) {
+                    var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
+                    html += choiceHtml({ key: 's:' + s.id, slotId: s.id }, '<strong>' + esc(s.headline) + '</strong>' + timeRange, s.description ? esc(s.description) : '');
+                });
+            }
+        });
+        host.innerHTML = html;
+    }
+
+    function timesBlock(i, key) {
+        var wins = checked[key] || [];
+        var rows = wins.map(function (w, j) {
             return '<div class="input-group input-group-sm mb-1" style="max-width:300px">'
-                + '<input type="text" class="form-control be-time" data-slot="' + slotId + '" data-idx="' + i + '" data-f="from" placeholder="från" value="' + esc(w.from || '') + '">'
+                + '<input type="text" class="form-control be-time" data-hpsk-time inputmode="decimal" data-i="' + i + '" data-idx="' + j + '" data-f="from" placeholder="från" value="' + esc(w.from || '') + '">'
                 + '<span class="input-group-text">–</span>'
-                + '<input type="text" class="form-control be-time" data-slot="' + slotId + '" data-idx="' + i + '" data-f="to" placeholder="till" value="' + esc(w.to || '') + '">'
-                + '<button class="btn btn-outline-danger" type="button" onclick="beRemoveTime(' + slotId + ',' + i + ')"><i class="bi bi-x"></i></button>'
+                + '<input type="text" class="form-control be-time" data-hpsk-time inputmode="decimal" data-i="' + i + '" data-idx="' + j + '" data-f="to" placeholder="till" value="' + esc(w.to || '') + '">'
+                + '<button class="btn btn-outline-danger be-deltime" type="button" data-i="' + i + '" data-idx="' + j + '" aria-label="Ta bort tiden"><i class="bi bi-x"></i></button>'
                 + '</div>';
         }).join('');
         return '<div class="ms-4 mt-2">'
             + '<div class="d-flex justify-content-between align-items-center gap-2 mb-1">'
-            + '<span class="small text-muted">Jag kan (valfritt — lämna tomt = hela passet):</span>'
-            + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" type="button" title="Lägg till tid" aria-label="Lägg till tid" onclick="beAddTime(' + slotId + ')"><i class="bi bi-clock"></i><i class="bi bi-plus-lg"></i></button>'
+            + '<span class="small text-muted">Jag kan (valfritt — tomt = hela dagen):</span>'
+            + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0 be-addtime" type="button" data-i="' + i + '" title="Lägg till tid" aria-label="Lägg till tid"><i class="bi bi-clock"></i><i class="bi bi-plus-lg"></i></button>'
             + '</div>'
             + rows
             + '</div>';
@@ -161,26 +196,31 @@
     // Read time inputs from the DOM into state before any re-render (preserve typed values).
     function readTimes() {
         document.querySelectorAll('.be-time').forEach(function (inp) {
-            var sid = inp.getAttribute('data-slot'), idx = +inp.getAttribute('data-idx'), f = inp.getAttribute('data-f');
-            if (!checked[sid]) return;
-            if (!checked[sid][idx]) checked[sid][idx] = { from: '', to: '' };
-            checked[sid][idx][f] = inp.value.trim();
+            var it = items[+inp.getAttribute('data-i')]; if (!it) return;
+            var idx = +inp.getAttribute('data-idx'), f = inp.getAttribute('data-f');
+            if (!checked[it.key]) return;
+            if (!checked[it.key][idx]) checked[it.key][idx] = { from: '', to: '' };
+            checked[it.key][idx][f] = window.hpskNormalizeTime ? (window.hpskNormalizeTime(inp.value) || inp.value.trim()) : inp.value.trim();
         });
     }
 
-    window.beToggle = function (slotId, on) {
+    document.addEventListener('change', function (e) {
+        var cb = e.target.closest && e.target.closest('.be-choice'); if (!cb) return;
+        var it = items[+cb.getAttribute('data-i')]; if (!it) return;
         readTimes();
-        if (on) { if (!checked[slotId]) checked[slotId] = []; }
-        else { delete checked[slotId]; }
+        if (cb.checked) { if (!checked[it.key]) checked[it.key] = []; } else delete checked[it.key];
         renderSlots();
-    };
-    window.beAddTime = function (slotId) { readTimes(); (checked[slotId] = checked[slotId] || []).push({ from: '', to: '' }); renderSlots(); };
-    window.beRemoveTime = function (slotId, idx) { readTimes(); if (checked[slotId]) checked[slotId].splice(idx, 1); renderSlots(); };
-
-    function initTimePickers() {
-        if (typeof flatpickr === 'undefined') return;
-        flatpickr('.be-time', { locale: 'sv', enableTime: true, noCalendar: true, dateFormat: 'H:i', time_24hr: true });
-    }
+    });
+    document.addEventListener('click', function (e) {
+        var add = e.target.closest && e.target.closest('.be-addtime');
+        var del = e.target.closest && e.target.closest('.be-deltime');
+        var b = add || del; if (!b) return;
+        var it = items[+b.getAttribute('data-i')]; if (!it) return;
+        readTimes();
+        if (add) (checked[it.key] = checked[it.key] || []).push({ from: '', to: '' });
+        else if (checked[it.key]) checked[it.key].splice(+b.getAttribute('data-idx'), 1);
+        renderSlots();
+    });
 
     async function post(url, payload) {
         try {
@@ -197,8 +237,11 @@
     window.beSave = async function () {
         if (PREVIEW) return;
         readTimes();
-        var payloadSlots = Object.keys(checked).map(function (sid) {
-            return { slotId: +sid, times: (checked[sid] || []).filter(function (t) { return (t.from && t.from.length) || (t.to && t.to.length); }) };
+        var payloadSlots = Object.keys(checked).map(function (key) {
+            var times = (checked[key] || []).filter(function (t) { return (t.from && t.from.length) || (t.to && t.to.length); });
+            if (key.indexOf('s:') === 0) return { slotId: +key.slice(2), times: times };
+            var rest = key.slice(2), bar = rest.indexOf('|');
+            return { slotId: 0, date: rest.slice(0, bar), roleKey: rest.slice(bar + 1), times: times };
         });
         var btn = q('beSaveBtn'); btn.disabled = true;
         var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots });

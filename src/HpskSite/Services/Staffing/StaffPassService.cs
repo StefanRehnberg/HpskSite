@@ -68,10 +68,35 @@ namespace HpskSite.Services.Staffing
 
         // ---- crew needs ----
 
+        /// <summary>Alla behovsrader, även dagarnas avvikelser. Räkna med <see cref="CrewNeedRules"/>.</summary>
+        public List<StaffCrewNeed> GetAllCrewNeeds(StaffOwner owner)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+        }
+
+        /// <summary>
+        /// Skriver om en rolls behov: alla dagars antal och de dagar som avviker (<see cref="CrewNeedRules.Plan"/>).
+        /// Bara hela-tävlingen-behovet (ScopeKind All) — stationernas behov rörs inte.
+        /// </summary>
+        public void SetRoleNeeds(StaffOwner owner, string roleKey, int all, IEnumerable<(DateTime Day, int Count)> days)
+        {
+            var key = (roleKey ?? "").Trim();
+            if (key.Length == 0) return;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND ScopeKind = @2 AND RoleKey = @3",
+                owner.P, owner.C, CrewNeedScope.All, key);
+            foreach (var (day, count) in CrewNeedRules.Plan(all, days))
+                db.Insert(new StaffCrewNeed { PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull,
+                    ScopeKind = CrewNeedScope.All, RoleKey = key, Count = count, DayDate = day?.Date });
+        }
+
+        /// <summary>Alla dagars antal per roll (raderna utan dag) — "Skift och behov"-dialogen.</summary>
         public List<CrewNeedRow> GetCrewNeeds(StaffOwner owner, string? discipline)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C)
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL", owner.P, owner.C)
                 .Select(n => new CrewNeedRow
                 {
                     ScopeKind = n.ScopeKind,
@@ -81,12 +106,13 @@ namespace HpskSite.Services.Staffing
                 }).ToList();
         }
 
-        /// <summary>Full replace of the comp's crew needs (only rows with Count &gt; 0 are kept).</summary>
+        /// <summary>Full replace of the comp's crew needs (only rows with Count &gt; 0 are kept). Dagarnas
+        /// avvikelser (DayDate satt) rörs inte — de sätts i rutnätet.</summary>
         public void SaveCrewNeeds(StaffOwner owner, List<CrewNeedRow> needs)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL", owner.P, owner.C);
             foreach (var n in (needs ?? new()).Where(n => n.Count > 0 && !string.IsNullOrWhiteSpace(n.RoleKey)))
             {
                 var kind = string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase) ? CrewNeedScope.Station : CrewNeedScope.All;
@@ -104,12 +130,9 @@ namespace HpskSite.Services.Staffing
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
-                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND Count > 0", owner.P, owner.C);
+                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
                 assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId IS NOT NULL", owner.P, owner.C);
             }
-
-            var stationNeeds = needs.Where(n => string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)).ToList();
-            var allNeeds = needs.Where(n => string.Equals(n.ScopeKind, CrewNeedScope.All, StringComparison.OrdinalIgnoreCase)).ToList();
             bool isFalt = FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase);
             int stations = isFalt ? Math.Max(0, stationCount) : 0;
 
@@ -127,11 +150,17 @@ namespace HpskSite.Services.Staffing
             {
                 Discipline = discipline ?? "",
                 StationCount = stations,
-                HasNeeds = needs.Count > 0,
+                HasNeeds = needs.Any(n => n.Count > 0),
             };
 
             foreach (var p in passes)
             {
+                // Behovet den dag passet ligger (dagarnas avvikelser inräknade).
+                DateTime? passDay = DateTime.TryParse(p.Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var pd) ? pd.Date : null;
+                var stationNeeds = CrewNeedRules.EffectiveFor(needs, CrewNeedScope.Station, passDay)
+                    .Select(x => new StaffCrewNeed { ScopeKind = CrewNeedScope.Station, RoleKey = x.RoleKey, Count = x.Count }).ToList();
+                var allNeeds = CrewNeedRules.EffectiveFor(needs, CrewNeedScope.All, passDay)
+                    .Select(x => new StaffCrewNeed { ScopeKind = CrewNeedScope.All, RoleKey = x.RoleKey, Count = x.Count }).ToList();
                 var cp = new CoveragePass { PassId = p.Id, Label = p.Label, Date = p.Date, TimeLabel = TimeLabel(p) };
                 for (int n = 1; n <= stations; n++)
                 {
