@@ -71,7 +71,8 @@ namespace HpskSite.Services.Planning
         /// "N dagar före" (<see cref="DueDaysBefore"/>), som räknas från <c>anchor</c>.
         /// </summary>
         public sealed record TaskInput(string Title, string? Description, int? Assignee, string? AssigneeName,
-            DateTime? Due, int? DueDaysBefore, int? AreaId, string? ScopeType, string? ScopeKey, decimal? EstimatedCost);
+            DateTime? Due, int? DueDaysBefore, int? AreaId, string? ScopeType, string? ScopeKey, decimal? EstimatedCost,
+            bool IsMilestone = false, bool SendToForbundet = false);
 
         private static string? ValidateInput(TaskInput i)
         {
@@ -106,6 +107,7 @@ namespace HpskSite.Services.Planning
                 DueDate = i.DueDaysBefore.HasValue ? PlanningTaskRules.DueFromDaysBefore(i.DueDaysBefore, anchor) : i.Due?.Date,
                 AreaId = area, ScopeType = Clean(i.ScopeType, 20), ScopeKey = Clean(i.ScopeType, 20) == null ? null : Clean(i.ScopeKey, 100),
                 EstimatedCost = i.EstimatedCost, SortOrder = NextTaskSort(db, planningId, area) + 1,
+                IsMilestone = i.IsMilestone, SendToForbundet = i.IsMilestone && i.SendToForbundet,
                 Status = PlanningTaskStatus.NotStarted, FromMeetingId = fromMeetingId > 0 ? fromMeetingId : null,
                 CreatedAt = now, CreatedBy = byParticipantId, UpdatedAt = now,
             };
@@ -142,6 +144,9 @@ namespace HpskSite.Services.Planning
             if (t.AreaId != newArea) changed.Add("området");
             if ((t.ScopeType ?? "") != (newScope ?? "") || (t.ScopeKey ?? "") != (newKey ?? "")) changed.Add("kopplingen");
             if (t.EstimatedCost != i.EstimatedCost) changed.Add("uppskattningen");
+            var newSend = i.IsMilestone && i.SendToForbundet;
+            if (t.IsMilestone != i.IsMilestone) changed.Add("milstolpen");
+            else if (t.SendToForbundet != newSend) changed.Add("att den skickas till förbundet");
             if (changed.Count == 0) return new TaskResult(taskId, null);
             var reassigned = t.AssigneeParticipantId != newAssignee && newAssignee.HasValue;
             if (t.AreaId != newArea) t.SortOrder = NextTaskSort(db, planningId, newArea) + 1;
@@ -155,6 +160,8 @@ namespace HpskSite.Services.Planning
             t.ScopeType = newScope;
             t.ScopeKey = newKey;
             t.EstimatedCost = i.EstimatedCost;
+            t.IsMilestone = i.IsMilestone;
+            t.SendToForbundet = newSend;
             t.UpdatedAt = now;
             db.Update(t);
             TaskEvent(db, t, PlanningTaskEventKind.Edited, byParticipantId, null, null, "Ändrade " + string.Join(", ", changed) + ".", null, false, now);
@@ -232,6 +239,35 @@ namespace HpskSite.Services.Planning
                 db.Update(t);
                 TaskEvent(db, t, PlanningTaskEventKind.Continued, byParticipantId, old, t.Status, note, meetingId > 0 ? meetingId : null, false, now);
             }
+            Bump(db, planningId);
+            return null;
+        }
+
+        /// <summary>
+        /// Milstolpen har skickats till förbundet: tidpunkten och vem, och milstolpen bockas av (Utförd) — det är
+        /// vad milstolpen var. En systemrad i meddelandena berättar det för gruppen.
+        /// </summary>
+        public string? MarkSentToForbundet(int planningId, int taskId, int byParticipantId, string summary)
+        {
+            var now = Now;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var t = db.SingleOrDefault<PlanningTaskRow>(
+                "SELECT * FROM PlanningTask WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", taskId, planningId);
+            if (t == null) return "Milstolpen finns inte.";
+            var old = t.Status;
+            t.SentToForbundetAt = now;
+            t.SentToForbundetBy = byParticipantId;
+            if (t.Status != PlanningTaskStatus.Done)
+            {
+                t.StatusBeforeDone = t.Status;
+                t.Status = PlanningTaskStatus.Done;
+                t.DoneAt = now; t.DoneBy = byParticipantId; t.DoneAtMeetingId = null;
+            }
+            t.UpdatedAt = now;
+            db.Update(t);
+            TaskEvent(db, t, PlanningTaskEventKind.Done, byParticipantId, old, t.Status, "Skickad till förbundet. " + summary, null, false, now);
+            InsertSystem(db, planningId, "forbundet-sent", $"{t.Title}: skickad till förbundet. {summary}".Trim(), byParticipantId, null, ("task", t.Id), now);
             Bump(db, planningId);
             return null;
         }

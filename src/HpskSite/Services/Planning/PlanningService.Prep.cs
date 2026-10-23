@@ -447,7 +447,11 @@ namespace HpskSite.Services.Planning
                 var sort = 0;
                 foreach (var item in def.Items)
                 {
-                    var t = NewTask(planningId, area.Id, item.Title, null, item.DaysBeforeComp, anchor, PlanningTaskSource.Template, null, ++sort, byParticipantId, now);
+                    var t = NewTask(planningId, area.Id, item.Title, item.Description, item.DaysBeforeComp, anchor, PlanningTaskSource.Template, null, ++sort, byParticipantId, now);
+                    // P3: milstolparna, och förbundets frister ur tävlingens dag när den är känd.
+                    t.IsMilestone = item.Milestone;
+                    t.SendToForbundet = item.Milestone && item.ToForbundet;
+                    if (item.DueFromAnchor != null && anchor.HasValue) t.DueDate = item.DueFromAnchor(anchor.Value.Date);
                     db.Insert(t);
                     TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, "Från mallen.", null, false, now);
                     tasks++;

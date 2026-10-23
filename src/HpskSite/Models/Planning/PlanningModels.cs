@@ -460,6 +460,14 @@ namespace HpskSite.Models.Planning
         /// <summary>Vad den beräknas kosta. Utfallet kommer ur bokföringen.</summary>
         public decimal? EstimatedCost { get; set; }
         public int SortOrder { get; set; }
+        // ---- P3: milstolpar (Stefan 2026-10-23) ----
+        /// <summary>Ett viktigt datum (förbundets frister, inbjudan i tid till tidningen). Samma uppgift, med flaggan.</summary>
+        public bool IsMilestone { get; set; }
+        /// <summary>Milstolpen skickas till förbundet (sajtinställningen Planning:ForbundetEmail).</summary>
+        public bool SendToForbundet { get; set; }
+        public DateTime? SentToForbundetAt { get; set; }
+        /// <summary>Deltagaren som skickade.</summary>
+        public int? SentToForbundetBy { get; set; }
         /// <summary>Template, KretsChecklist, Station eller Paste — var uppgiften kom ifrån.</summary>
         public string? SourceKind { get; set; }
         public string? SourceKey { get; set; }

@@ -98,7 +98,12 @@ namespace HpskSite.Services.Staffing
         };
     }
 
-    internal record PrepItem(string Title, int? DaysBeforeComp);
+    /// <summary>
+    /// En punkt i mallen. P3 (2026-10-23): en punkt kan vara en MILSTOLPE och kan skickas till förbundet;
+    /// <see cref="DueFromAnchor"/> räknar en förbundsfrist ur tävlingens dag ("1 oktober året före").
+    /// </summary>
+    internal record PrepItem(string Title, int? DaysBeforeComp, string? Description = null, bool Milestone = false,
+        bool ToForbundet = false, Func<DateTime, DateTime>? DueFromAnchor = null);
     internal record PrepArea(string Area, List<PrepItem> Items);
 
     /// <summary>
@@ -126,11 +131,32 @@ namespace HpskSite.Services.Staffing
         }
 
         private static PrepItem I(string title, int? days = null) => new(title, days);
+        private static PrepItem M(string title, int? days, string description, bool toForbundet = false, Func<DateTime, DateTime>? rule = null)
+            => new(title, days, description, true, toForbundet, rule);
+
+        /// <summary>
+        /// SM: förbundets frister som milstolpar (beslut 9.1 och 10.1–10.2). Tidningens manusstopp publiceras inte,
+        /// så inbjudans milstolpe får sitt datum när redaktören svarat. SM är förbundets uppdrag — ingen sanktion att söka.
+        /// </summary>
+        private static PrepArea Forbundet(bool falt) => new("Förbundet", new List<PrepItem>
+        {
+            M("Ansökan om tävlingen till förbundet", null,
+                "Förbundets frist: 1 oktober året före tävlingsåret. Ansökan går genom kretsen.", false, d => new DateTime(d.Year - 1, 10, 1)),
+            M("Tävlingen med i förbundets stomprogram", null,
+                "Förbundets frist: 30 juni året före tävlingsåret.", false, d => new DateTime(d.Year - 1, 6, 30)),
+            I("Kontrollera manusstoppet med tidningens redaktör", 240) with
+                { Description = "Manusstoppet publiceras inte. Fråga redaktören och skriv in datumet på milstolpen Inbjudan till förbundet." },
+            M("Inbjudan till förbundet (i tid till tidningen)", null,
+                "Datumet fylls i när redaktören svarat om manusstoppet. Bifoga inbjudan ur planeringens dokument.", true),
+        }.Concat(falt ? new[] { M("Fältets underlag till förbundet", 84,
+                "Banans underlag (målförutsättningar och stationsbeskrivningar) ska vara hos förbundet minst 12 veckor före tävlingen.", true) }
+            : Array.Empty<PrepItem>()).ToList());
 
         // --- Common områden shared by all disciplines ---
         private static PrepArea Admin(bool big) => new("Sanktion & administration", new()
         {
-            I("Sök sanktion (SPSF/krets)", big ? 120 : 60),
+            // SM är förbundets uppdrag; där ersätts sanktionen av området Förbundet.
+            big ? I("Kontakta förbundets SM-ansvarige", 365) : I("Sök sanktion (SPSF/krets)", 60),
             I("Boka domare / jury", big ? 90 : 45),
             I("Försäkring och tillstånd", big ? 90 : 45),
             I("Fastställ tidsplan och ansvarsfördelning", big ? 75 : 30),
@@ -183,7 +209,7 @@ namespace HpskSite.Services.Staffing
             list.Add(Sekretariat(big));
             list.Add(Kansli(big));
             if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            if (big) { list.Insert(0, Forbundet(false)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
             return list;
         }
 
@@ -220,7 +246,7 @@ namespace HpskSite.Services.Staffing
             }));
             list.Add(Kansli(big));
             if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            if (big) { list.Insert(0, Forbundet(false)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
             return list;
         }
 
@@ -251,7 +277,7 @@ namespace HpskSite.Services.Staffing
             list.Add(Sekretariat(big));
             list.Add(Kansli(big));
             if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            if (big) { list.Insert(0, Forbundet(true)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
             return list;
         }
 

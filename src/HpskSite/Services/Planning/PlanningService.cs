@@ -59,7 +59,8 @@ namespace HpskSite.Services.Planning
             // P2b: bemanningen i planeringen (alter-staffing-planning-p2b.sql + Planning.DisciplineKey).
             foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId"),
                                                  ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId"),
-                                                 ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate") })
+                                                 ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate"),
+                                                 ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;

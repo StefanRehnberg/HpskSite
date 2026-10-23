@@ -60,6 +60,7 @@ namespace HpskSite.Controllers
         private readonly Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> _archiveOptions;
         private readonly HpskSite.Services.Staffing.StaffingService _staffing;
         private readonly HpskSite.Services.Staffing.StaffDayService _staffDays;
+        private readonly HpskSite.Services.SiteSettings.SiteSettingService _siteSettings;
 
         public PlanningController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
@@ -72,11 +73,13 @@ namespace HpskSite.Controllers
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.CompetitionLinks competitionLinks,
             HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs,
             Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> archiveOptions,
-            HpskSite.Services.Staffing.StaffingService staffing, HpskSite.Services.Staffing.StaffDayService staffDays)
+            HpskSite.Services.Staffing.StaffingService staffing, HpskSite.Services.Staffing.StaffDayService staffDays,
+            HpskSite.Services.SiteSettings.SiteSettingService siteSettings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _staffing = staffing;
             _staffDays = staffDays;
+            _siteSettings = siteSettings;
             _competitions = competitions;
             _competitionLinks = competitionLinks;
             _kretsPlanning = kretsPlanning;
@@ -364,6 +367,8 @@ namespace HpskSite.Controllers
                     canEdit = PlanningAccess.CanEditPlanning(c), canManage = PlanningAccess.CanManagePlanning(c),
                     canInvite = PlanningAccess.CanInvite(c), canReadMessages = PlanningAccess.CanReadMessages(c),
                     canUseMeetings = PlanningAccess.CanUseMeetings(c), canWrite = PlanningAccess.CanWriteMessages(c),
+                    // Förbundets adress (en sajtinställning) fylls i av sajtadmin under Inställningar.
+                    isSiteAdmin = !c.ViaLink && await _auth.IsCurrentUserAdminAsync(),
                     pendingRequests = PlanningAccess.CanManagePlanning(c) ? _planning.PendingCounts(new[] { id }).GetValueOrDefault(id) : 0,
                     icsUrl = PlanningAccess.CanUseMeetings(c) ? _links.IcsUrl(c.ParticipantId, id, Request.PublicBase()) : null,
                     pushConfigured = _pushInfo.IsConfigured,

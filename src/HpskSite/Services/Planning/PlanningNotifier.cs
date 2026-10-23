@@ -419,6 +419,26 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>
+        /// P3: milstolpen till förbundet. Mejlet går från "{planeringen} via Pistol.nu" med svarsadress till den
+        /// som skickar — förbundet svarar alltså en människa, inte sajten. Returnerar om det gick iväg.
+        /// </summary>
+        public async Task<bool> ForbundetAsync(int planningId, PlanningTaskRow task, PlanningMemberRow? by, string to, string? message,
+            IReadOnlyList<(string FileName, System.IO.Stream Content, string ContentType)> files, IReadOnlyList<PlanningDocumentRow> links)
+        {
+            var p = _planning.Get(planningId);
+            if (p == null) return false;
+            var inner = new StringBuilder();
+            inner.Append($"<p><b>{H(task.Title)}</b></p>");
+            if (!string.IsNullOrWhiteSpace(message)) inner.Append($"<p style=\"white-space:pre-wrap\">{H(message!.Trim())}</p>");
+            if (files.Count > 0) inner.Append($"<p>Bifogat: {H(string.Join(", ", files.Select(f => f.FileName)))}.</p>");
+            foreach (var l in links.Where(l => !string.IsNullOrWhiteSpace(l.Url)))
+                inner.Append($"<p><a href=\"{H(l.Url)}\">{H(l.Title)}</a></p>");
+            inner.Append($"<p style=\"color:#555\">Skickat av {H(by?.DisplayName ?? "planeringsgruppen")} för planeringen {H(p.Name)}. Svara på mejlet så når svaret {H(by?.DisplayName ?? "avsändaren")}.</p>");
+            return await _email.SendPlanningMailWithAttachmentsAsync(to, $"{p.Name}: {task.Title}",
+                Page("förbundet", p.Name, inner.ToString(), ""), ReplyToFor(by, p.Name), files);
+        }
+
+        /// <summary>
         /// "Påminn försenade" (P2): ett mejl till personen med HENS försenade uppgifter — en gång om dagen och
         /// person, hur många gånger knappen än trycks. Returnerar om mejlet gick iväg.
         /// </summary>

@@ -12551,6 +12551,20 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   överst, trådarna efter senaste händelsen, 15 åt gången (`data-pl-older`), svaret skrivs under tråden; inte
   längre sticky. `.pl-card.p-0 { overflow: hidden }` så tabellkort följer de rundade hörnen. Rälsens Bemanning/
   Dagsprogram utan ny-flik-ikon (öppnas i samma flik). Svit `tavlingsplanering-en-verify.mjs` 37/37 (A/B 6 röda).
+- **Bemanning och Dagsprogram i planeringens ram (2026-10-23, 3ab1bb9):** `PlaneringBemanning`/`PlaneringDagsprogram`
+  renderar `.pl-page .pl-shell` med rälsen (`Partials/_PlaneringShellStyles.cshtml`); `planering.js` med
+  `CFG.railOnly` ritar bara rälsen, länkarna går till `/tavlingsplanering/{id}#vy=…`.
+- **P3 steg A, milstolpar och Skicka till förbundet (2026-10-23):** plan `notes/tavlingsplanering-p3-arbetsplan-2026-10-23.md`.
+  `PlanningTask.IsMilestone`/`SendToForbundet`/`SentToForbundetAt`/`SentToForbundetBy` (migrering
+  `add-milestones-to-planning-task.sql`, körordning P3a). SM-mallarna (`WorkBreakdownService`) får området
+  **Förbundet** först: ansökan (1 okt året före) och stomprogrammet (30 juni året före) räknas ur tävlingens dag
+  (`PrepItem.DueFromAnchor`), inbjudan i tid till tidningen (datum när redaktören svarat om manusstoppet) och för
+  fält underlaget 12 veckor före. Förbundets adress = sajtinställningen `Planning:ForbundetEmail` (sajtadmin under
+  Inställningar, `SetForbundetEmail`). `SendToForbundet` bifogar högst 10 dokument / 15 MB ur arkivet
+  (länkdokument i texten), svarsadress = avsändaren, och bockar av milstolpen **bara när mejlet gick iväg**
+  (`MarkSentToForbundet` + systemmeddelande). Uppgifter: filtret Milstolpar, flaggan på raden; Översikt: kortet
+  Milstolpar. Svit `hpsk-verify/tavlingsplanering-p3-verify.mjs` 25/25 (A/B: mallens flagga + uppdateringens
+  "behåll" fäller 6).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

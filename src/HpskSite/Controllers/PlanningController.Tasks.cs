@@ -41,6 +41,9 @@ namespace HpskSite.Controllers
             doneAtMeetingId = t.DoneAtMeetingId,
             doneAtMeeting = t.DoneAtMeetingId.HasValue && meetings.TryGetValue(t.DoneAtMeetingId.Value, out var dm) ? dm.Title : null,
             mine = t.AssigneeParticipantId == c.ParticipantId && c.IsParticipant,
+            isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet,
+            sentToForbundetAt = DT(t.SentToForbundetAt),
+            sentToForbundetBy = t.SentToForbundetBy.HasValue ? names.GetValueOrDefault(t.SentToForbundetBy.Value, "Någon") : null,
             canEdit = PlanningAccess.CanEditTask(c, t),
             canReport = PlanningAccess.CanReportOnTask(c, t),
         };
@@ -67,6 +70,9 @@ namespace HpskSite.Controllers
                 canDecide = PlanningAccess.CanDecideTask(x.Caller, false, x.Planning, null),
                 canManageAreas = PlanningAccess.CanManageAreas(x.Caller),
                 canAddDocument = PlanningAccess.CanAddDocument(x.Caller),
+                // Förbundets adress är en sajtinställning utan förval (beslut 10.2).
+                forbundetEmail = ForbundetEmail(),
+                canSendToForbundet = PlanningAccess.CanEditPlanning(x.Caller) && !x.Caller.ViaLink,
                 doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
                 anchor = D(anchor), anchorIsCompetition = comp?.CompetitionDate is { Year: > 1900 },
                 scopeTypes = PlanningTaskRules.ScopeTypes,
@@ -107,12 +113,14 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateTask(int id, string title, string? description, int? assignee, string? due, int? meetingId, string? t,
-            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
+            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
+            string? isMilestone = null, string? sendToForbundet = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanCreateTasks(x.Caller)) return No("Bara den som deltar lägger till uppgifter.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
+            if (input != null) input = input with { IsMilestone = Flag(isMilestone), SendToForbundet = Flag(sendToForbundet) };
             if (err != null) return No(err);
             var r = _planning.CreateTask(id, x.Caller.ParticipantId, input!, meetingId, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
@@ -123,7 +131,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateTask(int id, int taskId, string title, string? description, int? assignee, string? due, string? t,
-            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
+            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
+            string? isMilestone = null, string? sendToForbundet = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
@@ -132,6 +141,12 @@ namespace HpskSite.Controllers
             if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften ändras av den som lade till den, eller av den som kan ändra planeringen.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
             if (err != null) return No(err);
+            // Utelämnat = behåll (en äldre klient som inte känner till milstolparna får inte ta bort flaggan).
+            input = input! with
+            {
+                IsMilestone = isMilestone == null ? task.IsMilestone : Flag(isMilestone),
+                SendToForbundet = sendToForbundet == null ? task.SendToForbundet : Flag(sendToForbundet),
+            };
             var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, input!, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
             var mailed = await NotifyAssignedAsync(id, taskId, r.NewAssignee, x.Caller);
@@ -234,6 +249,70 @@ namespace HpskSite.Controllers
                 return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Skriv sista dagen som ett datum, till exempel 2027-05-14."));
             return Task.FromResult<(PlanningService.TaskInput?, string?)>((new PlanningService.TaskInput(title, description, pid,
                 pid == null ? assigneeName : null, dueDaysBefore.HasValue ? null : dueDate, dueDaysBefore, areaId, scopeType, scopeKey, cost), null));
+        }
+
+        private static bool Flag(string? v) => v is "1" or "true" or "on";
+
+        internal const string ForbundetEmailKey = "Planning:ForbundetEmail";
+        private string ForbundetEmail() => (_siteSettings.Get(ForbundetEmailKey, "") ?? "").Trim();
+
+        /// <summary>Förbundets adress (sajtadmin). Tom adress = knappen säger att den saknas.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetForbundetEmail(string? email)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return No("Förbundets adress fylls i av en sajtadministratör.");
+            var e = (email ?? "").Trim();
+            if (e.Length > 0 && (e.Length > 256 || !System.Text.RegularExpressions.Regex.IsMatch(e, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")))
+                return No("Skriv en giltig e-postadress.");
+            _siteSettings.Set(ForbundetEmailKey, e, await MemberIdAsync());
+            return Ok(new { success = true, email = e });
+        }
+
+        /// <summary>
+        /// Skicka en milstolpe till förbundet (P3, beslut 10.2): mejl med valda dokument ur planeringens arkiv,
+        /// svarsadress = den som skickar. Milstolpen bockas av och gruppen får en rad i meddelandena — bara när
+        /// mejlet faktiskt gick iväg.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendToForbundet(int id, int taskId, string? documentIds, string? message)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som skickar till förbundet.");
+            var task = _planning.GetTask(id, taskId);
+            if (task == null || !task.IsMilestone || !task.SendToForbundet) return No("Milstolpen skickas inte till förbundet.");
+            var to = ForbundetEmail();
+            if (to.Length == 0) return No("Förbundets adress saknas. En sajtadministratör fyller i den under planeringens Inställningar.");
+            var ids = (documentIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => int.TryParse(s.Trim(), out var n) ? n : 0).Where(n => n > 0).Distinct().ToList();
+            var docs = ids.Select(i => _planning.Document(id, i)).ToList();
+            if (docs.Any(d => d == null)) return No("Ett dokument finns inte längre.");
+            if (ids.Count > 10) return No("Bifoga högst tio dokument.");
+            var streams = new List<(string, System.IO.Stream, string)>();
+            var links = new List<PlanningDocumentRow>();
+            long total = 0;
+            try
+            {
+                foreach (var d in docs)
+                {
+                    if (!d!.IsFile) { links.Add(d); continue; }
+                    var st = await _docs.OpenReadAsync(d.StoredFileName);
+                    if (st == null) return No($"Filen {d.Title} kunde inte läsas.");
+                    var ms = new System.IO.MemoryStream();
+                    await st.CopyToAsync(ms); await st.DisposeAsync(); ms.Position = 0;
+                    total += ms.Length;
+                    if (total > 15L * 1024 * 1024) { ms.Dispose(); return No("De bifogade filerna är större än 15 MB tillsammans. Välj färre."); }
+                    streams.Add((string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.StoredFileName! : d.OriginalFileName!, ms, HpskSite.Services.Staffing.PrepDocumentStorage.ContentTypeFor(d.StoredFileName!)));
+                }
+                var ok = await _notify.ForbundetAsync(id, task, x.Caller.Participant, to, message, streams, links);
+                if (!ok) return No("Mejlet till förbundet gick inte iväg. Försök igen om en stund.");
+                var summary = docs.Count == 0 ? "" : "Bifogat: " + string.Join(", ", docs.Select(d => d!.Title)) + ".";
+                var err = _planning.MarkSentToForbundet(id, taskId, x.Caller.ParticipantId, summary);
+                return err == null ? Ok(new { success = true, to }) : No(err);
+            }
+            finally { foreach (var (_, s, _) in streams) s.Dispose(); }
         }
 
         /// <summary>Fältkonfigurationen tävlingen är ansluten till — "Station N" länkar dit.</summary>

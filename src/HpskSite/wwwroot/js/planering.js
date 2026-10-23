@@ -366,6 +366,15 @@
                     <li>Skriv det första meddelandet under <a href="#vy=meddelanden" data-pl-go="meddelanden">Meddelanden</a>. Alla får ett mejl på kvällen med det som är nytt.</li>
                 </ol></div>`);
         }
+        // Milstolparna: de viktiga datumen, först de som är kvar.
+        const ms = ((TASKS && TASKS.tasks) || []).filter(t => t.isMilestone)
+            .sort((a, b) => ((a.status === 'Done') - (b.status === 'Done')) || String(a.due || '9999').localeCompare(String(b.due || '9999')));
+        if (ms.length) html.push(`<div class="pl-card"><div class="pl-cardh"><h2>Milstolpar</h2>
+                <a href="#vy=uppgifter" data-pl-go="uppgifter" data-pl-filter="milestones">Alla milstolpar</a></div>
+            ${ms.slice(0, 6).map(t => `<div class="d-flex gap-2 py-1 border-top align-items-baseline">
+                <i class="bi ${t.status === 'Done' ? 'bi-check-circle-fill text-success' : 'bi-flag-fill text-primary'}" aria-hidden="true"></i>
+                <div class="flex-grow-1">${esc(t.title)}${t.sentToForbundetAt ? ' <span class="pl-help small">· skickad till förbundet</span>' : ''}</div>
+                <div class="text-nowrap small${t.overdue ? ' text-danger' : ' pl-help'}">${t.due ? esc(fmtDay(t.due)) : 'inget datum'}${t.overdue ? ' · försenad' : ''}</div></div>`).join('')}</div>`);
         // Senaste meddelandena
         if (MSG) {
             const last = MSG.messages.filter(m => m.kind === 'Message' && !m.deleted).slice(-3);
@@ -596,7 +605,10 @@
     function isPastMeeting(m) { return m.status === 'Cancelled' || (m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) < new Date()); }
     function fmtDay(s) {
         const p = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); if (!p) return s || '';
-        return new Date(+p[1], +p[2] - 1, +p[3]).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+        // Året skrivs ut när det inte är i år — en milstolpe 1 oktober nästa år får inte läsas som i höst.
+        const d = new Date(+p[1], +p[2] - 1, +p[3]);
+        return d.toLocaleDateString('sv-SE', d.getFullYear() === new Date().getFullYear()
+            ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
     }
     function firstName(n) { return (n || '').split(' ')[0]; }
     function meetingMenuItems(m, onPage) {
@@ -1039,6 +1051,7 @@
             ready: all.filter(t => t.status === 'ReadyForReview').length,
             overdue,
             done: all.filter(t => t.status === 'Done').length,
+            milestones: all.filter(t => t.isMilestone).length,
         };
         if (!tkFilter) tkFilter = TOKEN && n.mine ? 'mine' : 'open';
         const html = [];
@@ -1059,7 +1072,7 @@
                 <input type="search" class="form-control form-control-sm" id="tkQ" placeholder="Sök på uppgift eller namn" style="max-width:20rem" value="${esc(tkQuery)}">
                 <select class="form-select form-select-sm" id="tkFilter" aria-label="Visa" style="max-width:16rem">
                     ${opt('open', `Öppna (${n.open})`)}${opt('mine', `Mina (${n.mine})`)}${opt('overdue', `Försenade (${n.overdue})`)}
-                    ${opt('help', `Behöver hjälp (${n.help})`)}${opt('ready', `Klar att pröva (${n.ready})`)}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
+                    ${opt('help', `Behöver hjälp (${n.help})`)}${opt('ready', `Klar att pröva (${n.ready})`)}${n.milestones ? opt('milestones', `Milstolpar (${n.milestones})`) : ''}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
                 </select><span class="ms-auto pl-help small" id="tkCount"></span></div>
                 <div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0 pl-tktable">
                 <thead><tr><th class="ps-3">Uppgift</th><th class="d-none d-md-table-cell">Vem</th><th class="d-none d-md-table-cell">Senast</th>
@@ -1082,7 +1095,7 @@
         const f = tkFilter;
         const okF = f === 'all' || (f === 'open' && t.status !== 'Done') || (f === 'mine' && t.mine && t.status !== 'Done')
             || (f === 'help' && t.status === 'NeedsHelp') || (f === 'ready' && t.status === 'ReadyForReview')
-            || (f === 'overdue' && t.overdue) || (f === 'done' && t.status === 'Done');
+            || (f === 'overdue' && t.overdue) || (f === 'done' && t.status === 'Done') || (f === 'milestones' && t.isMilestone);
         const area = t.areaId ? (areaById(t.areaId) || {}).name : '';
         return okF && (!q || [t.title, t.assignee, t.report, area].some(v => (v || '').toLowerCase().includes(q)));
     }
@@ -1096,6 +1109,7 @@
             { label: `Kommentarer och dokument${t.comments ? ' (' + t.comments + ')' : ''}…`, fn: () => openThread(t) },
             !t.canDecide && TASKS.canDecide && open && { label: 'Markera som utförd…', fn: () => decideOutsideMeeting(t) },
             (t.canDecide || TASKS.canDecide) && !open && { label: 'Ångra utförd', fn: () => undoDone(t, 0) },
+            t.isMilestone && t.sendToForbundet && TASKS.canSendToForbundet && { label: t.sentToForbundetAt ? 'Skicka till förbundet igen…' : 'Skicka till förbundet…', fn: () => openSendForbundet(t) },
             { label: 'Visa historiken', fn: () => openHistory(t) },
             t.canEdit && { divider: true },
             t.canEdit && { label: 'Ta bort…', danger: true, fn: () => removeTask(t) },
@@ -1110,7 +1124,10 @@
             + [t.comments ? `${t.comments} kommentar${t.comments === 1 ? '' : 'er'}` : '', docs ? `${docs} dokument` : ''].filter(Boolean).join(', ') + '</button>');
         // Bara på EGNA uppgifter — på varje rad blev det brus. Övriga bockas av via radens Åtgärder.
         const quick = decide && t.canDecide && t.mine ?`<button type="button" class="btn btn-sm btn-outline-success ms-2 pl-noprint" data-tk-quickdone="${t.id}" title="Markera som utförd">Klar ✓</button>` : '';
-        return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}${open ? '' : ' pl-tkdonerow'}"><td class="ps-3"><b>${esc(t.title)}</b>${quick}<div class="pl-help small">${origin}${extra.length ? ' · ' + extra.join(' · ') : ''}</div>${done}
+        const flag = t.isMilestone ? '<i class="bi bi-flag-fill text-primary me-1" aria-hidden="true"></i><span class="visually-hidden">Milstolpe: </span>' : '';
+        const sent = t.sentToForbundetAt ? `<div class="small text-success">Skickad till förbundet ${esc(fmtShort(t.sentToForbundetAt))}${t.sentToForbundetBy ? ' — ' + esc(t.sentToForbundetBy) : ''}</div>`
+            : (t.isMilestone && t.sendToForbundet ? '<div class="small text-body-secondary">Skickas till förbundet</div>' : '');
+        return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}${open ? '' : ' pl-tkdonerow'}"><td class="ps-3">${flag}<b>${esc(t.title)}</b>${quick}${sent}<div class="pl-help small">${origin}${extra.length ? ' · ' + extra.join(' · ') : ''}</div>${done}
                 <div class="d-sm-none mt-1">${tkChip(t)}</div>
                 <div class="d-md-none small mt-1">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}${t.overdue ? ' <span class="text-danger">försenad</span>' : ''}</div></td>
             <td class="d-none d-md-table-cell">${t.assignee ? esc(t.assignee) : '<span class="pl-help">Ingen än</span>'}</td>
@@ -1229,6 +1246,10 @@
                     <div id="teDueDaysBox" class="${days ? '' : 'd-none'}"><div class="input-group" style="max-width:16rem"><input id="teDays" type="number" min="0" max="1000" class="form-control" value="${days ? t.dueDaysBefore : ''}">
                         <span class="input-group-text">dagar ${esc(daysWord())}</span></div>
                         <div class="pl-help small mt-1">${TASKS.anchor ? 'Datumet följer med om dagen flyttas.' : 'Datumet räknas fram när dagen är bestämd.'}</div></div></div>
+                <div class="mb-3"><div class="form-check"><input class="form-check-input" type="checkbox" id="teMilestone"${t && t.isMilestone ? ' checked' : ''}>
+                    <label class="form-check-label" for="teMilestone"><b>Milstolpe</b> — ett viktigt datum, till exempel en frist hos förbundet</label></div>
+                    <div class="form-check ms-4${t && t.isMilestone ? '' : ' d-none'}" id="teForbundetBox"><input class="form-check-input" type="checkbox" id="teForbundet"${t && t.sendToForbundet ? ' checked' : ''}>
+                    <label class="form-check-label" for="teForbundet">Skickas till förbundet, med dokument ur planeringens arkiv</label></div></div>
                 <details class="mb-1"${t && (t.description || t.scopeType || t.estimatedCost != null) ? ' open' : ''}><summary class="mb-2">Mer om uppgiften</summary>
                     <div class="mb-3"><label class="form-label" for="teDesc">Beskrivning</label><textarea id="teDesc" class="form-control" rows="3" maxlength="4000">${esc(t ? t.description || '' : '')}</textarea></div>
                     ${showScope ? `<div class="row g-2 mb-3"><div class="col-6"><label class="form-label" for="teScope">Gäller</label><select id="teScope" class="form-select">${scopeOpts}</select></div>
@@ -1244,10 +1265,12 @@
                     body.querySelector('#teDueDateBox').classList.toggle('d-none', d);
                     body.querySelector('#teDueDaysBox').classList.toggle('d-none', !d);
                 }));
+                body.querySelector('#teMilestone').addEventListener('change', e => body.querySelector('#teForbundetBox').classList.toggle('d-none', !e.target.checked));
                 body.querySelector('#teTitle').focus();
             },
             onOk: async body => {
                 const daysMode = !!body.querySelector('#teDueDays') && body.querySelector('#teDueDays').checked;
+                const milestone = body.querySelector('#teMilestone').checked;
                 const w = whoParams(body);
                 if (body.querySelector('#teWho').value === '__member' && !w.assigneeMemberId) return 'Sök fram och välj medlemmen först.';
                 const p = Object.assign({
@@ -1259,6 +1282,8 @@
                     scopeType: body.querySelector('#teScope') ? body.querySelector('#teScope').value : (t ? t.scopeType || '' : ''),
                     scopeKey: body.querySelector('#teScopeKey') ? body.querySelector('#teScopeKey').value : (t ? t.scopeKey || '' : ''),
                     estimatedCost: body.querySelector('#teCost').value.trim(),
+                    isMilestone: milestone ? '1' : '0',
+                    sendToForbundet: milestone && body.querySelector('#teForbundet').checked ? '1' : '0',
                 }, w);
                 if (daysMode && p.dueDaysBefore === '') return 'Skriv hur många dagar före.';
                 const r = t ? await post('UpdateTask', Object.assign({ taskId: t.id }, p)) : await post('CreateTask', p);
@@ -1266,6 +1291,36 @@
                 await Promise.all([reloadTasks(), w.assigneeMemberId ? reloadPeople() : Promise.resolve()]);
                 rerender();
                 if (r.mailed) showMsg('Den som fick uppgiften har fått ett mejl.', 'success');
+                return true;
+            }
+        });
+    }
+    // Milstolpen till förbundet (P3): valda dokument ur arkivet bifogas, svarsadressen är den som skickar.
+    function openSendForbundet(t) {
+        const to = TASKS.forbundetEmail || '';
+        const docs = (DOCS && DOCS.documents) || [];
+        if (!to) {
+            formModal({ title: 'Skicka till förbundet', wide: false, cancelLabel: 'Stäng',
+                html: `<p>Förbundets adress är inte ifylld än. En sajtadministratör fyller i den under planeringens <b>Inställningar</b>.</p>` });
+            return;
+        }
+        formModal({
+            title: 'Skicka till förbundet', okLabel: 'Skicka', wide: false,
+            html: `<p class="mb-2"><b>${esc(t.title)}</b></p>
+                <p class="pl-help small">Mejlet går till <b>${esc(to)}</b>. Förbundet svarar dig. Milstolpen bockas av när mejlet har gått iväg.</p>
+                <div class="fw-semibold mb-1">Bifoga dokument</div>
+                ${docs.length ? `<div class="mb-3" style="max-height:240px;overflow:auto">${docs.map((d, i) => `<div class="form-check">
+                    <input class="form-check-input sf-doc" type="checkbox" id="sfDoc${i}" data-sf-doc="${d.id}">
+                    <label class="form-check-label" for="sfDoc${i}">${esc(d.title)}${d.fileName ? ` <span class="pl-help small">${esc(d.fileName)}</span>` : ''}</label></div>`).join('')}</div>`
+                    : '<p class="pl-help small">Planeringens arkiv är tomt. Lägg dokumentet under <b>Dokument</b> först.</p>'}
+                <label class="form-label" for="sfMsg">Meddelande (valfritt)</label>
+                <textarea id="sfMsg" class="form-control" rows="4" maxlength="2000"></textarea>`,
+            onOk: async body => {
+                const ids = [...body.querySelectorAll('.sf-doc:checked')].map(x => x.dataset.sfDoc);
+                const r = await post('SendToForbundet', { taskId: t.id, documentIds: ids.join(','), message: body.querySelector('#sfMsg').value });
+                if (!r.success) return r.message;
+                await reloadTasks(); await reloadMessages(); rerender();
+                showMsg('Skickat till förbundet (' + esc(r.to) + ').', 'success');
                 return true;
             }
         });
@@ -2469,6 +2524,10 @@
                        ${p.disciplines.map(d => `<option value="${esc(d.id)}"${d.id === p.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
                        <div class="pl-help small mt-1">Styr vilka roller bemanningen föreslår (till exempel stationschef i fältskytte). När planeringen kopplas till en tävling gäller tävlingens gren.</div>
                        <span id="stDiscSaved" class="pl-help small"></span>`}</div>
+            ${S.me.isSiteAdmin ? `<div class="pl-card" style="max-width:720px"><h2>Förbundets adress</h2>
+                <p class="pl-help small">Gäller alla planeringar: dit går milstolpar som skickas till förbundet (till exempel inbjudan i tid till tidningen). Syns bara för sajtadministratörer.</p>
+                <div class="d-flex gap-2 flex-wrap"><input id="stForbundet" type="email" class="form-control" style="max-width:320px" maxlength="256" value="${esc((TASKS && TASKS.forbundetEmail) || '')}" placeholder="namn@pistolskytteforbundet.se">
+                <button class="btn btn-outline-primary" id="stForbundetSave">Spara adressen</button></div><span id="stForbundetSaved" class="pl-help small"></span></div>` : ''}
             ${p.competition ? `<div class="pl-card" style="max-width:720px"><h2>Tävlingen</h2>
                 <p class="mb-2">Planeringen hör till <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>. Den som har tillgång till tävlingen — tävlingsledning,
                     klubbens administratörer och skjutledare, kretsens administratörer — kommer in med nivån <i>Kan ändra</i> utan att bjudas in.</p>
@@ -2484,6 +2543,11 @@
             if (!r.success) { failMsg(r); e.target.checked = !e.target.checked; return; }
             S.planning.doneAtMeetingsOnly = e.target.checked;
             await reloadTasks(); $('stDoneSaved').textContent = 'Sparat.';
+        });
+        $('stForbundetSave')?.addEventListener('click', async () => {
+            const r = await post('SetForbundetEmail', { email: $('stForbundet').value.trim() });
+            if (!r.success) { failMsg(r); return; }
+            await reloadTasks(); $('stForbundetSaved').textContent = r.email ? 'Sparat.' : 'Adressen är borttagen.';
         });
         $('stUnlink')?.addEventListener('click', async () => {
             if (!await plConfirm('Koppla loss från tävlingen?', 'Uppgifterna står kvar. De som bara var med genom tävlingen kommer inte längre in, och förberedelserna syns inte längre på tävlingens sida.', 'Koppla loss', true)) return;
