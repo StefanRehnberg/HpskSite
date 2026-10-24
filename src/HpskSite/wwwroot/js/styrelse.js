@@ -337,7 +337,8 @@
         // Väntar på dig
         const rows = [];
         if (r.canPlace && r.issuesToPlace)
-            rows.push(todo(r.issuesToPlace, `ärende${r.issuesToPlace === 1 ? '' : 'n'} väntar på att placeras på ett möte`, 'arenden', 0, 'Placera'));
+            // Ett ärende kan beslutas direkt ELLER placeras på ett möte — texten får inte låsa fast det ena.
+            rows.push(todo(r.issuesToPlace, `ärende${r.issuesToPlace === 1 ? '' : 'n'} väntar på styrelsen — besluta direkt eller placera på ett möte`, 'arenden', 0, 'Visa ärendena'));
         (r.justering || []).forEach(j =>
             rows.push(todo('', `Protokoll att justera: <strong>${esc(j.title)}</strong> ${esc(svDate(j.meetingDate))}`, 'mote', j.id, 'Justera', 'efter')));
         if (r.canPlace && r.motionsWithoutOpinion)
@@ -1287,7 +1288,7 @@
     let isFilter = 'all', isData = null;
     function viewArenden() {
         setHead('Ärenden', CAN_PLACE
-            ? 'Ärenden som ledamöterna vill ta upp. Placera dem under en punkt på ett kommande möte.'
+            ? 'Ärenden som ledamöterna vill ta upp. Besluta dem direkt, eller placera dem under en punkt på ett kommande möte.'
             : 'Ärenden du vill ta upp på ett styrelsemöte. Sekreteraren eller ordföranden placerar dem på dagordningen.');
         setActions([
             { label: 'Anmäl ett ärende…', icon: 'bi-inbox', fn: () => issueDialog(null) },
@@ -1312,7 +1313,7 @@
             // Rälsens antal följer listan som visas — annars kan de två säga olika saker en stund.
             counts.arenden = waiting.length; renderRail('arenden');
             if (waiting.length) {
-                h += `<div class="sv-card sv-attn"><div class="sv-cardh"><h2>Att placera (${waiting.length})</h2><span class="sv-help">Äldst först</span></div>
+                h += `<div class="sv-card sv-attn"><div class="sv-cardh"><h2>Väntar på styrelsen (${waiting.length})</h2><span class="sv-help">Äldst först</span></div>
                     <div class="table-responsive"><table class="table sv-table align-middle mb-0 bg-transparent"><thead><tr><th>Ärende</th><th class="d-none d-md-table-cell">Anmält av</th><th class="d-none d-md-table-cell">Önskat möte</th><th class="text-end"></th></tr></thead><tbody>`;
                 waiting.forEach(i => {
                     h += `<tr><td><strong>${esc(i.title)}</strong><div class="sv-help">${esc(i.kindLabel)} · ${esc(svDate(i.submittedDate))}<span class="d-md-none"> · ${esc(i.submittedBy)}</span></div></td>
@@ -1324,7 +1325,7 @@
                 });
                 h += '</tbody></table></div></div>';
             } else {
-                h += '<div class="sv-todo done mb-3"><span class="n">✓</span><span class="t">Inga ärenden väntar på att placeras.</span></div>';
+                h += '<div class="sv-todo done mb-3"><span class="n">✓</span><span class="t">Inga ärenden väntar på styrelsen.</span></div>';
             }
         }
         const rest = r.canPlace ? all.filter(i => i.state !== 'Waiting') : all;
@@ -1363,7 +1364,7 @@
                     items.push({ divider: true });
                     items.push({ label: 'Återkalla…', danger: true, fn: () => withdrawIssue(i) });
                 }
-                h += `<tr><td class="ps-3"><strong>${esc(i.title)}</strong><div class="sv-help">${esc(i.kindLabel)} · ${r.canPlace ? 'anmält av ' + esc(i.submittedBy) + ' · ' : ''}${esc(svDate(i.submittedDate))}</div></td>
+                h += `<tr><td class="ps-3"><strong>${esc(i.title)}</strong><div class="sv-help">${esc(i.kindLabel)} · ${r.canPlace ? (i.sourceKind === 'Planering' ? 'från ' + esc(issueSender(i)) : 'anmält av ' + esc(i.submittedBy)) + ' · ' : ''}${esc(svDate(i.submittedDate))}</div></td>
                     <td>${pill(i.state, i.state === 'Placed' && i.placement ? 'Placerad ' + i.placement.paragraph : i.stateLabel)}${where}</td>
                     <td class="text-end pe-3">${rowMenu(items)}</td></tr>`;
             });
@@ -1467,7 +1468,13 @@
                 ${issueFiles(i.attachments, 'mb-3')}
                 ${i.direct ? `<p class="mb-1"><strong>Beslutat utan möte ${esc(svDate(i.direct.date))}:</strong> ${esc(i.direct.outcome)}${i.direct.deciders ? ' (' + esc(i.direct.deciders) + ')' : ''}</p>
                     ${i.direct.text ? `<p class="mb-1" style="white-space:pre-wrap;">${esc(i.direct.text)}</p>` : ''}` : ''}
-                ${i.placement ? `<p class="mb-1"><strong>${i.direct ? 'Anmäls på' : 'Placering'}:</strong> ${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</p>` : ''}
+                ${i.direct
+                    // Ett beslut utan möte REDOVISAS för styrelsen på nästa möte (under "Beslut fattade mellan
+                    // möten") — det anmäls inte, och det är inte placerat för att beslutas där.
+                    ? (i.direct.reported
+                        ? `<p class="mb-1"><strong>${i.direct.reported.locked ? 'Redovisat för styrelsen på' : 'Redovisas för styrelsen på'}:</strong> ${esc(i.direct.reported.meetingTitle)} ${esc(svDate(i.direct.reported.meetingDate))}, ${esc(i.direct.reported.paragraph)} (Beslut fattade mellan möten)</p>`
+                        : '<p class="mb-1 sv-help">Beslutet redovisas för styrelsen på nästa möte, när det läggs in.</p>')
+                    : (i.placement ? `<p class="mb-1"><strong>Placering:</strong> ${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</p>` : '')}
                 ${i.placement && i.placement.decision ? `<p class="mb-1"><strong>Beslut:</strong> <span style="white-space:pre-wrap;">${esc(i.placement.decision)}</span></p>` : ''}
                 ${i.closedReason ? `<p class="mb-1"><strong>Skäl:</strong> ${esc(i.closedReason)}</p>` : ''}`
         });
