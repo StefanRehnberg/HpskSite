@@ -200,7 +200,9 @@ namespace HpskSite.Services.Staffing
                 existing.SupportsTargetRange = req.SupportsTargetRange;
                 existing.SupportsFunctionTitle = req.SupportsFunctionTitle;
                 existing.Description = Blank(req.Description);
-                existing.SortOrder = req.SortOrder;
+                // Ordningen sätts av ReorderRoles. Ett namnbyte skickar ingen ordning (0) och flyttade förut
+                // raden högst upp i rutnätet (rättat 2026-10-24).
+                if (req.SortOrder != 0) existing.SortOrder = req.SortOrder;
                 existing.IsActive = true;
                 existing.ModifiedDate = now;
                 scope.Database.Update(existing);

@@ -1,0 +1,72 @@
+/* Planeringens bemanning (#vy=bemanning) — se wwwroot/js/planering-bemanning.js.
+   Rutnätets mått kommer från den gamla bemanningssidan: rollkolumnen står still när rutnätet rullar i sidled,
+   och kolumnbredden bestäms av ANTALET dagar (sätts i js), aldrig av ett långt namn i en ruta. */
+
+.plb-switch { display: inline-flex; flex-wrap: nowrap; }
+@media (max-width: 575.98px) {
+    .plb-switch { display: flex; width: 100%; }
+    .plb-switch .btn { flex: 1 1 0; white-space: normal; line-height: 1.2; padding-left: .4rem; padding-right: .4rem; }
+}
+.plb-dim { color: var(--bs-secondary-color); }
+.pl-state.no { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+
+.plb-wrap { overflow-x: auto; overflow-y: visible; background: var(--bs-body-bg); }
+.plb-grid { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; font-size: .95rem; }
+.plb-grid th, .plb-grid td { border-bottom: 1px solid var(--bs-border-color); vertical-align: top; padding: .4rem .5rem; }
+.plb-grid thead th { position: sticky; top: 0; z-index: 3; background: var(--bs-body-bg); border-bottom-width: 2px; font-weight: 600; }
+.plb-grid .plb-rolecol { position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg); width: 260px;
+    box-shadow: 1px 0 0 var(--bs-border-color); overflow-wrap: break-word; font-weight: normal; }
+/* Greppet, namnet och radens meny på en rad; ett långt namn bryts i sin egen ruta, aldrig under greppet. */
+.plb-rolehead { display: flex; justify-content: space-between; align-items: flex-start; gap: .35rem; }
+.plb-roletitle { display: flex; align-items: flex-start; gap: .1rem; min-width: 0; flex: 1 1 auto; }
+.plb-rolehead > .dropdown { flex: 0 0 auto; }
+@media (max-width: 575.98px) {
+    /* Telefon: smal rollkolumn, menyn under namnet — dagarna får platsen. */
+    .plb-grid .plb-rolecol { width: 150px; }
+    .plb-rolehead { flex-direction: column; gap: .25rem; }
+}
+.plb-grid thead .plb-rolecol { z-index: 4; font-weight: 600; }
+/* En öppen radmeny ligger i en låst cell, och varje låst cell är en egen staplingsnivå: utan det här hamnar
+   menyn under nästa rads rollcell och går inte att klicka på (sviten fann det). */
+.plb-grid th:has(.dropdown-menu.show), .plb-grid td:has(.dropdown-menu.show) { z-index: 8; }
+.plb-grid .min-w-0 { min-width: 0; }
+.plb-rolename { font-weight: 600; }
+.plb-daylabel { font-size: .8rem; font-weight: 500; }
+.plb-grid .plb-dim { font-size: .78rem; font-weight: 400; }
+.plb-need { font-size: .78rem; }
+.plb-grid td.plb-short { background: rgba(var(--bs-danger-rgb), .07); }
+.plb-grid td.plb-full { background: rgba(var(--bs-success-rgb), .05); }
+
+.plb-entry { display: flex; align-items: baseline; gap: .15rem; line-height: 1.3; padding: 1px 0; min-width: 0; }
+.plb-person { display: inline-flex; align-items: baseline; gap: .35rem; background: none; border: 0; min-width: 0; flex: 1 1 auto;
+    padding: 1px 2px; border-radius: 3px; text-align: left; color: inherit; cursor: pointer; overflow: hidden; }
+.plb-person:hover { background: var(--bs-tertiary-bg); }
+.plb-person:hover .plb-name { text-decoration: underline; }
+.plb-person:focus-visible { outline: 2px solid var(--bs-primary); }
+.plb-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.plb-club { font-size: .75rem; color: var(--bs-secondary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.plb-time { font-size: .72rem; flex: 0 0 auto; }
+/* Flytta och ta bort: syns när pekaren står på raden, och alltid på en pekskärm (där finns ingen hover). */
+.plb-mini { border: 0; background: none; color: var(--bs-secondary-color); line-height: 1; padding: 0 3px; visibility: hidden; flex: 0 0 auto; }
+.plb-entry:hover .plb-mini, .plb-mini:focus-visible { visibility: visible; }
+@media (hover: none) { .plb-mini { visibility: visible; } }
+.plb-add { display: block; width: 100%; text-align: left; font-size: .8rem; background: none; border: 0; padding: 2px 0 0;
+    color: var(--bs-secondary-color); }
+.plb-add:hover, .plb-add:focus-visible { color: var(--bs-primary); text-decoration: underline; }
+.plb-add:focus-visible { outline: 2px solid var(--bs-primary); border-radius: 3px; }
+
+.plb-grip { cursor: grab; color: var(--bs-secondary-color); background: none; border: 0; padding: 0 .35rem 0 0; line-height: 1; }
+.plb-grip:focus-visible { outline: 2px solid var(--bs-primary); border-radius: 3px; }
+#plbGridBody tr.plb-dragging { opacity: .4; }
+#plbGridBody tr.plb-dropbefore > * { box-shadow: inset 0 3px 0 -1px var(--bs-primary); }
+#plbGridBody tr.plb-dropafter > * { box-shadow: inset 0 -3px 0 -1px var(--bs-primary); }
+
+/* Rutans snabbinmatning ligger över sidan, vid rutan (inte i en dialog — nästa namn ska gå att skriva direkt). */
+.plb-editor { position: fixed; z-index: 1060; display: none; }
+.plb-editor .list-group { max-height: 240px; overflow: auto; }
+
+.plb-org th { background: var(--bs-tertiary-bg); }
+
+@media print {
+    .plb-switch, .plb-add, .plb-mini, .plb-grip { display: none !important; }
+}

@@ -15,8 +15,9 @@
     const CFG = window.PL_CONFIG || {};
     const ID = CFG.id;
     const TOKEN = CFG.token || '';
-    // Bemanningens och dagsprogrammets sidor har samma ram och vänstermeny (Stefan 2026-10-23), men sitt
-    // eget innehåll: där ritas bara rälsen, och dess poster leder tillbaka till planeringens sida.
+    // Dagsprogrammets sida har samma ram och vänstermeny (Stefan 2026-10-23), men sitt eget innehåll: där
+    // ritas bara rälsen, och dess poster leder tillbaka till planeringens sida. (Bemanningen är sedan
+    // 2026-10-24 en del i den här sidan, #vy=bemanning — planering-bemanning.js.)
     const RAIL_ONLY = CFG.railOnly || '';
     const $ = id => document.getElementById(id);
 
@@ -211,6 +212,10 @@
         { key: 'beslut', label: 'Förslag och beslut' },
         { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
+        // Omgång 2 (2026-10-24): bemanningen är en del i planeringen, inte en egen sida (planering-bemanning.js).
+        { key: 'bemanning', label: 'Bemanning', need: s => s.me.canEdit && !TOKEN },
+        // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad.
+        { key: 'dagsprogram', label: 'Dagsprogram', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
         { key: 'delar', label: 'Delar', need: s => s.me.canEdit || (s.parts || []).length > 0 },
         { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
         { key: 'installningar', label: 'Inställningar', need: s => s.me.canEdit },
@@ -260,14 +265,11 @@
         const counts = { meddelanden: unreadCount(), moten: votesOwed(), uppgifter: myOpenTasks(), beslut: decisionsOwed(), deltagare: s.me.pendingRequests || 0 };
         const here = RAIL_ONLY || (view === 'mote' ? 'moten' : view);
         const base = RAIL_ONLY ? '/tavlingsplanering/' + ID : '';
-        $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
-            `<a href="${base}#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
-            + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('')
-            // P2b: bemanningen är ett eget rutnät på en egen sida (det behöver hela bredden).
-            // Öppnas i samma flik (en egen sida som behöver hela bredden), därför ingen ny-flik-ikon.
-            + (s.me.canEdit && s.planning.staffingUrl ? `<a href="${esc(s.planning.staffingUrl)}" class="pl-nav${here === 'bemanning' ? ' on' : ''}">Bemanning</a>` : '')
-            // Dagsprogrammet hör till tävlingen och finns här när planeringen är kopplad (Stefan 2026-10-23).
-            + (s.me.canEdit && s.planning.agendaUrl ? `<a href="${esc(s.planning.agendaUrl)}" class="pl-nav${here === 'dagsprogram' ? ' on' : ''}">Dagsprogram</a>` : '');
+        $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v => v.href
+            // En egen sida (dagsprogrammet): en vanlig länk, i samma flik.
+            ? `<a href="${esc(v.href(s))}" class="pl-nav${v.key === here ? ' on' : ''}">${esc(v.label)}</a>`
+            : `<a href="${base}#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
+                + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
     }
 
     function myOpenTasks() {
@@ -305,14 +307,22 @@
 
     function render(v) {
         if (!S) return;
-        const allowed = VIEWS.filter(x => !x.need || x.need(S)).map(x => x.key).concat(['mote']);
+        const allowed = VIEWS.filter(x => !x.href && (!x.need || x.need(S))).map(x => x.key).concat(['mote']);
         view = allowed.includes(v) ? v : 'oversikt';
         if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
+        if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
-           uppgifter: viewTasks, beslut: viewDecisions, delar: viewParts, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
+           uppgifter: viewTasks, beslut: viewDecisions, delar: viewParts, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings,
+           bemanning: () => window.PlaneringBemanning.render(STAFF_API) })[view]();
     }
+
+    // Det bemanningens del (planering-bemanning.js) får av skalet: samma anrop, dialoger och meddelanden.
+    const STAFF_API = {
+        ID, req, token, esc, spinner, setHead, setActions, rowMenu, formModal, plConfirm, showMsg, failMsg, datePicker,
+        S: () => S, isActive: () => view === 'bemanning', go,
+    };
 
     function subLine() {
         const p = S.planning;
@@ -3162,7 +3172,8 @@
                 const editing = document.activeElement && $('plBody').contains(document.activeElement)
                     && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
                 if (view === 'meddelanden' && $('plThread')) refreshThreadOnly();          // skrivrutan rörs inte
-                else if (!typing && !editing && view !== 'installningar' && !document.querySelector('.modal.show')) render(view);
+                // Bemanningen läser om sig själv (egen pollning) — en omritning här hade stängt rutans inmatning.
+                else if (!typing && !editing && view !== 'installningar' && view !== 'bemanning' && !document.querySelector('.modal.show')) render(view);
                 else renderRail();
             }
         } catch (e) { /* tyst: nästa varv försöker igen */ }

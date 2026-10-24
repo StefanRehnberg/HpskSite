@@ -22,6 +22,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 @await Html.PartialAsync("_PlaneringShellStyles")
+<link rel="stylesheet" href="~/css/planering-bemanning.css" asp-append-version="true">
 
 <div class="pl-page container-fluid py-4" id="plApp">
     @Html.AntiForgeryToken()
@@ -100,6 +101,8 @@
                 leave: @((ViewData["PlanningLeave"] as bool? == true) ? "true" : "false")
             };
         </script>
+        @* Bemanningen (#vy=bemanning) är en egen fil men en del i sidan — laddas före planering.js. *@
+        <script src="~/js/planering-bemanning.js" asp-append-version="true"></script>
         <script src="~/js/planering.js" asp-append-version="true"></script>
     }
 </div>

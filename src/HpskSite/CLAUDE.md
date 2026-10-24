@@ -12501,10 +12501,34 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     planeringen (`PlanningAccess.CanEditStaffing`) ELLER tillgång till den kopplade tävlingen; utan —
     tävlingens behörighet, som förut. **Id-baserade anrop prövas mot RADENS egen ägare**, aldrig mot ett id i
     anropet. Appbehörighet (`HasAdminAccess`) kan bara ges när planeringen är kopplad.
-  - **Sidan `/tavlingsplanering/{id}/bemanning`** (`PlaneringBemanning.cshtml`) visar samma `_StaffingRoster`/
-    `_StaffingGrid` som tävlingens planeringssida; ett fetch-tillägg lägger `planningId` på varje anrop till
-    `/umbraco/surface/Staffing/`, så delvyerna behöver inte veta om planeringen. Planeringens meny har
-    Bemanning; Inställningar har Gren (bara utan tävling). **Dagsprogram och materiel stannar på tävlingen.**
+  - ⚠️⚠️ **OMGJORT 2026-10-24 (omgång 2, steg 2): bemanningen är en DEL i planeringen, `#vy=bemanning`** —
+    `wwwroot/js/planering-bemanning.js` (`window.PlaneringBemanning.render(api)`/`leave()`) + `wwwroot/css/planering-bemanning.css`,
+    laddade av `Planering.cshtml` FÖRE `planering.js`. Sidan `PlaneringBemanning.cshtml` är BORTTAGEN;
+    `/tavlingsplanering/{id}/bemanning` (och `?c=…&vy=bemanning`, `StaffOwnerResolver.ManageUrl`, `planning.staffingUrl`)
+    leder till `/tavlingsplanering/{id}#vy=bemanning`. Stefan: "lösryckt … knappen Mer … modalerna låsta mot vänsterkanten".
+    - **Tre delar via växeln** (`&del=` i adressen): **Rutnät** (rad = roll, kolumn = dag; rutans snabbinmatning
+      `#plbEditor` står kvar öppen för nästa namn), **Personer** (sök, filter, *Gruppera per förening* = det gamla
+      "Per förening"; namnet öppnar personen i sidan, `&person=<nyckel>`, ← Alla personer + bakåtknappen), **Hitta
+      funktionärer** (tre kort). Planeringens form: blå Åtgärder per del, grå `rowMenu` på roller, dagar, personer,
+      uppdrag och "något annat"; `formModal`/`plConfirm`. **Inga offcanvas, inga prompt/confirm/alert** (sviten mäter det).
+    - Skalet ger modulen ett API (`STAFF_API` i planering.js: `req`, `token`, `setHead`, `setActions`, `rowMenu`,
+      `formModal`, `plConfirm`, `showMsg`, `failMsg`, `datePicker`, `S()`, `isActive()`). Modulen pollar sig själv
+      (15 s, aldrig med dialog/meny/rutan öppen eller fokus i ett fält); planeringens pollning ritar inte om delen.
+    - ⚠️⚠️ **`SaveAssignment` skriver ALLA fält** (även e-post, telefon, plats, ansvarig, behörighet) — uppdragets
+      dialog hämtar raden ur `GetRoster` och skickar med det den inte visar. Dialogen visar bara person, roll, dag,
+      tid, läge och anteckning; skiftet (`PassId`) behålls bara om varken dag eller tid ändrats. Den gamla dialogen
+      tömde e-posten vid varje ändring. **Skift & behov** (StaffPass-ytan) finns inte längre i ytan; endpoints och
+      tabeller står kvar — kör `Migrations/check-prod-staffpass-2026-10-24.sql` i prod innan något tas bort.
+    - ⚠️ **`SaveRole` skriver alla rollens flaggor** — namnbytet skickar med dem ur `GetRoles`; och
+      `RoleCatalogService.SaveRole` rör inte längre `SortOrder` när anropet saknar en (0): ett namnbyte flyttade
+      förut raden högst upp (A/B: 1 röd).
+    - ⚠️ En öppen radmeny i en låst cell hamnade under nästa rads låsta cell — `td/th:has(.dropdown-menu.show)`
+      får högre `z-index` (sviten fann det).
+    - Svit `hpsk-verify/tavlingsplanering-bemanningsvy-verify.mjs` 65/65 (A/B: e-posten utan att skickas med → 1 röd;
+      namnbytet som nollställer ordningen → 1 röd). bemanning-, hitta-, en- och p3-sviterna uppdaterade till delen.
+  - (Historik:) Sidan `/tavlingsplanering/{id}/bemanning` (`PlaneringBemanning.cshtml`) visade samma `_StaffingRoster`/
+    `_StaffingGrid` som tävlingens planeringssida; ett fetch-tillägg lade `planningId` på varje anrop. Inställningar
+    har Gren (bara utan tävling). **Dagsprogram och materiel stannar på tävlingen.**
   - **Självanmälan:** `/bemanna?p={planering}` (`StaffOwner.SignupPath`); `/bemanna?c=` fungerar som förut och
     leder till tävlingens planering när den har en. Mina uppdrag grupperar per ägare (`MyCompetitionGroup.PlanningId`).
   - Svit: `hpsk-verify/tavlingsplanering-bemanning-verify.mjs` 49/49 (A/B: radägarens prövning släppt +

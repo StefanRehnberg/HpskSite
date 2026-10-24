@@ -117,6 +117,6 @@ namespace HpskSite.Services.Staffing
 
         /// <summary>Var organisatören hanterar bemanningen.</summary>
         public string ManageUrl(StaffOwner owner) =>
-            owner.HasPlanning ? $"/tavlingsplanering/{owner.PlanningId}/bemanning" : $"/tavlingsplanering?c={owner.Comp}";
+            owner.HasPlanning ? $"/tavlingsplanering/{owner.PlanningId}#vy=bemanning" : $"/tavlingsplanering?c={owner.Comp}";
     }
 }

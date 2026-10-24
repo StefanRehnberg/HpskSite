@@ -359,7 +359,7 @@ namespace HpskSite.Controllers
                     // P2b: grenen styr bemanningens roller tills planeringen kopplas (då gäller tävlingens).
                     disciplineKey = x.Planning.DisciplineKey ?? "",
                     disciplines = HpskSite.Models.CompetitionTypes.All.Select(d => new { id = d.Id, name = d.Name }),
-                    staffingUrl = $"/tavlingsplanering/{x.Planning.Id}/bemanning",
+                    staffingUrl = $"/tavlingsplanering/{x.Planning.Id}#vy=bemanning",
                     // Dagsprogrammet hör till tävlingen — en del i planeringen när den är kopplad.
                     agendaUrl = _planning.LinkFor(x.Planning.Id) != null ? $"/tavlingsplanering/{x.Planning.Id}/dagsprogram" : "",
                     // P3 steg F: ansökan till kretsen ur planeringen (ett utkast i klubbens ansökningar).

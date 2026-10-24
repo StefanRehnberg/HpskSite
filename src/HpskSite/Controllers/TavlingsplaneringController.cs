@@ -94,7 +94,7 @@ namespace HpskSite.Controllers
                 var vy = (Request.Query["vy"].ToString() ?? "").ToLowerInvariant();
                 return Redirect(vy switch
                 {
-                    "bemanning" => $"/tavlingsplanering/{linked.Id}/bemanning",
+                    "bemanning" => $"/tavlingsplanering/{linked.Id}#vy=bemanning",
                     "dagsprogram" => $"/tavlingsplanering/{linked.Id}/dagsprogram",
                     _ => $"/tavlingsplanering/{linked.Id}",
                 });
@@ -130,34 +130,12 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// P2b (2026-10-23): planeringens bemanning — samma rutnät som tävlingens (_StaffingRoster), med
-        /// planeringen som ägare. Sidan lägger <c>planningId</c> på varje anrop till StaffingController, så
-        /// rutnätet fungerar även innan planeringen kopplats till en tävling. Behörigheten prövas här (för
-        /// sidan) och av StaffingController (för varje anrop): Kan ändra i planeringen, eller tillgång till
-        /// den kopplade tävlingen.
+        /// Omgång 2 (2026-10-24): bemanningen är en del i planeringen (<c>#vy=bemanning</c>, planering-bemanning.js),
+        /// inte en egen sida. Den gamla adressen (bokmärken, mejl, tävlingens Bemanning-knapp) leder dit.
+        /// Behörigheten prövas av planeringen och av StaffingController för varje anrop.
         /// </summary>
         [HttpGet("{id:int}/bemanning")]
-        public async Task<IActionResult> PlanningStaffing(int id)
-        {
-            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                return StatusCode(500, "Umbraco-kontext saknas.");
-            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
-            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
-            if (currentMember?.Email == null)
-                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/{id}/bemanning")}");
-
-            var owner = _owners.ForPlanning(id);
-            var canAccess = owner != null && await CanStaffPlanningAsync(owner, currentMember.Email);
-            ViewData["PlanningId"] = id;
-            ViewData["Exists"] = owner != null;
-            ViewData["CanAccess"] = canAccess;
-            ViewData["CompetitionId"] = owner?.Comp ?? 0;
-            ViewData["PlanningName"] = owner == null ? "" : (_owners.Planning(id)?.Name ?? "");
-            ViewData["CompetitionName"] = owner is { HasCompetition: true } ? _owners.Name(owner) : "";
-            ViewData["Discipline"] = owner == null ? "Precision" : (_owners.Discipline(owner) is { Length: > 0 } d ? d : "Precision");
-            return View("PlaneringBemanning", rootNode);
-        }
+        public IActionResult PlanningStaffing(int id) => Redirect($"/tavlingsplanering/{id}#vy=bemanning");
 
         /// <summary>
         /// Planeringens dagsprogram (Stefan 2026-10-23): dagsprogrammet hör till tävlingen, så det finns i
