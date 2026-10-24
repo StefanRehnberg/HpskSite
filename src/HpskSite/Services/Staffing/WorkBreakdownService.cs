@@ -100,7 +100,7 @@ namespace HpskSite.Services.Staffing
 
     /// <summary>
     /// En punkt i mallen. P3 (2026-10-23): en punkt kan vara en MILSTOLPE och kan skickas till förbundet;
-    /// <see cref="DueFromAnchor"/> räknar en förbundsfrist ur tävlingens dag ("1 oktober året före").
+    /// <see cref="DueFromAnchor"/> räknar en förbundsfrist ur tävlingens dag ("30 juni året före").
     /// </summary>
     internal record PrepItem(string Title, int? DaysBeforeComp, string? Description = null, bool Milestone = false,
         bool ToForbundet = false, Func<DateTime, DateTime>? DueFromAnchor = null, Func<DateTime, string>? TitleFromAnchor = null);
@@ -135,17 +135,24 @@ namespace HpskSite.Services.Staffing
             => new(title, days, description, true, toForbundet, rule);
 
         /// <summary>
-        /// SM: förbundets frister som milstolpar (beslut 9.1 och 10.1–10.2). SM är förbundets uppdrag — ingen sanktion att söka.
+        /// SM: förbundets frister som milstolpar (beslut 9.1 och 10.1–10.2). SM är förbundets uppdrag — ingen sanktion att söka,
+        /// och ingen ansökan 1 oktober: den gäller nationella tävlingar och landsdelstävlingar (SHB C.3.5.3.2), SM fördelas
+        /// genom långtidsplanen. Stefan 2026-10-24 ("SHB har säkert rätt"): förbundet fastställer datumet i stomprogrammet
+        /// (C.3.5.3.1) och godkänner inbjudan (C.3.5.2.1).
         /// <para>P4 (Stefan 2026-10-24): SM-annonsen ska med i förbundets tidning — den stora SM-veckan i nr 2, ett SM senare
         /// på året (springskytte) i nr 3. <see cref="NpIssues.ForCompetition"/> väljer numret ur tävlingens dag och
         /// uppskattar manusstoppet ur förbundets utgivningsplan. Titel och datum går att ändra på milstolpen.</para>
         /// </summary>
         private static PrepArea Forbundet(bool falt) => new("Förbundet", new List<PrepItem>
         {
-            M("Ansökan om tävlingen till förbundet", null,
-                "Förbundets frist: 1 oktober året före tävlingsåret. Ansökan går genom kretsen.", false, d => new DateTime(d.Year - 1, 10, 1)),
-            M("Tävlingen med i förbundets stomprogram", null,
-                "Förbundets frist: 30 juni året före tävlingsåret.", false, d => new DateTime(d.Year - 1, 6, 30)),
+            M("Förbundet fastställer SM-datumet i stomprogrammet", null,
+                "Förbundsstyrelsen fastställer stomprogrammet med SM-datumen senast 30 juni året före (SHB C.3.5.3.1). "
+                + "Kontrollera att datumet i stomprogrammet stämmer med planeringen.", false, d => new DateTime(d.Year - 1, 6, 30)),
+            M("Förslag till inbjudan till förbundet för godkännande", null,
+                "Arrangören skickar i god tid förslaget till inbjudan till förbundet, som godkänner den (SHB C.3.5.2.1). "
+                + "Inbjudan och SM-annonsen går ut först när förbundet har godkänt. Sista dagen är satt fyra veckor före "
+                + "tidningens manusstopp — ändra den om förbundet vill ha förslaget tidigare.",
+                true, d => NpIssues.ForCompetition(d).Deadline.AddDays(-28)),
             M("SM-annonsen till Nationellt Pistolskytte", null,
                 "SM-annonsen ska med i förbundets tidning i det nummer som kommer ut före tävlingen — den stora SM-veckan i nr 2 "
                 + "(juni), ett SM senare på året, till exempel springskytte, i nr 3 (september). Numret och sista dagen (tidningens "
@@ -156,7 +163,7 @@ namespace HpskSite.Services.Staffing
                 TitleFromAnchor = d => { var n = NpIssues.ForCompetition(d); return $"SM-annonsen till Nationellt Pistolskytte nr {n.Issue}/{n.Year}"; },
             },
         }.Concat(falt ? new[] { M("Fältets underlag till förbundet", 84,
-                "Banans underlag (målförutsättningar och stationsbeskrivningar) ska vara hos förbundet minst 12 veckor före tävlingen.", true) }
+                "Banans underlag (målförutsättningar och stationsbeskrivningar) ska vara hos förbundet minst 12 veckor före tävlingen (SHB C.3.5.2.2).", true) }
             : Array.Empty<PrepItem>()).ToList());
 
         // --- Common områden shared by all disciplines ---
@@ -170,7 +177,7 @@ namespace HpskSite.Services.Staffing
         });
         private static PrepArea Kansli(bool big) => new("Kansli & inbjudan", new()
         {
-            I("Publicera inbjudan", big ? 75 : 35),
+            big ? new PrepItem("Publicera inbjudan", 75, "Först när förbundet har godkänt inbjudan (SHB C.3.5.2.1).") : I("Publicera inbjudan", 35),
             I("Öppna anmälan", big ? 60 : 30),
             I("Bekräfta anmälningar / seedning", big ? 14 : 7),
             I("Publicera startlista", 3),

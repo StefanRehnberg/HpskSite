@@ -12581,7 +12581,10 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **P3 steg A, milstolpar och Skicka till förbundet (2026-10-23):** plan `notes/tavlingsplanering-p3-arbetsplan-2026-10-23.md`.
   `PlanningTask.IsMilestone`/`SendToForbundet`/`SentToForbundetAt`/`SentToForbundetBy` (migrering
   `add-milestones-to-planning-task.sql`, körordning P3a). SM-mallarna (`WorkBreakdownService`) får området
-  **Förbundet** först: ansökan (1 okt året före) och stomprogrammet (30 juni året före) räknas ur tävlingens dag
+  **Förbundet** först: stomprogrammet (30 juni året före, SHB C.3.5.3.1) räknas ur tävlingens dag — ⚠️ ingen
+  ansökan 1 okt för SM (C.3.5.3.2 gäller nationella/landsdelstävlingar; Stefan 2026-10-24 "SHB har säkert rätt");
+  förslaget till inbjudan till förbundet för godkännande (C.3.5.2.1, skickas, 4 veckor före NP-manusstoppet) och
+  "Publicera inbjudan" bara efter godkännandet;
   (`PrepItem.DueFromAnchor`), inbjudan i tid till tidningen (datum när redaktören svarat om manusstoppet) och för
   fält underlaget 12 veckor före. Förbundets adress = sajtinställningen `Planning:ForbundetEmail` (sajtadmin under
   Inställningar, `SetForbundetEmail`). `SendToForbundet` bifogar högst 10 dokument / 15 MB ur arkivet
