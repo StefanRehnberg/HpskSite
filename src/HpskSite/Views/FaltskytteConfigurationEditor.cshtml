@@ -269,6 +269,27 @@
 </div>
 
 <!-- Request-approval picker modal — owner chooses a specific Banläggare to ask. -->
+<div class="modal fade" id="fkReturnModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-return-left me-2"></i>Skicka tillbaka</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Konfigurationen går tillbaka till utkast. Ägaren får din kommentar i ett mejl och ser den här i konfiguratorn, ändrar och begär godkännande igen.</p>
+                <label class="form-label small fw-bold" for="fkReturnComment">Vad behöver ändras?</label>
+                <textarea class="form-control" id="fkReturnComment" rows="4" maxlength="2000" placeholder="Till exempel: Station 4 — målgrupp B står för långt bort för figurerna."></textarea>
+                <div id="fkReturnError" class="text-danger small mt-2" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="fkReturnSubmit()"><i class="bi bi-send me-1"></i>Skicka tillbaka</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="fkRequestApprovalModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -367,6 +388,8 @@ async function fkEditorLoad() {
             return;
         }
         fkEditorConfig = data.configuration;
+        // Omgang 3 (K9): versionen editorn laste - skickas med vid varje sparning av banan.
+        window._faltCfgVersion = fkEditorConfig.version || null;
         fkEditorRenderMeta();
 
         var blob = {};
@@ -454,9 +477,9 @@ function fkEditorRenderApprovalBanner() {
                (approvedDateStr ? ' den ' + approvedDateStr : '') +
                '. Konfigurationsdata är låst tills godkännandet återkallas.';
         if (canEdit) {
-            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(true)">Begär ändring</button>');
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(\'change\')">Begär ändring</button>');
         } else if (canApprove) {
-            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(false)">Återkalla godkännande</button>');
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(\'revoke\')">Återkalla godkännande</button>');
         }
     } else if (status === 'PendingApproval') {
         banner.className = 'alert alert-warning mb-3';
@@ -468,15 +491,26 @@ function fkEditorRenderApprovalBanner() {
         // canApprove === true alone isn't enough anymore — we want directed flow.
         if (isRequestedApprover) {
             actions.push('<button class="btn btn-success btn-sm" onclick="fkApprovalApprove()"><i class="bi bi-shield-check me-1"></i>Godkänn</button>');
+            // Omgång 3 (3.3): banläggaren kan skicka tillbaka med en kommentar i stället för att bara godkänna.
+            actions.push('<button class="btn btn-outline-primary btn-sm" onclick="fkReturnOpen()"><i class="bi bi-arrow-return-left me-1"></i>Skicka tillbaka…</button>');
         }
         if (canEdit) {
-            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(true)">Avbryt begäran</button>');
+            actions.push('<button class="btn btn-outline-secondary btn-sm" onclick="fkApprovalUnapprove(\'cancel\')">Avbryt begäran</button>');
         }
     } else {
         // Draft. Only surface the banner when the viewer can request approval.
         if (canEdit) {
             banner.className = 'alert alert-light border mb-3';
             text = 'Konfigurationen är ett utkast. När du är klar kan du begära godkännande av en Banläggare.';
+            // Omgång 3 (3.3): banläggarens kommentar står kvar tills någon begär godkännande igen.
+            if (fkEditorConfig.returnComment) {
+                banner.className = 'alert alert-warning mb-3';
+                text = '<i class="bi bi-arrow-return-left me-1"></i><strong>Skickad tillbaka</strong>'
+                    + (fkEditorConfig.returnedByName ? ' av <strong>' + escapeHtml(fkEditorConfig.returnedByName) + '</strong>' : '')
+                    + (fkEditorConfig.returnedDate ? ' den ' + new Date(fkEditorConfig.returnedDate).toLocaleDateString('sv-SE') : '')
+                    + ':<div class="mt-1" style="white-space:pre-wrap">' + escapeHtml(fkEditorConfig.returnComment) + '</div>'
+                    + '<div class="small mt-1">Ändra det som behövs och begär godkännande igen.</div>';
+            }
             actions.push('<button class="btn btn-primary btn-sm" onclick="fkRequestApprovalOpen()"><i class="bi bi-shield-check me-1"></i>Begär godkännande…</button>');
         } else {
             banner.style.display = 'none';
@@ -563,12 +597,40 @@ async function fkApprovalApprove() {
     if (!confirm('Godkänn konfigurationen "' + (fkEditorConfig.name || '') + '"? Konfigurationsdata låses tills godkännandet återkallas.')) return;
     await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/Approve');
 }
-async function fkApprovalUnapprove(asOwner) {
-    var prompt = asOwner
-        ? 'Begär ändring? Befintligt godkännande tas bort och konfigurationen återgår till utkast.'
-        : 'Återkalla godkännandet? Konfigurationen återgår till utkast.';
+async function fkApprovalUnapprove(mode) {
+    // Omgång 3 (K9): "Avbryt begäran" sa förut att ett godkännande togs bort, fast inget fanns.
+    var prompt = mode === 'cancel'
+        ? 'Avbryt begäran om godkännande? Konfigurationen återgår till utkast, och du kan begära godkännande igen när du vill.'
+        : mode === 'change'
+            ? 'Begär ändring? Befintligt godkännande tas bort och konfigurationen återgår till utkast.'
+            : 'Återkalla godkännandet? Konfigurationen återgår till utkast.';
     if (!confirm(prompt)) return;
     await fkApprovalCall('/umbraco/surface/FaltskytteConfiguration/Unapprove');
+}
+
+function fkReturnOpen() {
+    document.getElementById('fkReturnComment').value = '';
+    document.getElementById('fkReturnError').style.display = 'none';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fkReturnModal')).show();
+}
+async function fkReturnSubmit() {
+    var err = document.getElementById('fkReturnError');
+    var comment = document.getElementById('fkReturnComment').value.trim();
+    if (!comment) { err.textContent = 'Skriv vad som behöver ändras.'; err.style.display = ''; return; }
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/ReturnForChanges', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+            },
+            body: JSON.stringify({ configId: fkEditorConfig.id, comment: comment })
+        });
+        var data = await resp.json();
+        if (!data.success) { err.textContent = data.message || 'Det gick inte att skicka tillbaka.'; err.style.display = ''; return; }
+        bootstrap.Modal.getInstance(document.getElementById('fkReturnModal')).hide();
+        await fkEditorReloadMeta();
+    } catch (e) { console.error(e); err.textContent = 'Nätverksfel.'; err.style.display = ''; }
 }
 
 async function fkApprovalCall(url) {
@@ -635,6 +697,8 @@ async function fkEditorSaveMeta() {
             alert('Kunde inte spara: ' + (data.message || 'Okänt fel'));
             return;
         }
+        // Omgång 3 (K9): uppgifterna ändrar versionen — annars krockade nästa sparning av banan med ens egen ändring.
+        if (data.version) window._faltCfgVersion = data.version;
         // Refresh server-side state (e.g. isSecret).
         fkEditorConfig.name = body.name;
         fkEditorConfig.description = body.description;
@@ -758,6 +822,9 @@ async function fkEditorReloadMeta() {
             // approval state, and the derived flags. Keep the in-memory JSON blob though
             // (we don't want to clobber unsaved configurator edits with the server's copy).
             var srv = data.configuration;
+            // Versionen foljer bara med nar banan pa servern ar den vi kanner till - annars skulle en annans
+            // andring doljas och nasta sparning skriva over den.
+            if (srv.jsonBlob === fkEditorConfig.jsonBlob) window._faltCfgVersion = srv.version || window._faltCfgVersion;
             fkEditorConfig.collaborators = srv.collaborators || [];
             fkEditorConfig.approvalStatus = srv.approvalStatus;
             fkEditorConfig.approvedByMemberId = srv.approvedByMemberId;
@@ -770,6 +837,9 @@ async function fkEditorReloadMeta() {
             fkEditorConfig.canEdit = srv.canEdit;
             fkEditorConfig.canDelete = srv.canDelete;
             fkEditorConfig.canApprove = srv.canApprove;
+            fkEditorConfig.returnComment = srv.returnComment;
+            fkEditorConfig.returnedByName = srv.returnedByName;
+            fkEditorConfig.returnedDate = srv.returnedDate;
             fkEditorRenderMeta();
         }
     } catch (e) { console.error(e); }

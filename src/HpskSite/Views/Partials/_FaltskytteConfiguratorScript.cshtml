@@ -26,7 +26,17 @@ const faltCfgScoringMode = () => {
 // Reserved metadata keys stored in faltCfgData alongside weapon classes. When iterating
 // weapon-class entries, skip these. Add new keys here (with leading underscore) instead
 // of polluting the iteration sites.
-const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode']);
+// _courseStations (omgång 3): en delkonfiguration för ett områdes stationer i en planering. Konfigurationens station N
+// är banans station _courseStations[N-1]; numret här ändras aldrig (det är stationens identitet), bara rubrikerna visar banans.
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode', '_courseStations']);
+function faltCfgCourseNo(num) {
+    var cs = faltCfgData && faltCfgData._courseStations;
+    return Array.isArray(cs) && cs[num - 1] > 0 ? cs[num - 1] : null;
+}
+function faltCfgCourseSuffix(num) {
+    var n = faltCfgCourseNo(num);
+    return n ? ' · banans station ' + n : '';
+}
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
 // Mirror SHAPE (target groups + figures, including images / descriptions /
@@ -676,6 +686,7 @@ function faltCfgOpen(weaponClasses, existingConfig) {
         if (mode) faltCfgData._mode = mode;
         if (morker) faltCfgData._morker = morker;
         if (scoringModeMeta) faltCfgData._scoringMode = scoringModeMeta;
+        if (existingConfig._courseStations) faltCfgData._courseStations = existingConfig._courseStations;
     }
 
     faltCfgLinkedGroups = faltCfgData._linkedGroups || [];
@@ -687,6 +698,11 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     var scoringModeEl = document.getElementById('faltCfg_scoringMode');
     if (scoringModeEl) scoringModeEl.value = faltCfgData._scoringMode || 'Normal';
     faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
+    // En tom delkonfiguration för ett område: lika många stationer som området har.
+    if (Array.isArray(faltCfgData._courseStations) && faltCfgData._courseStations.length > 0) {
+        faltCfgStationCount = faltCfgData._courseStations.length;
+        document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
+    }
 
     // Detect station count from existing config (handle both camelCase and PascalCase)
     for (const wc of Object.keys(faltCfgData)) {
@@ -1061,7 +1077,7 @@ function faltCfgStationHasContent(st) {
 function faltCfgStationLabel(num) {
     var canonical = faltCfgGetCanonicalClass();
     var st = (faltCfgData[canonical] && faltCfgData[canonical].stations || []).find(function (s) { return s.station === num; });
-    return 'Station ' + num + (st && st.name ? ' (' + st.name + ')' : '');
+    return 'Station ' + num + (st && st.name ? ' (' + st.name + ')' : '') + faltCfgCourseSuffix(num);
 }
 
 // mapping: { gammaltNummer: nyttNummer | null }  (null = tas bort). Nummer som inte
@@ -1240,13 +1256,13 @@ function renderActiveTab() {
         html += `
         <div class="card mb-2" data-station="${st.station}" data-wc="${wc}">
             <div class="card-header py-2">
-                <div class="d-flex justify-content-between align-items-center gap-2">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" data-station-title="${st.station}">
-                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}
+                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}${faltCfgCourseNo(st.station) ? ` <span class="badge text-bg-light border">banans station ${faltCfgCourseNo(st.station)}</span>` : ''}
                         <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
                     </span>
-                    <span class="d-flex align-items-center gap-2">
+                    <span class="d-flex flex-wrap align-items-center gap-2">
                         <span class="text-muted small">${st.shootingTimeSec}s | ${st.shooterStartPosition}${st.weaponStartPosition === '45 grader' ? ' | 45 grader' : ''} | ${st.targetGroups.length} målgr.</span>
                         <span class="btn-group btn-group-sm" role="group" aria-label="Ordning">
                             <button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgMoveStation('${wc}', ${st.station}, -1)" title="Flytta upp" ${idx === 0 ? 'disabled' : ''}><i class="bi bi-arrow-up"></i></button>
@@ -1371,6 +1387,9 @@ function faltCfgSetDistance(wc, stationNum, tgIdx, value, opts) {
     var station = faltCfgData[wc] && faltCfgData[wc].stations
         ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
     if (!station || !station.targetGroups || !station.targetGroups[tgIdx]) return;
+    // Omgång 3 (K9): taket gäller också sifferfältet — förut klämdes bara minimum, och 60 m sparades där 50 m är högst.
+    var capBounds = faltTargetGroupBounds(station.targetGroups[tgIdx], wc, station);
+    if (capBounds && capBounds.max != null && v > capBounds.max) v = capBounds.max;
     station.targetGroups[tgIdx].distance = v;
 
     // Mirror to both controls (slider may have driven this; sync the number, or vice versa).
@@ -2017,12 +2036,13 @@ function faltCfgRenderSimpleMode() {
         html +=
             '<div class="card mb-2" data-station="' + st.station + '">' +
               '<div class="card-header py-2">' +
-                '<div class="d-flex justify-content-between align-items-center gap-2">' +
+                '<div class="d-flex flex-wrap justify-content-between align-items-center gap-2">' +
                   '<span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" data-station-title="' + st.station + '"><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
+                  (faltCfgCourseNo(st.station) ? ' <span class="badge text-bg-light border">banans station ' + faltCfgCourseNo(st.station) + '</span>' : '') +
                     '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
                     '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
                   '</span>' +
-                  '<span class="d-flex align-items-center gap-2">' +
+                  '<span class="d-flex flex-wrap align-items-center gap-2">' +
                     '<input type="text" class="form-control form-control-sm" maxlength="60" value="' + (st.name ? faltCfgEscapeHtml(st.name) : '') + '" style="width:150px" placeholder="Namn (valfritt)" onclick="event.stopPropagation()" onchange="faltCfgSimpleSetName(' + st.station + ', this.value)">' +
                     '<span class="btn-group btn-group-sm" role="group" aria-label="Ordning">' +
                       '<button class="btn btn-outline-secondary" onclick="event.stopPropagation(); faltCfgSimpleMoveStation(' + st.station + ', -1)" title="Flytta upp"' + (idx === 0 ? ' disabled' : '') + '><i class="bi bi-arrow-up"></i></button>' +
@@ -2270,13 +2290,16 @@ async function faltCfgSaveToServer(json) {
             var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
-                body: JSON.stringify({ id: configId, jsonBlob: json })
+                // Omgång 3 (K9): versionen editorn läste — servern vägrar om någon annan hunnit spara emellan.
+                body: JSON.stringify({ id: configId, jsonBlob: json, expectedVersion: window._faltCfgVersion || null })
             });
             var data = await resp.json();
             if (!data.success) {
                 alert('Kunde inte spara: ' + (data.message || 'Okänt fel'));
                 return false;
             }
+            if (data.version) window._faltCfgVersion = data.version;
+            if (typeof fkEditorConfig !== 'undefined' && fkEditorConfig) fkEditorConfig.jsonBlob = json;
             return true;
         } catch (err) {
             alert('Nätverksfel vid sparande.');
@@ -2387,7 +2410,7 @@ function faltCfgStationsStructurallyEqual(a, b) {
 function faltCfgPrintStation(stationNum, wc) {
     var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
     if (!station) return;
-    var stNameSuffix = station.name ? ' – ' + faltCfgEscapeHtml(station.name) : '';
+    var stNameSuffix = (station.name ? ' – ' + faltCfgEscapeHtml(station.name) : '') + faltCfgCourseSuffix(stationNum);
 
     // Combine classes that share STRUCTURE — figures, behaviours, images. In
     // simple mode per-class params (Skjuttid, positions, Stödhand, Max skott)

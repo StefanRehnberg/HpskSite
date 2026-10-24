@@ -32,6 +32,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>The Banläggare cert holder who actually approved. Populated only when ApprovalStatus = Approved.</summary>
         public int? ApprovedByMemberId { get; set; }
         public DateTime? ApprovedDate { get; set; }
+        /// <summary>Omgång 3 (3.3): banläggarens kommentar när konfigurationen skickades tillbaka (åter till utkast).</summary>
+        public string? ReturnComment { get; set; }
+        public int? ReturnedByMemberId { get; set; }
+        public DateTime? ReturnedDate { get; set; }
+        /// <summary>
+        /// Omgång 3 (3.3): en delkonfiguration för ett område börjar på områdets första station (stationerna 3–6 heter 3–6,
+        /// inte 1–4), så att den kan länkas in i hela banans konfiguration station för station. Null = 1.
+        /// </summary>
+        public int? FirstStationNumber { get; set; }
         public DateTime CreatedDate { get; set; } = DateTime.Now;
         public DateTime ModifiedDate { get; set; } = DateTime.Now;
     }
@@ -71,6 +80,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool IsSecret { get; set; }
         public DateTime CreatedDate { get; set; }
         public DateTime ModifiedDate { get; set; }
+        /// <summary>Omgång 3 (K9): versionen för <see cref="UpdateFaltskytteConfigurationRequest.ExpectedVersion"/>.</summary>
+        public string Version => ModifiedDate.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
         public int StationCount { get; set; }
         public List<CollaboratorView> Collaborators { get; set; } = new();
         public bool CanEdit { get; set; }
@@ -82,6 +93,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? ApprovedByMemberId { get; set; }
         public string? ApprovedByName { get; set; }
         public DateTime? ApprovedDate { get; set; }
+        /// <summary>Omgång 3: senaste återsändningen (visas i utkastet tills någon begär godkännande igen).</summary>
+        public string? ReturnComment { get; set; }
+        public string? ReturnedByName { get; set; }
+        public DateTime? ReturnedDate { get; set; }
+        public int FirstStationNumber { get; set; } = 1;
         /// <summary>True when ApprovalStatus == Approved — config-data edits are forbidden.</summary>
         public bool IsLocked { get; set; }
         /// <summary>True when ApprovalStatus = PendingApproval and viewer is the requested approver (or site admin).</summary>
@@ -122,6 +138,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? SecretUntil { get; set; }
         public bool ClearSecretUntil { get; set; }
         public string? JsonBlob { get; set; }
+        /// <summary>
+        /// Omgång 3 (Expertgruppen K9): versionen editorn läste (<see cref="FaltskytteConfigurationView.Version"/>). Skiljer den
+        /// sig vägras en ändring av banan — annars skrev den som sparade sist över någon annans stationer utan att någon
+        /// märkte det. Tom = ingen kontroll (äldre klienter, metadata).
+        /// </summary>
+        public string? ExpectedVersion { get; set; }
     }
 
     public class AddCollaboratorRequest
@@ -140,6 +162,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     public class ApprovalActionRequest
     {
         public int ConfigId { get; set; }
+        /// <summary>Omgång 3: kommentaren när banläggaren skickar tillbaka (ReturnForChanges).</summary>
+        public string? Comment { get; set; }
     }
 
     /// <summary>

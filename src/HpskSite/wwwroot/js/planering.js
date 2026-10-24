@@ -3572,9 +3572,39 @@
             cfgHtml = `<div class="px-3 pb-3" id="plStationsConfig"><div class="pl-help small mb-1">Fältkonfigurationen
                 <a href="${esc(cfg.url)}">${esc(cfg.name)}</a>: ${cfg.chiefs.length - lacking.length} av ${cfg.chiefs.length} stationschefer kan läsa och ändra den.</div>
                 ${lacking.length ? `<div class="small mb-2">Saknar tillgång: ${lacking.map(c => esc(c.name) + ' <span class="pl-help">(station ' + esc(c.stations) + ')</span>').join(', ')}</div>
-                    ${cfg.canEdit && S.me.canEdit ? '<button type="button" class="btn btn-outline-primary btn-sm" data-st-give="1"><i class="bi bi-person-check me-1"></i>Ge stationscheferna tillgång till fältkonfigurationen</button>'
+                    ${cfg.canEdit && S.me.canEdit ? '<button type="button" class="btn btn-outline-primary btn-sm" data-st-give="all"><i class="bi bi-person-check me-1"></i>Ge stationscheferna tillgång till fältkonfigurationen</button>'
                         : '<div class="pl-help small">Den som äger fältkonfigurationen — eller arbetar med den — kan ge dem tillgång.</div>'}` : ''}</div>`;
         }
+        // Omgång 3 (3.3): varje område kan ha en egen fältkonfiguration för sina stationer — byggs, godkänns och skrivs ut
+        // av den förening som har stationerna, utan att någon behöver tävlingens hela konfiguration.
+        const areaMap = new Map();
+        rows.filter(s => s.areaId).forEach(s => {
+            if (!areaMap.has(s.areaId)) areaMap.set(s.areaId, { id: s.areaId, name: s.area, host: s.host, planningId: s.planningId, planning: s.planning, stations: [] });
+            areaMap.get(s.areaId).stations.push(s.number);
+        });
+        const acfg = new Map((r.areaConfigs || []).map(c => [c.areaId, c]));
+        const stLabel = { Draft: ['Utkast', 'draft'], PendingApproval: ['Väntar på godkännande', 'draft'], Approved: ['Godkänd', 'live'] };
+        const areaRows = [...areaMap.values()].map(a => {
+            const c = acfg.get(a.id);
+            const what = `<b>${esc(a.host || a.name)}</b>${a.host ? ` <span class="pl-help small">· ${esc(a.name)}</span>` : ''} <span class="pl-help small">· station ${esc(a.stations.join(', '))}</span>`;
+            if (c) {
+                const [lbl, tone] = stLabel[c.status] || stLabel.Draft;
+                return `<li class="mb-2" data-area-config="${a.id}">${what}<div class="small">
+                    ${c.canView ? `<a href="${esc(c.url)}">${esc(c.name)}</a>` : esc(c.name)}
+                    <span class="hpsk-state hpsk-state--${tone} ms-1"><span class="hpsk-state-dot"></span>${esc(lbl)}</span>
+                    ${c.canEdit && S.me.canEdit ? ` · <a href="#" data-st-give="${a.id}">Ge områdets stationschefer tillgång</a>` : ''}</div></li>`;
+            }
+            const mine = a.planningId === ID;
+            return `<li class="mb-2" data-area-config="${a.id}">${what}<div class="small">
+                ${mine && r.canCreateAreaConfig ? `<a href="#" data-st-areacfg="${a.id}">Skapa en fältkonfiguration för områdets stationer</a>`
+                    : '<span class="pl-help">Ingen egen fältkonfiguration</span>'}</div></li>`;
+        });
+        const isFalt = (r.competition && r.competition.falt) || FALT_KEYS.includes(S.planning.disciplineKey);
+        const areaCfgHtml = areaRows.length && isFalt ? `<div class="px-3 pb-3" id="plAreaConfigs">
+            <h3 class="h6 mt-2 mb-1">Områdenas fältkonfigurationer</h3>
+            <p class="pl-help small mb-2">Ett område kan bygga sina stationer i en egen fältkonfiguration och få den godkänd av en banläggare.
+                Den börjar som en kopia av områdets stationer i tävlingens konfiguration, och visar banans stationsnummer.</p>
+            <ul class="list-unstyled mb-0">${areaRows.join('')}</ul></div>` : '';
         $('plStationsWrap').innerHTML = `<div class="pl-card p-0" id="plStations"><div class="pl-cardh px-3 pt-3"><h2>Stationerna</h2>
                 ${S.me.canEdit && !TOKEN ? '<a href="#vy=installningar" data-pl-go="installningar">Fördela stationerna</a>' : ''}</div>
             <p class="pl-help small px-3 mb-2">Vilken förening som ansvarar för vilka stationer (under Inställningar → Områden), och stationscheferna ur bemanningen.
@@ -3588,14 +3618,27 @@
                     <div class="small d-md-none">${s.chiefs.length ? 'Stationschef: ' + esc(s.chiefs.join(', ')) : '<span class="pl-help">Ingen stationschef</span>'}</div></td>
                 <td class="d-none d-md-table-cell">${s.chiefs.length ? esc(s.chiefs.join(', ')) : '<span class="pl-help">—</span>'}</td>
                 <td class="d-none d-md-table-cell">${s.openTasks ? s.openTasks + ' öppna' : '<span class="pl-help">—</span>'}</td></tr>`).join('')}</tbody></table></div>
-            ${cfgHtml}</div>`;
+            ${cfgHtml}${areaCfgHtml}</div>`;
     }
     document.addEventListener('click', async e => {
         const b = e.target.closest('[data-st-give]'); if (!b) return;
-        e.preventDefault(); b.disabled = true;
-        const r = await post('GiveChiefsConfigAccess', {});
-        if (!r.success) { failMsg(r); b.disabled = false; return; }
-        showMsg(r.added.length ? esc(r.added.join(', ')) + (r.added.length === 1 ? ' kan nu' : ' kan nu') + ' läsa och ändra fältkonfigurationen.' : 'Alla stationschefer hade redan tillgång.');
+        e.preventDefault(); if (b.dataset.busy) return; b.dataset.busy = '1';
+        const area = b.dataset.stGive !== 'all' ? b.dataset.stGive : null;
+        const r = await post('GiveChiefsConfigAccess', area ? { areaId: area } : {});
+        delete b.dataset.busy;
+        if (!r.success) { failMsg(r); return; }
+        showMsg(r.added.length ? esc(r.added.join(', ')) + ' kan nu läsa och ändra fältkonfigurationen.' : 'Alla stationschefer hade redan tillgång.');
+        await loadStationsCard();
+    });
+    document.addEventListener('click', async e => {
+        const b = e.target.closest('[data-st-areacfg]'); if (!b) return;
+        e.preventDefault(); if (b.dataset.busy) return; b.dataset.busy = '1';
+        const r = await post('CreateAreaConfig', { areaId: b.dataset.stAreacfg });
+        delete b.dataset.busy;
+        if (!r.success) { failMsg(r, 'Fältkonfigurationen kunde inte skapas.'); return; }
+        const who = r.added.length ? ` ${esc(r.added.join(', '))} kan läsa och ändra den.` : '';
+        showMsg(`Fältkonfigurationen är skapad${r.copied ? ' med områdets stationer ur tävlingens konfiguration' : ''}.${who}
+            <a href="${esc(r.url)}">Öppna den</a>`);
         await loadStationsCard();
     });
 

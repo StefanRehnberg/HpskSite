@@ -12799,9 +12799,26 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     för kännedom resp. godkännande, fältets underlag till kretsstyrelsen resp. förbundet, jury och vapenkontroll),
     Milsnabb, och flera grenar på en gång (`ForMany`: gemensamma områden en gång, grenens med grennamn). Ett befintligt
     område får de uppgifter som saknas (titel, även borttagna räknas) i stället för att hoppas över. Test `PrepTemplatesTests`.
+  - **Fältkonfiguratorn (K9, 3.3):**
+    - **Versionen** = `ModifiedDate.Ticks` (`FaltskytteConfigurationView.Version`). `UpdateWithVersionAsync` vägrar en ÄNDRAD
+      stationsuppsättning när `ExpectedVersion` skiljer ("ändrats av någon annan … ladda om"); svaret bär den nya versionen,
+      som editorn sparar (`window._faltCfgVersion`). En oförändrad sparning prövas inte.
+    - **Avståndstaket på servern** (`CourseReviewChecklist` → `TooFar`): en målgrupp över SHB:s maxavstånd vägras och namnges.
+      Klienten klämmer reglaget till taket.
+    - **Skicka tillbaka med kommentar** (`ReturnForChanges`, `ReturnAsync`): den Banläggare som ombetts (eller sajtadmin), bara
+      från Väntar. Utkast igen; `ReturnComment/ReturnedByMemberId/ReturnedDate` visas i utkastbannern tills någon begär
+      godkännande igen. Ägaren mejlas (`SendFaltkonfigDecisionAsync`, även vid godkännande). Avbryt begäran har egen text.
+    - **⚠️ En delkonfiguration per OMRÅDE** (`CreateAreaConfig`): en egen `FaltskytteConfiguration` för områdets stationer,
+      kopierad ur tävlingens anslutna konfiguration (annars tävlingens inline-konfiguration, annars tom). **Konfiguratorns
+      stationer numreras 1..N och numret ändras aldrig** (det är stationens identitet); banans nummer står i meta-nyckeln
+      **`_courseStations`** (`AreaConfigBlob.Build`, test `AreaConfigBlobTests`) och visas som "banans station X" i rubriker
+      och utskrift. `FirstStationNumber` = områdets första station. Kopplingen är `PlanningLink` med `TargetKind = faltconfig`
+      och `AreaId` (en per område, `LinkAreaConfig`); ⚠️ varje fråga på tävlingskopplingen filtrerar `TargetKind = competition`.
+      En borttagen konfiguration tar bort sin länk. Områdets stationschefer blir medarbetare; `GiveChiefsConfigAccess` tar
+      `areaId`. Stationskortet på Översikt listar områdena.
   - **Migrering `add-planning-omgang3.sql` (körordning P3j) FÖRE deployen.** Körd i dev, EJ i prod.
-  - Svit `tavlingsplanering-o3-verify.mjs` 56/56. Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`,
-    `PlanningTaskRulesTests`.
+  - Svit `tavlingsplanering-o3-verify.mjs` 97/97 (A/B steg 7: utan omnumreringen och utan länkstädningen → 2 röda).
+    Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`, `PlanningTaskRulesTests`, `AreaConfigBlobTests`.
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

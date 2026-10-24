@@ -102,5 +102,53 @@ namespace HpskSite.Services.Planning
             public string? ScopeKey { get; set; }
             public string DisplayName { get; set; } = "";
         }
+
+        // =====================================================================================
+        //  Omgång 3 (Expertgruppen 3.3): en delkonfiguration per område
+        // =====================================================================================
+
+        /// <summary>Ett område med sina stationer — för delkonfigurationen.</summary>
+        public sealed record AreaStations(PlanningAreaRow Area, List<int> Stations);
+
+        public AreaStations? AreaWithStations(int planningId, int areaId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var a = s.Database.SingleOrDefault<PlanningAreaRow>(
+                "SELECT * FROM PlanningArea WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", areaId, planningId);
+            if (a == null) return null;
+            var (stations, _) = PlanningStations.Parse(a.Stations);
+            return new AreaStations(a, stations);
+        }
+
+        /// <summary>Familjens delkonfigurationer: område → konfiguration (en per område).</summary>
+        public sealed record AreaConfigLink(int PlanningId, int AreaId, int ConfigId);
+
+        public List<AreaConfigLink> AreaConfigLinks(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var family = StationFamily(s.Database, planningId);
+            if (family.Count == 0) return new();
+            // Ett borttaget område släpper sin konfiguration ur bilden (raden står kvar; området kan inte väckas igen).
+            return s.Database.Fetch<PlanningLinkRow>($@"SELECT l.* FROM PlanningLink l JOIN PlanningArea a ON a.Id = l.AreaId AND a.DeletedAt IS NULL
+                    WHERE l.TargetKind = N'{PlanningLinkRow.Faltconfig}' AND l.PlanningId IN ({string.Join(",", family.Select(f => f.Id))})")
+                .Select(l => new AreaConfigLink(l.PlanningId, l.AreaId!.Value, l.TargetId)).ToList();
+        }
+
+        /// <summary>Kopplar en fältkonfiguration till ett område. Vägrar ett andra för samma område.</summary>
+        public string? LinkAreaConfig(int planningId, int areaId, int configId, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            if (db.ExecuteScalar<int>($"SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId = @1",
+                    planningId, areaId) > 0)
+                return "Området har redan en delkonfiguration.";
+            db.Insert(new PlanningLinkRow
+            {
+                PlanningId = planningId, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltconfig, TargetId = configId, AreaId = areaId,
+                LinkedAt = Now, LinkedBy = byMemberId,
+            });
+            Bump(db, planningId);
+            return null;
+        }
     }
 }

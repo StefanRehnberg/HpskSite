@@ -700,11 +700,14 @@ namespace HpskSite.Models.Planning
     public class PlanningLinkRow
     {
         public const string Competition = "competition"; // competitionstore-ok: kopplingens sort (TargetKind), inte doktypens alias
+        /// <summary>Omgång 3 (3.3): en fältkonfiguration (delkonfigurationen för ett område). <see cref="AreaId"/> säger vilket.</summary>
+        public const string Faltconfig = "faltconfig";
         public int Id { get; set; }
         public int PlanningId { get; set; }
         public int PlanningPartId { get; set; }
         public string TargetKind { get; set; } = Competition;
         public int TargetId { get; set; }
+        public int? AreaId { get; set; }
         public DateTime LinkedAt { get; set; }
         public int LinkedBy { get; set; }
     }

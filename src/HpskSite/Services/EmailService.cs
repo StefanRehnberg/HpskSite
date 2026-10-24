@@ -888,6 +888,31 @@ namespace HpskSite.Services
             await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
+        /// <summary>
+        /// Omgång 3 (tävlingsplaneringen, 3.3): Banläggarens beslut om en fältkonfiguration till ägaren — godkänd, eller
+        /// skickad tillbaka med en kommentar om vad som ska ändras. Svaret går till banläggaren.
+        /// </summary>
+        public async Task<bool> SendFaltkonfigDecisionAsync(string toEmail, string toName, string byName, string configName,
+            int configId, bool approved, string? comment, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail)) return false;
+            var siteUrl = _configuration["SiteUrl"] ?? "https://pistol.nu";
+            var url = $"{siteUrl}/faltkonfig/{configId}/redigera";
+            var subject = approved ? $"Godkänd: {configName}" : $"Skickad tillbaka: {configName}";
+            var h = (string? s) => System.Web.HttpUtility.HtmlEncode(s ?? "");
+            var what = approved
+                ? $"<p><strong>{h(byName)}</strong> har godkänt fältkonfigurationen <strong>{h(configName)}</strong>. Banan är nu låst; vill du ändra något väljer du <i>Begär ändring</i> i konfiguratorn.</p>"
+                : $"<p><strong>{h(byName)}</strong> har skickat tillbaka fältkonfigurationen <strong>{h(configName)}</strong> med en kommentar:</p>"
+                  + $"<blockquote style=\"border-left:3px solid #ccc; margin:10px 0; padding:5px 10px; white-space:pre-wrap\">{h(comment)}</blockquote>"
+                  + "<p>Ändra det som behövs och begär godkännande igen. Svarar du på mejlet når svaret banläggaren.</p>";
+            var body = $@"<html><body style=""font-family: Arial, sans-serif; line-height: 1.6; color: #333;"">
+<h2>Hej {h(toName)},</h2>
+{what}
+<p style=""margin: 24px 0;""><a href=""{url}"" style=""background:#198754;color:#fff;padding:12px 24px;text-decoration:none;border-radius:5px;font-weight:bold"">Öppna konfigurationen</a></p>
+</body></html>";
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
         /// <summary>Notify a member that a site admin has granted them full access to ALL course
         /// material (reviewer) — for proofreading/verification. Best-effort; no-op without an email.</summary>
         public async Task SendCourseReviewerGrantedAsync(string toEmail, string toName, string? grantedByName = null)

@@ -163,7 +163,8 @@ namespace HpskSite.Services.Planning
                 var db = s.Database;
                 if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'competition' AND TargetId = @0", competitionId) > 0)
                     return "Tävlingen hör redan till en planering.";
-                if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WHERE PlanningId = @0", planningId) > 0)
+                // Omgång 3: bara tävlingskopplingen räknas — ett områdes delkonfiguration (faltconfig) är en annan sort.
+                if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId) > 0)
                     return "Planeringen är redan kopplad till en tävling. En planering med flera tävlingar kommer när planeringen kan delas upp.";
                 var root = db.ExecuteScalar<int?>("SELECT TOP 1 Id FROM PlanningPart WHERE PlanningId = @0 AND Kind = N'Root' AND DeletedAt IS NULL ORDER BY Id", planningId);
                 if (root == null) return "Planeringen saknar sin grunddel.";

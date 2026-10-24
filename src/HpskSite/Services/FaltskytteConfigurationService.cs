@@ -34,6 +34,7 @@ namespace HpskSite.Services
         private readonly ClubService _clubService;
         private readonly CertificationService _certificationService;
         private readonly EmailService _emailService;
+        private readonly HpskSite.Services.Kretsgranskning.CourseReviewChecklist _checklist;
 
         public FaltskytteConfigurationService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -44,8 +45,10 @@ namespace HpskSite.Services
             IUmbracoContextAccessor umbracoContextAccessor,
             ClubService clubService,
             CertificationService certificationService,
-            EmailService emailService)
+            EmailService emailService,
+            HpskSite.Services.Kretsgranskning.CourseReviewChecklist checklist)
         {
+            _checklist = checklist;
             _databaseFactory = databaseFactory;
             _logger = logger;
             _authService = authService;
@@ -332,19 +335,45 @@ namespace HpskSite.Services
             return (true, null, config);
         }
 
+        /// <summary>Omgång 3 (3.3): en delkonfiguration för ett område börjar på områdets första station.</summary>
+        public async Task SetFirstStationNumberAsync(int configId, int firstStation)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            await db.ExecuteAsync("UPDATE FaltskytteConfiguration SET FirstStationNumber = @0 WHERE Id = @1", firstStation > 0 ? firstStation : (int?)null, configId);
+        }
+
         public async Task<(bool Success, string? Message)> UpdateAsync(UpdateFaltskytteConfigurationRequest request)
         {
-            if (request == null) return (false, "Ogiltig förfrågan (saknar body).");
+            var (ok, msg, _) = await UpdateWithVersionAsync(request);
+            return (ok, msg);
+        }
+
+        /// <summary>Omgång 3 (Expertgruppen K9): som <see cref="UpdateAsync"/>, och svarar med den nya versionen.</summary>
+        public async Task<(bool Success, string? Message, string? Version)> UpdateWithVersionAsync(UpdateFaltskytteConfigurationRequest request)
+        {
+            if (request == null) return (false, "Ogiltig förfrågan (saknar body).", null);
             using var db = _databaseFactory.CreateDatabase();
             var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", request.Id);
-            if (config == null) return (false, "Konfigurationen hittades inte.");
+            if (config == null) return (false, "Konfigurationen hittades inte.", null);
 
             // JsonBlob (the configuration data) is locked when Approved. Metadata stays editable.
             // The check is content-aware: an Update where the supplied JsonBlob normalizes to the
             // existing one is a no-op, so we don't refuse it (lets the editor "save" without changes).
-            if (request.JsonBlob != null && IsApproved(config) && !JsonBlobsEqual(config.JsonBlob, request.JsonBlob))
+            var blobChanges = request.JsonBlob != null && !JsonBlobsEqual(config.JsonBlob, request.JsonBlob);
+            if (blobChanges && IsApproved(config))
             {
-                return (false, "Konfigurationen är godkänd och kan inte ändras. Begär ändring först.");
+                return (false, "Konfigurationen är godkänd och kan inte ändras. Begär ändring först.", null);
+            }
+            // Omgång 3 (K9): förut vann den som sparade sist — en annan banläggares stationer försvann utan ett ord.
+            if (blobChanges && !string.IsNullOrWhiteSpace(request.ExpectedVersion) && request.ExpectedVersion != VersionOf(config))
+            {
+                return (false, "Konfigurationen har ändrats av någon annan sedan du öppnade den. Ladda om sidan — dina senaste ändringar är inte sparade.", null);
+            }
+            // Omgång 3 (K9): SHB:s maxavstånd i servern — sifferfältet gick förbi reglagets tak, och servern sparade.
+            if (blobChanges)
+            {
+                var tooFar = TooFarMessage(request.JsonBlob!);
+                if (tooFar != null) return (false, tooFar, null);
             }
 
             if (request.Name != null) config.Name = request.Name.Trim();
@@ -353,7 +382,7 @@ namespace HpskSite.Services
             if (request.Visibility != null)
             {
                 if (!ValidVisibilities.Contains(request.Visibility))
-                    return (false, $"Ogiltig synlighet: {request.Visibility}");
+                    return (false, $"Ogiltig synlighet: {request.Visibility}", null);
                 config.Visibility = request.Visibility;
             }
             if (request.ClearSecretUntil) config.SecretUntil = null;
@@ -366,7 +395,32 @@ namespace HpskSite.Services
 
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
-            return (true, null);
+            // Versionen läses ur databasen: datetime-kolumnen avrundar, så minnets värde stämmer inte med nästa läsning.
+            var stored = await db.ExecuteScalarAsync<DateTime>("SELECT ModifiedDate FROM FaltskytteConfiguration WHERE Id = @0", config.Id);
+            return (true, null, stored.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        private static string VersionOf(FaltskytteConfiguration c) => c.ModifiedDate.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>Banans avstånd mot SHB:s tak, med samma regler som kretsens bangranskning. Null = inget för långt.</summary>
+        private string? TooFarMessage(string json)
+        {
+            try
+            {
+                var r = _checklist.Build(json, _ => null);
+                var bad = r.Stations.Where(s => s.TooFar.Count > 0).ToList();
+                if (bad.Count == 0) return null;
+                var parts = bad.Take(5).SelectMany(s => s.TooFar.Select(t =>
+                    $"station {s.Station} ({s.WeaponClass}), målgrupp {t.Group}: {t.Distance} m, högst {t.Max} m"));
+                return "Avståndet är längre än Skjuthandboken tillåter för figurernas storleksgrupp: " + string.Join("; ", parts)
+                    + (bad.Count > 5 ? " …" : "") + ". Ändra avståndet och spara igen.";
+            }
+            catch (Exception ex)
+            {
+                // Kontrollen får aldrig hindra en sparning den inte kan läsa — kretsens granskning ser banan ändå.
+                _logger.LogWarning(ex, "Fältkonfigurationen: avståndskontrollen kunde inte köras.");
+                return null;
+            }
         }
 
         /// <summary>
@@ -419,6 +473,8 @@ namespace HpskSite.Services
 
             config.ApprovalStatus = StatusPendingApproval;
             config.RequestedApproverMemberId = requestedApproverMemberId;
+            // En ny begäran: den förra återsändningens kommentar är besvarad.
+            config.ReturnComment = null; config.ReturnedByMemberId = null; config.ReturnedDate = null;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
 
@@ -488,9 +544,58 @@ namespace HpskSite.Services
             config.ApprovedByMemberId = viewerMemberId;
             config.ApprovedDate = DateTime.Now;
             config.RequestedApproverMemberId = null;
+            config.ReturnComment = null; config.ReturnedByMemberId = null; config.ReturnedDate = null;
             config.ModifiedDate = DateTime.Now;
             await db.UpdateAsync(config);
+            // Omgång 3 (3.3): notis åt båda hållen — ägaren får veta att banan är godkänd (inte vid självgodkännande).
+            if (config.OwnerMemberId != viewerMemberId) await NotifyOwnerAsync(config, viewerMemberId, approved: true, comment: null);
             return (true, null);
+        }
+
+        /// <summary>
+        /// Omgång 3 (Expertgruppen 3.3, som kretsgranskningens Återsänd): banläggaren som ombetts godkänna skickar tillbaka
+        /// konfigurationen med en kommentar — den går åter till utkast, och ägaren får kommentaren i ett mejl och i editorn.
+        /// </summary>
+        public async Task<(bool Success, string? Message)> ReturnAsync(int configId, int viewerMemberId, string? comment)
+        {
+            var text = (comment ?? "").Trim();
+            if (text.Length == 0) return (false, "Skriv vad som behöver ändras.");
+            if (text.Length > 2000) text = text[..2000];
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return (false, "Konfigurationen hittades inte.");
+            if (NormalizeStatus(config.ApprovalStatus) != StatusPendingApproval)
+                return (false, "Konfigurationen väntar inte på godkännande.");
+            var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            if (!isSiteAdmin && config.RequestedApproverMemberId != viewerMemberId)
+                return (false, "Det är den Banläggare som ombetts godkänna som skickar tillbaka.");
+
+            config.ApprovalStatus = StatusDraft;
+            config.RequestedApproverMemberId = null;
+            config.ReturnComment = text;
+            config.ReturnedByMemberId = viewerMemberId;
+            config.ReturnedDate = DateTime.Now;
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            await NotifyOwnerAsync(config, viewerMemberId, approved: false, comment: text);
+            return (true, null);
+        }
+
+        private async Task NotifyOwnerAsync(FaltskytteConfiguration config, int byMemberId, bool approved, string? comment)
+        {
+            try
+            {
+                var owner = _memberService.GetById(config.OwnerMemberId);
+                if (owner == null || string.IsNullOrWhiteSpace(owner.Email)) return;
+                var by = _memberService.GetById(byMemberId);
+                var byName = ResolveMemberName(byMemberId) ?? by?.Name ?? "Banläggaren";
+                await _emailService.SendFaltkonfigDecisionAsync(owner.Email, ResolveMemberName(config.OwnerMemberId) ?? owner.Name ?? "",
+                    byName, config.Name, config.Id, approved, comment, MailReplyTo.To(by?.Email, byName));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fältkonfiguration {Id}: mejlet till ägaren om beslutet gick inte.", config.Id);
+            }
         }
 
         public async Task<(bool Success, string? Message)> UnapproveAsync(int configId, int viewerMemberId)
@@ -545,6 +650,9 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
             // CASCADE on FK handles collaborator rows automatically.
             var rows = await db.ExecuteAsync("DELETE FROM FaltskytteConfiguration WHERE Id = @0", id);
+            // Omgång 3 (3.3): en delkonfiguration som tas bort släpper sitt område i planeringen.
+            if (rows > 0)
+                await db.ExecuteAsync("IF OBJECT_ID('dbo.PlanningLink') IS NOT NULL DELETE FROM PlanningLink WHERE TargetKind = N'faltconfig' AND TargetId = @0", id);
             return rows > 0 ? (true, null) : (false, "Konfigurationen hittades inte.");
         }
 
@@ -704,6 +812,10 @@ namespace HpskSite.Services
                 IsSecret = config.SecretUntil.HasValue && config.SecretUntil.Value > DateTime.Now,
                 CreatedDate = config.CreatedDate,
                 ModifiedDate = config.ModifiedDate,
+                ReturnComment = config.ReturnComment,
+                ReturnedByName = config.ReturnedByMemberId.HasValue ? ResolveMemberName(config.ReturnedByMemberId.Value) : null,
+                ReturnedDate = config.ReturnedDate,
+                FirstStationNumber = config.FirstStationNumber is > 0 ? config.FirstStationNumber.Value : 1,
                 StationCount = stationCount,
                 Collaborators = collaborators.Select(c => new CollaboratorView
                 {

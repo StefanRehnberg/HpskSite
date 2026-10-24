@@ -199,8 +199,9 @@ namespace HpskSite.Controllers
                 if (!await _configService.CanEditAsync(config, viewerId))
                     return Json(new { success = false, message = "Du har inte rättighet att ändra denna konfiguration." });
 
-                var (success, message) = await _configService.UpdateAsync(request);
-                return Json(new { success, message });
+                // Omgång 3 (K9): svaret bär den nya versionen, som editorn skickar med nästa gång.
+                var (success, message, version) = await _configService.UpdateWithVersionAsync(request);
+                return Json(new { success, message, version });
             }
             catch (Exception ex)
             {
@@ -387,6 +388,26 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unapproving config {Id}", request?.ConfigId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>Omgång 3 (3.3): banläggaren skickar tillbaka konfigurationen med en kommentar (åter till utkast).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReturnForChanges([FromBody] ApprovalActionRequest request)
+        {
+            try
+            {
+                if (request == null) return Json(new { success = false, message = "Ogiltig förfrågan." });
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var (success, message) = await _configService.ReturnAsync(request.ConfigId, viewerId.Value, request.Comment);
+                return Json(new { success, message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error returning config {Id}", request?.ConfigId);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }
