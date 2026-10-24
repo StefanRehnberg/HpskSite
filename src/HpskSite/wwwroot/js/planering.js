@@ -573,7 +573,10 @@
             <div class="d-flex gap-2 flex-wrap">${comp.manageUrl ? `<a class="btn btn-outline-primary btn-sm" href="${esc(comp.manageUrl)}">Tävlingshanteringen</a>` : ''}
                 ${p.agendaUrl && S.me.canEdit ? `<a class="btn btn-outline-primary btn-sm" href="${esc(p.agendaUrl)}">Dagsprogrammet</a>` : ''}</div></div>`);
         if (A) html.push(applicationCard(A), applicationHistory());
+        // P4: överskottets fördelning — för den som kan ändra planeringen.
+        if (S.me.canEdit && !TOKEN) html.push('<div id="plSurplusWrap"></div>');
         $('plBody').innerHTML = html.join('');
+        loadSurplus();
     }
 
     // Vad som gäller just nu, i ord, med knappen för steget man står på (resten under Åtgärder).
@@ -3515,6 +3518,128 @@
         if (!r.success) { failMsg(r); b.disabled = false; return; }
         showMsg(r.added.length ? esc(r.added.join(', ')) + (r.added.length === 1 ? ' kan nu' : ' kan nu') + ' läsa och ändra fältkonfigurationen.' : 'Alla stationschefer hade redan tillgång.');
         await loadStationsCard();
+    });
+
+    // ================================================================ Överskottet (P4, fråga 15)
+    // "Det finns ingen regel — det måste vara flexibelt." Ett underlag, ingen bokföring: beloppet, fasta poster först och en
+    // nyckel för resten. Föreningarna och talen ur bemanningen (planeringen och delplaneringarna); servern räknar.
+    let SUR = null, surTimer = 0;
+    const surKr = v => Math.round(Number(v) || 0).toLocaleString('sv-SE') + ' kr';
+    function surplusData() {
+        return {
+            amount: SUR.amount || 0, key: SUR.key, note: SUR.note || '',
+            fixed: SUR.fixed.map(f => ({ label: f.label, amount: f.amount || 0 })),
+            orgs: SUR.orgs.map(o => ({ key: o.key, name: o.manual ? o.name : null, include: o.include, weight: o.weight || 0 })),
+        };
+    }
+    async function loadSurplus() {
+        if (!$('plSurplusWrap')) return;
+        if (!SUR) {
+            const r = await get('Surplus');
+            if (!r.success) { $('plSurplusWrap').innerHTML = ''; return; }
+            SUR = r;
+        }
+        drawSurplus();
+    }
+    function drawSurplus() {
+        const w = $('plSurplusWrap'); if (!w || !SUR) return;
+        const manual = SUR.key === 'manual';
+        w.innerHTML = `<div class="pl-card" id="plSurplus"><div class="pl-cardh"><h2>Överskottet</h2>
+                <button type="button" class="btn btn-outline-secondary btn-sm pl-noprint" data-sur-print="1"><i class="bi bi-printer me-1"></i>Skriv ut</button></div>
+            <p class="pl-help small">Ett underlag för hur ett överskott fördelas mellan föreningarna som hjälpt till. Det finns ingen regel — välj det som passar.
+                Föreningarna och talen kommer ur bemanningen (<i>Ställer upp för</i>), även delplaneringarnas. Inget bokförs härifrån.</p>
+            <div class="row g-2 align-items-end mb-3">
+                <div class="col-sm-5"><label class="form-label fw-semibold" for="surAmount">Överskottet (kr)</label>
+                    <input id="surAmount" class="form-control" inputmode="decimal" value="${SUR.amount || ''}" data-sur="amount"></div>
+                <div class="col-sm-7"><label class="form-label fw-semibold" for="surKey">Fördela resten</label>
+                    <select id="surKey" class="form-select" data-sur="key">${SUR.keys.map(k => `<option value="${k.value}"${k.value === SUR.key ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select></div>
+            </div>
+            <h3 class="h6 mb-1">Fasta poster först <span class="pl-help small fw-normal">— till exempel förbundets andel eller hyran</span></h3>
+            <div id="surFixed">${SUR.fixed.map((f, i) => `<div class="d-flex gap-2 mb-1" data-sur-fixed="${i}">
+                <input class="form-control form-control-sm" maxlength="100" value="${esc(f.label)}" placeholder="Till exempel Förbundet" data-sur="fixedLabel" data-i="${i}" aria-label="Post">
+                <input class="form-control form-control-sm" style="max-width:140px" inputmode="decimal" value="${f.amount || ''}" data-sur="fixedAmount" data-i="${i}" aria-label="Belopp">
+                <button type="button" class="btn btn-sm btn-outline-secondary pl-noprint" data-sur-delfixed="${i}" aria-label="Ta bort posten"><i class="bi bi-x-lg"></i></button></div>`).join('')}</div>
+            <button type="button" class="btn btn-link btn-sm px-0 pl-noprint" data-sur-addfixed="1">＋ Lägg till en fast post</button>
+            <div class="table-responsive mt-2"><table class="table align-middle mb-1" id="surTable">
+                <thead><tr><th>Förening</th><th class="text-end d-none d-md-table-cell">Personer</th><th class="text-end d-none d-md-table-cell">Uppdrag</th>
+                    <th class="text-end d-none d-md-table-cell">Dagar</th>${manual ? '<th class="text-end">Andel</th>' : ''}<th class="text-end">Belopp</th></tr></thead>
+                <tbody>${SUR.orgs.map((o, i) => `<tr data-sur-org="${esc(o.key)}">
+                    <td><div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="surInc${i}" data-sur="include" data-i="${i}"${o.include ? ' checked' : ''}>
+                        <label class="form-check-label" for="surInc${i}">${esc(o.name)}</label></div>
+                        <div class="pl-help small d-md-none">${o.people} ${o.people === 1 ? 'person' : 'personer'} · ${o.assignments} uppdrag · ${o.days} ${o.days === 1 ? 'dag' : 'dagar'}</div></td>
+                    <td class="text-end d-none d-md-table-cell">${o.people}</td><td class="text-end d-none d-md-table-cell">${o.assignments}</td><td class="text-end d-none d-md-table-cell">${o.days}</td>
+                    ${manual ? `<td class="text-end"><input class="form-control form-control-sm text-end ms-auto" style="max-width:90px" inputmode="decimal" value="${o.weight || ''}" data-sur="weight" data-i="${i}" aria-label="Andel för ${esc(o.name)}"></td>` : ''}
+                    <td class="text-end fw-semibold" data-sur-share="${i}">${o.include ? surKr(o.share) : '—'}</td></tr>`).join('')
+                    || `<tr><td colspan="6" class="pl-help">Ingen i bemanningen ännu. Lägg till föreningar för hand, eller bemanna först.</td></tr>`}</tbody>
+                <tfoot><tr><td colspan="${manual ? 5 : 4}" class="text-end d-none d-md-table-cell">Att fördela efter de fasta posterna</td>
+                    <td class="text-end d-md-none">Att fördela</td><td class="text-end fw-semibold" id="surRemaining">${surKr(SUR.remaining)}</td></tr></tfoot></table></div>
+            <div id="surError" class="text-danger small mb-2">${SUR.error ? esc(SUR.error) : ''}</div>
+            <button type="button" class="btn btn-link btn-sm px-0 pl-noprint" data-sur-addorg="1">＋ Lägg till en förening som inte finns i bemanningen</button>
+            <div class="mt-2"><label class="form-label" for="surNote">Anteckning (valfri)</label>
+                <textarea id="surNote" class="form-control" rows="2" maxlength="2000" data-sur="note">${esc(SUR.note || '')}</textarea></div>
+            <div class="mt-3 pl-noprint"><button type="button" class="btn btn-primary" data-sur-save="1">Spara underlaget</button> <span id="surSaved" class="pl-help ms-2"></span></div></div>`;
+    }
+    function surRecalc(full) {
+        clearTimeout(surTimer);
+        surTimer = setTimeout(async () => {
+            const r = await post('CalculateSurplus', { data: JSON.stringify(surplusData()) });
+            if (!r.success) { $('surError').textContent = r.message || ''; return; }
+            const keep = SUR;
+            SUR = Object.assign(r, { amount: keep.amount, fixed: keep.fixed, note: keep.note });
+            if (full) { drawSurplus(); return; }
+            SUR.orgs.forEach((o, i) => { const c = document.querySelector(`[data-sur-share="${i}"]`); if (c) c.textContent = o.include ? surKr(o.share) : '—'; });
+            $('surRemaining').textContent = surKr(SUR.remaining);
+            $('surError').textContent = SUR.error || '';
+            if ($('surSaved')) $('surSaved').textContent = '';
+        }, full ? 0 : 350);
+    }
+    const surNum = v => { const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; };
+    document.addEventListener('input', e => {
+        const f = e.target.dataset && e.target.dataset.sur; if (!f || !SUR) return;
+        const i = parseInt(e.target.dataset.i, 10);
+        if (f === 'amount') SUR.amount = surNum(e.target.value);
+        else if (f === 'fixedLabel') SUR.fixed[i].label = e.target.value;
+        else if (f === 'fixedAmount') SUR.fixed[i].amount = surNum(e.target.value);
+        else if (f === 'weight') SUR.orgs[i].weight = surNum(e.target.value);
+        else if (f === 'note') { SUR.note = e.target.value; return; }
+        else return;
+        surRecalc(false);
+    });
+    document.addEventListener('change', e => {
+        const f = e.target.dataset && e.target.dataset.sur; if (!f || !SUR) return;
+        if (f === 'key') { SUR.key = e.target.value; surRecalc(true); }
+        else if (f === 'include') { SUR.orgs[parseInt(e.target.dataset.i, 10)].include = e.target.checked; surRecalc(false); }
+    });
+    document.addEventListener('click', async e => {
+        if (!SUR) return;
+        const t = e.target.closest('[data-sur-addfixed],[data-sur-delfixed],[data-sur-addorg],[data-sur-save],[data-sur-print]'); if (!t) return;
+        e.preventDefault();
+        if (t.dataset.surAddfixed) { SUR.fixed.push({ label: '', amount: 0 }); drawSurplus(); return; }
+        if (t.dataset.surDelfixed) { SUR.fixed.splice(parseInt(t.dataset.surDelfixed, 10), 1); surRecalc(true); return; }
+        if (t.dataset.surPrint) {
+            if (!$('plSurPrintCss')) { const st = document.createElement('style'); st.id = 'plSurPrintCss';
+                st.textContent = '@media print{body.pl-sur-print *{visibility:hidden}body.pl-sur-print #plSurplus,body.pl-sur-print #plSurplus *{visibility:visible}body.pl-sur-print #plSurplus{position:absolute;left:0;top:0;width:100%}body.pl-sur-print .pl-noprint{display:none!important}}';
+                document.head.appendChild(st); }
+            document.body.classList.add('pl-sur-print'); window.print(); document.body.classList.remove('pl-sur-print'); return;
+        }
+        if (t.dataset.surAddorg) {
+            formModal({ title: 'Lägg till en förening', okLabel: 'Lägg till', wide: false,
+                html: `<label class="form-label" for="surOrgName">Föreningens namn</label><input id="surOrgName" class="form-control" maxlength="100" placeholder="Till exempel Blekinge krets">
+                    <div class="pl-help small mt-1">För en förening som bidragit utan att stå i bemanningen. Den får en andel när du fördelar lika eller med egna andelar.</div>`,
+                onOk: async body => {
+                    const n = body.querySelector('#surOrgName').value.trim();
+                    if (!n) return 'Skriv föreningens namn.';
+                    if (SUR.orgs.some(o => o.name.toLowerCase() === n.toLowerCase())) return 'Föreningen finns redan i listan.';
+                    SUR.orgs.push({ key: 'text:' + n, name: n, manual: true, include: true, weight: 0, people: 0, assignments: 0, days: 0, share: 0 });
+                    surRecalc(true); return true;
+                } });
+            return;
+        }
+        if (t.dataset.surSave) {
+            const r = await post('SaveSurplus', { data: JSON.stringify(surplusData()) });
+            if (!r.success) { failMsg(r); return; }
+            SUR = r; drawSurplus(); $('surSaved').textContent = 'Sparat.';
+        }
     });
 
     // Den sammankallande är alltid med (delegerat: dialogens kropp byts ut varje gång).
