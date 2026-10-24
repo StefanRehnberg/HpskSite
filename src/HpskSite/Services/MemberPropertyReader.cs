@@ -23,6 +23,23 @@ namespace HpskSite.Services
         /// <summary><c>primaryClubId</c> som tal, eller 0. ⚠️ Egenskapen är en STRÄNG i medlemstypen.</summary>
         public int PrimaryClubId => int.TryParse(Get("primaryClubId").Trim(), out var id) && id > 0 ? id : 0;
 
+        /// <summary>
+        /// Alla medlemmens klubbar, huvudklubben först — samma regel som <c>MemberClubService.GetAllClubIds</c>.
+        /// Kräver att <c>primaryClubId</c> och <c>memberClubIds</c> lästes.
+        /// </summary>
+        public List<int> AllClubIds
+        {
+            get
+            {
+                var result = new List<int>();
+                var primary = PrimaryClubId;
+                if (primary > 0) result.Add(primary);
+                foreach (var part in Get("memberClubIds").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    if (int.TryParse(part.Trim(), out var id) && id > 0 && !result.Contains(id)) result.Add(id);
+                return result;
+            }
+        }
+
         /// <summary>Förnamn + efternamn, annars nodens namn.</summary>
         public string DisplayName
         {

@@ -160,7 +160,7 @@ namespace HpskSite.Services
         private static readonly (string Table, string MemberColumn, string ClearSql)[] _assignmentColumns = new[]
         {
             ("StaffAssignment", "MemberId",
-                "DisplayName = N'Borttagen medlem', Phone = NULL, Email = NULL, OriginalName = NULL, HasAdminAccess = 0"),
+                "DisplayName = N'Borttagen medlem', Phone = NULL, Email = NULL, OriginalName = NULL, Note = NULL, HasAdminAccess = 0"),
             ("WorkArea",        "ResponsibleMemberId", "ResponsibleName = NULL"),
             ("WorkItem",        "AssignedMemberId",    "AssignedName = NULL"),
             // Tävlingsplaneringen (2026-10-21): deltagarraden står kvar så att meddelandena behåller

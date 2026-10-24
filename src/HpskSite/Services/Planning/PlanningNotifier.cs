@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -396,14 +396,29 @@ namespace HpskSite.Services.Planning
         /// med en knapp till uppgifterna, där hen säger hur det går. Returnerar om mejlet gick iväg.
         /// </summary>
         public async Task<bool> TaskAssignedAsync(int planningId, int taskId, int assigneeParticipantId, PlanningMemberRow? by)
+            => await TaskAssignedOutcomeAsync(planningId, taskId, assigneeParticipantId, by) == TaskMailOutcome.Sent;
+
+        /// <summary>Vad som hände med mejlet om en ny uppgift.</summary>
+        public enum TaskMailOutcome { None, Sent, Queued }
+
+        /// <summary>
+        /// Omgång 3 steg 10 (volym): dagens FÖRSTA uppgift till en person mejlas direkt. Får hen fler samma dag läggs
+        /// de i kö (<c>task-queued</c>) och svepet skickar ETT samlat mejl när kön stått still i
+        /// <see cref="TaskBatchQuietMinutes"/> minuter — den som fördelar tio uppgifter på en kväll ska inte ge
+        /// mottagaren tio mejl.
+        /// </summary>
+        public async Task<TaskMailOutcome> TaskAssignedOutcomeAsync(int planningId, int taskId, int assigneeParticipantId, PlanningMemberRow? by)
         {
             var p = _planning.Get(planningId);
             var task = _planning.GetTask(planningId, taskId);
             var who = _planning.Participant(planningId, assigneeParticipantId);
-            if (p == null || task == null || who == null || !who.IsActive) return false;
-            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            if (p == null || task == null || who == null || !who.IsActive) return TaskMailOutcome.None;
+            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return TaskMailOutcome.None;
             var r = ResolveRecipient(who);
-            if (r == null) return false;
+            if (r == null) return TaskMailOutcome.None;
+            if (TaskMailSentToday(planningId, who.Id, taskId))
+                return Claim(planningId, who.Id, TaskQueuedKind, "mail", "task", taskId, DateTime.Today) != null
+                    ? TaskMailOutcome.Queued : TaskMailOutcome.None;
             var byName = by?.DisplayName ?? "Någon";
             var inner = new StringBuilder();
             inner.Append($"<p>{H(byName)} har gett dig en uppgift i planeringen:</p>");
@@ -415,7 +430,140 @@ namespace HpskSite.Services.Planning
                 + "<i>Klar att pröva</i> — och skriver gärna en rad. Om uppgiften är utförd bestämmer ni sedan på ett möte.</p>");
             // DueAt = utskicksdagen: får hen samma uppgift igen en annan dag (bytt och tillbaka) går ett nytt mejl.
             return await SendMail(r, planningId, "task-assigned", "task", taskId, DateTime.Today,
-                $"Ny uppgift: {task.Title}", Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
+                $"Ny uppgift: {task.Title}", Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name))
+                ? TaskMailOutcome.Sent : TaskMailOutcome.None;
+        }
+
+        /// <summary>
+        /// Omgång 3 steg 10 (K5): en gäst vars mejllänk gått ut ber om en ny. Mejlet går bara till adressen som står på
+        /// gästens deltagarrad — en länk per planering hen är med i. Svaret till den som frågar är alltid detsamma
+        /// (anroparen), så sidan säger aldrig om en adress finns. Returnerar antalet mejl som gick iväg.
+        /// </summary>
+        public async Task<int> RenewGuestLinksAsync(string email)
+        {
+            var addr = (email ?? "").Trim();
+            if (addr.Length < 3 || !addr.Contains('@')) return 0;
+            List<PlanningMemberRow> rows;
+            using (var s = _scopes.CreateScope(autoComplete: true))
+                rows = s.Database.Fetch<PlanningMemberRow>(@"
+                    SELECT pm.* FROM PlanningMember pm JOIN Planning p ON p.Id = pm.PlanningId
+                     WHERE pm.RemovedAt IS NULL AND pm.MemberId IS NULL AND p.DeletedAt IS NULL
+                       AND LOWER(LTRIM(RTRIM(pm.GuestEmail))) = @0", addr.ToLowerInvariant());
+            var sent = 0;
+            foreach (var row in rows)
+            {
+                try
+                {
+                    var p = _planning.Get(row.PlanningId);
+                    var r = ResolveRecipient(row);
+                    if (p == null || r == null) continue;
+                    var inner = new StringBuilder();
+                    inner.Append("<p>Här är en ny länk till planeringen. Den gamla hade gått ut.</p>");
+                    inner.Append($"<p>{Button("Öppna planeringen", _links.MailUrl(r.Pid, p.Id, "oppna"))}</p>");
+                    inner.Append($"<p style=\"color:#555\">Länken gäller i {(int)PlanningLinkService.MailLifetime.TotalDays} dagar. "
+                        + "Varje mejl från planeringen har dessutom en egen, ny länk.</p>");
+                    // Registreras som alla andra utskick (DueAt = tidpunkten: varje begäran är sin egen rad).
+                    var logId = Claim(p.Id, r.Pid, "relink", "mail", "relink", 0, DateTime.Now);
+                    if (logId == null) continue;
+                    var ok = await _email.SendPlanningMailAsync(r.Email, $"Ny länk: {p.Name}",
+                        Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, p.Id)), MailReplyTo.NoReply);
+                    Done(logId.Value, ok);
+                    if (ok) sent++;
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: den nya länken kunde inte skickas.", row.PlanningId); }
+            }
+            return sent;
+        }
+
+        internal const string TaskQueuedKind = "task-queued";
+        /// <summary>Så länge kön ska stå still innan det samlade mejlet går.</summary>
+        public const int TaskBatchQuietMinutes = 10;
+
+        /// <summary>Har personen redan fått ett uppgiftsmejl i dag (om en annan uppgift)?</summary>
+        private bool TaskMailSentToday(int planningId, int participantId, int taskId)
+        {
+            try
+            {
+                using var s = _scopes.CreateScope(autoComplete: true);
+                return s.Database.ExecuteScalar<int>(@"
+                    SELECT COUNT(*) FROM PlanningNotifyLog
+                     WHERE PlanningId = @0 AND ParticipantId = @1 AND Kind = N'task-assigned' AND Channel = N'mail'
+                       AND DueAt = @2 AND RefId <> @3", planningId, participantId, DateTime.Today, taskId) > 0;
+            }
+            catch (Exception ex)
+            {
+                // Kan vi inte läsa loggen mejlar vi hellre direkt än köar i blindo.
+                _logger.LogWarning(ex, "Planering {Id}: uppgiftsmejlens logg kunde inte läsas.", planningId);
+                return false;
+            }
+        }
+
+        private sealed class QueuedTaskRow
+        {
+            public int Id { get; set; }
+            public int PlanningId { get; set; }
+            public int ParticipantId { get; set; }
+            public int RefId { get; set; }
+            public DateTime ClaimedAt { get; set; }
+        }
+
+        /// <summary>
+        /// Svepets del: köade uppgifter där den senaste köades för minst <see cref="TaskBatchQuietMinutes"/> minuter sedan
+        /// går som ETT mejl per person. Raderna markeras förbrukade när utskicket registrerats (claim-then-send).
+        /// Uppgifter som hunnit flyttas till någon annan eller tagits bort tas inte med.
+        /// </summary>
+        internal async Task<int> TaskBatchesAsync(DateTime now)
+        {
+            List<QueuedTaskRow> queued;
+            try
+            {
+                using var s = _scopes.CreateScope(autoComplete: true);
+                queued = s.Database.Fetch<QueuedTaskRow>(@"
+                    SELECT Id, PlanningId, ParticipantId, RefId, ClaimedAt FROM PlanningNotifyLog
+                     WHERE Kind = @0 AND Succeeded = 0", TaskQueuedKind);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering: köade uppgiftsmejl kunde inte läsas."); return 0; }
+
+            var sent = 0;
+            foreach (var g in queued.GroupBy(q => (q.PlanningId, q.ParticipantId)))
+            {
+                if (g.Max(q => q.ClaimedAt) > now.AddMinutes(-TaskBatchQuietMinutes)) continue;
+                try
+                {
+                    var ids = g.Select(q => q.Id).ToList();
+                    // Spärren: ett utskick per kö, nycklat på köns sista rad.
+                    var logId = Claim(g.Key.PlanningId, g.Key.ParticipantId, "task-batch", "mail", "queue", ids.Max());
+                    if (logId == null) continue;
+                    using (var s = _scopes.CreateScope(autoComplete: true))
+                        s.Database.Execute("UPDATE PlanningNotifyLog SET Succeeded = 1 WHERE Id IN (@0)", ids);
+
+                    var p = _planning.Get(g.Key.PlanningId);
+                    var who = _planning.Participant(g.Key.PlanningId, g.Key.ParticipantId);
+                    if (p == null || p.DeletedAt != null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                    var r = ResolveRecipient(who);
+                    if (r == null) continue;
+                    var taskIds = g.Select(q => q.RefId).ToHashSet();
+                    var tasks = _planning.Tasks(g.Key.PlanningId)
+                        .Where(t => taskIds.Contains(t.Id) && t.AssigneeParticipantId == who.Id)
+                        .OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();
+                    if (tasks.Count == 0) continue;
+                    var inner = new StringBuilder();
+                    inner.Append(tasks.Count == 1
+                        ? "<p>Du har fått ytterligare en uppgift i planeringen:</p><ul>"
+                        : $"<p>Du har fått {tasks.Count} uppgifter till i planeringen:</p><ul>");
+                    foreach (var t in tasks.Take(30))
+                        inner.Append($"<li><b>{H(t.Title)}</b>{(t.DueDate.HasValue ? $" <span style=\"color:#555\">(senast {H(t.DueDate.Value.ToString("d MMM yyyy", Sv))})</span>" : "")}</li>");
+                    inner.Append("</ul>");
+                    inner.Append($"<p>{Button("Visa mina uppgifter", OpenUrl(r, g.Key.PlanningId, "uppgifter"))}</p>");
+                    inner.Append("<p style=\"color:#555\">Där säger du hur långt du kommit med var och en och skriver gärna en rad.</p>");
+                    var ok = await _email.SendPlanningMailAsync(r.Email, $"{(tasks.Count == 1 ? "Ny uppgift" : $"{tasks.Count} nya uppgifter")}: {p.Name}",
+                        Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, g.Key.PlanningId)), ReplyToFor(null, p.Name));
+                    Done(logId.Value, ok);
+                    if (ok) sent++;
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: det samlade uppgiftsmejlet föll.", g.Key.PlanningId); }
+            }
+            return sent;
         }
 
         /// <summary>
@@ -571,7 +719,7 @@ namespace HpskSite.Services.Planning
         //  Svepet (körs av PlanningNotificationHostedService)
         // =====================================================================================
 
-        public sealed record SweepResult(int Digests, int Pushes, int MeetingReminders, int VoteReminders, int DueReminders = 0);
+        public sealed record SweepResult(int Digests, int Pushes, int MeetingReminders, int VoteReminders, int DueReminders = 0, int TaskBatches = 0);
 
         public async Task<SweepResult> SweepAsync(DateTime now)
         {
@@ -642,7 +790,10 @@ namespace HpskSite.Services.Planning
                     _logger.LogError(ex, "Planering {PlanningId}: svepet föll för planeringen.", planningId);
                 }
             }
-            return new SweepResult(digests, pushes, meetingRem, voteRem, dueRem);
+            int taskBatches = 0;
+            try { taskBatches = await TaskBatchesAsync(now); }
+            catch (Exception ex) { _logger.LogError(ex, "Planering: de samlade uppgiftsmejlen föll."); }
+            return new SweepResult(digests, pushes, meetingRem, voteRem, dueRem, taskBatches);
         }
 
         /// <summary>Spärren för timpushen: villkorad UPDATE, 1 rad = vi fick den.</summary>

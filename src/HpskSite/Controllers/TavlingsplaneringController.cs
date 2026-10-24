@@ -1,4 +1,4 @@
-using HpskSite.Models.Staffing;
+﻿using HpskSite.Models.Staffing;
 using HpskSite.Services;
 using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.Mvc;
@@ -205,6 +205,28 @@ namespace HpskSite.Controllers
             ViewData["PlanningStartMeeting"] = m ?? 0;
             ViewData["PlanningReply"] = a == "svara" ? (m ?? 0) : 0;
             return View("Planering", rootNode);
+        }
+
+        /// <summary>
+        /// Omgång 3 steg 10 (K5): "Skicka mig en ny länk" på sidan för en länk som gått ut. Ingen inloggning — gästen
+        /// har inget konto. Svaret är ALLTID detsamma, så sidan avslöjar aldrig om en adress finns i en planering, och
+        /// samma adress kan fråga högst en gång i kvarten.
+        /// </summary>
+        [HttpPost("ny-lank")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> NyLank(string? email)
+        {
+            const string neutral = "Om adressen hör till en gäst i en planering har vi skickat en ny länk dit. Titta i inkorgen om en stund.";
+            var addr = (email ?? "").Trim().ToLowerInvariant();
+            if (addr.Length < 3 || !addr.Contains('@'))
+                return Json(new { success = false, message = "Skriv e-postadressen som inbjudan skickades till." });
+            var rate = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Hosting.RateCounterService)) as HpskSite.Services.Hosting.RateCounterService;
+            if (rate != null && !rate.TryClaimOnce("planning-relink:" + addr, TimeSpan.FromMinutes(15)))
+                return Json(new { success = true, message = neutral });
+            var notify = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningNotifier)) as HpskSite.Services.Planning.PlanningNotifier;
+            try { if (notify != null) await notify.RenewGuestLinksAsync(addr); }
+            catch (Exception ex) { (HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<TavlingsplaneringController>)) as Microsoft.Extensions.Logging.ILogger)?.LogError(ex, "Tävlingsplaneringen: en ny länk kunde inte skickas."); }
+            return Json(new { success = true, message = neutral });
         }
 
         /// <summary>

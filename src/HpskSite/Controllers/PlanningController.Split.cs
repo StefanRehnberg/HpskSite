@@ -111,6 +111,34 @@ namespace HpskSite.Controllers
             };
         }
 
+        /// <summary>
+        /// Omgång 3 steg 10: vilka av de valbara delarna som visas. En del med innehåll visas alltid; en påslagen del
+        /// visas även tom. <c>…On</c> = den sammankallande har slagit på den (Åtgärder kan då slå av den igen).
+        /// </summary>
+        private object PartsJson(PlanningRow p)
+        {
+            var (dec, sur) = _planning.PartsWithContent(p.Id);
+            var decOn = PlanningParts.Has(p.Parts, PlanningParts.Decisions);
+            var surOn = PlanningParts.Has(p.Parts, PlanningParts.Surplus);
+            return new
+            {
+                decisions = dec || decOn, decisionsOn = decOn, decisionsHasContent = dec,
+                surplus = sur || surOn, surplusOn = surOn, surplusHasContent = sur,
+            };
+        }
+
+        /// <summary>Slår på eller av en del (Förslag och beslut, Överskottet). Den som kan ändra planeringen.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetPart(int id, string part, string? on)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Det väljs av den som kan ändra planeringen.");
+            var err = _planning.SetPart(id, part ?? "", on == "1");
+            return err == null ? Ok() : No(err);
+        }
+
         /// <summary>Omgång 3: "Bemannar för" — vilken av familjens tävlingar planeringens bemanning gäller (0 = huvudplaneringens).</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

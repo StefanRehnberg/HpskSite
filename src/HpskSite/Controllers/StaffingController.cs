@@ -240,6 +240,8 @@ namespace HpskSite.Controllers
                         }).ToList();
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: family clashes failed for planning {Planning}", pid); }
+                    try { ApplyRoleChoice(resp, owner, discipline, pid); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
                 }
                 return Json(resp);
             }
@@ -247,6 +249,53 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: GetGrid failed for competition {CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Kunde inte läsa rutnätet." });
+            }
+        }
+
+        /// <summary>
+        /// Omgång 3 steg 10 (progressivt avslöjande): en planering vars roller inte är valda visar bara rader med folk,
+        /// behov eller arrangörens egna roller — elva tomma rader skrämmer en liten klubb — och ber om ett val.
+        /// </summary>
+        private void ApplyRoleChoice(GridResponse resp, StaffOwner owner, string? discipline, int planningId)
+        {
+            var p = _planning.Get(planningId);
+            if (p == null) return;
+            var withContent = new HashSet<string>(
+                resp.Rows.Where(r => r.IsCustom || r.Filled > 0 || r.HasNeed).Select(r => r.RoleKey), StringComparer.OrdinalIgnoreCase);
+            var crew = new HashSet<string>(resp.Rows.Where(r => r.Filled > 0).Select(r => r.RoleKey), StringComparer.OrdinalIgnoreCase);
+            resp.RoleChoices = _roleCatalog.BuiltInChoices(owner, discipline).Select(c => new GridRoleChoice
+            {
+                Key = c.Key, Name = c.Name, Description = c.Description, HasCrew = crew.Contains(c.Key),
+                Chosen = p.RolesChosen ? c.Active : withContent.Contains(c.Key),
+            }).ToList();
+            if (p.RolesChosen) return;
+            resp.RoleChoicePending = true;
+            resp.Rows = resp.Rows.Where(r => withContent.Contains(r.RoleKey)).ToList();
+        }
+
+        /// <summary>Omgång 3 steg 10: "Välj roller" — de valda inbyggda rollerna framme, övriga dolda (utom de med folk).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ChooseRoles([FromBody] ChooseStaffRolesRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (owner.PlanningIdOrNull is not int pid) return Json(new { success = false, message = "Rollerna väljs i planeringen." });
+            try
+            {
+                var kept = _roleCatalog.ApplyBuiltInChoice(owner, _owners.Discipline(owner),
+                    new HashSet<string>(request.Keys ?? new List<string>(), StringComparer.OrdinalIgnoreCase), viewer.Id);
+                _planning.MarkRolesChosen(pid);
+                return Json(new { success = true, kept });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ChooseRoles failed for planning {Planning}", pid);
+                return Json(new { success = false, message = "Rollerna kunde inte sparas." });
             }
         }
 

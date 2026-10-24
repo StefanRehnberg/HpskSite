@@ -140,6 +140,8 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<HpskSite.Services.Planning.PlanningLinkService>();
             builder.Services.AddScoped<HpskSite.Services.Planning.PlanningNotifier>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningNotificationHostedService>();
+            builder.Services.AddScoped<HpskSite.Services.Planning.PlanningPurgeService>();
+            builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningPurgeHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningSchemaGuardHostedService>();
 
             // Årshjulets och banornas påminnelser 90 dagar före (2026-10-21, plan del C).

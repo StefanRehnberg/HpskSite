@@ -339,6 +339,52 @@ namespace HpskSite.Services.Staffing
             return (true, null, inUse);
         }
 
+        /// <summary>En inbyggd roll i valet "Välj roller" (omgång 3 steg 10).</summary>
+        public sealed record BuiltInChoice(string Key, string Name, string? Description, bool Active);
+
+        /// <summary>
+        /// Grenens inbyggda roller och om de är framme (inte dolda) för ägaren. Egna roller ingår inte — de skapade
+        /// arrangören själv och tas bort på raden.
+        /// </summary>
+        public List<BuiltInChoice> BuiltInChoices(StaffOwner owner, string? discipline)
+        {
+            var active = For(owner, discipline).ToDictionary(r => r.Key, StringComparer.OrdinalIgnoreCase);
+            return FunctionaryRoles.ForDiscipline(discipline)
+                .Select(b => active.TryGetValue(b.Key, out var a)
+                    ? new BuiltInChoice(b.Key, a.DisplayName, b.Description, true)
+                    : new BuiltInChoice(b.Key, b.DisplayName, b.Description, false))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Omgång 3 steg 10 ("Välj roller"): de valda inbyggda rollerna tas fram, de övriga döljs — UTOM en roll som har
+        /// folk, som står kvar och namnges. Samma mekanism som <see cref="DeleteRole"/> (IsActive=0-markören).
+        /// Returnerar namnen på rollerna som inte kunde döljas.
+        /// </summary>
+        public List<string> ApplyBuiltInChoice(StaffOwner owner, string? discipline, ISet<string> chosen, int byMemberId)
+        {
+            var kept = new List<string>();
+            foreach (var c in BuiltInChoices(owner, discipline))
+            {
+                var want = chosen.Contains(c.Key);
+                if (want && !c.Active)
+                {
+                    using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                    scope.Database.Execute(
+                        "UPDATE StaffRole SET IsActive = 1, ModifiedDate = @3 WHERE OwnerType = @0 AND OwnerId = @1 AND RoleKey = @2",
+                        OwnerTypeOf(owner), OwnerIdOf(owner), c.Key, DateTime.UtcNow);
+                    Forget(owner);
+                }
+                else if (!want && c.Active)
+                {
+                    var (ok, _, inUse) = DeleteRole(owner, c.Key, discipline, byMemberId, deleteAssignments: false);
+                    if (!ok && inUse > 0) kept.Add(c.Name);
+                }
+            }
+            Forget(owner);
+            return kept;
+        }
+
         // ---------------------------------------------------------------- helpers
 
         private void Forget(StaffOwner owner)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using HpskSite.Services.Hosting;
@@ -60,10 +60,48 @@ namespace HpskSite.Services.Planning
             }
             var notifier = scope.ServiceProvider.GetRequiredService<PlanningNotifier>();
             var result = await notifier.SweepAsync(now);
-            if (result.Digests + result.Pushes + result.MeetingReminders + result.VoteReminders > 0)
+            if (result.Digests + result.Pushes + result.MeetingReminders + result.VoteReminders + result.TaskBatches > 0)
                 logger.LogInformation("Planeringens svep: {Digests} kvällsmejl, {Pushes} pushar, {Meetings} mötespåminnelser, {Votes} svarspåminnelser.",
                     result.Digests, result.Pushes, result.MeetingReminders, result.VoteReminders);
             return result;
+        }
+    }
+
+    /// <summary>
+    /// Omgång 3 steg 10 (K7): rensningen av borttagna planeringar en gång om dygnet (<see cref="PlanningPurgeService"/>).
+    /// Kör bara på publiceraren.
+    /// </summary>
+    public class PlanningPurgeHostedService : IsolatedBackgroundService
+    {
+        private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(11);
+        private static readonly TimeSpan Interval = TimeSpan.FromHours(24);
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<PlanningPurgeHostedService> _logger;
+
+        public PlanningPurgeHostedService(IServiceScopeFactory scopeFactory, ILogger<PlanningPurgeHostedService> logger)
+        {
+            _scopeFactory = scopeFactory;
+            _logger = logger;
+        }
+
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
+        {
+            try { await Task.Delay(StartupDelay, stoppingToken); }
+            catch (OperationCanceledException) { return; }
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    if (_scopeFactory.MayRunScheduled(nameof(PlanningPurgeHostedService)))
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        await scope.ServiceProvider.GetRequiredService<PlanningPurgeService>().PurgeAsync(DateTime.Now);
+                    }
+                }
+                catch (Exception ex) { _logger.LogError(ex, "Planeringsrensningen föll."); }
+                try { await Task.Delay(Interval, stoppingToken); }
+                catch (OperationCanceledException) { return; }
+            }
         }
     }
 

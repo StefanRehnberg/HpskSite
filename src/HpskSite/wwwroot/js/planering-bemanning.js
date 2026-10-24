@@ -161,17 +161,59 @@ window.PlaneringBemanning = (function () {
         return parts.join(' · ');
     }
 
+    // Omgång 3 steg 10 ("Välj roller"): grenens inbyggda roller med kryssrutor. Det valda tas fram, resten döljs —
+    // utom roller som har folk, som står kvar. Egna roller rör valet inte.
+    function roleChoiceList(g, idPrefix) {
+        return `<div class="row g-1">${(g.roleChoices || []).map((c, i) => `<div class="col-sm-6"><div class="form-check">
+            <input class="form-check-input" type="checkbox" id="${idPrefix}${i}" data-plb-rolechoice="${esc(c.key)}"${c.chosen || c.hasCrew ? ' checked' : ''}${c.hasCrew ? ' disabled' : ''}>
+            <label class="form-check-label" for="${idPrefix}${i}">${esc(c.name)}${c.hasCrew ? ' <span class="text-body-secondary small">(har folk)</span>' : ''}</label>
+            ${c.description ? `<div class="small text-body-secondary">${esc(c.description)}</div>` : ''}</div></div>`).join('')}</div>`;
+    }
+    function chooseRolesCard(g) {
+        return `<div class="pl-card" id="plbChooseRoles"><h2 class="h5">Vilka roller behöver ni?</h2>
+            <p class="pl-help small">Kryssa i de funktioner planeringen ska bemanna. Resten visas inte — ni kan ta fram dem när som helst under
+            <b>Åtgärder → Välj roller</b>, och ni kan alltid skriva en egen roll längst ned i rutnätet.</p>
+            ${roleChoiceList(g, 'plbRc')}
+            <div class="mt-2"><button type="button" class="btn btn-primary btn-sm" data-plb-saveroles>Spara rollerna</button></div></div>`;
+    }
+    async function saveRoleChoice(scope) {
+        const keys = [...scope.querySelectorAll('[data-plb-rolechoice]')].filter(x => x.checked).map(x => x.dataset.plbRolechoice);
+        const r = await spost('ChooseRoles', { keys });
+        if (!r.success) return r.message || 'Rollerna kunde inte sparas.';
+        await loadGrid(); drawGrid();
+        if ((r.kept || []).length) A.showMsg('Rollerna är sparade. Kvar eftersom de har folk: ' + esc(r.kept.join(', ')) + '.', 'warning');
+        else A.showMsg('Rollerna är sparade.', 'success');
+        return true;
+    }
+    function openChooseRoles() {
+        A.formModal({
+            title: 'Välj roller', okLabel: 'Spara rollerna',
+            html: `<p class="pl-help small">Kryssa i de funktioner planeringen ska bemanna. En roll som har folk står kvar.</p>${roleChoiceList(B.grid, 'plbRm')}`,
+            onOk: body => saveRoleChoice(body)
+        });
+    }
+    document.addEventListener('click', async e => {
+        if (!A || !A.isActive() || !e.target.closest('[data-plb-saveroles]')) return;
+        e.preventDefault();
+        const card = $('plbChooseRoles'); if (!card) return;
+        const res = await saveRoleChoice(card);
+        if (typeof res === 'string') A.showMsg(esc(res), 'danger');
+    });
+
     function drawGrid() {
         const g = B.grid, cols = g.columns || [];
         A.setHead('Bemanning', gridSummary());
         A.setActions([
             { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: openNewRole },
+            (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
         ]);
 
         let notes = disciplineLine();
+        // Omgång 3 steg 10: en ny planering väljer sina roller i stället för att mötas av hela katalogen.
+        if (g.roleChoicePending && (g.roleChoices || []).length) notes += chooseRolesCard(g);
         if (!linked()) notes += `<p class="pl-help small mb-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen och följer med när den kopplas.</p>`;
         const vols = g.volunteers || [];
         if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>

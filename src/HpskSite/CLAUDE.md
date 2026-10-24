@@ -12853,8 +12853,34 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       Rutnätet visar dem som "Krockar i veckan" (`GridResponse.FamilyClashes`, satt i `StaffingController.GetGrid`;
       ett fel fäller inte rutnätet).
     - Index `IX_StaffAssignment_MemberId` (steg 10) ligger i samma migrering.
+  - **Gäster, volym och rensning (steg 10):**
+    - **Uppgiftsmejlen samlas** (`PlanningNotifier.TaskAssignedOutcomeAsync`): dagens FÖRSTA uppgift till en person mejlas
+      direkt; fler samma dag köas som `PlanningNotifyLog` Kind `task-queued` (Succeeded 0) och svepet (`TaskBatchesAsync`)
+      skickar ETT mejl när kön stått still i `TaskBatchQuietMinutes` (10) minuter — spärren är en `task-batch`-rad nycklad
+      på köns sista rad, och köraderna märks förbrukade. Uppgifter som flyttats till någon annan tas inte med. Svaret
+      bär `mailed`/`mailQueued`; inklistringens `TasksAssignedAsync` går direkt som förut.
+    - **Gästens dokument** (`PlanningAccess.DocumentsViaLinkOk`): via mejllänken arbetar bara en GÄST (utan konto) med
+      dokument — lägger till, och tar bort/ändrar/kopplar loss sina EGNA. En medlem med konto loggar in. Dokumentendpointsen
+      tar `t`.
+    - **Ny länk** (`/tavlingsplanering/ny-lank`, formuläret på sidan för en länk som inte fungerar): mejlar en ny länk till
+      gästrader med just den adressen (`RenewGuestLinksAsync`, loggas som Kind `relink`). Svaret är ALLTID detsamma (sidan
+      avslöjar aldrig om en adress finns) och samma adress får fråga en gång i kvarten (`RateCounterService`).
+    - **Progressivt avslöjande:** `Planning.Parts` (`PlanningParts`: `beslut`, `overskott`) och `Planning.RolesChosen`.
+      *Förslag och beslut* (rälsen) och *Överskottet* (Tävlingen) syns när de har innehåll eller slagits på under Översiktens
+      Åtgärder (`SetPart`; `planning.parts` i `Get`). **Välj roller:** en planering med `RolesChosen = 0` visar i rutnätet
+      bara roller med folk, behov eller egna (`StaffingController.ApplyRoleChoice`) och frågar vilka som behövs;
+      `ChooseRoles` tar fram de valda inbyggda och döljer resten med samma IsActive=0-markör som *Ta bort roll* — en roll
+      med folk står kvar och namnges. Åtgärder → *Välj roller…* finns alltid. Migreringen satte båda på befintliga
+      planeringar (ingen ändring för dem); en kopia får förlagans.
+    - **Rensningen** (`PlanningPurgeService`, dygnssvep `PlanningPurgeHostedService`, sajtadmin `Planning/RunPurgeNow`): en
+      borttagen planering tas bort för gott efter 90 dagar — tabellerna i `PlanningIdTables` (testet
+      `PlanningStep10Tests.Purge_lists_every_table_that_carries_a_PlanningId` faller för en ny tabell med `PlanningId` som
+      inte står där), möten, roller, avsikter; tävlingsansökan kopplas loss, inte raderas. Filer tas bort bara när ingen
+      annan rad pekar på dem. En borttagen huvudplanering med en kvarvarande delplanering rensas inte.
+    - `MemberPropertyReader` i stället för `GetById` per person (rutnätets klubbar, personlistan;
+      `MemberPropertyRow.AllClubIds`). Gallringen nollar `StaffAssignment.Note`.
   - **Migrering `add-planning-omgang3.sql` (körordning P3j) FÖRE deployen.** Körd i dev, EJ i prod.
-  - Svit `tavlingsplanering-o3-verify.mjs` 123/123 (A/B steg 9: avsiktsregeln bort + planeringsvillkoret vänt → 2 röda);
+  - Svit `tavlingsplanering-o3-verify.mjs` 154/154 (A/B steg 9: avsiktsregeln bort + planeringsvillkoret vänt → 2 röda);
     steg 7: utan omnumreringen och utan länkstädningen → 2 röda; steg 8: antal uppdrag i stället för samtidigt + utan
     stationsrader → 5 röda. Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`, `PlanningTaskRulesTests`,
     `AreaConfigBlobTests`, `StaffTimeCoverageTests`, `FamilyClashRulesTests`.

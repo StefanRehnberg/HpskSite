@@ -1,4 +1,4 @@
-using HpskSite.Models.Planning;
+﻿using HpskSite.Models.Planning;
 
 namespace HpskSite.Services.Planning
 {
@@ -22,6 +22,40 @@ namespace HpskSite.Services.Planning
                 planningId, threadId, areaId > 0 ? areaId : null);
             Bump(db, planningId);
             return null;
+        }
+
+        /// <summary>
+        /// Omgång 3 steg 10 (progressivt avslöjande): slår på eller av en del (<see cref="PlanningParts"/>). En del med
+        /// innehåll visas ändå — det här styr bara om den syns innan något finns i den.
+        /// </summary>
+        public string? SetPart(int planningId, string part, bool on)
+        {
+            if (!PlanningParts.All.Contains(part, StringComparer.OrdinalIgnoreCase)) return "Okänd del.";
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var current = db.ExecuteScalar<string?>("SELECT Parts FROM Planning WITH (UPDLOCK) WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            var next = PlanningParts.With(current, part.ToLowerInvariant(), on);
+            db.Execute("UPDATE Planning SET Parts = @1 WHERE Id = @0", planningId, next.Length == 0 ? null : next);
+            Bump(db, planningId);
+            return null;
+        }
+
+        /// <summary>Har planeringen förslag och beslut, eller ett sparat överskott? (Visas då oavsett <see cref="PlanningRow.Parts"/>.)</summary>
+        public (bool Decisions, bool Surplus) PartsWithContent(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var dec = db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningDecision WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId) > 0;
+            var sur = db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningSurplus WHERE PlanningId = @0", planningId) > 0;
+            return (dec, sur);
+        }
+
+        /// <summary>Markerar att planeringens roller i bemanningen är valda (rutnätet visar då hela katalogen).</summary>
+        public void MarkRolesChosen(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE Planning SET RolesChosen = 1 WHERE Id = @0", planningId);
+            Bump(s.Database, planningId);
         }
     }
 }

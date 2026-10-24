@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -113,9 +113,9 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddDocumentLink(int id, string? title, string? description, int? categoryId, string url, string? attachKind, int? attachId)
+        public async Task<IActionResult> AddDocumentLink(int id, string? title, string? description, int? categoryId, string url, string? attachKind, int? attachId, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanAddDocument(x.Caller)) return No("Bara den som deltar lägger till dokument.");
             var r = _planning.AddDocument(id, x.Caller.ParticipantId,
@@ -126,9 +126,9 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [RequestSizeLimit(26L * 1024 * 1024)]
-        public async Task<IActionResult> UploadDocument(int id, string? title, string? description, int? categoryId, string? attachKind, int? attachId, IFormFile? file)
+        public async Task<IActionResult> UploadDocument(int id, string? title, string? description, int? categoryId, string? attachKind, int? attachId, IFormFile? file, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanAddDocument(x.Caller)) return No("Bara den som deltar lägger till dokument.");
             if (file == null) return No("Välj en fil.");
@@ -149,9 +149,9 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateDocument(int id, int documentId, string? title, string? description, int? categoryId)
+        public async Task<IActionResult> UpdateDocument(int id, int documentId, string? title, string? description, int? categoryId, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var d = _planning.Document(id, documentId);
             if (d == null) return No("Dokumentet finns inte.");
@@ -175,9 +175,9 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RemoveDocument(int id, int documentId)
+        public async Task<IActionResult> RemoveDocument(int id, int documentId, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var d = _planning.Document(id, documentId);
             if (d == null) return No("Dokumentet finns inte.");
@@ -191,9 +191,9 @@ namespace HpskSite.Controllers
         /// <summary>Bifogar befintliga dokument (kommaseparerade id) till ett möte, en punkt, en uppgift eller ett område.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AttachDocuments(int id, string? documentIds, string? kind, int targetId)
+        public async Task<IActionResult> AttachDocuments(int id, string? documentIds, string? kind, int targetId, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanAttachDocument(x.Caller)) return No("Bara den som deltar bifogar dokument.");
             var k = PlanningDocTarget.Normalize(kind);
@@ -205,9 +205,9 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DetachDocument(int id, int refId)
+        public async Task<IActionResult> DetachDocument(int id, int refId, string? t = null)
         {
-            var x = await ResolveAsync(id, null);
+            var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var r = _planning.DocumentRef(id, refId);
             if (r == null) return No("Bifogningen finns inte.");

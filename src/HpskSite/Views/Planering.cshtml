@@ -32,7 +32,43 @@
         <div class="pl-card mt-3" style="max-width:720px;">
             <h1 class="h3">Länken fungerar inte längre</h1>
             <p class="mb-2">Länken i mejlet har gått ut, eller så är du inte längre med i planeringen.</p>
-            <p class="pl-help mb-0">Har du ett konto på pistol.nu kan du logga in och öppna planeringen under <a href="/tavlingsplanering">Tävling → Tävlingsplanering</a>. Annars kan den som bjöd in dig skicka en ny inbjudan.</p>
+            <p class="pl-help">Har du ett konto på pistol.nu kan du logga in och öppna planeringen under <a href="/tavlingsplanering">Tävling → Tävlingsplanering</a>.</p>
+            @* Omgång 3 steg 10 (K5): gästen (utan konto) kan be om en ny länk till samma adress. *@
+            <form id="plRelink" class="mt-3" novalidate>
+                <label for="plRelinkEmail" class="form-label fw-semibold">Inget konto? Skicka mig en ny länk</label>
+                <div class="d-flex flex-wrap gap-2">
+                    <input type="email" id="plRelinkEmail" name="email" class="form-control" style="max-width:320px" autocomplete="email" placeholder="Din e-postadress" required>
+                    <button type="submit" class="btn btn-primary" id="plRelinkBtn">Skicka en ny länk</button>
+                </div>
+                <div class="form-text">Skriv adressen som inbjudan kom till. Länken skickas bara dit.</div>
+                <div id="plRelinkMsg" class="mt-2" role="status"></div>
+            </form>
+            <script>
+                (function () {
+                    var f = document.getElementById('plRelink');
+                    if (!f) return;
+                    f.addEventListener('submit', function (e) {
+                        e.preventDefault();
+                        var btn = document.getElementById('plRelinkBtn'), msg = document.getElementById('plRelinkMsg');
+                        var tok = document.querySelector('#plApp input[name="__RequestVerificationToken"]');
+                        btn.disabled = true;
+                        fetch('/tavlingsplanering/ny-lank', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok ? tok.value : '' },
+                            body: new URLSearchParams({ email: document.getElementById('plRelinkEmail').value })
+                        }).then(function (r) {
+                            if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Något gick fel.');
+                            return r.json();
+                        }).then(function (j) {
+                            msg.className = 'mt-2 alert ' + (j.success ? 'alert-success' : 'alert-warning');
+                            msg.textContent = j.message || '';
+                        }).catch(function (err) {
+                            msg.className = 'mt-2 alert alert-danger';
+                            msg.textContent = err.message;
+                        }).finally(function () { btn.disabled = false; });
+                    });
+                })();
+            </script>
         </div>
     }
     else

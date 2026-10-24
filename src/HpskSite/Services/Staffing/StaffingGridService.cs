@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using HpskSite.Models.Staffing;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
@@ -28,6 +28,7 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<StaffingGridService> _logger;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProps;
 
         public StaffingGridService(
             StaffingService staffing,
@@ -39,8 +40,10 @@ namespace HpskSite.Services.Staffing
             ClubService clubService,
             IUmbracoContextAccessor umbracoContextAccessor,
             ILogger<StaffingGridService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberPropertyReader memberProps)
         {
+            _memberProps = memberProps;
             _competitions = competitions;
             _staffing = staffing;
             _roles = roles;
@@ -431,15 +434,18 @@ namespace HpskSite.Services.Staffing
             if (memberIds.Count == 0) return result;
 
             var clubNameById = new Dictionary<int, string>();
-            foreach (var mid in memberIds)
+            // Omgång 3 steg 10: EN läsning för hela rutnätet i stället för ett GetById per person.
+            List<HpskSite.Services.MemberPropertyRow> members;
+            try { members = _memberProps.Read(new[] { "primaryClubId" }, memberIds); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Rutnätet: klubbarna kunde inte läsas."); return result; }
+            foreach (var m in members)
             {
+                var mid = m.Id;
                 try
                 {
-                    var m = _memberService.GetById(mid);
-                    // primaryClubId is stored as a STRING on the member type — GetValue<int> returns 0.
-                    // Same read as SearchMembers, which is the proven one.
-                    var raw = m?.GetValue<string>("primaryClubId");
-                    if (string.IsNullOrEmpty(raw) || !int.TryParse(raw, out var clubId) || clubId <= 0) continue;
+                    // primaryClubId is stored as a STRING on the member type — PrimaryClubId parses it.
+                    var clubId = m.PrimaryClubId;
+                    if (clubId <= 0) continue;
                     if (!clubNameById.TryGetValue(clubId, out var name))
                     {
                         name = _clubService.GetClubNameById(clubId) ?? "";

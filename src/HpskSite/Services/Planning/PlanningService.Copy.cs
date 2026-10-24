@@ -41,6 +41,8 @@ namespace HpskSite.Services.Planning
             copy.DoneAtMeetingsOnly = src.DoneAtMeetingsOnly;
             copy.GroupName = src.GroupName;
             copy.CopiedFromPlanningId = src.Id;
+            copy.Parts = src.Parts;               // Omgång 3 steg 10: samma delar som förlagan
+            copy.RolesChosen = src.RolesChosen;
             copy.CreatedBy = i.CopierMemberId; copy.UpdatedBy = i.CopierMemberId;
             db.Update(copy);
 

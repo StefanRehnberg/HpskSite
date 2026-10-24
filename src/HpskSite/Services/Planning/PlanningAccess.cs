@@ -149,12 +149,19 @@ namespace HpskSite.Services.Planning
         public static bool CanCommentOnTask(PlanningCaller c, PlanningTaskRow t) =>
             CanWriteMessages(c) || (c.IsParticipant && t.AssigneeParticipantId == c.ParticipantId);
 
-        /// <summary>Lägga till ett dokument eller en länk: Deltar och uppåt, inloggad.</summary>
-        public static bool CanAddDocument(PlanningCaller c) => CanWriteMessages(c) && !c.ViaLink;
+        /// <summary>
+        /// Omgång 3 steg 10 (K5): via mejllänken arbetar bara en GÄST (utan konto) med dokument — hen har ingen annan
+        /// väg in. Den som har ett konto loggar in, som för allt annat som skriver.
+        /// </summary>
+        private static bool DocumentsViaLinkOk(PlanningCaller c) => !c.ViaLink || c.Participant is { IsGuest: true };
 
-        /// <summary>Ta bort ett dokument: den som lade till det, eller Kan ändra och uppåt.</summary>
+        /// <summary>Lägga till ett dokument eller en länk: Deltar och uppåt; inloggad, eller gäst via länken.</summary>
+        public static bool CanAddDocument(PlanningCaller c) => CanWriteMessages(c) && DocumentsViaLinkOk(c);
+
+        /// <summary>Ta bort ett dokument: den som lade till det, eller Kan ändra och uppåt (en gäst bara sina egna).</summary>
         public static bool CanRemoveDocument(PlanningCaller c, PlanningDocumentRow d) =>
-            c.IsParticipant && !c.ViaLink && (d.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && DocumentsViaLinkOk(c)
+            && (d.AddedBy == c.ParticipantId || (!c.ViaLink && AtLeast(c, PlanningAccessLevel.Editor)));
 
         /// <summary>Ändra namn, beskrivning och kategori på ett dokument: samma som att ta bort det.</summary>
         public static bool CanEditDocument(PlanningCaller c, PlanningDocumentRow d) => CanRemoveDocument(c, d);
@@ -170,7 +177,8 @@ namespace HpskSite.Services.Planning
 
         /// <summary>Ta bort en bifogning: den som bifogade, eller Kan ändra och uppåt. Dokumentet står kvar i arkivet.</summary>
         public static bool CanDetachDocument(PlanningCaller c, PlanningDocumentRefRow r) =>
-            c.IsParticipant && !c.ViaLink && (r.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && DocumentsViaLinkOk(c)
+            && (r.AddedBy == c.ParticipantId || (!c.ViaLink && AtLeast(c, PlanningAccessLevel.Editor)));
 
         /// <summary>Koppla och koppla loss en tävling: den sammankallande (plus tävlingens redigerare, prövas av anroparen).</summary>
         public static bool CanLinkCompetition(PlanningCaller c) => CanManagePlanning(c);

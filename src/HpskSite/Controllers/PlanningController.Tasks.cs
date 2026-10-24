@@ -119,8 +119,8 @@ namespace HpskSite.Controllers
             if (err != null) return No(err);
             var r = _planning.CreateTask(id, x.Caller.ParticipantId, input!, meetingId, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
-            var mailed = await NotifyAssignedAsync(id, r.TaskId, r.NewAssignee, x.Caller);
-            return Ok(new { success = true, taskId = r.TaskId, mailed });
+            var mail = await NotifyAssignedAsync(id, r.TaskId, r.NewAssignee, x.Caller);
+            return Ok(new { success = true, taskId = r.TaskId, mailed = mail == PlanningNotifier.TaskMailOutcome.Sent, mailQueued = mail == PlanningNotifier.TaskMailOutcome.Queued });
         }
 
         [HttpPost]
@@ -145,8 +145,8 @@ namespace HpskSite.Controllers
             };
             var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, input!, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
-            var mailed = await NotifyAssignedAsync(id, taskId, r.NewAssignee, x.Caller);
-            return Ok(new { success = true, mailed });
+            var mail = await NotifyAssignedAsync(id, taskId, r.NewAssignee, x.Caller);
+            return Ok(new { success = true, mailed = mail == PlanningNotifier.TaskMailOutcome.Sent, mailQueued = mail == PlanningNotifier.TaskMailOutcome.Queued });
         }
 
         /// <summary>Den ansvarige: läget (fram till Klar att pröva) och en rad om hur det går.</summary>
@@ -320,11 +320,11 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>Mejl till den som fått uppgiften — inte till den som gav sig själv den.</summary>
-        private async Task<bool> NotifyAssignedAsync(int planningId, int taskId, int? assignee, PlanningCaller by)
+        private async Task<PlanningNotifier.TaskMailOutcome> NotifyAssignedAsync(int planningId, int taskId, int? assignee, PlanningCaller by)
         {
-            if (!(assignee > 0) || assignee == by.ParticipantId) return false;
-            try { return await _notify.TaskAssignedAsync(planningId, taskId, assignee!.Value, by.Participant); }
-            catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: uppgift {Task} kunde inte aviseras.", planningId, taskId); return false; }
+            if (!(assignee > 0) || assignee == by.ParticipantId) return PlanningNotifier.TaskMailOutcome.None;
+            try { return await _notify.TaskAssignedOutcomeAsync(planningId, taskId, assignee!.Value, by.Participant); }
+            catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: uppgift {Task} kunde inte aviseras.", planningId, taskId); return PlanningNotifier.TaskMailOutcome.None; }
         }
 
         // ---------------------------------------------------------------- "Att prata om"

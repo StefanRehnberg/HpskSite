@@ -255,7 +255,9 @@
         { key: 'meddelanden', label: 'Meddelanden', need: s => s.me.canReadMessages },
         { key: 'moten', label: 'Möten' },
         { key: 'uppgifter', label: 'Uppgifter' },
-        { key: 'beslut', label: 'Förslag och beslut' },
+        // Omgång 3 steg 10: Förslag och beslut syns när det finns något, eller när delen slagits på under Åtgärder.
+        // hashOk: en länk (#vy=beslut) öppnar delen även när rälsen döljer den — sidans läge kan vara äldre än förslaget.
+        { key: 'beslut', label: 'Förslag och beslut', need: s => !s.planning.parts || s.planning.parts.decisions, hashOk: true },
         { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
         // Omgång 2: vägen till tävlingen — ansökan till kretsen, tävlingen som skapas, och kopplingen. Den som deltar
@@ -323,6 +325,24 @@
                 + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
     }
 
+    // Omgång 3 steg 10 (progressivt avslöjande): Åtgärder slår på en del som inte visas än — och av igen så länge den är tom.
+    function partActions() {
+        const pt = S.planning.parts;
+        if (!pt || !S.me.canEdit || TOKEN) return [];
+        const out = [];
+        if (!pt.decisions) out.push({ label: 'Visa Förslag och beslut', icon: 'bi-plus-lg', fn: () => setPart('beslut', true, 'beslut') });
+        else if (pt.decisionsOn && !pt.decisionsHasContent) out.push({ label: 'Dölj Förslag och beslut (tomt)', icon: 'bi-eye-slash', fn: () => setPart('beslut', false) });
+        if (!pt.surplus) out.push({ label: 'Visa Överskottet', icon: 'bi-plus-lg', fn: () => setPart('overskott', true, 'tavling') });
+        else if (pt.surplusOn && !pt.surplusHasContent) out.push({ label: 'Dölj Överskottet (tomt)', icon: 'bi-eye-slash', fn: () => setPart('overskott', false) });
+        return out;
+    }
+    async function setPart(part, on, then) {
+        const r = await post('SetPart', { part, on: on ? '1' : '0' });
+        if (!r.success) { failMsg(r); return; }
+        await reloadPeople();
+        if (then) go(then); else { renderRail(); render(view); }
+    }
+
     function myOpenTasks() {
         if (!TASKS) return S ? (S.me.openTasks || 0) : 0;
         return TASKS.tasks.filter(t => t.mine && t.status !== 'Done').length;
@@ -358,7 +378,7 @@
 
     function render(v) {
         if (!S) return;
-        const allowed = VIEWS.filter(x => !x.href && (!x.need || x.need(S))).map(x => x.key).concat(['mote']);
+        const allowed = VIEWS.filter(x => !x.href && (!x.need || x.need(S) || x.hashOk)).map(x => x.key).concat(['mote']);
         view = allowed.includes(v) ? v : 'oversikt';
         if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
         if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
@@ -416,6 +436,8 @@
             // Hela planen på papper: bemanning, förberedelser och (när planeringen är kopplad) dagsprogrammet.
             S.me.canEdit && !TOKEN && { label: 'Skriv ut hela planen', icon: 'bi-printer',
                 fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
+            // Omgång 3 steg 10: delar som inte visas förrän de behövs.
+            ...partActions(),
         ] : []);
         const p = S;
         const html = [];
@@ -607,7 +629,7 @@
         if (A) html.push(applicationCard(A), applicationHistory());
         html.push(staffsForCardHtml());
         // P4: överskottets fördelning — för den som kan ändra planeringen.
-        if (S.me.canEdit && !TOKEN) html.push('<div id="plSurplusWrap"></div>');
+        if (S.me.canEdit && !TOKEN && (!S.planning.parts || S.planning.parts.surplus)) html.push('<div id="plSurplusWrap"></div>');
         $('plBody').innerHTML = html.join('');
         loadSurplus();
         const sf = $('plStaffsFor');
@@ -1752,6 +1774,7 @@
                 await reloadTasks();
                 rerender();
                 if (r.mailed) showMsg('Den som fick uppgiften har fått ett mejl.', 'success');
+                else if (r.mailQueued) showMsg('Den som fick uppgiften har redan fått ett mejl i dag — hen får ett samlat mejl om sina nya uppgifter om en stund.', 'success');
                 return true;
             }
         });
@@ -2059,7 +2082,7 @@
     // uppgift eller ett område. Alla som är med läser alla dokument.
     async function reloadDocs() { const r = await get('Documents'); if (r.success) DOCS = r; }
     function docById(id) { return DOCS ? DOCS.documents.find(d => d.id === id) : null; }
-    function canAddDocs() { return !!(DOCS && DOCS.canAdd && !TOKEN); }
+    function canAddDocs() { return !!(DOCS && DOCS.canAdd); }
     function refsOn(kind, id) {
         const out = [];
         if (!DOCS) return out;
@@ -2087,7 +2110,7 @@
         if (!items.length && !gone.length) return '';
         return `<div class="pl-docs">${items.map(({ doc, ref }) => `<span class="pl-doc"><i class="bi ${docIcon(doc)}" aria-hidden="true"></i>
                 <a href="${esc(doc.url)}" target="_blank" rel="noopener" title="${esc(doc.title)}">${esc(doc.title)}</a>
-                ${ref.canDetach && !TOKEN ? `<button type="button" class="pl-noprint" data-doc-detach="${ref.refId}" title="Ta bort bifogningen" aria-label="Ta bort bifogningen av ${esc(doc.title)}">✕</button>` : ''}</span>`).join('')}
+                ${ref.canDetach ? `<button type="button" class="pl-noprint" data-doc-detach="${ref.refId}" title="Ta bort bifogningen" aria-label="Ta bort bifogningen av ${esc(doc.title)}">✕</button>` : ''}</span>`).join('')}
             ${gone.map(r => `<span class="pl-doc gone"><i class="bi bi-file-earmark-x" aria-hidden="true"></i>Borttaget dokument
                 ${!TOKEN && DOCS.canManageCategories ? `<button type="button" class="pl-noprint" data-doc-detach="${r.refId}" aria-label="Ta bort raden">✕</button>` : ''}</span>`).join('')}</div>`;
     }
@@ -2198,10 +2221,10 @@
         const where = d.refs.filter(r => !r.gone);
         const menu = rowMenu([
             { label: d.isFile ? 'Öppna filen' : 'Öppna länken', fn: () => window.open(d.url, '_blank', 'noopener') },
-            d.canEdit && !TOKEN && { label: 'Ändra namn, beskrivning och kategori…', fn: () => openDocEdit(d) },
+            d.canEdit && { label: 'Ändra namn, beskrivning och kategori…', fn: () => openDocEdit(d) },
             canAddDocs() && { label: 'Bifoga på ett möte eller en uppgift…', fn: () => openAttachFromDoc(d) },
-            d.canRemove && !TOKEN && { divider: true },
-            d.canRemove && !TOKEN && { label: 'Ta bort dokumentet…', danger: true, fn: () => removeDoc(d) },
+            d.canRemove && { divider: true },
+            d.canRemove && { label: 'Ta bort dokumentet…', danger: true, fn: () => removeDoc(d) },
         ]);
         return `<div class="pl-docrow"><i class="bi ${docIcon(d)} fs-4 text-secondary" aria-hidden="true"></i>
             <div class="flex-grow-1 min-w-0"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="fw-semibold">${esc(d.title)}</a>
@@ -2479,6 +2502,7 @@
                 await reloadTasks(); rerender();
                 $('ntTitle' + meetingId)?.focus();
                 if (r.mailed) showMsg('Uppgiften är tillagd och den som fick den har fått ett mejl.', 'success');
+                else if (r.mailQueued) showMsg('Uppgiften är tillagd. Den som fick den får ett samlat mejl om sina nya uppgifter om en stund.', 'success');
             } else if (b.dataset.topicAdd) {
                 const inp = $('plTopic' + meetingId); const text = inp ? inp.value.trim() : '';
                 if (!text) { inp?.focus(); return; }

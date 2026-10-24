@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using HpskSite.Models.Staffing;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
@@ -27,6 +27,7 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<CompetitionPeopleService> _logger;
         private readonly MemberClubService _memberClubs;
         private readonly Umbraco.Cms.Core.Web.IUmbracoContextAccessor _umbraco;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProps;
 
         public CompetitionPeopleService(
             StaffingService staffing,
@@ -37,8 +38,10 @@ namespace HpskSite.Services.Staffing
             ClubService clubService,
             ILogger<CompetitionPeopleService> logger,
             MemberClubService memberClubs,
-            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbraco)
+            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbraco,
+            HpskSite.Services.MemberPropertyReader memberProps)
         {
+            _memberProps = memberProps;
             _memberClubs = memberClubs;
             _umbraco = umbraco;
             _staffing = staffing;
@@ -222,16 +225,18 @@ namespace HpskSite.Services.Staffing
             }
 
             // ---------- 5. finalise: contact details, club, state rollup ----------
+            // Omgång 3 steg 10: medlemmarnas kontakt och klubbar i EN läsning, inte ett GetById per person.
+            var members = ReadMembers(byKey.Values.Where(r => r.MemberId is > 0).Select(r => r.MemberId!.Value));
             foreach (var row in byKey.Values)
             {
                 row.PrepOpenCount = row.Prep.Count(p => !string.Equals(p.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase));
                 row.PrepOverdueCount = row.Prep.Count(p => p.IsOverdue);
                 row.ReadOnly = row.Assignments.Count > 0 && row.Assignments.All(a => a.ReadOnly);
 
-                if (row.MemberId is > 0) EnrichFromMember(row);
+                if (row.MemberId is > 0 && members.TryGetValue(row.MemberId.Value, out var m)) EnrichFromMember(row, m);
                 (row.State, row.StatePriority) = RollUpState(row);
             }
-            FinishRepresents(byKey.Values.ToList(), resp);
+            FinishRepresents(byKey.Values.ToList(), resp, members);
 
             resp.People = byKey.Values
                 .OrderBy(p => p.StatePriority)
@@ -378,7 +383,8 @@ namespace HpskSite.Services.Staffing
         /// Förvalet är medlemmens huvudklubb; en person utan konto har inget förval men kan väljas till de föreningar
         /// som andra i bemanningen ställer upp för. Ett fel här får aldrig fälla personlistan.
         /// </summary>
-        private void FinishRepresents(List<CompetitionPersonRow> rows, CompetitionPeopleResponse resp)
+        private void FinishRepresents(List<CompetitionPersonRow> rows, CompetitionPeopleResponse resp,
+            Dictionary<int, HpskSite.Services.MemberPropertyRow> members)
         {
             try
             {
@@ -393,18 +399,14 @@ namespace HpskSite.Services.Staffing
                 }
                 foreach (var row in rows)
                 {
-                    if (row.MemberId is > 0)
+                    if (row.MemberId is > 0 && members.TryGetValue(row.MemberId.Value, out var m))
                     {
-                        var m = _memberService.GetById(row.MemberId.Value);
-                        if (m != null)
-                        {
-                            var clubs = _memberClubs.GetAllClubIds(m);
-                            foreach (var c in clubs) row.RepresentChoices.Add(new RepresentChoice { Type = "club", Id = c, Name = Name("club", c) });
-                            foreach (var reg in clubs.Select(RegionIdOfClub).Where(r => r > 0).Distinct())
-                                row.RepresentChoices.Add(new RepresentChoice { Type = "region", Id = reg, Name = Name("region", reg) });
-                            if (row.RepresentsId == null && _memberClubs.GetPrimaryClubId(m) is var pc && pc > 0)
-                            { row.RepresentsType = "club"; row.RepresentsId = pc; row.RepresentsIsDefault = true; }
-                        }
+                        var clubs = m.AllClubIds;
+                        foreach (var c in clubs) row.RepresentChoices.Add(new RepresentChoice { Type = "club", Id = c, Name = Name("club", c) });
+                        foreach (var reg in clubs.Select(RegionIdOfClub).Where(r => r > 0).Distinct())
+                            row.RepresentChoices.Add(new RepresentChoice { Type = "region", Id = reg, Name = Name("region", reg) });
+                        if (row.RepresentsId == null && m.PrimaryClubId is var pc && pc > 0)
+                        { row.RepresentsType = "club"; row.RepresentsId = pc; row.RepresentsIsDefault = true; }
                     }
                     if (row.RepresentsId > 0) row.RepresentsName = Name(row.RepresentsType!, row.RepresentsId.Value);
                     row.RepresentChoices = row.RepresentChoices.Where(c => c.Name.Length > 0).GroupBy(c => c.Type + c.Id).Select(g => g.First()).ToList();
@@ -439,17 +441,29 @@ namespace HpskSite.Services.Staffing
             return r.Value<string>("regionName") is { Length: > 0 } n ? n : r.Name ?? "";
         }
 
-        private void EnrichFromMember(CompetitionPersonRow row)
+        /// <summary>Kontakt och klubbar för personlistans medlemmar, i en läsning. Ett fel ger en tom karta.</summary>
+        private Dictionary<int, HpskSite.Services.MemberPropertyRow> ReadMembers(IEnumerable<int> ids)
         {
             try
             {
-                var m = _memberService.GetById(row.MemberId!.Value);
-                if (m == null) return;
+                return _memberProps.Read(new[] { "phoneNumber", "primaryClubId", "memberClubIds" }, ids)
+                    .ToDictionary(m => m.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "People: medlemmarnas kontaktuppgifter kunde inte läsas.");
+                return new Dictionary<int, HpskSite.Services.MemberPropertyRow>();
+            }
+        }
+
+        private void EnrichFromMember(CompetitionPersonRow row, HpskSite.Services.MemberPropertyRow m)
+        {
+            try
+            {
                 if (string.IsNullOrWhiteSpace(row.Email)) row.Email = m.Email;
-                if (string.IsNullOrWhiteSpace(row.Phone) && m.HasProperty("phoneNumber"))
-                    row.Phone = m.GetValue<string>("phoneNumber");
-                var pcid = m.GetValue<string>("primaryClubId");
-                if (!string.IsNullOrEmpty(pcid) && int.TryParse(pcid, out var clubId))
+                if (string.IsNullOrWhiteSpace(row.Phone) && m.Get("phoneNumber") is { Length: > 0 } phone)
+                    row.Phone = phone;
+                if (m.PrimaryClubId is var clubId && clubId > 0)
                     // Same abbreviation as the grid — a person's club must read identically in the cell,
                     // the person panel and the printout.
                     row.ClubName = HpskSite.Helpers.ClubNameHelper.Shorten(_clubService.GetClubNameById(clubId) ?? "");

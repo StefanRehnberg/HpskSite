@@ -13,6 +13,29 @@ namespace HpskSite.Models.Planning
     // ============================================================================================
 
     /// <summary>
+    /// Omgång 3 steg 10 (Expertgruppen avsnitt 5, progressivt avslöjande): delar som inte visas förrän de har innehåll eller
+    /// slås på via Åtgärder — en liten klubbs planering börjar med det den behöver.
+    /// </summary>
+    public static class PlanningParts
+    {
+        public const string Decisions = "beslut";
+        public const string Surplus = "overskott";
+        public static readonly string[] All = { Decisions, Surplus };
+
+        public static bool Has(string? parts, string part) =>
+            (parts ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(part, StringComparer.OrdinalIgnoreCase);
+
+        public static string With(string? parts, string part, bool on)
+        {
+            var set = (parts ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(p => All.Contains(p, StringComparer.OrdinalIgnoreCase)).ToList();
+            set.RemoveAll(p => string.Equals(p, part, StringComparison.OrdinalIgnoreCase));
+            if (on) set.Add(part);
+            return string.Join(",", set.OrderBy(p => Array.IndexOf(All, p)));
+        }
+    }
+
+    /// <summary>
     /// Planeringens slag. Lagras som text — byt aldrig en befintlig sträng. ⚠️ Frågas inte längre
     /// (Stefan 2026-10-22): valet ändrade ingenting, så nya planeringar får <see cref="Group"/>. Kolumnen
     /// står kvar för den dag ett slag faktiskt styr något (t.ex. mallar för SM).
@@ -165,6 +188,12 @@ namespace HpskSite.Models.Planning
         /// <summary>Får medlemmen välja roll när hen anmäler sig till bemanningen? Av = bara dagen
         /// ("var det behövs"). Stefan 2026-10-23: en inställning, förval på.</summary>
         public bool SignupRoleChoice { get; set; } = true;
+        /// <summary>Omgång 3 steg 10 (progressivt avslöjande): har arrangören valt bemanningens roller? Innan dess visar
+        /// rutnätet bara roller med innehåll och erbjuder "Välj roller".</summary>
+        public bool RolesChosen { get; set; }
+        /// <summary>Omgång 3 steg 10: delar som slagits på via Åtgärder, kommaseparerat (<see cref="PlanningParts"/>).
+        /// En del med innehåll syns ändå.</summary>
+        public string? Parts { get; set; }
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         /// <summary>

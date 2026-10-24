@@ -387,6 +387,8 @@ namespace HpskSite.Controllers
                     subPlannings = SubPlanningsJson(x.Planning, c, x.MemberId),
                     // Omgång 3: familjens tävlingar och "Bemannar för".
                     family = FamilyJson(x.Planning),
+                    // Omgång 3 steg 10 (progressivt avslöjande): delar som visas först när de har innehåll eller slagits på.
+                    parts = PartsJson(x.Planning),
                 },
                 me = new
                 {
@@ -1278,7 +1280,17 @@ namespace HpskSite.Controllers
             var now = ParseDateTime(asOf) ?? DateTime.Now;
             var scopes = HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>();
             var r = await PlanningNotificationHostedService.RunOnceAsync(scopes, now, _logger);
-            return Json(new { success = true, ran = r != null, digests = r?.Digests, pushes = r?.Pushes, meetingReminders = r?.MeetingReminders, voteReminders = r?.VoteReminders });
+            return Json(new { success = true, ran = r != null, digests = r?.Digests, pushes = r?.Pushes, meetingReminders = r?.MeetingReminders, voteReminders = r?.VoteReminders, taskBatches = r?.TaskBatches });
+        }
+
+        /// <summary>Sajtadmin: kör rensningen av borttagna planeringar nu, med en vald tid (samma som dygnssvepet).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RunPurgeNow(string? asOf)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return No("Bara sajtadministratören.");
+            var r = await HttpContext.RequestServices.GetRequiredService<PlanningPurgeService>().PurgeAsync(ParseDateTime(asOf) ?? DateTime.Now);
+            return Json(new { success = true, plannings = r.Plannings, files = r.Files });
         }
     }
 }

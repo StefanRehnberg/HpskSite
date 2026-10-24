@@ -72,7 +72,10 @@ namespace HpskSite.Tests.Services
             PlanningAccess.CanRemoveDocument(Caller(PlanningAccessLevel.Participant), d).Should().BeTrue();
             PlanningAccess.CanRemoveDocument(Caller(PlanningAccessLevel.Participant, pid: 8), d).Should().BeFalse();
             PlanningAccess.CanRemoveDocument(Caller(PlanningAccessLevel.Editor, pid: 8), d).Should().BeTrue();
-            PlanningAccess.CanRemoveDocument(Caller(PlanningAccessLevel.Editor, viaLink: true), d).Should().BeFalse();
+            // Omgång 3 steg 10: via länken tar bara en GÄST bort, och bara sina egna (PlanningStep10Tests).
+            // En medlem med konto loggar in.
+            PlanningAccess.CanRemoveDocument(new PlanningCaller(new PlanningMemberRow { Id = 7, PlanningId = 1, MemberId = 70,
+                Access = PlanningAccessLevel.Editor }, true), d).Should().BeFalse();
         }
 
         [Theory]

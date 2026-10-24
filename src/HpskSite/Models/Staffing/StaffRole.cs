@@ -253,6 +253,31 @@ namespace HpskSite.Models.Staffing
         public List<GridClash> Clashes { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>
         public List<GridClash> FamilyClashes { get; set; } = new();
+        /// <summary>
+        /// Omgång 3 steg 10: planeringens roller är inte valda än. Rutnätet visar då bara roller med folk, behov eller
+        /// arrangörens egna, och ber om ett val ur <see cref="RoleChoices"/>.
+        /// </summary>
+        public bool RoleChoicePending { get; set; }
+        /// <summary>Grenens inbyggda roller för "Välj roller" (bara för en planering).</summary>
+        public List<GridRoleChoice> RoleChoices { get; set; } = new();
+    }
+
+    public class GridRoleChoice
+    {
+        public string Key { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        /// <summary>Förvalt i dialogen: framme i rutnätet (eller, före valet, med folk eller behov).</summary>
+        public bool Chosen { get; set; }
+        /// <summary>Har folk — kan inte döljas.</summary>
+        public bool HasCrew { get; set; }
+    }
+
+    /// <summary>Omgång 3 steg 10: "Välj roller" — de inbyggda rollerna som ska vara framme.</summary>
+    public class ChooseStaffRolesRequest
+    {
+        public int CompetitionId { get; set; }
+        public List<string> Keys { get; set; } = new();
     }
 
     public class GridClash
