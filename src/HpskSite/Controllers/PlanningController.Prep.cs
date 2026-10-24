@@ -151,6 +151,33 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Omgång 2, rälsposten Tävlingen: tävlingar planeringen kan kopplas till — kommande tävlingar i klubbarna som
+        /// någon i planeringen företräder, som den som frågar får redigera och som inte redan har en planering.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> LinkableCompetitions(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanLinkCompetition(x.Caller) || x.Caller.ViaLink) return No("Planeringen kopplas av den sammankallande.");
+            if (_planning.LinkFor(id) != null) return No("Planeringen är redan kopplad till en tävling.");
+            var clubs = BoardTargets(id).Where(t => t.OwnerType == Models.DocumentOwnerType.Club).ToDictionary(t => t.OwnerId, t => t.Name);
+            var from = DateTime.Today.AddDays(-7);
+            // Närmast planeringens datum först (en planering för 2028 ska inte få höstens tävlingar överst).
+            var anchor = x.Planning.TargetStart ?? DateTime.Today;
+            var list = new List<object>();
+            foreach (var c in _competitions.List()
+                         .Where(c => c.ClubId > 0 && clubs.ContainsKey(c.ClubId) && c.CompetitionDate >= from)
+                         .OrderBy(c => Math.Abs((c.CompetitionDate!.Value - anchor).TotalDays)).ThenBy(c => c.CompetitionDate).Take(80))
+            {
+                if (_planning.ForCompetition(c.Id) != null || !await _auth.CanEditCompetitionAsync(c.Id)) continue;
+                list.Add(new { id = c.Id, name = c.DisplayName, date = D(c.CompetitionDate), club = clubs[c.ClubId] });
+                if (list.Count >= 30) break;
+            }
+            return Ok(new { success = true, competitions = list });
+        }
+
+        /// <summary>
         /// P2b: bemanningen har bytt tävling (StaffingPlanningLink körde i kopplingens transaktion). Speglingarna
         /// till tävlingen räknas om — tävlingsansvariga och stationschefer — och en kopplad planering får
         /// tävlingens dagar i bemanningen. Körs efter transaktionen: speglingarna skrivs genom tävlingslagringen.

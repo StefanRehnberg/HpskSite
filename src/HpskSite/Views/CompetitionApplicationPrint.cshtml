@@ -1,0 +1,97 @@
+@model HpskSite.Models.Kretsgranskning.CompetitionApplicationPrintModel
+@using System.Globalization
+@*
+    Ansökan på papper (omgång 2) — det kretsen ser, kretsens svar och historiken.
+    Öppnas från planeringens rälspost Tävlingen (Åtgärder → Skriv ut ansökan).
+*@
+@{
+    Layout = null;
+    var ci = CultureInfo.GetCultureInfo("sv-SE");
+    var a = Model.App;
+    string Day(DateTime? d) => d.HasValue ? d.Value.ToString("d MMMM yyyy", ci) : "";
+    var dates = Day(a.CompetitionDate) + (a.EndDate.HasValue && a.EndDate.Value.Date != a.CompetitionDate.Date ? " – " + Day(a.EndDate) : "");
+    var place = string.Join(" · ", new[] { Model.RangeName, a.Place }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
+    var medals = a.AwardsStandardMedals == true ? "Ja, standardmedaljer ges" : a.AwardsStandardMedals == false ? "Nej" : "Ej angivet";
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ansökan – @a.Name</title>
+    <style>
+        body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 24px; background: #fff; }
+        .wrap { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin: 0 0 .2rem; }
+        h2 { font-size: 1.1rem; margin: 1.4rem 0 .5rem; border-bottom: 2px solid #333; padding-bottom: .2rem; }
+        .meta { color: #555; margin-bottom: 1rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; vertical-align: top; font-size: .92rem; }
+        th { width: 34%; color: #444; font-weight: 600; }
+        .pill { display: inline-block; font-size: .78rem; padding: 1px 8px; border: 1px solid #999; border-radius: 10px; }
+        .note { white-space: pre-wrap; }
+        .muted { color: #777; }
+        .toolbar { margin-bottom: 1rem; display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn { display: inline-block; padding: 8px 16px; background: #0d6efd; color: #fff; border: 0; border-radius: 6px; text-decoration: none; cursor: pointer; font-size: .95rem; }
+        .btn.secondary { background: #6c757d; }
+        @@media (max-width: 560px) { body { padding: 16px; } th { width: 40%; } }
+        @@media print { .toolbar { display: none; } body { padding: 0; } }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="toolbar">
+        <button type="button" class="btn" onclick="window.print()">Skriv ut</button>
+        <button type="button" class="btn secondary" onclick="window.close()">Stäng</button>
+    </div>
+    <h1>Ansökan: @a.Name</h1>
+    <div class="meta">@Model.ClubName söker hos @Model.RegionName · <span class="pill" id="capStatus">@Model.StatusLabel</span>@if (a.SubmittedAt.HasValue) {<text> · inskickad @Day(a.SubmittedAt)</text>}</div>
+
+    <h2>Tävlingen</h2>
+    <table>
+        <tr><th>Söks som</th><td>@Model.LevelLabel</td></tr>
+        <tr><th>Gren</th><td>@Model.DisciplineLabel</td></tr>
+        <tr><th>Datum</th><td>@dates@if (a.GrantedDate.HasValue && a.GrantedDate.Value.Date != a.CompetitionDate.Date) {<text> <span class="muted">(Förbundet har beviljat @Day(a.GrantedDate))</span></text>}</td></tr>
+        @if (a.ReserveDate.HasValue) { <tr><th>Reservdatum</th><td>@Day(a.ReserveDate)</td></tr> }
+        <tr><th>Plats</th><td>@(place.Length > 0 ? place : "Ej angivet")</td></tr>
+        @if (a.NumberOfSeries is > 0) { <tr><th>Antal @Model.SeriesWord</th><td>@a.NumberOfSeries</td></tr> }
+        <tr><th>Mästerskap</th><td>@(string.IsNullOrWhiteSpace(a.ChampionshipScope) ? "Nej" : a.ChampionshipScope)</td></tr>
+        <tr><th>Standardmedaljer</th><td>@medals</td></tr>
+        @if (!string.IsNullOrWhiteSpace(a.Classes)) { <tr><th>Preliminära klasser</th><td>@a.Classes</td></tr> }
+    </table>
+
+    <h2>Kontaktperson</h2>
+    <table>
+        <tr><th>Namn</th><td>@a.ContactName</td></tr>
+        @if (!string.IsNullOrWhiteSpace(a.ContactEmail)) { <tr><th>E-post</th><td>@a.ContactEmail</td></tr> }
+        @if (!string.IsNullOrWhiteSpace(a.ContactPhone)) { <tr><th>Telefon</th><td>@a.ContactPhone</td></tr> }
+    </table>
+
+    @if (!string.IsNullOrWhiteSpace(a.Note))
+    {
+        <h2>Meddelande till kretsen</h2>
+        <div class="note">@a.Note</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(a.CompletionRequest) || !string.IsNullOrWhiteSpace(a.KretsOpinion) || !string.IsNullOrWhiteSpace(a.DecisionText))
+    {
+        <h2>Kretsens svar</h2>
+        <table>
+            @if (!string.IsNullOrWhiteSpace(a.CompletionRequest)) { <tr><th>Kretsen bad om</th><td class="note">@a.CompletionRequest</td></tr> }
+            @if (!string.IsNullOrWhiteSpace(a.CompletionReply)) { <tr><th>Klubbens svar</th><td class="note">@a.CompletionReply</td></tr> }
+            @if (!string.IsNullOrWhiteSpace(a.KretsOpinion)) { <tr><th>Kretsens yttrande</th><td class="note">@a.KretsOpinion@(string.IsNullOrWhiteSpace(a.KretsOpinionText) ? "" : ": " + a.KretsOpinionText)</td></tr> }
+            @if (!string.IsNullOrWhiteSpace(a.DecisionText)) { <tr><th>Beslut</th><td class="note">@a.DecisionText@if (!string.IsNullOrWhiteSpace(a.DeciderName)) {<text> <span class="muted">(@a.DeciderName@(string.IsNullOrWhiteSpace(a.DeciderRole) ? "" : ", " + a.DeciderRole)@(a.DecidedAt.HasValue ? ", " + Day(a.DecidedAt) : ""))</span></text>}</td></tr> }
+        </table>
+    }
+
+    <h2>Historik</h2>
+    <table id="capHistory">
+        @foreach (var e in Model.Events)
+        {
+            <tr><th>@e.At.ToString("yyyy-MM-dd HH:mm")</th><td><b>@e.Label</b>@(e.ByName.Length > 0 ? " · " + e.ByName : "")@if (!string.IsNullOrWhiteSpace(e.Text)) {<div class="note">@e.Text</div>}</td></tr>
+        }
+    </table>
+    <p class="muted" style="margin-top:1.4rem">Utskriven @DateTime.Now.ToString("d MMMM yyyy", ci) från pistol.nu.</p>
+</div>
+</body>
+</html>

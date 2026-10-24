@@ -172,6 +172,21 @@ namespace HpskSite.Services.Kretsgranskning
             return Transition(a, CompetitionApplicationStatus.Aterkallad, actorId, actorName, CompetitionApplicationEventKind.Withdrawn, Trim(reason));
         }
 
+        /// <summary>Tar bort ett utkast som aldrig skickats in, med dess händelser (<see cref="CompetitionApplicationRules.ClubCanDelete"/>).</summary>
+        public string? DeleteDraft(int id)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var a = db.SingleOrDefaultById<CompetitionApplication>(id);
+            if (a == null) return "Ansökan hittades inte.";
+            if (!CompetitionApplicationRules.ClubCanDelete(a))
+                return "Bara ett utkast som aldrig skickats in kan tas bort. Återkalla ansökan i stället — då ser kretsen det.";
+            db.Execute("DELETE FROM CompetitionApplicationEvent WHERE ApplicationId = @0", id);
+            db.Execute("DELETE FROM CompetitionApplication WHERE Id = @0", id);
+            scope.Complete();
+            return null;
+        }
+
         /// <summary>Kretsen ber om komplettering. Texten är obligatorisk — den är vad klubben ska göra.</summary>
         public (CompetitionApplication? App, string? Error) RequestCompletion(int id, string text, KretsDecider who)
         {

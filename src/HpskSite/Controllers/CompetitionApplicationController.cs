@@ -140,19 +140,26 @@ namespace HpskSite.Controllers
         });
 
         /// <summary>En ansökan med händelselogg — för klubben eller kretsen.</summary>
+        /// <param name="asClub">Planeringens rälspost Tävlingen (omgång 2) läser alltid som klubben: den som både
+        /// administrerar klubben och kretsen (t.ex. sajtadministratören) får klubbens knappar där.</param>
         [HttpGet]
-        public async Task<IActionResult> GetApplication(int id)
+        public async Task<IActionResult> GetApplication(int id, bool asClub = false)
         {
             var a = _apps.Get(id);
             if (a == null) return Json(new { success = false, message = "Ansökan hittades inte." });
             var club = await CanClubAsync(a.ClubId, a.RegionId);
             var krets = (await KretsAuthorityAsync(a.RegionId)).Allowed;
-            if (!club && !krets) return Json(new { success = false, message = "Åtkomst nekad" });
+            if (!club && !krets)
+            {
+                // Omgång 2: planeringens deltagare läser ansökan som planeringen gjort, men ändrar den inte.
+                var reader = await CurrentMemberAsync();
+                if (reader == null || !PlanningReader(a, reader.Id)) return Json(new { success = false, message = "Åtkomst nekad" });
+            }
             await PrimeRangesAsync(new[] { a });
             return Json(new
             {
                 success = true,
-                application = Dto(a, forClub: club && !krets),
+                application = Dto(a, forClub: club && (!krets || asClub)),
                 events = _apps.Events(id).Select(e => new { at = e.At.ToString("yyyy-MM-dd HH:mm"), e.Kind, kindLabel = EventLabel(e.Kind), byName = e.ByName ?? "", e.Text }),
                 canKrets = krets,
                 canClub = club
@@ -307,6 +314,74 @@ namespace HpskSite.Controllers
             if (saved == null) return Json(new { success = false, message = err });
             _calendar.Invalidate();
             return Json(new { success = true, message = "Ansökan är återkallad." });
+        }
+
+        /// <summary>Tar bort ett utkast som aldrig skickats in (omgång 2). En inskickad ansökan återkallas i stället.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteApplication(int id)
+        {
+            var (a, me, deny) = await ClubActionAsync(id);
+            if (deny != null) return deny;
+            var err = _apps.DeleteDraft(id);
+            if (err != null) return Json(new { success = false, message = err });
+            _calendar.Invalidate();
+            return Json(new { success = true, message = "Utkastet är borttaget." });
+        }
+
+        /// <summary>
+        /// Ansökan på papper (omgång 2): allt kretsen ser, kretsens svar och historiken. Samma läsrätt som
+        /// <see cref="GetApplication"/>.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PrintApplication(int id)
+        {
+            var a = _apps.Get(id);
+            if (a == null) return NotFound();
+            var me = await CurrentMemberAsync();
+            if (me == null) return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString("/umbraco/surface/CompetitionApplication/PrintApplication?id=" + id)}");
+            if (!await CanClubAsync(a.ClubId, a.RegionId) && !(await KretsAuthorityAsync(a.RegionId)).Allowed && !PlanningReader(a, me.Id))
+                return StatusCode(403);
+            await PrimeRangesAsync(new[] { a });
+            return View("~/Views/CompetitionApplicationPrint.cshtml", new CompetitionApplicationPrintModel
+            {
+                App = a,
+                ClubName = a.ClubId > 0 ? (_clubs.GetClubNameById(a.ClubId) ?? "") : RegionName(a.RegionId),
+                RegionName = RegionName(a.RegionId),
+                LevelLabel = CompetitionLevel.Find(a.Level)?.Label ?? a.Level,
+                DisciplineLabel = ActivityDiscipline.Label(a.Discipline),
+                StatusLabel = CompetitionApplicationStatus.Label(a.Status),
+                RangeName = a.RangeId is int rid && _rangeLabels.TryGetValue(rid, out var rl) ? rl : null,
+                SeriesWord = CompetitionApplicationRules.SeriesWord(a.Discipline),
+                Events = _apps.Events(id).Select(e => new CompetitionApplicationPrintModel.Event(e.At, EventLabel(e.Kind), e.ByName ?? "", e.Text)).ToList(),
+            });
+        }
+
+        /// <summary>
+        /// Omgång 2: den som är med i planeringen ansökan gjordes ur läser den (i planeringens rälspost Tävlingen),
+        /// även utan att administrera klubben. Ändra, skicka in och svara kräver fortfarande klubbens rätt.
+        /// </summary>
+        /// <summary>Namnet på planeringen ansökan gjordes ur — klubbens lista visar "Från planeringen …".</summary>
+        private string? PlanningName(int? planningId)
+        {
+            if (planningId is not > 0) return null;
+            try { return HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Planning.PlanningService>().Get(planningId.Value)?.Name; }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: namnet kunde inte läsas.", planningId); return null; }
+        }
+
+        private bool PlanningReader(CompetitionApplication a, int memberId)
+        {
+            if (a.PlanningId is not > 0) return false;
+            try
+            {
+                var plans = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Planning.PlanningService>();
+                return plans.ParticipantForMember(a.PlanningId.Value, memberId) is { IsActive: true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Ansökan {Id}: planeringens deltagare kunde inte läsas.", a.Id);
+                return false;
+            }
         }
 
         [HttpPost]
@@ -1101,6 +1176,9 @@ namespace HpskSite.Controllers
             canWithdraw = forClub && CompetitionApplicationRules.ClubCanWithdraw(a.Status) && a.CompetitionId is null or <= 0,
             canReply = forClub && a.Status == CompetitionApplicationStatus.Komplettering,
             canCreateCompetition = forClub && CompetitionApplicationRules.CanCreateCompetition(a),
+            canDelete = forClub && CompetitionApplicationRules.ClubCanDelete(a),
+            a.PlanningId,
+            planningName = PlanningName(a.PlanningId),
             lateNote = LateNote(a)
         };
 

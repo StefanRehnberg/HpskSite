@@ -213,6 +213,13 @@ namespace HpskSite.Models.Kretsgranskning
         public static bool ClubCanWithdraw(string status) =>
             status != CompetitionApplicationStatus.Avslagen && status != CompetitionApplicationStatus.Aterkallad;
 
+        /// <summary>
+        /// Får klubben ta bort ansökan helt (omgång 2)? Bara ett utkast som aldrig skickats in och som ingen tävling
+        /// skapats ur — kretsen har då aldrig sett det. En inskickad ansökan återkallas i stället, så att kretsen ser det.
+        /// </summary>
+        public static bool ClubCanDelete(CompetitionApplication a) =>
+            a.Status == CompetitionApplicationStatus.Utkast && a.SubmittedAt == null && a.CompetitionId is null or <= 0;
+
         /// <summary>Kan kretsen besluta, yttra sig eller begära komplettering?</summary>
         public static bool KretsCanAct(string status) => CompetitionApplicationStatus.AtKrets.Contains(status);
 
@@ -331,5 +338,21 @@ namespace HpskSite.Models.Kretsgranskning
             }
             return list;
         }
+    }
+
+    /// <summary>Ansökan på papper (omgång 2, Views/CompetitionApplicationPrint.cshtml).</summary>
+    public class CompetitionApplicationPrintModel
+    {
+        public CompetitionApplication App { get; set; } = new();
+        public string ClubName { get; set; } = "";
+        public string RegionName { get; set; } = "";
+        public string LevelLabel { get; set; } = "";
+        public string DisciplineLabel { get; set; } = "";
+        public string StatusLabel { get; set; } = "";
+        public string? RangeName { get; set; }
+        public string SeriesWord { get; set; } = "";
+        public List<Event> Events { get; set; } = new();
+
+        public record Event(DateTime At, string Label, string ByName, string? Text);
     }
 }

@@ -47,6 +47,21 @@
     .pl-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
     .pl-state.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
     .pl-state.blue { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    /* Tävlingen (omgång 2): vägen i fyra steg, och ansökans uppgifter som rader */
+    .pl-steps { list-style: none; padding: 0; margin: 0; display: flex; gap: .4rem; flex-wrap: wrap; }
+    .pl-steps li { flex: 1 1 140px; display: flex; gap: .5rem; align-items: flex-start; padding: .55rem .7rem; border-radius: .5rem;
+        background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); font-size: .92rem; }
+    .pl-steps li .n { flex: 0 0 1.6rem; height: 1.6rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+        font-weight: 700; background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); }
+    .pl-steps li.done { color: var(--bs-success-text-emphasis); background: var(--bs-success-bg-subtle); }
+    .pl-steps li.done .n { background: var(--bs-success); border-color: var(--bs-success); color: #fff; }
+    .pl-steps li.now { color: var(--bs-primary-text-emphasis); background: var(--bs-primary-bg-subtle); font-weight: 600; }
+    .pl-steps li.now .n { background: var(--bs-primary); border-color: var(--bs-primary); color: #fff; }
+    .pl-steps li.skip { opacity: .65; }
+    .pl-kv { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: .35rem 1rem; margin: 0; }
+    .pl-kv dt { font-weight: 600; color: var(--bs-secondary-color); }
+    .pl-kv dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    @@media (max-width: 575.98px) { .pl-kv { grid-template-columns: 1fr; gap: 0; } .pl-kv dd { margin-bottom: .45rem; } }
     /* Meddelandena */
     .pl-msgs { display: flex; flex-direction: column; gap: .2rem; }
     .pl-msg { padding: .6rem .2rem; border-top: 1px solid var(--bs-border-color); }

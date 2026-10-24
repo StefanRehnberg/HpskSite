@@ -212,6 +212,9 @@
         { key: 'beslut', label: 'Förslag och beslut' },
         { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
+        // Omgång 2: vägen till tävlingen — ansökan till kretsen, tävlingen som skapas, och kopplingen. Den som deltar
+        // utan att kunna ändra ser den när det finns något att läsa.
+        { key: 'tavling', label: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || !!(s.planning.application && s.planning.application.id) || !!s.planning.competition) },
         // Omgång 2 (2026-10-24): bemanningen är en del i planeringen, inte en egen sida (planering-bemanning.js).
         { key: 'bemanning', label: 'Bemanning', need: s => s.me.canEdit && !TOKEN },
         // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad.
@@ -315,6 +318,7 @@
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
            uppgifter: viewTasks, beslut: viewDecisions, delar: viewParts, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings,
+           tavling: viewCompetition,
            bemanning: () => window.PlaneringBemanning.render(STAFF_API) })[view]();
     }
 
@@ -345,7 +349,6 @@
             // Hela planen på papper: bemanning, förberedelser och (när planeringen är kopplad) dagsprogrammet.
             S.me.canEdit && !TOKEN && { label: 'Skriv ut hela planen', icon: 'bi-printer',
                 fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
-            S.planning.application && S.planning.application.id === 0 && { label: 'Sök om tävlingen hos kretsen…', icon: 'bi-send', fn: openApplication },
         ] : []);
         const p = S;
         const html = [];
@@ -383,6 +386,10 @@
         if (TASKS && !TASKS.tasks.length && p.planning.competition && p.me.canEdit)
             steps.push(`<div class="pl-next"><div class="t"><b>Lägg in förberedelserna</b> — börja med en mall för tävlingens storlek.</div>
                 <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter">Uppgifter</a></div>`);
+        // Tävlingen (omgång 2): det som väntar på vägen till tävlingen — själva arbetet görs i rälsposten Tävlingen.
+        const compStep = competitionNextStep();
+        if (compStep) steps.push(`<div class="pl-next${compStep.warn ? ' warn' : ''}" id="plCompNext"><div class="t"><b>Tävlingen:</b> ${compStep.text}</div>
+            <a class="btn ${compStep.warn ? 'btn-primary' : 'btn-outline-primary'}" href="#vy=tavling" data-pl-go="tavling">${esc(compStep.button || 'Tävlingen')}</a></div>`);
         const upcoming = (MEET ? MEET.meetings : []).filter(m => m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) >= new Date())
             .sort((a, b) => parseDT(a.startsAt) - parseDT(b.startsAt));
         if (upcoming.length) {
@@ -402,17 +409,6 @@
                     <li>Skriv det första meddelandet under <a href="#vy=meddelanden" data-pl-go="meddelanden">Meddelanden</a>. Alla får ett mejl på kvällen med det som är nytt.</li>
                 </ol></div>`);
         }
-        // Ansökan till kretsen (P3 steg F): ett utkast i klubbens ansökningar, eller läget för den som finns.
-        const app = p.planning.application;
-        if (app && app.id > 0) html.push(`<div class="pl-card" id="plAppCard"><div class="pl-cardh"><h2>Ansökan till kretsen</h2>
-                ${app.url ? `<a href="${esc(app.url)}">Klubbens tävlingsansökningar</a>` : ''}</div>
-            <div><b>${esc(app.name)}</b> <span class="pl-state ${app.status === 'Beviljad' ? 'ok' : app.status === 'Avslagen' ? 'off' : 'wait'}">${esc(app.statusLabel)}</span></div>
-            <div class="pl-help small">${esc([app.club, app.date ? fmtDay(app.date) : ''].filter(Boolean).join(' · '))}</div>
-            <p class="pl-help small mb-0 mt-1">${app.status === 'Utkast' ? 'Utkastet skickas in till kretsen under klubbens tävlingar.'
-                : 'När tävlingen skapas ur ansökan kopplas den till den här planeringen.'}</p></div>`);
-        else if (app && app.id === 0) html.push(`<div class="pl-card" id="plAppCard"><h2>Ska tävlingen sökas hos kretsen?</h2>
-            <p class="mb-2">En kretstävling, landsdelstävling eller nationell tävling söks hos kretsen. Gör ett utkast härifrån — namn, gren och datum fylls i från planeringen — och skicka in det under klubbens tävlingar.</p>
-            <button class="btn btn-outline-primary" data-pl-apply="1"><i class="bi bi-send me-1"></i>Sök om tävlingen…</button></div>`);
         // Milstolparna: de viktiga datumen, först de som är kvar.
         const ms = ((TASKS && TASKS.tasks) || []).filter(t => t.isMilestone)
             .sort((a, b) => ((a.status === 'Done') - (b.status === 'Done')) || String(a.due || '9999').localeCompare(String(b.due || '9999')));
@@ -441,54 +437,315 @@
         e.preventDefault(); goMeeting(parseInt(b.dataset.plMeet, 10));
     });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-invite]')) { e.preventDefault(); openInvite(); } });
-    document.addEventListener('click', e => { if (e.target.closest('[data-pl-apply]')) { e.preventDefault(); openApplication(); } });
+    document.addEventListener('click', e => { if (e.target.closest('[data-pl-newmeet]')) { e.preventDefault(); openNewMeeting(); } });
 
-    // Ansökan ur planeringen (P3 steg F, beslut 9.7): ett UTKAST i klubbens vanliga tävlingsansökningar.
-    function openApplication() {
+    // ================================================================ Tävlingen (omgång 2)
+    // Vägen från planering till tävling på ett ställe: ansökan till kretsen (klubbens vanliga ansökan — läst,
+    // ändrad, inskickad och utskriven här, med klubbens fullständiga dialog), tävlingen som skapas ur den eller
+    // direkt (en föreningstävling söks inte), och kopplingen. Ändra, skicka in, svara och skapa kräver klubbens
+    // rätt och prövas på servern; den som bara deltar läser.
+    let APP = null; // CompetitionApplication/GetApplication: { application, events, canClub }
+    const APP_BASE = '/umbraco/surface/CompetitionApplication/';
+    function appPost(action, params) {
+        return req(APP_BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+            body: new URLSearchParams(params).toString() });
+    }
+    const APP_AT_KRETS = ['Inskickad', 'Komplettering', 'HosForbundet'];
+
+    // Raden under Nästa steg på Översikt — null när inget väntar.
+    function competitionNextStep() {
         const p = S.planning, a = p.application;
-        if (!a || a.id !== 0) return;
-        const discs = p.disciplines || [];
+        if (TOKEN || p.competition) return null;
+        if (a && a.id > 0) {
+            if (a.status === 'Utkast') return S.me.canEdit ? { text: 'utkastet till ansökan är inte inskickat till kretsen.', button: 'Visa ansökan' } : null;
+            if (a.status === 'Komplettering') return { warn: true, text: 'kretsen ber om mer i ansökan.', button: 'Visa ansökan' };
+            if (a.status === 'Beviljad') return { warn: true, text: 'kretsen har sagt ja — nu kan tävlingen skapas.', button: 'Skapa tävlingen' };
+            if (a.status === 'Avslagen') return { text: 'kretsen sa nej till ansökan.', button: 'Visa ansökan' };
+            return null; // hos kretsen eller förbundet: inget att göra än
+        }
+        if (a && a.id === 0) return { text: 'ska den sökas hos kretsen, eller är det en föreningstävling?', button: 'Tävlingen' };
+        return null;
+    }
+
+    function competitionSteps() {
+        const p = S.planning, a = p.application, st = a && a.id > 0 ? a.status : '';
+        const linked = !!p.competition, direct = linked && !st;
+        const sent = st && st !== 'Utkast';
+        const steps = [
+            { t: direct ? 'Ingen ansökan behövdes' : 'Ansökan till kretsen', s: direct ? 'skip' : (sent || linked ? 'done' : 'now') },
+            { t: st === 'Avslagen' ? 'Kretsen sa nej' : 'Kretsen säger ja', s: direct ? 'skip' : (st === 'Beviljad' || linked ? 'done' : (APP_AT_KRETS.includes(st) || st === 'Avslagen' ? 'now' : '')) },
+            { t: 'Tävlingen skapas', s: linked ? 'done' : (st === 'Beviljad' ? 'now' : '') },
+            { t: 'Planeringen kopplas', s: linked ? 'done' : '' },
+        ];
+        return `<ol class="pl-steps mb-3" id="plCompSteps">${steps.map((x, i) => `<li class="${x.s}"${x.s === 'now' ? ' aria-current="step"' : ''}>
+            <span class="n">${x.s === 'done' ? '<i class="bi bi-check-lg"></i>' : i + 1}</span><span>${esc(x.t)}</span></li>`).join('')}</ol>`;
+    }
+
+    async function viewCompetition() {
+        const p = S.planning, sum = p.application;
+        setHead('Tävlingen', esc(p.name));
+        // Läst förut (samma ansökan): rita direkt och läs om i bakgrunden — pollningen ritar om vyn.
+        const cached = APP && sum && APP.application.id === sum.id;
+        if (cached || !(sum && sum.id > 0)) drawCompetition();
+        else { setActions([]); $('plBody').innerHTML = spinner(); }
+        if (!(sum && sum.id > 0)) { APP = null; return; }
+        try {
+            const r = await req(APP_BASE + 'GetApplication?asClub=true&id=' + sum.id);
+            APP = r.success ? r : null;
+        } catch (e) { APP = null; }
+        if (view === 'tavling' && !document.querySelector('.modal.show')) drawCompetition();
+    }
+
+    function drawCompetition() {
+        const p = S.planning, sum = p.application, comp = p.competition;
+        const A = APP && sum && APP.application.id === sum.id ? APP.application : null;
+        const club = !!(APP && APP.canClub && A);
+        const direct = !comp && !A && sum && sum.id === 0 && S.me.canLinkCompetition;
+        setActions([
+            club && A.canSubmit && { label: 'Skicka in till kretsen', icon: 'bi-send', fn: submitApp },
+            club && A.canReply && { label: 'Svara kretsen…', icon: 'bi-reply', fn: replyApp },
+            club && A.canCreateCompetition && { label: 'Skapa tävlingen…', icon: 'bi-trophy', fn: createFromApp },
+            club && A.canEdit && { label: 'Ändra ansökan…', icon: 'bi-pencil', fn: editApp },
+            A && { label: 'Skriv ut ansökan', icon: 'bi-printer', fn: () => window.open(APP_BASE + 'PrintApplication?id=' + A.id, '_blank', 'noopener') },
+            !comp && !A && sum && sum.id === 0 && { label: 'Sök om tävlingen hos kretsen…', icon: 'bi-send', fn: newApp },
+            direct && { label: 'Skapa en föreningstävling…', icon: 'bi-plus-circle', fn: createDirect },
+            // Utan ansökan, eller när tävlingen redan skapats ur den (och planeringen kopplats loss).
+            !comp && (!A || A.competitionId > 0) && S.me.canLinkCompetition && { label: 'Koppla till en befintlig tävling…', icon: 'bi-link-45deg', fn: linkExisting },
+            comp && comp.manageUrl && { label: 'Öppna tävlingshanteringen', icon: 'bi-box-arrow-up-right', fn: () => { location.href = comp.manageUrl; } },
+            ((club && (A.canDelete || A.canWithdraw)) || (comp && S.me.canLinkCompetition)) && { divider: true },
+            club && A.canDelete && { label: 'Ta bort utkastet…', icon: 'bi-trash', danger: true, fn: deleteApp },
+            club && !A.canDelete && A.canWithdraw && { label: 'Återkalla ansökan…', icon: 'bi-x-circle', danger: true, fn: withdrawApp },
+            comp && S.me.canLinkCompetition && { label: 'Koppla loss från tävlingen…', icon: 'bi-link', danger: true, fn: unlinkCompetition },
+        ]);
+
+        const html = [`<div class="pl-card" id="plCompWay"><h2>Vägen till tävlingen</h2>${competitionSteps()}${competitionNow(A, club, direct)}</div>`];
+        if (comp) html.push(`<div class="pl-card" id="plCompCard"><h2>Tävlingen</h2>
+            <p class="mb-1">${comp.url ? `<a href="${esc(comp.url)}"><b>${esc(comp.name)}</b></a>` : `<b>${esc(comp.name)}</b>`}${comp.date ? ' · ' + esc(fmtDay(comp.date)) + (comp.endDate && comp.endDate !== comp.date ? '–' + esc(fmtDay(comp.endDate)) : '') : ''}</p>
+            <p class="pl-help small mb-2">Den som har tillgång till tävlingen — tävlingsledning, klubbens administratörer och skjutledare, kretsens administratörer — kommer in i planeringen med nivån <i>Kan ändra</i> utan att bjudas in.</p>
+            <div class="d-flex gap-2 flex-wrap">${comp.manageUrl ? `<a class="btn btn-outline-primary btn-sm" href="${esc(comp.manageUrl)}">Tävlingshanteringen</a>` : ''}
+                ${p.agendaUrl && S.me.canEdit ? `<a class="btn btn-outline-primary btn-sm" href="${esc(p.agendaUrl)}">Dagsprogrammet</a>` : ''}</div></div>`);
+        if (A) html.push(applicationCard(A), applicationHistory());
+        $('plBody').innerHTML = html.join('');
+    }
+
+    // Vad som gäller just nu, i ord, med knappen för steget man står på (resten under Åtgärder).
+    function competitionNow(A, club, direct) {
+        const p = S.planning, sum = p.application, comp = p.competition;
+        const btn = (id, label, cls) => `<button class="btn ${cls || 'btn-primary'}" id="${id}">${esc(label)}</button>`;
+        if (comp) return `<p class="mb-0">Planeringen är kopplad till tävlingen. Bemanningen, dagsprogrammet och förberedelserna hör nu till den.</p>`;
+        if (A) {
+            const who = club ? '' : `<p class="pl-help small mb-0 mt-1">Ansökan ändras och skickas in av någon som administrerar ${esc(A.clubName)}.</p>`;
+            switch (A.status) {
+                case 'Utkast': return `<div class="pl-next"><div class="t"><b>Utkastet är inte inskickat.</b> Gå igenom det och skicka in det till ${esc(A.regionName || 'kretsen')}.</div>
+                    ${club ? btn('plAppEdit', 'Ändra', 'btn-outline-primary') + btn('plAppSubmit', 'Skicka in till kretsen') : ''}</div>${who}`;
+                case 'Inskickad': return `<p class="mb-0">Ansökan ligger hos ${esc(A.regionName || 'kretsen')}. Ni får ett mejl när kretsen har svarat.</p>`;
+                case 'Komplettering': return `<div class="pl-next warn"><div class="t"><b>Kretsen ber om mer:</b> ${esc(A.completionRequest || '')}</div>
+                    ${club ? btn('plAppReply', 'Svara kretsen') : ''}</div>${who}`;
+                case 'HosForbundet': return `<p class="mb-0">Kretsen har skickat ansökan vidare till Förbundet, som beslutar. Kretsen registrerar beslutet här när det kommer.</p>`;
+                case 'Beviljad': return A.canCreateCompetition || !club
+                    ? `<div class="pl-next warn"><div class="t"><b>Kretsen har sagt ja.</b> Skapa tävlingen — namn, datum och det ansökan angav fylls i, och planeringen kopplas till tävlingen.</div>
+                        ${club ? btn('plAppCreate', 'Skapa tävlingen') : ''}</div>${club ? '' : `<p class="pl-help small mb-0 mt-1">Tävlingen skapas av någon som administrerar ${esc(A.clubName)}.</p>`}`
+                    : `<p class="mb-2">Kretsen har sagt ja, och tävlingen är skapad${A.competitionUrl ? ` — <a href="${esc(A.competitionUrl)}">öppna den</a>` : ''}. Planeringen är inte kopplad till den.</p>
+                        ${S.me.canLinkCompetition ? btn('plCompLink', 'Koppla till en befintlig tävling…', 'btn-outline-primary') : ''}`;
+                case 'Avslagen': return `<p class="mb-0">Kretsen sa nej till ansökan.${A.decisionText ? ' ' + esc(A.decisionText) : ''}</p>`;
+                default: return '';
+            }
+        }
+        if (sum && sum.id > 0) return `<p class="mb-0"><b>${esc(sum.name)}</b> <span class="pl-state wait">${esc(sum.statusLabel)}</span></p>
+            <p class="pl-help small mb-0 mt-1">Ansökan kunde inte läsas just nu. Ladda om sidan om en stund.</p>`;
+        if (sum && sum.id === 0) return `<p class="mb-2">En <b>kretstävling, landsdelstävling eller nationell tävling</b> söks hos kretsen. En <b>föreningstävling</b> söks inte — den skapas direkt.</p>
+            <div class="d-flex gap-2 flex-wrap">${btn('plAppNew', 'Sök om tävlingen hos kretsen…')}
+                ${direct ? btn('plCompDirect', 'Skapa en föreningstävling…', 'btn-outline-primary') : ''}
+                ${S.me.canLinkCompetition ? btn('plCompLink', 'Koppla till en befintlig tävling…', 'btn-outline-secondary') : ''}</div>`;
+        if (S.me.canLinkCompetition) return `<p class="mb-2">Finns tävlingen redan kan du koppla planeringen till den. Ansökan till kretsen och en ny tävling görs av någon som administrerar klubben som arrangerar — be den personen vara med i planeringen och företräda klubben.</p>
+            ${btn('plCompLink', 'Koppla till en befintlig tävling…', 'btn-outline-primary')}`;
+        return `<p class="mb-0">${S.me.canEdit ? 'Ansökan till kretsen och tävlingen görs av någon som administrerar klubben som arrangerar, och planeringen kopplas av den sammankallande.' : 'Här syns ansökan och tävlingen när de finns.'}</p>`;
+    }
+    document.addEventListener('click', e => {
+        const b = e.target.closest('#plAppEdit, #plAppSubmit, #plAppReply, #plAppCreate, #plAppNew, #plCompDirect, #plCompLink'); if (!b) return;
+        ({ plAppEdit: editApp, plAppSubmit: submitApp, plAppReply: replyApp, plAppCreate: createFromApp, plAppNew: newApp,
+           plCompDirect: createDirect, plCompLink: linkExisting })[b.id]();
+    });
+
+    function applicationCard(A) {
+        const cls = A.status === 'Beviljad' ? 'ok' : (A.status === 'Avslagen' || A.status === 'Aterkallad' ? 'off' : (A.status === 'Utkast' ? 'blue' : 'wait'));
+        const day = s => s ? fmtDay(s) : '';
+        const rows = [
+            ['Tävlingen', A.name],
+            ['Söker', `${A.clubName}${A.regionName ? ' hos ' + A.regionName : ''}`],
+            ['Söks som', A.levelLabel],
+            ['Gren', A.disciplineLabel],
+            ['Datum', day(A.competitionDate) + (A.endDate && A.endDate !== A.competitionDate ? ' – ' + day(A.endDate) : '')
+                + (A.grantedDate && A.grantedDate !== A.competitionDate ? ` (Förbundet har beviljat ${day(A.grantedDate)})` : '')],
+            A.reserveDate && ['Reservdatum', day(A.reserveDate)],
+            ['Plats', [A.rangeName, A.place].filter(Boolean).filter((v, i, all) => all.indexOf(v) === i).join(' · ') || 'Ej angivet'],
+            A.numberOfSeries && ['Antal ' + (A.seriesWord || 'serier'), String(A.numberOfSeries)],
+            ['Mästerskap', A.championshipScope || 'Nej'],
+            ['Standardmedaljer', A.awardsStandardMedals === true ? 'Ja' : A.awardsStandardMedals === false ? 'Nej' : 'Ej angivet'],
+            A.classes && ['Preliminära klasser', A.classes],
+            ['Kontaktperson', [A.contactName, A.contactEmail, A.contactPhone].filter(Boolean).join(' · ')],
+            A.note && ['Meddelande till kretsen', A.note],
+            A.completionRequest && ['Kretsen bad om', A.completionRequest],
+            A.completionReply && ['Klubbens svar', A.completionReply],
+            A.kretsOpinion && ['Kretsens yttrande', A.kretsOpinion + (A.kretsOpinionText ? ': ' + A.kretsOpinionText : '')],
+            A.decisionText && ['Beslut', A.decisionText + (A.deciderName ? ` (${A.deciderName}${A.decidedAt ? ', ' + day(A.decidedAt) : ''})` : '')],
+        ].filter(Boolean);
+        return `<div class="pl-card" id="plAppCard"><div class="pl-cardh"><h2>Ansökan till kretsen</h2><span class="pl-state ${cls}">${esc(A.statusLabel)}</span></div>
+            <dl class="pl-kv">${rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join('')}</dl>
+            ${A.lateNote ? `<div class="alert alert-warning py-2 mt-3 mb-0 small">${esc(A.lateNote)}</div>` : ''}</div>`;
+    }
+    function applicationHistory() {
+        const ev = (APP && APP.events) || [];
+        if (!ev.length) return '';
+        return `<div class="pl-card" id="plAppHistory"><h2>Historik</h2>
+            ${ev.slice().reverse().map(x => `<div class="d-flex gap-3 py-1 border-top flex-wrap"><div class="pl-help small text-nowrap" style="min-width:8.5rem">${esc(x.at)}</div>
+                <div class="flex-grow-1"><b>${esc(x.kindLabel)}</b>${x.byName ? ' · ' + esc(x.byName) : ''}${x.text ? `<div class="small" style="white-space:pre-wrap">${esc(x.text)}</div>` : ''}</div></div>`).join('')}</div>`;
+    }
+
+    // Efter en ändring i ansökan: planeringens sammanfattning och ansökan läses om.
+    async function afterAppChange(msg, kind) {
+        await reloadPeople();
+        if (view === 'tavling') await viewCompetition(); else render(view);
+        if (msg) showMsg(esc(msg), kind || 'success');
+    }
+    function needDialog() {
+        if (typeof window.hpskAppOpenForm === 'function') return true;
+        showMsg('Ansökans dialog finns inte på sidan. Ladda om sidan och försök igen.', 'danger');
+        return false;
+    }
+    function newApp() {
+        const p = S.planning, sum = p.application;
+        if (!sum || sum.id !== 0 || !needDialog()) return;
+        window.hpskAppOpenForm({
+            clubId: sum.clubs[0].id, clubs: sum.clubs, planningId: ID,
+            prefill: { name: p.name, discipline: p.disciplineKey || '', date: p.targetStart || '',
+                endDate: p.targetEnd && p.targetEnd !== p.targetStart ? p.targetEnd : '', place: p.targetText || '' },
+            onSaved: r => afterAppChange(r.message),
+        });
+    }
+    function editApp() {
+        const A = APP && APP.application;
+        if (!A || !needDialog()) return;
+        window.hpskAppOpenForm({ clubId: A.clubId, app: A, onSaved: r => afterAppChange(r.message) });
+    }
+    async function submitApp() {
+        const A = APP && APP.application; if (!A) return;
+        if (!await plConfirm('Skicka in ansökan?', `Ansökan om ${A.name} skickas till ${A.regionName || 'kretsen'}, som får ett mejl. Efter det ändrar du den bara om kretsen ber om mer — eller så återkallar du den.`, 'Skicka in')) return;
+        const r = await appPost('SubmitApplication', { id: A.id });
+        if (!r.success) { failMsg(r); return; }
+        await afterAppChange(r.message);
+    }
+    function replyApp() {
+        const A = APP && APP.application; if (!A) return;
         formModal({
-            title: 'Sök om tävlingen hos kretsen', okLabel: 'Gör ett utkast', wide: false,
-            html: `<p class="pl-help small">Utkastet hamnar under klubbens tävlingar, där du kontrollerar det och skickar in det till kretsen.
-                    När tävlingen sedan skapas ur ansökan kopplas den till den här planeringen.</p>
-                ${a.clubs.length > 1 ? `<label class="form-label" for="apClub">Klubben som söker</label>
-                    <select id="apClub" class="form-select mb-3">${a.clubs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>`
-                    : `<p class="mb-3">Klubben som söker: <b>${esc(a.clubs[0].name)}</b></p>`}
-                <label class="form-label" for="apName">Tävlingens namn</label>
-                <input id="apName" class="form-control mb-3" maxlength="200" value="${esc(p.name)}">
-                <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="apLevel">Nivå</label>
-                    <select id="apLevel" class="form-select">${a.levels.map(l => `<option value="${esc(l.value)}">${esc(l.label)}</option>`).join('')}</select></div>
-                    <div class="col-sm-6"><label class="form-label" for="apDisc">Gren</label>
-                    <select id="apDisc" class="form-select">${discs.map(d => `<option value="${esc(d.id)}"${d.id === p.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div></div>
-                <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="apDate">Tävlingsdag</label><input id="apDate" class="form-control" value="${esc(p.targetStart || '')}" placeholder="ÅÅÅÅ-MM-DD"></div>
-                    <div class="col-sm-6"><label class="form-label" for="apEnd">Sista dagen (om flera)</label><input id="apEnd" class="form-control" value="${esc(p.targetEnd && p.targetEnd !== p.targetStart ? p.targetEnd : '')}" placeholder="ÅÅÅÅ-MM-DD"></div></div>
-                <label class="form-label" for="apPlace">Plats (valfritt)</label>
-                <input id="apPlace" class="form-control" maxlength="200" value="${esc(p.targetText || '')}">`,
-            onOpen: body => { datePicker(body.querySelector('#apDate')); datePicker(body.querySelector('#apEnd')); },
+            title: 'Svara kretsen', okLabel: 'Skicka svaret',
+            html: `${A.completionRequest ? `<p class="mb-2"><b>Kretsen ber om:</b> ${esc(A.completionRequest)}</p>` : ''}
+                <label class="form-label" for="plAppReplyText">Ditt svar</label>
+                <textarea id="plAppReplyText" class="form-control" rows="4" maxlength="4000"></textarea>
+                <p class="pl-help small mt-2 mb-0">Behöver något i själva ansökan ändras — gör det med <i>Ändra ansökan</i> först.</p>`,
+            onOpen: body => body.querySelector('#plAppReplyText').focus(),
             onOk: async body => {
-                const clubId = body.querySelector('#apClub') ? parseInt(body.querySelector('#apClub').value, 10) : a.clubs[0].id;
-                const req = {
-                    clubId, planningId: p.id, level: body.querySelector('#apLevel').value, discipline: body.querySelector('#apDisc').value,
-                    name: body.querySelector('#apName').value.trim(), competitionDate: body.querySelector('#apDate').value.trim(),
-                    endDate: body.querySelector('#apEnd').value.trim() || null, place: body.querySelector('#apPlace').value.trim() || null, submit: '0',
-                };
-                if (!req.name) return 'Skriv tävlingens namn.';
-                if (!req.competitionDate) return 'Välj tävlingsdagen.';
-                const r = await req2('/umbraco/surface/CompetitionApplication/SaveApplication', req);
-                if (!r.success) return r.message || 'Utkastet kunde inte sparas.';
-                await reloadPeople(); render(view);
-                const u = S.planning.application && S.planning.application.url;
-                showMsg('Utkastet till ansökan är sparat. ' + (u ? `<a href="${esc(u)}">Gå till klubbens tävlingar</a> och skicka in det till kretsen.` : 'Skicka in det under klubbens tävlingar.'), 'success');
+                const text = body.querySelector('#plAppReplyText').value.trim();
+                if (!text) return 'Skriv svaret till kretsen.';
+                const r = await appPost('ReplyApplication', { id: A.id, text });
+                if (!r.success) return r.message || 'Svaret kunde inte skickas.';
+                afterAppChange(r.message);
                 return true;
             }
         });
     }
-    // JSON-anrop till en annan kontroller (ansökan): samma felhantering som req().
-    function req2(url, body) {
-        return req(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(body) });
+    function withdrawApp() {
+        const A = APP && APP.application; if (!A) return;
+        formModal({
+            title: 'Återkalla ansökan', okLabel: 'Återkalla', okClass: 'btn-danger',
+            html: `<p>Ansökan om <b>${esc(A.name)}</b> återkallas. Kretsen ser att den är återkallad, och den kan inte skickas in igen — en ny ansökan kan göras härifrån.</p>
+                <label class="form-label" for="plAppWithdrawWhy">Skäl (valfritt)</label>
+                <input id="plAppWithdrawWhy" class="form-control" maxlength="500">`,
+            onOk: async body => {
+                const r = await appPost('WithdrawApplication', { id: A.id, reason: body.querySelector('#plAppWithdrawWhy').value.trim() });
+                if (!r.success) return r.message || 'Ansökan kunde inte återkallas.';
+                APP = null;
+                afterAppChange(r.message);
+                return true;
+            }
+        });
     }
-    document.addEventListener('click', e => { if (e.target.closest('[data-pl-newmeet]')) { e.preventDefault(); openNewMeeting(); } });
+    async function deleteApp() {
+        const A = APP && APP.application; if (!A) return;
+        if (!await plConfirm('Ta bort utkastet?', `Utkastet till ansökan om ${A.name} tas bort. Det har aldrig skickats in, så kretsen har inte sett det.`, 'Ta bort', true)) return;
+        const r = await appPost('DeleteApplication', { id: A.id });
+        if (!r.success) { failMsg(r); return; }
+        APP = null;
+        await afterAppChange(r.message);
+    }
+
+    // Guiden (CompetitionWizardModal) visas i planeringen; när tävlingen är skapad säger planeringen det i stället för
+    // guidens alert() (onCompetitionSaved returnerar true).
+    function openWizard() {
+        const el = document.getElementById('competitionWizardModal');
+        if (!el || typeof window.hpskWizardFromPlanning !== 'function') { showMsg('Tävlingsguiden finns inte på sidan. Ladda om sidan och försök igen.', 'danger'); return false; }
+        const modal = window.competitionWizardModalInstance || new bootstrap.Modal(el);
+        window.competitionWizardModalInstance = modal;
+        modal.show();
+        if (typeof window.resetWizard === 'function') window.resetWizard();
+        return true;
+    }
+    function createFromApp() {
+        const A = APP && APP.application; if (!A) return;
+        if (typeof window.hpskAppCreateCompetition !== 'function') { needDialog(); return; }
+        window.hpskAppCreateCompetition(A.id, data => {
+            if (!data || data.success === false) { failMsg(data, 'Tävlingen kunde inte skapas.'); return true; }
+            // Servern kopplar tävlingen till planeringen i samma anrop (ansökan bär planeringens id).
+            afterAppChange('Tävlingen är skapad och planeringen är kopplad till den.' + (data.applicationNote ? ' ' + data.applicationNote : ''));
+            return true;
+        });
+    }
+    function createDirect() {
+        const p = S.planning, sum = p.application;
+        if (!sum || sum.id !== 0 || !openWizard()) return;
+        window.hpskWizardFromPlanning({ name: p.name, discipline: p.disciplineKey || '', date: p.targetStart || '',
+            endDate: p.targetEnd && p.targetEnd !== p.targetStart ? p.targetEnd : '', venue: p.targetText || '', clubId: sum.clubs[0].id });
+        window.onCompetitionSaved = data => {
+            const cid = parseInt(data && data.data && data.data.id, 10) || 0;
+            linkAfterCreate(cid);
+            return true;
+        };
+    }
+    async function linkAfterCreate(cid) {
+        if (!cid) { showMsg('Tävlingen är skapad, men dess nummer kom inte tillbaka. Koppla planeringen under Åtgärder → Koppla till en befintlig tävling.', 'warning'); return; }
+        const r = await post('LinkCompetition', { competitionId: cid });
+        if (!r.success) { await afterAppChange(); showMsg('Tävlingen är skapad, men planeringen kunde inte kopplas: ' + esc(r.message || '') + ' Koppla den under Åtgärder → Koppla till en befintlig tävling.', 'warning'); return; }
+        await afterAppChange('Tävlingen är skapad och planeringen är kopplad till den.');
+    }
+    async function linkExisting() {
+        const r = await get('LinkableCompetitions');
+        if (!r.success) { failMsg(r); return; }
+        const list = r.competitions || [];
+        formModal({
+            title: 'Koppla till en befintlig tävling', okLabel: list.length ? 'Koppla' : 'Stäng',
+            html: list.length
+                ? `<p class="pl-help small">Kommande tävlingar i klubbarna som någon i planeringen företräder, som du får redigera och som inte redan har en planering — närmast planeringens datum först.</p>
+                   <div class="list-group" id="plLinkList">${list.map((c, i) => `<label class="list-group-item d-flex gap-2 align-items-start">
+                       <input class="form-check-input mt-1" type="radio" name="plLinkComp" value="${c.id}"${i === 0 ? ' checked' : ''}>
+                       <span><b>${esc(c.name)}</b><span class="d-block pl-help small">${esc([c.date ? fmtDay(c.date) : '', c.club].filter(Boolean).join(' · '))}</span></span></label>`).join('')}</div>
+                   <p class="pl-help small mt-2 mb-0">Bemanningen får tävlingens dagar, och de som har tillgång till tävlingen kommer in i planeringen.</p>`
+                : `<p class="mb-0">Det finns ingen kommande tävling att koppla till: ingen i klubbarna som någon här företräder som du får redigera och som saknar planering.</p>`,
+            onOk: async body => {
+                const pick = body.querySelector('input[name="plLinkComp"]:checked');
+                if (!pick) return list.length ? 'Välj en tävling.' : true;
+                const x = await post('LinkCompetition', { competitionId: pick.value });
+                if (!x.success) return x.message || 'Planeringen kunde inte kopplas.';
+                afterAppChange('Planeringen är kopplad till tävlingen.');
+                return true;
+            }
+        });
+    }
+    async function unlinkCompetition() {
+        if (!await plConfirm('Koppla loss från tävlingen?', 'Uppgifterna står kvar. De som bara var med genom tävlingen kommer inte längre in, och förberedelserna syns inte längre på tävlingens sida.', 'Koppla loss', true)) return;
+        const r = await post('UnlinkCompetition', {});
+        if (!r.success) { failMsg(r); return; }
+        await afterAppChange('Planeringen är inte längre kopplad till tävlingen.');
+    }
 
     // ================================================================ Meddelanden
     function renderBody(m) {
@@ -2719,11 +2976,7 @@
             ${S.me.isSiteAdmin ? `<div class="pl-card" style="max-width:720px"><h2>Förbundets adress</h2>
                 <p class="pl-help small">Gäller alla planeringar: dit går milstolpar som skickas till förbundet (till exempel inbjudan i tid till tidningen). Syns bara för sajtadministratörer.</p>
                 <div class="d-flex gap-2 flex-wrap"><input id="stForbundet" type="email" class="form-control" style="max-width:320px" maxlength="256" value="${esc((TASKS && TASKS.forbundetEmail) || '')}" placeholder="namn@pistolskytteforbundet.se">
-                <button class="btn btn-outline-primary" id="stForbundetSave">Spara adressen</button></div><span id="stForbundetSaved" class="pl-help small"></span></div>` : ''}
-            ${p.competition ? `<div class="pl-card" style="max-width:720px"><h2>Tävlingen</h2>
-                <p class="mb-2">Planeringen hör till <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>. Den som har tillgång till tävlingen — tävlingsledning,
-                    klubbens administratörer och skjutledare, kretsens administratörer — kommer in med nivån <i>Kan ändra</i> utan att bjudas in.</p>
-                ${S.me.canLinkCompetition ? '<button class="btn btn-outline-danger btn-sm" id="stUnlink">Koppla loss från tävlingen…</button>' : ''}</div>` : ''}`;
+                <button class="btn btn-outline-primary" id="stForbundetSave">Spara adressen</button></div><span id="stForbundetSaved" class="pl-help small"></span></div>` : ''}`;
         datePicker($('stStart')); datePicker($('stEnd'));
         $('stDisc')?.addEventListener('change', async e => {
             const r = await post('SetDiscipline', { value: e.target.value });
@@ -2740,12 +2993,6 @@
             const r = await post('SetForbundetEmail', { email: $('stForbundet').value.trim() });
             if (!r.success) { failMsg(r); return; }
             await reloadTasks(); $('stForbundetSaved').textContent = r.email ? 'Sparat.' : 'Adressen är borttagen.';
-        });
-        $('stUnlink')?.addEventListener('click', async () => {
-            if (!await plConfirm('Koppla loss från tävlingen?', 'Uppgifterna står kvar. De som bara var med genom tävlingen kommer inte längre in, och förberedelserna syns inte längre på tävlingens sida.', 'Koppla loss', true)) return;
-            const r = await post('UnlinkCompetition', {});
-            if (!r.success) { failMsg(r); return; }
-            await reloadPeople(); render('installningar');
         });
         $('stSave').onclick = async () => {
             const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };

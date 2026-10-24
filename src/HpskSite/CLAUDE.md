@@ -12670,6 +12670,27 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   `LinkToCompetition` + speglarna + tävlingsdagarna); går det inte svarar skapandet med en `applicationNote`. Ytor: kortet
   på Översikt (`#plAppCard`: frågan, eller ansökans läge + länk till `klubbens url#clubAdmin/competitions`) och Åtgärder →
   *Sök om tävlingen hos kretsen…*. Svit p3 144/144 (A/B: planeringsspärren + kopplingen → 4 röda).
+  - ⚠️⚠️ **OMGJORT 2026-10-24 (omgång 2, steg 3): rälsposten Tävlingen, `#vy=tavling`** (`viewCompetition` i
+    planering.js). Kortet på Översikt, den korta ansökningsdialogen och Inställningar → Tävlingen är BORTA. Översikt har
+    bara en rad under Nästa steg (`#plCompNext`, `competitionNextStep()`) som leder hit. Vyn: *Vägen till tävlingen* i
+    fyra steg (`#plCompSteps`: ansökan · kretsen säger ja · tävlingen skapas · planeringen kopplas; "Ingen ansökan
+    behövdes" när tävlingen kopplades utan ansökan), det som gäller nu med knappen för steget, kortet Tävlingen när
+    planeringen är kopplad (`#plCompCard`), ansökan som rader (`#plAppCard`) och historiken (`#plAppHistory`).
+    Ansökan läses med `CompetitionApplication/GetApplication?asClub=true` — `asClub` ger klubbens knappar även till den
+    som också är krets (sajtadmin). **Läsrätt för planeringens deltagare** (`PlanningReader`: aktiv rad i
+    `a.PlanningId`) i `GetApplication` och `PrintApplication`; ändra/skicka in/svara/skapa kräver fortfarande klubbens
+    rätt. **Klubbens fullständiga dialog** (`_CompetitionApplications` + `CompetitionWizardModal` tas med i
+    Planering.cshtml utom i länkläget): `hpskAppOpenForm` tar nu `planningId`, `prefill`, `onSaved`;
+    `hpskAppCreateCompetition(id, onSaved)`. **Guiden**: `window.onCompetitionSaved(data)` får svaret och returnerar
+    `true` när anroparen själv berättar — då ingen `alert()`; `hpskWizardFromPlanning(p)` förifyller en
+    föreningstävling (banderollen återanvänder id `wizard_applicationBanner` så att `resetWizard` tar bort den).
+    Föreningstävling direkt = guiden + `Planning/LinkCompetition` med guidens `data.data.id`. **Nytt**:
+    `CompetitionApplication/DeleteApplication` (bara `ClubCanDelete`: Utkast, aldrig inskickad, ingen tävling — annars
+    återkallas den), `PrintApplication` (Views/CompetitionApplicationPrint.cshtml), `Planning/LinkableCompetitions`
+    (klubbarna någon företräder, kan redigeras, utan planering, **närmast planeringens datum först** — sorterat från i dag
+    låg 2028 utanför de 30), DTO:n har `canDelete`, `planningId`, `planningName` (klubbens lista: "Från planeringen …").
+    Svit `tavlingsplanering-tavling-verify.mjs` 57/57 (A/B: utan asClub → 2 röda; PlanningReader nekar → 3 röda;
+    ClubCanDelete utan statusvillkoret → 4 röda). ⚠️ Guidens åtta steg körs inte i sviten (fältpåsen + återanropet).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

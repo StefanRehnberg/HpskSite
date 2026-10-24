@@ -8,8 +8,10 @@
 
     Exporterar (guardat mot dubbel inkludering):
       window.hpskAppsLoad(clubId)                    — läs om listan
-      window.hpskAppOpenForm({clubId, clubs, date})  — öppna dialogen för en ny ansökan
-      window.hpskAppCreateCompetition(id)            — öppna tävlingsguiden förifylld (kräver guiden på sidan)
+      window.hpskAppOpenForm({clubId, clubs, date, app, planningId, prefill, onSaved})
+                                                     — öppna dialogen (ny eller app = ändra); planningId/prefill/onSaved
+                                                       när den öppnas ur planeringens rälspost Tävlingen (omgång 2)
+      window.hpskAppCreateCompetition(id, onSaved)   — öppna tävlingsguiden förifylld (kräver guiden på sidan)
 
     ⚠️ Inga prompt()/alert()-flöden för avslag, svar eller återkallande — en blockerande dialog har
     redan en gång rapporterats som att "sidan frös". Allt sker i rader på sidan.
@@ -267,6 +269,8 @@
             parts.push('<div class="small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.decisionText) + '</div>');
         if (a.competitionUrl)
             parts.push('<div class="small mt-1"><a href="' + esc(a.competitionUrl) + '">Tävlingen är skapad</a></div>');
+        if (a.planningName)
+            parts.push('<div class="small mt-1 text-muted"><i class="bi bi-diagram-3 me-1"></i>Från planeringen ' + esc(a.planningName) + '</div>');
         return parts.join('');
     }
 
@@ -281,7 +285,8 @@
         const items = [];
         if (a.canEdit) items.push('<li><button class="dropdown-item" type="button" data-ca="edit" data-id="' + a.id + '">Ändra ansökan</button></li>');
         items.push('<li><button class="dropdown-item" type="button" data-ca="history" data-id="' + a.id + '">Visa historik</button></li>');
-        if (a.canWithdraw) items.push('<li><hr class="dropdown-divider"></li><li><button class="dropdown-item text-danger" type="button" data-ca="withdraw" data-id="' + a.id + '">Återkalla ansökan…</button></li>');
+        if (a.canDelete) items.push('<li><hr class="dropdown-divider"></li><li><button class="dropdown-item text-danger" type="button" data-ca="delete" data-id="' + a.id + '">Ta bort utkastet…</button></li>');
+        else if (a.canWithdraw) items.push('<li><hr class="dropdown-divider"></li><li><button class="dropdown-item text-danger" type="button" data-ca="withdraw" data-id="' + a.id + '">Återkalla ansökan…</button></li>');
         const menu = '<div class="btn-group ms-1"><button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">Åtgärder</button>'
             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
         return primary + menu;
@@ -326,6 +331,14 @@
                 return;
             }
             case 'withdrawSend': return act('WithdrawApplication', { id, reason: ($('caWithdrawReason' + id)?.value || '') }, id);
+            case 'delete': {
+                const cell = inlineRow(id); if (!cell) return;
+                cell.innerHTML = '<div class="p-2 bg-body-tertiary rounded"><div class="small mb-1">Ta bort utkastet <strong>' + esc(a ? a.name : '') + '</strong>? Det har aldrig skickats in, så kretsen har inte sett det.</div>'
+                    + '<div class="mt-2"><button type="button" class="btn btn-danger btn-sm" data-ca="deleteSend" data-id="' + id + '">Ta bort</button> '
+                    + '<button type="button" class="btn btn-link btn-sm" data-ca="closeInline" data-id="' + id + '">Avbryt</button></div><div class="small mt-1" data-inline-result></div></div>';
+                return;
+            }
+            case 'deleteSend': return act('DeleteApplication', { id }, id);
             case 'closeInline': {
                 const tr = document.querySelector('[data-app-inline="' + id + '"]');
                 if (tr) { tr.classList.add('d-none'); tr.firstElementChild.innerHTML = ''; }
@@ -395,6 +408,11 @@
         state.pendingClubs = opts.clubs || null;
         if (opts.clubId) state.clubId = opts.clubId;
         if (opts.regionId) state.regionId = opts.regionId;
+        // Ur planeringen (omgång 2): en ny ansökan bär planeringens id, och planeringen läser om sig själv.
+        state.planningId = opts.planningId || 0;
+        state.onSaved = opts.onSaved || null;
+        if (opts.app) state.apps[opts.app.id] = opts.app;
+        const pre = opts.prefill || {};
         return ensureMeta().then(() => {
             const a = opts.app || null;
             $('caId').value = a ? a.id : '';
@@ -410,13 +428,13 @@
             } else clubWrap.classList.add('d-none');
 
             fillSelect($('caLevel'), meta.levels, a ? a.level : 'Krets');
-            fillSelect($('caDiscipline'), meta.disciplines, a ? a.discipline : 'Precision');
-            $('caName').value = a ? a.name : '';
+            fillSelect($('caDiscipline'), meta.disciplines, a ? a.discipline : (pre.discipline || 'Precision'));
+            $('caName').value = a ? a.name : (pre.name || '');
             ['caDate', 'caEndDate', 'caReserveDate'].forEach(datePicker);
-            setDate('caDate', a ? a.competitionDate : (opts.date || ''));
-            setDate('caEndDate', a ? a.endDate : '');
+            setDate('caDate', a ? a.competitionDate : (opts.date || pre.date || ''));
+            setDate('caEndDate', a ? a.endDate : (pre.endDate || ''));
             setDate('caReserveDate', a ? a.reserveDate : '');
-            $('cavenue').value = a ? (a.place || '') : '';
+            $('cavenue').value = a ? (a.place || '') : (pre.place || '');
             $('caSeries').value = a && a.numberOfSeries ? a.numberOfSeries : '';
             $('caScope').value = a ? (a.championshipScope || '') : '';
             $('caMedals').value = a && a.awardsStandardMedals != null ? (a.awardsStandardMedals ? '1' : '0') : '';
@@ -469,7 +487,8 @@
             numberOfSeries: $('caSeries').value ? parseInt($('caSeries').value, 10) : null,
             championshipScope: $('caScope').value, awardsStandardMedals: $('caMedals').value, contactName: $('caContactName').value, contactEmail: $('caContactEmail').value,
             contactPhone: $('caContactPhone').value, classes: $('caClasses').value, note: $('caNote').value,
-            submit: submit ? '1' : '0'
+            submit: submit ? '1' : '0',
+            planningId: !id && state.planningId ? state.planningId : null
         };
         const res = $('caFormResult');
         // Ett ifyllt antal måste vara 1–100. En nolla får inte tyst bli "ej angivet".
@@ -494,7 +513,8 @@
             if (!r.success) { res.className = 'mt-3 alert alert-warning py-2'; res.textContent = r.message || 'Det gick inte att spara.'; return; }
             bootstrap.Modal.getInstance($('caAppModal')).hide();
             if ($('caAppsBox') && clubId === state.clubId) { showTopMessage(r.message, true); window.hpskAppsLoad(state.clubId); }
-            if (typeof window.hpskAppSaved === 'function') window.hpskAppSaved(r);
+            if (state.onSaved) state.onSaved(r);
+            else if (typeof window.hpskAppSaved === 'function') window.hpskAppSaved(r);
         }).catch(() => { $('caSubmit').disabled = $('caSaveDraft').disabled = false; res.className = 'mt-3 alert alert-warning py-2'; res.textContent = 'Det gick inte att spara.'; });
     }
     $('caSubmit')?.addEventListener('click', () => save(true));
@@ -502,9 +522,11 @@
     $('caNewBtn')?.addEventListener('click', () => window.hpskAppOpenForm({ clubId: state.clubId }));
 
     // ── Skapa tävlingen ──────────────────────────────────────────────────────────────
-    window.hpskAppCreateCompetition = function (id) {
-        fetch(base + 'GetPrefill?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
-            if (!d.success) { showTopMessage(d.message || 'Det gick inte.', false); return; }
+    // onSaved (omgång 2, planeringen): får guidens svar och returnerar true när den själv berättar att tävlingen
+    // skapats — då visar guiden ingen alert().
+    window.hpskAppCreateCompetition = function (id, onSaved) {
+        return fetch(base + 'GetPrefill?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { if (onSaved) onSaved({ success: false, message: d.message || 'Det gick inte.' }); else showTopMessage(d.message || 'Det gick inte.', false); return; }
             const el = $('competitionWizardModal');
             if (!el || typeof window.hpskWizardFromApplication !== 'function') { showTopMessage('Tävlingsguiden finns inte på den här sidan.', false); return; }
             const modal = window.competitionWizardModalInstance || new bootstrap.Modal(el);
@@ -512,7 +534,8 @@
             modal.show();
             if (typeof window.resetWizard === 'function') window.resetWizard();
             window.hpskWizardFromApplication(d.prefill);
-            window.onCompetitionSaved = function () { window.hpskAppsLoad(state.clubId); if (typeof loadClubCompetitions === 'function') loadClubCompetitions(); };
+            window.onCompetitionSaved = onSaved
+                || function () { window.hpskAppsLoad(state.clubId); if (typeof loadClubCompetitions === 'function') loadClubCompetitions(); };
         });
     };
 

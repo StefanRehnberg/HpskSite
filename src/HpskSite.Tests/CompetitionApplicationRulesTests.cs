@@ -92,6 +92,19 @@ namespace HpskSite.Tests
             CompetitionApplicationRules.ClubCanWithdraw(CompetitionApplicationStatus.Beviljad).Should().BeTrue();
         }
 
+        // Omgång 2: bara ett utkast som kretsen aldrig sett tas bort; allt annat återkallas.
+        [Fact]
+        public void BaraEttAldrigInskickatUtkast_KanTasBort()
+        {
+            CompetitionApplicationRules.ClubCanDelete(App(status: "Utkast")).Should().BeTrue();
+            CompetitionApplicationRules.ClubCanDelete(App(status: "Inskickad")).Should().BeFalse();
+            CompetitionApplicationRules.ClubCanDelete(App(status: "Beviljad")).Should().BeFalse();
+            var sentBefore = App(status: "Utkast"); sentBefore.SubmittedAt = new DateTime(2026, 10, 1);
+            CompetitionApplicationRules.ClubCanDelete(sentBefore).Should().BeFalse();
+            var withCompetition = App(status: "Utkast"); withCompetition.CompetitionId = 123;
+            CompetitionApplicationRules.ClubCanDelete(withCompetition).Should().BeFalse();
+        }
+
         [Fact]
         public void TavlingKanSkapas_EfterKretsensJa()
         {
