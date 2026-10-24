@@ -729,7 +729,7 @@ namespace HpskSite.Controllers
             if (a.Support) _logger.LogWarning("Planering {PlanningId}: sajtadmin {MemberId} godkände förfrågan {RequestId} som support ({Access}).", id, a.MemberId, requestId, acc);
             var mailed = await _notify.InviteAsync(id, r.ParticipantId, a.Caller.Participant, false, approved: true);
             // Supportvägen: sajtadmin får gästens länk in (som förut vid inbjudan med e-post).
-            var supportLink = req.Kind == PlanningRequestKind.Invite && await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna") : null;
+            var supportLink = req.Kind == PlanningRequestKind.Invite && await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna", baseUrl: Request.PublicBase()) : null;
             return Ok(new { success = true, participantId = r.ParticipantId, mailed, supportLink });
         }
 

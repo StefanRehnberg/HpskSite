@@ -57,8 +57,9 @@ namespace HpskSite.Services.Planning
             _ics.Protect($"ics|{participantId}|{planningId}");
 
         /// <summary>Länk till svarssidan. <paramref name="action"/>: svara, rosta, oppna.</summary>
-        public string MailUrl(int participantId, int planningId, string action, int? refId = null) =>
-            $"{SiteUrl}/tavlingsplanering/svar?t={Uri.EscapeDataString(MailToken(participantId, planningId))}&a={action}"
+        /// <param name="baseUrl">Sidans egen adress när länken visas på sidan (supportvägen); utan den sajtens (mejl).</param>
+        public string MailUrl(int participantId, int planningId, string action, int? refId = null, string? baseUrl = null) =>
+            $"{(string.IsNullOrWhiteSpace(baseUrl) ? SiteUrl : baseUrl.TrimEnd('/'))}/tavlingsplanering/svar?t={Uri.EscapeDataString(MailToken(participantId, planningId))}&a={action}"
             + (refId > 0 ? $"&m={refId}" : "");
 
         /// <summary>Kalenderlänken. <paramref name="baseUrl"/> = sidans egen adress (Request.PublicBase()); utan den sajtens (mejl).</summary>

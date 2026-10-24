@@ -24,6 +24,26 @@ namespace HpskSite.Controllers
             return link == null ? null : _competitions.GetSaved(link.TargetId);
         }
 
+        /// <summary>
+        /// Var en stations förening hör hemma, sett från planeringen <paramref name="viewer"/> (Expertgruppen 2026-10-24 F4):
+        /// null = här, annars "Delplanering: X" eller "Huvudplaneringen: X".
+        /// </summary>
+        private string? FamilyLabel(PlanningRow viewer, int ownerPlanningId)
+        {
+            if (ownerPlanningId == viewer.Id) return null;
+            var owner = _planning.Get(ownerPlanningId);
+            if (owner == null) return null;
+            return owner.Id == viewer.ParentPlanningId ? "Huvudplaneringen: " + owner.Name : "Delplanering: " + owner.Name;
+        }
+
+        /// <summary>Det som gäller hela familjens stationer görs i huvudplaneringen (F4). Null = här går det.</summary>
+        private string? WholeStationsElsewhere(PlanningRow p)
+        {
+            if (!(p.ParentPlanningId > 0)) return null;
+            var root = _planning.Get(p.ParentPlanningId!.Value);
+            return $"Det görs i huvudplaneringen{(root == null ? "" : " " + root.Name)} — stationerna gäller hela familjen.";
+        }
+
         private static bool IsFalt(string? type) =>
             HpskSite.Models.Staffing.FunctionaryRoles.FaltFamily.Contains(type ?? "", StringComparer.OrdinalIgnoreCase);
 
@@ -117,7 +137,7 @@ namespace HpskSite.Controllers
             var areas = _planning.StationAreas(id).Select(a => new
             {
                 id = a.Id, name = a.Name, planningId = a.PlanningId,
-                planning = a.PlanningId == id ? null : _planning.Get(a.PlanningId)?.Name,
+                planning = FamilyLabel(x.Planning, a.PlanningId),
                 host = a.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, a.HostClubId) : a.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, a.HostRegionId) : a.HostText,
                 responsible = a.ResponsibleParticipantId > 0 ? _planning.Participant(a.PlanningId, a.ResponsibleParticipantId!.Value)?.DisplayName : a.ResponsibleName,
                 stations = PlanningStations.Parse(a.Stations).Stations.OrderBy(n => n).ToList(),
@@ -134,13 +154,14 @@ namespace HpskSite.Controllers
                 areas,
                 course = courseJson,
                 stationCount = courseSvc.StationCount(id, course?.JsonBlob),
-                canCreateCourse = course == null && canEditPlanning,
+                canCreateCourse = course == null && canEditPlanning && WholeStationsElsewhere(x.Planning) == null,
+                wholeElsewhere = WholeStationsElsewhere(x.Planning),
                 canCreateAreaConfig = canEditPlanning,
                 stations = rows.Select(r => new
                 {
                     number = r.Number, areaId = r.AreaId, area = r.AreaName,
                     host = r.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, r.HostClubId) : r.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, r.HostRegionId) : r.HostText,
-                    planningId = r.PlanningId, planning = r.PlanningId == id ? null : r.PlanningName,
+                    planningId = r.PlanningId, planning = FamilyLabel(x.Planning, r.PlanningId),
                     chiefs = r.Chiefs, openTasks = r.OpenTasks,
                     built = builtSet.Contains(r.Number), url = urls.GetValueOrDefault(r.Number),
                 }),
@@ -176,6 +197,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som ändrar antalet stationer.");
+            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
             var err = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().SetStationCountAsync(x.Planning, x.MemberId, stationCount);
             return err == null ? Ok(new { success = true }) : No(err);
         }
@@ -257,6 +279,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som skapar stationerna.");
+            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
             if (stationCount is < 1 or > PlanningStations.Max) return No($"Tävlingen kan ha 1–{PlanningStations.Max} stationer.");
             var svc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
             var (cfg, err) = await svc.CreateCourseAsync(x.Planning, x.MemberId, stationCount ?? 0);
@@ -271,6 +294,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som sätter ihop stationerna.");
+            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
             var r = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().AssembleAsync(x.Planning, x.MemberId);
             if (r.Error != null) return No(r.Error);
             return Ok(new

@@ -3616,14 +3616,16 @@
         const parts = fa.filter(a => a.part).map(a => a.part);
         const pending = parts.filter(p => p.state !== 'current').length;
         const canAttach = comp && comp.canAttach && edit && (!comp.attached || comp.stale) && c.builtStations > 0;
+        // F4: antalet och ihopsättningen gäller hela familjen — de görs i huvudplaneringen, inte i en delplanering.
+        const whole = edit && !r.wholeElsewhere;
         setActions(edit && !c ? [
             rows.length && { label: 'Lägg till en förening…', icon: 'bi-plus-lg', fn: () => openStationArea(null) },
             rows.length && TASKS && TASKS.canManageAreas && { label: 'En uppgift per station', icon: 'bi-signpost-split', fn: seedStations },
         ] : edit && c ? [
             { label: 'Lägg till en förening…', icon: 'bi-plus-lg', fn: () => openStationArea(null) },
-            { label: 'Ändra antalet stationer…', icon: 'bi-123', fn: openStationCount },
+            whole && { label: 'Ändra antalet stationer…', icon: 'bi-123', fn: openStationCount },
             { divider: true },
-            { label: 'Sätt ihop stationerna' + (pending ? ` (${pending} ${pending === 1 ? 'del' : 'delar'} att ta med)` : ''), icon: 'bi-diagram-3', fn: assembleStations },
+            whole && { label: 'Sätt ihop stationerna' + (pending ? ` (${pending} ${pending === 1 ? 'del' : 'delar'} att ta med)` : ''), icon: 'bi-diagram-3', fn: assembleStations },
             c.canView && { label: 'Öppna alla stationer i konfiguratorn', icon: 'bi-box-arrow-up-right', fn: () => { location.href = c.url; } },
             c.canEdit && { label: 'Begär godkännande av stationerna…', icon: 'bi-patch-check', fn: () => { location.href = c.url; } },
             TASKS && TASKS.canManageAreas && { label: 'En uppgift per station', icon: 'bi-signpost-split', fn: seedStations },
@@ -3638,14 +3640,15 @@
             return;
         }
         $('plBody').innerHTML = `<p class="pl-help mb-3">Stationerna hör till planeringen och finns innan tävlingen. Varje förening bygger sina stationer
-                i en egen del. Delarna läggs sedan ihop till tävlingens stationer.</p>
-            ${stepsHtml(r, rows, fa, edit)}${areasHtml(fa, edit)}${stationRowsHtml(rows, fa, edit)}`;
+                i en egen del. Delarna läggs sedan ihop till tävlingens stationer.${r.wholeElsewhere ? ` <span id="plStElsewhere">Antalet stationer och ihopsättningen: ${esc(r.wholeElsewhere.replace(/^Det görs/, 'görs'))}</span>` : ''}</p>
+            ${stepsHtml(r, rows, fa, whole)}${areasHtml(fa, edit)}${stationRowsHtml(rows, fa, edit)}`;
     }
 
     function stationsEmptyHtml(r, rows) {
         const suggested = Math.max(rows.length ? rows[rows.length - 1].number : 0, r.stationCount || 0, (r.competition && r.competition.stationCount) || 0) || 8;
         if (!r.canCreateCourse) return `<div class="pl-card" id="plStEmpty"><h2>Stationerna är inte skapade än</h2>
-            <p class="mb-0">Den som kan ändra planeringen skapar stationerna här. Sedan väljer varje förening sina stationer och bygger dem.</p></div>`;
+            <p class="mb-0">${r.wholeElsewhere ? `Stationerna skapas i huvudplaneringen och gäller hela familjen. ${esc(r.wholeElsewhere)}`
+                : 'Den som kan ändra planeringen skapar stationerna här.'} Sedan väljer varje förening sina stationer och bygger dem.</p></div>`;
         return `<div class="pl-card" id="plStEmpty"><h2>Skapa stationerna</h2>
             <p>Börja med hur många stationer tävlingen har. Sedan lägger du till föreningarna och väljer vilka stationer var och en bygger.
                 ${r.competition && r.competition.falt ? `Stationerna börjar som en kopia av tävlingens fältkonfiguration (${esc(r.competition.name)}).` : ''}</p>
@@ -3709,11 +3712,11 @@
                 own && { label: 'Ta bort föreningen', danger: true, fn: () => deleteArea(own) },
             ]) : rowMenu([
                 a.part && a.part.canView && { label: 'Öppna delen', fn: () => { location.href = a.part.url; } },
-                { label: 'Öppna delplaneringen', fn: () => { location.href = '/tavlingsplanering/' + a.planningId + '#vy=stationer'; } },
+                { label: a.planningId === (S.planning.parent && S.planning.parent.id) ? 'Öppna huvudplaneringen' : 'Öppna delplaneringen', fn: () => { location.href = '/tavlingsplanering/' + a.planningId + '#vy=stationer'; } },
             ]);
             return `<tr data-st-area="${a.id}">
                 <td><b>${esc(a.host || a.name)}</b>${a.host && a.host !== a.name ? `<div class="pl-help small">${esc(a.name)}</div>` : ''}
-                    ${a.planning ? `<div class="pl-help small">Delplanering: ${esc(a.planning)}</div>` : ''}
+                    ${a.planning ? `<div class="pl-help small">${esc(a.planning)}</div>` : ''}
                     <div class="d-md-none small mt-1">${partCellHtml(a)}</div></td>
                 <td><div class="pl-chips">${a.stations.map(n => `<span class="pl-chip">${n}</span>`).join('')}</div></td>
                 <td class="d-none d-md-table-cell">${partCellHtml(a)}</td>
@@ -3742,7 +3745,7 @@
                     fn: () => openTaskEdit(null, s.areaId && s.planningId === ID ? s.areaId : null, { scopeType: 'Station', scopeKey: String(s.number) }) },
             ]);
             return `<tr data-station="${s.number}"><td class="ps-3"><b>${s.number}</b></td>
-                <td>${s.areaId ? esc(stWho(s)) : stMiss('Ingen förening')}${s.planning ? `<div class="pl-help small">Delplanering: ${esc(s.planning)}</div>` : ''}
+                <td>${s.areaId ? esc(stWho(s)) : stMiss('Ingen förening')}${s.planning ? `<div class="pl-help small">${esc(s.planning)}</div>` : ''}
                     <div class="d-md-none small mt-1">${builtHtml} · Stationschef: ${chiefHtml}</div></td>
                 <td class="d-none d-md-table-cell">${builtHtml}</td>
                 <td class="d-none d-md-table-cell">${chiefHtml}</td>

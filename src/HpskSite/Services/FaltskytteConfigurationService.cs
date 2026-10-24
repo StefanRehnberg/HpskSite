@@ -511,21 +511,8 @@ namespace HpskSite.Services
             if (!pickedHasCert)
                 return (false, "Vald medlem saknar aktiv Banläggare-certifiering.");
 
-            // Banan i planeringen (Stefan 2026-10-24, "varje del, sedan helheten"): en sammansatt bana begärs godkänd
-            // först när varje del är godkänd och oförändrad sedan den sattes ihop.
-            var parts = HpskSite.Models.Planning.CourseAssembly.AssembledFrom(config.JsonBlob);
-            if (parts.Count > 0)
-            {
-                var now = new Dictionary<int, FaltskytteConfiguration>();
-                foreach (var pt in parts)
-                {
-                    var c = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", pt.ConfigId);
-                    if (c != null) now[c.Id] = c;
-                }
-                var blocker = HpskSite.Models.Planning.CourseAssembly.ApprovalBlocker(config.JsonBlob, id =>
-                    now.TryGetValue(id, out var c) ? (c.Name, c.JsonBlob, NormalizeStatus(c.ApprovalStatus) == StatusApproved) : null);
-                if (blocker != null) return (false, blocker);
-            }
+            var blocker = await PartsBlockerAsync(config);
+            if (blocker != null) return (false, blocker);
 
             config.ApprovalStatus = StatusPendingApproval;
             config.RequestedApproverMemberId = requestedApproverMemberId;
@@ -568,6 +555,26 @@ namespace HpskSite.Services
         ///  - owner-Banläggare may self-approve in any state (the "I trust myself" shortcut),
         ///    which doubles as the fallback when the owner is the only Banläggare around.
         /// </summary>
+        /// <summary>
+        /// Stationerna i planeringen (Stefan 2026-10-24, "varje del, sedan helheten"): sammansatta stationer godkänns —
+        /// och begärs godkända — först när varje del är godkänd och oförändrad sedan de sattes ihop. Gäller ALLA vägar,
+        /// även ägarens självgodkännande och sajtadmin (Expertgruppen 2026-10-24 F1). Null = inget hinder.
+        /// </summary>
+        private async Task<string?> PartsBlockerAsync(FaltskytteConfiguration config)
+        {
+            var parts = HpskSite.Models.Planning.CourseAssembly.AssembledFrom(config.JsonBlob);
+            if (parts.Count == 0) return null;
+            using var db = _databaseFactory.CreateDatabase();
+            var now = new Dictionary<int, FaltskytteConfiguration>();
+            foreach (var pt in parts)
+            {
+                var c = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", pt.ConfigId);
+                if (c != null) now[c.Id] = c;
+            }
+            return HpskSite.Models.Planning.CourseAssembly.ApprovalBlocker(config.JsonBlob, id =>
+                now.TryGetValue(id, out var c) ? (c.Name, c.JsonBlob, NormalizeStatus(c.ApprovalStatus) == StatusApproved) : null);
+        }
+
         public async Task<(bool Success, string? Message)> ApproveAsync(int configId, int viewerMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
@@ -595,6 +602,8 @@ namespace HpskSite.Services
                     return (false, "Endast certifierade Banläggare kan godkänna.");
                 return (false, "Du är inte den Banläggare som ägaren har bett om godkännande.");
             }
+            var blocker = await PartsBlockerAsync(config);
+            if (blocker != null) return (false, blocker);
 
             config.ApprovalStatus = StatusApproved;
             config.ApprovedByMemberId = viewerMemberId;

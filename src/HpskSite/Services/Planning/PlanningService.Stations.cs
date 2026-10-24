@@ -51,8 +51,9 @@ namespace HpskSite.Services.Planning
             var db = s.Database;
             var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
             if (p == null) return new List<StationRow>();
-            // Huvudplaneringen ser sina delplaneringars stationer; en delplanering ser sina egna.
-            var family = db.Fetch<PlanningRow>("SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", planningId);
+            // Stationsnumren gäller hela familjen: huvudplaneringen ser sina delplaneringars stationer, och en delplanering
+            // ser huvudplaneringens och syskonens som deras (inte som lediga) — Expertgruppen 2026-10-24 F4.
+            var family = StationFamily(db, planningId);
             var ids = string.Join(",", family.Select(f => f.Id));
             var names = family.ToDictionary(f => f.Id, f => f.Name);
             var areas = db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({ids}) AND DeletedAt IS NULL AND Stations IS NOT NULL");
@@ -247,7 +248,7 @@ namespace HpskSite.Services.Planning
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var ids = string.Join(",", db.Fetch<int>("SELECT Id FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", planningId));
+            var ids = string.Join(",", StationFamily(db, planningId).Select(f => f.Id));
             if (ids.Length == 0) return new();
             return db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({ids}) AND DeletedAt IS NULL AND Stations IS NOT NULL")
                 .OrderBy(a => a.PlanningId == planningId ? 0 : 1).ThenBy(a => a.PlanningId).ThenBy(a => a.SortOrder).ToList();
