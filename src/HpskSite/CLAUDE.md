@@ -12837,7 +12837,8 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       konfiguration (`onlyIfEmpty`), annars med knappen (kortet visar `stale` när banan ändrats efter).
     - **Uppgifterna:** `SeedStationTasks` kräver ingen tävling, lägger varje stationsuppgift i området som äger stationen
       och milstolpen "Banläggaren godkänner banan"; uppgiften länkar till stationen i delen (`#station=N`, konfiguratorn
-      fokuserar den) annars i banan. Svit `tavlingsplanering-banan-verify.mjs`.
+      fokuserar den) annars i banan. Svit `tavlingsplanering-banan-verify.mjs` 44/44 (A/B: utan godkännandegrinden,
+      utan delarna i `Assemble`, utan Kan ändra-regeln → röda var för sig).
   - **⚠️⚠️ Bemanning per station och pass — TIDEN ÄR SANNINGEN (3.2):**
     - **`StaffTimeCoverage.Peak`** (rena funktioner) är ENDA räkningen av "hur många är på plats": flest SAMTIDIGT, inte
       antalet uppdrag (tio markörer i två skift om fem = fem). Utan tid = hela dagen; ett uppdrag i ett pass har passets
