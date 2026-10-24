@@ -51,7 +51,7 @@ namespace HpskSite.Models.Planning
             {
                 var blob = Parse(p.Blob);
                 var stations = AreaConfigBlob.CourseStations(p.Blob);
-                if (blob == null || stations.Count == 0) { warnings.Add($"{p.Name} har inga stationer kopplade till banan och togs inte med."); continue; }
+                if (blob == null || stations.Count == 0) { warnings.Add($"{p.Name} har inga av tävlingens stationer och togs inte med."); continue; }
                 var mine = new List<int>();
                 foreach (var n in stations)
                 {
@@ -66,8 +66,8 @@ namespace HpskSite.Models.Planning
                     if (b.Length > 0 && a.Length == 0) { result[k] = blob[k]!.DeepClone(); continue; }
                     if (b.Length > 0 && a.Length > 0 && a != b)
                         warnings.Add(k == "_scoringMode"
-                            ? $"{p.Name} har en annan tävlingstyp än banan — banans gäller."
-                            : $"{p.Name} har en annan inställning för mörkerskytte än banan — banans gäller.");
+                            ? $"{p.Name} har en annan tävlingstyp än helheten — helhetens gäller."
+                            : $"{p.Name} har en annan inställning för mörkerskytte än helheten — helhetens gäller.");
                 }
             }
 
@@ -173,10 +173,25 @@ namespace HpskSite.Models.Planning
                 else if (!now.Value.Approved) notApproved.Add(now.Value.Name);
             }
             if (changed.Count > 0)
-                return $"Delarna har ändrats sedan banan sattes ihop ({string.Join(", ", changed)}). Sätt ihop banan igen i planeringen först.";
+                return $"Delarna har ändrats sedan stationerna sattes ihop ({string.Join(", ", changed)}). Sätt ihop stationerna igen i planeringen först.";
             if (notApproved.Count > 0)
-                return $"Varje del ska vara godkänd innan hela banan kan godkännas. Inte godkända än: {string.Join(", ", notApproved)}.";
+                return $"Varje del ska vara godkänd innan helheten kan godkännas. Inte godkända än: {string.Join(", ", notApproved)}.";
             return null;
+        }
+
+        /// <summary>Stationsnumren som har innehåll i någon vapengrupp (det som är byggt).</summary>
+        public static SortedSet<int> BuiltStations(string? blob)
+        {
+            var o = Parse(blob);
+            var set = new SortedSet<int>();
+            if (o == null) return set;
+            foreach (var wc in WeaponClasses(o))
+                foreach (var st in Stations(o, wc))
+                {
+                    var n = StationNumber(st);
+                    if (n > 0) set.Add(n);
+                }
+            return set;
         }
 
         // ---------------------------------------------------------------- hjälpare

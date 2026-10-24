@@ -110,8 +110,52 @@ namespace HpskSite.Tests.Models
             CourseAssembly.ApprovalBlocker(course, _ => ("Klubb X", part, false)).Should().Contain("Inte godkända än: Klubb X");
             CourseAssembly.ApprovalBlocker(course, _ => ("Klubb X", part, true)).Should().BeNull();
             var changed = Cfg(Wc("C", St(1, 12)), "\"_courseStations\":[1]");
-            CourseAssembly.ApprovalBlocker(course, _ => ("Klubb X", changed, true)).Should().Contain("Sätt ihop banan igen");
-            CourseAssembly.ApprovalBlocker(course, _ => null).Should().Contain("Sätt ihop banan igen");
+            CourseAssembly.ApprovalBlocker(course, _ => ("Klubb X", changed, true)).Should().Contain("Sätt ihop stationerna igen");
+            CourseAssembly.ApprovalBlocker(course, _ => null).Should().Contain("Sätt ihop stationerna igen");
+        }
+
+        [Fact]
+        public void Built_stations_are_the_numbers_with_content_in_any_weapon_class()
+        {
+            CourseAssembly.BuiltStations(Cfg(Wc("A", St(2, 9)) + "," + Wc("C", St(1, 9), St(2, 9)), "\"_stationCount\":6"))
+                .Should().Equal(1, 2);
+            CourseAssembly.BuiltStations(null).Should().BeEmpty();
+        }
+
+        // ---------------------------------------------------------------- en förening byter stationer (Stationerna-vyn)
+
+        [Fact]
+        public void A_part_that_gets_a_new_station_keeps_its_own_work_and_takes_the_new_one_from_the_whole()
+        {
+            // Klubb X hade tävlingens 1 och 5 (delens 1 och 2) och får 3.
+            var part = Cfg(Wc("C", St(1, 11), St(2, 15)), "\"_courseStations\":[1,5],\"_scoringMode\":\"Normal\"");
+            var course = Cfg(Wc("C", St(1, 91), St(3, 93), St(5, 95)));
+            var r = AreaConfigBlob.Resync(part, course, new[] { 1, 3, 5 });
+            AreaConfigBlob.CourseStations(r).Should().Equal(1, 3, 5);
+            Numbers(r, "C").Should().Equal(1, 2, 3);
+            Time(r, "C", 1).Should().Be(11, "delens eget arbete står kvar");
+            Time(r, "C", 2).Should().Be(93, "den nya stationen kommer ur helheten");
+            Time(r, "C", 3).Should().Be(15);
+            JObject.Parse(r).Value<string>("_scoringMode").Should().Be("Normal");
+        }
+
+        [Fact]
+        public void A_part_that_loses_a_station_drops_it_and_is_numbered_again()
+        {
+            var part = Cfg(Wc("C", St(1, 12), St(2, 13), St(3, 14)), "\"_courseStations\":[2,3,4]");
+            var r = AreaConfigBlob.Resync(part, null, new[] { 2, 4 });
+            AreaConfigBlob.CourseStations(r).Should().Equal(2, 4);
+            Numbers(r, "C").Should().Equal(1, 2);
+            Time(r, "C", 2).Should().Be(14);
+        }
+
+        [Fact]
+        public void A_new_station_that_the_whole_has_not_built_is_left_empty()
+        {
+            var part = Cfg(Wc("C", St(1, 12)), "\"_courseStations\":[2]");
+            var r = AreaConfigBlob.Resync(part, null, new[] { 2, 7 });
+            AreaConfigBlob.CourseStations(r).Should().Equal(2, 7);
+            Numbers(r, "C").Should().Equal(1);
         }
 
         [Fact]

@@ -50,7 +50,7 @@ function faltCfgCourseNo(num) {
 }
 function faltCfgCourseSuffix(num) {
     var n = faltCfgCourseNo(num);
-    return n ? ' · banans station ' + n : '';
+    return n ? ' · tävlingens station ' + n : '';
 }
 function faltCfgIsMetaKey(k) { return FALT_CFG_META_KEYS.has(k); }
 
@@ -1285,7 +1285,7 @@ function renderActiveTab() {
             <div class="card-header py-2">
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" data-station-title="${st.station}">
-                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}${faltCfgCourseNo(st.station) ? ` <span class="badge text-bg-light border">banans station ${faltCfgCourseNo(st.station)}</span>` : ''}${faltCfgPartBadge(st.station)}
+                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}${faltCfgCourseNo(st.station) ? ` <span class="badge text-bg-light border">tävlingens station ${faltCfgCourseNo(st.station)}</span>` : ''}${faltCfgPartBadge(st.station)}
                         <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
                     </span>
@@ -2065,7 +2065,7 @@ function faltCfgRenderSimpleMode() {
               '<div class="card-header py-2">' +
                 '<div class="d-flex flex-wrap justify-content-between align-items-center gap-2">' +
                   '<span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" data-station-title="' + st.station + '"><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
-                  (faltCfgCourseNo(st.station) ? ' <span class="badge text-bg-light border">banans station ' + faltCfgCourseNo(st.station) + '</span>' : '') + faltCfgPartBadge(st.station) +
+                  (faltCfgCourseNo(st.station) ? ' <span class="badge text-bg-light border">tävlingens station ' + faltCfgCourseNo(st.station) + '</span>' : '') + faltCfgPartBadge(st.station) +
                     '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
                     '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
                   '</span>' +
@@ -2697,13 +2697,13 @@ function faltCfgAssembledNote() {
         note.className = 'alert alert-info py-2 small';
         host.parentNode.insertBefore(note, host);
     }
-    note.innerHTML = '<div class="fw-semibold mb-1"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Banan är ihopsatt av föreningarnas delar'
+    note.innerHTML = '<div class="fw-semibold mb-1"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Stationerna är ihopsatta av föreningarnas delar'
         + (faltCfgData._assembledAt ? ' (' + faltCfgEscapeHtml(faltCfgData._assembledAt) + ')' : '') + '</div>'
         + parts.map(function (p) {
             return '<div>· <a href="/faltkonfig/' + parseInt(p.configId, 10) + '/redigera">' + faltCfgEscapeHtml(p.name) + '</a> — station '
                 + (p.stations || []).map(function (n) { return parseInt(n, 10); }).join(', ') + '</div>';
         }).join('')
-        + '<div class="mt-1">Ändra de stationerna i delen. Ändras de här skrivs de över nästa gång banan sätts ihop i planeringen.</div>';
+        + '<div class="mt-1">Ändra de stationerna i delen. Ändras de här skrivs de över nästa gång stationerna sätts ihop i planeringen.</div>';
 }
 (function () {
     var orig = renderActiveTab;

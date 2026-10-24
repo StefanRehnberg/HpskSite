@@ -136,7 +136,7 @@ namespace HpskSite.Controllers
             // Banan i planeringen (2026-10-24): en fälttävling utan stationer får planeringens bana.
             string? courseNote = null;
             try { courseNote = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().AttachToCompetitionAsync(id, competitionId, onlyIfEmpty: true); }
-            catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: banan kunde inte anslutas till tävling {Comp}.", id, competitionId); courseNote = "Banan kunde inte anslutas till tävlingen."; }
+            catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: banan kunde inte anslutas till tävling {Comp}.", id, competitionId); courseNote = "Stationerna kunde inte anslutas till tävlingen."; }
             return Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter", courseNote });
         }
 
@@ -406,7 +406,7 @@ namespace HpskSite.Controllers
             // Banan i planeringen (2026-10-24): antalet ur tävlingen, banan eller områdena — ingen tävling behövs.
             var course = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
             var count = course.StationCount(id, (await course.CourseConfigAsync(id))?.JsonBlob);
-            if (count <= 0) return No("Planeringen har inga stationer än. Skapa banans fältkonfiguration eller ange områdenas stationer först.");
+            if (count <= 0) return No("Planeringen har inga stationer än. Skapa stationerna under Stationerna först.");
             var added = _planning.SeedStationTasks(id, count, x.Caller.ParticipantId);
             return Ok(new { success = true, added, stationCount = count });
         }

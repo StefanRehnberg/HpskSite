@@ -654,6 +654,32 @@ namespace HpskSite.Services
             }
         }
 
+        /// <summary>
+        /// Stationerna-vyn (2026-10-24): en förenings del följer med när föreningen får andra stationer. Planeringen har
+        /// redan prövat behörigheten (Kan ändra). Ändras innehållet i en godkänd eller väntande del blir den ett utkast igen —
+        /// det godkända var andra stationer. Returnerar true om delen var godkänd eller väntade.
+        /// </summary>
+        public async Task<bool> ReplaceForPlanningAsync(int configId, string jsonBlob, string? name)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", configId);
+            if (config == null) return false;
+            var blobChanges = !JsonBlobsEqual(config.JsonBlob, jsonBlob);
+            var wasLocked = blobChanges && (IsApproved(config) || NormalizeStatus(config.ApprovalStatus) == StatusPendingApproval);
+            if (wasLocked)
+            {
+                config.ApprovalStatus = StatusDraft;
+                config.ApprovedByMemberId = null;
+                config.ApprovedDate = null;
+                config.RequestedApproverMemberId = null;
+            }
+            if (blobChanges) config.JsonBlob = jsonBlob;
+            if (!string.IsNullOrWhiteSpace(name)) config.Name = name.Length > 200 ? name[..200] : name;
+            config.ModifiedDate = DateTime.Now;
+            await db.UpdateAsync(config);
+            return wasLocked;
+        }
+
         public async Task<(bool Success, string? Message)> UnapproveAsync(int configId, int viewerMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();

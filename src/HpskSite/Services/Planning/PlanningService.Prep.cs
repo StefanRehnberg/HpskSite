@@ -541,7 +541,7 @@ namespace HpskSite.Services.Planning
             return added;
         }
 
-        public const string CourseApprovalTaskTitle = "Banläggaren godkänner banan";
+        public const string CourseApprovalTaskTitle = "Banläggaren godkänner stationerna";
 
         /// <summary>
         /// "Bygg station N" för varje station som saknar en uppgift (fältskytte). Banan i planeringen (2026-10-24): uppgiften
@@ -594,7 +594,7 @@ namespace HpskSite.Services.Planning
             {
                 fallback ??= EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
                 var t = NewTask(planningId, fallback.Id, CourseApprovalTaskTitle,
-                    "Varje förenings del godkänns av en banläggare, sedan banan som helhet (fältkonfigurationen i planeringen).",
+                    "Varje förenings del godkänns av en banläggare, sedan stationerna som helhet (under Stationerna i planeringen).",
                     null, null, PlanningTaskSource.Station, "course", NextTaskSort(db, planningId, fallback.Id) + 1, byParticipantId, now);
                 t.IsMilestone = true;
                 db.Insert(t);

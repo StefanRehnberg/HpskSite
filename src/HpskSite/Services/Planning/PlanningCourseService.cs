@@ -94,15 +94,15 @@ namespace HpskSite.Services.Planning
             var count = Math.Max(stationCount, StationCount(p.Id, null));
             if (count > 0 && FaltskytteAttachedConfigState.StationCount(blob.ToString()) == 0) blob[CourseAssembly.StationCountKey] = count;
             if (blob["_scoringMode"] == null && !string.IsNullOrWhiteSpace(comp?.ScoringMode)) blob["_scoringMode"] = comp!.ScoringMode;
-            var name = $"{root.Name} – banan";
+            var name = $"{root.Name} – stationerna";
             var (ok, msg, created) = await _configs.CreateAsync(new CreateFaltskytteConfigurationRequest
             {
                 Name = name.Length > 200 ? name[..200] : name,
-                Description = $"Banans fältkonfiguration i planeringen {root.Name}. Föreningarnas delar läggs ihop hit med Sätt ihop banan.",
+                Description = $"Tävlingens stationer i planeringen {root.Name}. Föreningarnas delar läggs ihop hit med Sätt ihop stationerna.",
                 Visibility = "Private",
                 JsonBlob = blob.ToString(Newtonsoft.Json.Formatting.None),
             }, memberId);
-            if (!ok || created == null) return (null, msg ?? "Banans fältkonfiguration kunde inte skapas.");
+            if (!ok || created == null) return (null, msg ?? "Stationerna kunde inte skapas.");
             var linkError = _planning.LinkCourseConfig(p.Id, created.Id, memberId);
             if (linkError != null) { await _configs.DeleteAsync(created.Id); return (null, linkError); }
             return (created, null);
@@ -142,13 +142,13 @@ namespace HpskSite.Services.Planning
             var comp = _competitions.GetSaved(competitionId);
             if (comp == null || !IsFalt(comp.CompetitionType)) return onlyIfEmpty ? null : "Tävlingen är ingen fälttävling.";
             var course = await CourseConfigAsync(planningId);
-            if (course == null) return onlyIfEmpty ? null : "Planeringen har ingen fältkonfiguration för banan.";
+            if (course == null) return onlyIfEmpty ? null : "Planeringens stationer är inte skapade än.";
             var courseStations = FaltskytteAttachedConfigState.StationCount(course.JsonBlob);
-            if (courseStations == 0) return onlyIfEmpty ? null : "Banan har inga stationer än.";
+            if (courseStations == 0) return onlyIfEmpty ? null : "Ingen station är byggd än.";
             if (onlyIfEmpty && FaltskytteAttachedConfigState.StationCount(comp.StationConfig) > 0) return null;
             JObject blob;
             try { blob = JObject.Parse(course.JsonBlob ?? "{}"); }
-            catch { return "Banans fältkonfiguration går inte att läsa."; }
+            catch { return "Stationernas fältkonfiguration går inte att läsa."; }
             blob[FaltskytteAttachedConfigState.AttachedKey] = course.Id;
             var mode = blob.Value<string>("_scoringMode");
             var saved = _competitions.Update(competitionId, null, c =>
@@ -162,8 +162,60 @@ namespace HpskSite.Services.Planning
                 _logger.LogWarning("Planering {Id}: banan kunde inte anslutas till tävling {Comp} ({Outcome}).", planningId, competitionId, saved.Outcome);
                 return "Tävlingen kunde inte sparas. Försök igen.";
             }
-            if (saved.PublishProblem != null) return "Banan är ansluten men tävlingen kunde inte publiceras om: " + saved.PublishProblem;
+            if (saved.PublishProblem != null) return "Stationerna är anslutna men tävlingen kunde inte publiceras om: " + saved.PublishProblem;
             return null;
+        }
+
+        /// <summary>
+        /// Stationerna-vyn (Stefan 2026-10-24): föreningarna vars stationer ändrades får sina delar omsynkade
+        /// (<see cref="AreaConfigBlob.Resync"/>) och omdöpta efter stationerna. Svaret: delarna som var godkända (eller
+        /// väntade) och nu är utkast igen.
+        /// </summary>
+        public async Task<List<string>> SyncPartsAsync(int planningId, IEnumerable<PlanningService.AreaStationsChange> changed)
+        {
+            var reopened = new List<string>();
+            var links = _planning.AreaConfigLinks(planningId);
+            var course = await CourseConfigAsync(planningId);
+            foreach (var c in changed)
+            {
+                var link = links.FirstOrDefault(l => l.AreaId == c.AreaId);
+                if (link == null) continue;
+                var part = await _configs.GetByIdAsync(link.ConfigId);
+                if (part == null) continue;
+                var blob = AreaConfigBlob.Resync(part.JsonBlob, course?.JsonBlob, c.Stations);
+                var area = _planning.AreaWithStations(c.PlanningId, c.AreaId);
+                var planning = _planning.Get(c.PlanningId);
+                var name = area == null || planning == null ? null
+                    : $"{planning.Name} – {area.Area.Name}" + (c.Stations.Count > 0 ? $" (station {string.Join(", ", c.Stations.OrderBy(n => n))})" : "");
+                if (await _configs.ReplaceForPlanningAsync(part.Id, blob, name)) reopened.Add(name ?? part.Name);
+                if (c.Stations.Count > 0) await _configs.SetFirstStationNumberAsync(part.Id, c.Stations.Min());
+            }
+            return reopened;
+        }
+
+        /// <summary>
+        /// "Ändra antalet stationer": tävlingens antal i helheten (<c>_stationCount</c>). Färre stationer vägras så länge en
+        /// förening har en station över gränsen eller en sådan station är byggd.
+        /// </summary>
+        public async Task<string?> SetStationCountAsync(PlanningRow p, int memberId, int count)
+        {
+            if (count < 1 || count > PlanningStations.Max) return $"Tävlingen kan ha 1–{PlanningStations.Max} stationer.";
+            var (course, err) = await CreateCourseAsync(p, memberId, count);
+            if (course == null) return err;
+            var areaMax = _planning.MaxAreaStation(p.Id);
+            if (areaMax > count) return $"Station {areaMax} hör till en förening. Släpp den först under Föreningarna.";
+            var built = CourseAssembly.BuiltStations(course.JsonBlob);
+            if (built.Count > 0 && built.Max > count) return $"Station {built.Max} är byggd. Ta bort den i konfiguratorn först.";
+            var comp = FaltCompetition(p.Id);
+            if (comp != null && comp.NumberOfSeriesOrStations > count)
+                return $"Tävlingen {comp.Name} har {comp.NumberOfSeriesOrStations} stationer. Ändra den i tävlingen först.";
+            JObject blob;
+            try { blob = string.IsNullOrWhiteSpace(course.JsonBlob) ? new JObject() : JObject.Parse(course.JsonBlob); }
+            catch { return "Stationernas fältkonfiguration går inte att läsa."; }
+            if (blob.Value<int?>(CourseAssembly.StationCountKey) == count) return null;
+            blob[CourseAssembly.StationCountKey] = count;
+            var (ok, msg, _) = await _configs.UpdateWithVersionAsync(new UpdateFaltskytteConfigurationRequest { Id = course.Id, JsonBlob = blob.ToString(Newtonsoft.Json.Formatting.None) });
+            return ok ? null : msg;
         }
 
         /// <summary>Delarna och deras läge mot banan: med, ändrad sedan ihopläggningen eller inte med än.</summary>

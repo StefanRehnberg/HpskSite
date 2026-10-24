@@ -1153,7 +1153,7 @@ namespace HpskSite.Controllers
                 if (a.PlanningId > 0
                     && HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningCourseService)) is HpskSite.Services.Planning.PlanningCourseService course
                     && course.AttachToCompetitionAsync(a.PlanningId.Value, competitionId, onlyIfEmpty: true).GetAwaiter().GetResult() is { } courseErr)
-                    return "Tävlingen är skapad och kopplad till planeringen, men banan kunde inte anslutas: " + courseErr;
+                    return "Tävlingen är skapad och kopplad till planeringen, men stationerna kunde inte anslutas: " + courseErr;
                 return null;
             }
             catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)

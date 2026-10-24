@@ -12836,9 +12836,36 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       `NumberOfSeriesOrStations`/`ScoringMode` — vid `LinkCompetition` och ansökningslänken bara om tävlingen saknar
       konfiguration (`onlyIfEmpty`), annars med knappen (kortet visar `stale` när banan ändrats efter).
     - **Uppgifterna:** `SeedStationTasks` kräver ingen tävling, lägger varje stationsuppgift i området som äger stationen
-      och milstolpen "Banläggaren godkänner banan"; uppgiften länkar till stationen i delen (`#station=N`, konfiguratorn
-      fokuserar den) annars i banan. Svit `tavlingsplanering-banan-verify.mjs` 44/44 (A/B: utan godkännandegrinden,
-      utan delarna i `Assemble`, utan Kan ändra-regeln → röda var för sig).
+      och milstolpen "Banläggaren godkänner stationerna"; uppgiften länkar till stationen i delen (`#station=N`,
+      konfiguratorn fokuserar den) annars i helheten.
+    - **⚠️ ORDET (Stefan): användaren ser "Stationerna", aldrig "banan"** — koden heter fortfarande Course*/course
+      (internt), men varje text i planeringen, konfiguratorns planeringsrutor och serverns meddelanden säger
+      stationerna / helheten / tävlingens station N. "Banläggare" (certifikatet) står kvar.
+  - **⚠️⚠️ Rälsens plats Stationerna (`#vy=stationer`, Stefan 2026-10-24: "rörigt och en kvarleva … gör om")** — skissen
+    https://claude.ai/artifact/SYoxkZnwWrSTkQkVUTqfoU. ERSÄTTER Stationerna-kortet på Översikt (nu en rad,
+    `#plStationsSummary`) och fältet Stationer i områdesdialogen (bara en rad "väljs under Stationerna"; `SaveArea` med
+    `stations` finns kvar i API:t, null = rör inte). Syns för fältplaneringar och när ett område har stationer
+    (`stationsWanted`), inte via mejllänken.
+    - **Sidan:** Läget i fyra steg (Fördela · Bygg · Sätt ihop och godkänn · Tävlingen, `.pl-steps`), **Föreningarna**
+      (= familjens områden med stationer, `PlanningService.StationAreas`; radmeny Välj stationer / Skapa-Öppna delen /
+      Ge stationscheferna tillgång / Ändra / Ta bort; delplaneringens rader ändras där) och **Stationerna** (en rad per
+      station: förening, byggs i, stationschef, uppgifter; radmeny Öppna i konfiguratorn / Ge till en förening /
+      Lägg till en uppgift — `openTaskEdit(null, area, { scopeType, scopeKey })`). Utan stationer i planeringen: kortet
+      Skapa stationerna i stället för Läget, tabellerna syns ändå (en kopplad tävlings stationer).
+    - **Rutnätet** (`stationGridHtml`): en ruta per station; en station en annan förening i SAMMA planering har "flyttas
+      hit"; en som hör till en annan planering i familjen är låst.
+    - **`POST AssignStations(areaId, stations)`** → `PlanningService.AssignStations` (UPDLOCK på familjens områden):
+      området får EXAKT listan, andra områden i planeringen släpper dem, en station i en annan familjeplanering vägras
+      ("Ändra den där"), över tävlingens antal vägras. Ändrade områdens delar följer med:
+      `PlanningCourseService.SyncPartsAsync` → **`AreaConfigBlob.Resync`** (behåll delens arbete för kvarvarande
+      stationer, ny station ur helheten, numrera om 1..N; tester i `CourseAssemblyTests`) +
+      `FaltskytteConfigurationService.ReplaceForPlanningAsync` (ingen behörighetsprövning — planeringen har prövat;
+      en godkänd/väntande del blir UTKAST igen och svaret `reopened` säger vilka). Delens namn följer stationerna.
+    - **`POST SetStationCount`** → `PlanningCourseService.SetStationCountAsync`: `_stationCount` i helheten; färre vägras
+      om en förening har en station över, en sådan station är byggd, eller tävlingen har fler.
+    - `GET Stations` bär `areas` (med `part` inkl. `state`), `stationCount` och per station `built` (i helheten ELLER i
+      en del, `CourseAssembly.BuiltStations`) och `url` (`StationUrlsAsync`).
+    - Svit `tavlingsplanering-stationer-verify.mjs` (ersätter banan-sviten); p4 och o3 läser vyn.
   - **⚠️⚠️ Bemanning per station och pass — TIDEN ÄR SANNINGEN (3.2):**
     - **`StaffTimeCoverage.Peak`** (rena funktioner) är ENDA räkningen av "hur många är på plats": flest SAMTIDIGT, inte
       antalet uppdrag (tio markörer i två skift om fem = fem). Utan tid = hela dagen; ett uppdrag i ett pass har passets

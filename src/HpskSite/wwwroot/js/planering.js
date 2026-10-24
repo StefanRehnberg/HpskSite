@@ -260,6 +260,8 @@
         { key: 'beslut', label: 'Förslag och beslut', need: s => !s.planning.parts || s.planning.parts.decisions, hashOk: true },
         { key: 'dokument', label: 'Dokument' },
         { key: 'deltagare', label: 'Deltagare' },
+        // Stationerna (Stefan 2026-10-24): fältskyttets stationer — föreningarna, delarna och helheten — på en egen plats.
+        { key: 'stationer', label: 'Stationerna', need: s => !TOKEN && stationsWanted(s) },
         // Omgång 2: vägen till tävlingen — ansökan till kretsen, tävlingen som skapas, och kopplingen. Den som deltar
         // utan att kunna ändra ser den när det finns något att läsa.
         { key: 'tavling', label: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || !!(s.planning.application && s.planning.application.id) || !!s.planning.competition) },
@@ -386,7 +388,7 @@
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
            uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings,
-           tavling: viewCompetition,
+           tavling: viewCompetition, stationer: viewStations,
            bemanning: () => S.me.canEdit ? window.PlaneringBemanning.render(STAFF_API) : viewStaffingInfo() })[view]();
     }
 
@@ -498,7 +500,7 @@
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
         html.push(familyCompetitionsCardHtml());
         html.push(subPlanningsCardHtml());
-        html.push('<div id="plStationsWrap"></div>');
+        html.push('<div id="plStationsSum"></div>');
 
         // Kom igång — för en ny planering
         if (p.me.isParticipant && p.participants.length <= 1 && (!MEET || MEET.meetings.length === 0)) {
@@ -531,7 +533,7 @@
             <a href="#vy=deltagare" data-pl-go="deltagare">Visa alla</a></div>
             <div>${p.participants.slice(0, 8).map(x => esc(x.name) + (x.represents ? ` <span class="pl-help">(${esc(x.represents)})</span>` : '')).join(', ')}${p.participants.length > 8 ? ' …' : ''}</div></div>`);
         $('plBody').innerHTML = html.join('');
-        loadStationsCard();
+        loadStationsSummary();
     }
     document.addEventListener('click', e => {
         const b = e.target.closest('[data-pl-meet]'); if (!b) return;
@@ -1709,12 +1711,14 @@
         if (v === '__name') return { assignee: '', assigneeMemberId: '', assigneeName: body.querySelector('#teName').value.trim() };
         return { assignee: v, assigneeMemberId: '', assigneeName: '' };
     }
-    function openTaskEdit(t, presetArea) {
+    // preset: { scopeType, scopeKey } för en ny uppgift som gäller en station (Stationerna-vyn).
+    function openTaskEdit(t, presetArea, preset) {
         const c = competition();
         const days = t ? t.dueDaysBefore != null : false;
         const showDays = canDaysBefore() || days;
-        const showScope = !!c || (t && t.scopeType);
-        const scopeOpts = '<option value="">—</option>' + (TASKS.scopeTypes || []).map(s => `<option${t && t.scopeType === s ? ' selected' : ''}>${esc(s)}</option>`).join('');
+        const scopeNow = t ? t.scopeType : preset ? preset.scopeType : '';
+        const showScope = !!c || !!scopeNow;
+        const scopeOpts = '<option value="">—</option>' + (TASKS.scopeTypes || []).map(s => `<option${scopeNow === s ? ' selected' : ''}>${esc(s)}</option>`).join('');
         formModal({
             title: t ? 'Ändra uppgiften' : 'Ny uppgift', okLabel: t ? 'Spara' : 'Lägg till', wide: false,
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="teTitle">Vad ska göras?</label>
@@ -1733,10 +1737,10 @@
                     <label class="form-check-label" for="teMilestone"><b>Milstolpe</b> — ett viktigt datum, till exempel en frist hos förbundet</label></div>
                     <div class="form-check ms-4${t && t.isMilestone ? '' : ' d-none'}" id="teForbundetBox"><input class="form-check-input" type="checkbox" id="teForbundet"${t && t.sendToForbundet ? ' checked' : ''}>
                     <label class="form-check-label" for="teForbundet">Skickas till förbundet, med dokument ur planeringens arkiv</label></div></div>
-                <details class="mb-1"${t && (t.description || t.scopeType || t.estimatedCost != null) ? ' open' : ''}><summary class="mb-2">Mer om uppgiften</summary>
+                <details class="mb-1"${(t && (t.description || t.scopeType || t.estimatedCost != null)) || preset ? ' open' : ''}><summary class="mb-2">Mer om uppgiften</summary>
                     <div class="mb-3"><label class="form-label" for="teDesc">Beskrivning</label><textarea id="teDesc" class="form-control" rows="3" maxlength="4000">${esc(t ? t.description || '' : '')}</textarea></div>
                     ${showScope ? `<div class="row g-2 mb-3"><div class="col-6"><label class="form-label" for="teScope">Gäller</label><select id="teScope" class="form-select">${scopeOpts}</select></div>
-                        <div class="col-6"><label class="form-label" for="teScopeKey">Nummer</label><input id="teScopeKey" class="form-control" maxlength="100" value="${esc(t ? t.scopeKey || '' : '')}" placeholder="t.ex. 3"></div></div>` : ''}
+                        <div class="col-6"><label class="form-label" for="teScopeKey">Nummer</label><input id="teScopeKey" class="form-control" maxlength="100" value="${esc(t ? t.scopeKey || '' : preset ? preset.scopeKey || '' : '')}" placeholder="t.ex. 3"></div></div>` : ''}
                     <div class="mb-1"><label class="form-label" for="teCost">Uppskattning (kr)</label><input id="teCost" class="form-control" inputmode="decimal" style="max-width:12rem" value="${t && t.estimatedCost != null ? esc(t.estimatedCost) : ''}">
                         <div class="pl-help small">Vad ni räknar med att det kostar. Utfallet kommer ur bokföringen.</div></div></details>
                 ${t ? '' : '<p class="pl-help small mt-2 mb-0">Den som får uppgiften får ett mejl.</p>'}`,
@@ -1930,9 +1934,8 @@
                         <option value="text"${hostVal === 'text' ? ' selected' : ''}>Annan (skriv)</option></select>
                     <div class="pl-help small mt-1">Den klubb eller krets som står för området. Klubbarna och kretsarna som någon i planeringen företräder.</div>
                     <input id="arHostText" class="form-control mt-2${hostVal === 'text' ? '' : ' d-none'}" maxlength="200" value="${esc(a ? a.hostText || '' : '')}" placeholder="Till exempel: Förbundets kansli"></div>
-                <div class="mb-3"><label class="form-label" for="arStations">Stationer (fältskytte, valfritt)</label>
-                    <input id="arStations" class="form-control" maxlength="200" value="${esc(a ? a.stations || '' : '')}" placeholder="Till exempel 3-6, 9" inputmode="text">
-                    <div class="pl-help small mt-1">De stationer värden ansvarar för. En station kan bara höra till ett område.</div></div>
+                ${a && a.stations ? `<div class="mb-3 small" id="arStationsInfo"><span class="fw-semibold">Stationer</span> ${esc(a.stations)} ·
+                    <a href="#vy=stationer" data-pl-go="stationer" data-bs-dismiss="modal">väljs under Stationerna</a></div>` : ''}
                 <div class="mb-1"><label class="form-label" for="arDesc">Beskrivning (valfri)</label>
                     <textarea id="arDesc" class="form-control" rows="3" maxlength="2000">${esc(a ? a.description || '' : '')}</textarea></div>`,
             onOpen: body => {
@@ -1949,8 +1952,7 @@
                 const r = await post('SaveArea', { areaId: a ? a.id : 0, name: body.querySelector('#arName').value,
                     responsibleId: v === '__name' ? '' : v, responsibleName: v === '__name' ? body.querySelector('#arRespName').value : '',
                     details: '1', description: body.querySelector('#arDesc').value,
-                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#arHostText').value : '',
-                    stations: body.querySelector('#arStations').value.trim() });
+                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#arHostText').value : '' });
                 if (!r.success) return r.message;
                 await Promise.all([reloadTasks(), reloadPeople()]); rerender(); return true;
             }
@@ -2039,7 +2041,7 @@
     }
     async function seedStations() {
         const n = TASKS.stationCount || 0;
-        if (!await plConfirm('En uppgift per station?', `"Bygg station 1" … "Bygg station ${n}" läggs i det område som har stationen — en station utan område hamnar i Stationsbygge. Milstolpen "Banläggaren godkänner banan" läggs till. Stationer som redan har en uppgift hoppas över.`, 'Lägg till')) return;
+        if (!await plConfirm('En uppgift per station?', `"Bygg station 1" … "Bygg station ${n}" läggs i det område som har stationen — en station utan område hamnar i Stationsbygge. Milstolpen "Banläggaren godkänner stationerna" läggs till. Stationer som redan har en uppgift hoppas över.`, 'Lägg till')) return;
         const r = await post('SeedStations', {});
         if (!r.success) { failMsg(r); return; }
         await reloadTasks(); rerender();
@@ -3572,177 +3574,371 @@
         });
     }
 
-    // ================================================================ Stationerna (P4, fråga 13)
-    // I fältskytte delas stationerna mellan klubbar och kretsar: ett område bär sina stationer och sin värd, och
-    // stationschefen är bemanningens roll Stationschef per station. Huvudplaneringen visar också delplaneringarnas.
+    // ================================================================ Stationerna (Stefan 2026-10-24)
+    // En egen plats i rälsen för fältskytte, i den ordning det händer: fördela stationerna på föreningar, bygg dem i varsin
+    // del, sätt ihop och godkänn, och för över dem till tävlingen. En förening = ett område med värd och stationer (P4) —
+    // samma rader som under Inställningar → Områden, men stationerna väljs bara här.
     const FALT_KEYS = ['Faltskytte', 'MagnumFalt'];
-    function stationsWanted() {
-        return areas().some(a => a.stations) || FALT_KEYS.includes(S.planning.disciplineKey) || (S.planning.subPlannings || []).length > 0;
+    function stationsWanted(s) {
+        s = s || S;
+        return (s.areas || []).some(a => a.stations) || FALT_KEYS.includes(s.planning.disciplineKey);
     }
-    async function loadStationsCard() {
-        const wrap = $('plStationsWrap');
-        if (!wrap || !stationsWanted()) return;
+    let ST = null;
+    const ST_STATUS = { Draft: ['Utkast', 'draft'], PendingApproval: ['Väntar på godkännande', 'draft'], Approved: ['Godkänd', 'live'] };
+    const ST_PART = { current: ['Ihopsatt', 'live'], changed: ['Ändrad sedan ihopsättningen', 'draft'], new: ['Inte ihopsatt än', 'draft'] };
+    const stPill = ([lbl, tone]) => `<span class="hpsk-state hpsk-state--${tone}"><span class="hpsk-state-dot"></span>${esc(lbl)}</span>`;
+    const stMiss = t => `<span class="badge text-bg-warning fw-normal">${esc(t)}</span>`;
+    const stWho = s => s.host || s.area || '';
+
+    async function viewStations() {
+        setHead('Stationerna', esc(S.planning.name));
+        setActions([]);
+        if (!ST) $('plBody').innerHTML = spinner();
+        else drawStations();
+        await reloadStations();
+    }
+    async function reloadStations() {
         const r = await get('Stations');
-        if (!r.success || !$('plStationsWrap')) return;
-        const rows = r.stations || [];
-        if (!rows.length && !(r.competition && r.competition.falt) && !r.course && !(r.canCreateCourse && FALT_KEYS.includes(S.planning.disciplineKey))) {
-            $('plStationsWrap').innerHTML = ''; return;
-        }
-        const noChief = rows.filter(s => !s.chiefs.length).length, noHost = rows.filter(s => !s.area).length;
-        const warn = [noHost ? `${noHost === 1 ? 'En station har' : noHost + ' stationer har'} ingen förening som ansvarar` : '',
-            noChief ? `${noChief === 1 ? 'en station saknar' : noChief + ' stationer saknar'} stationschef` : ''].filter(Boolean).join(', och ');
-        const cfg = r.config;
-        let cfgHtml = '';
-        if (cfg && cfg.chiefs.length) {
-            const lacking = cfg.chiefs.filter(c => !c.hasAccess);
-            cfgHtml = `<div class="px-3 pb-3" id="plStationsConfig"><div class="pl-help small mb-1">Fältkonfigurationen
-                <a href="${esc(cfg.url)}">${esc(cfg.name)}</a>: ${cfg.chiefs.length - lacking.length} av ${cfg.chiefs.length} stationschefer kan läsa och ändra den.</div>
-                ${lacking.length ? `<div class="small mb-2">Saknar tillgång: ${lacking.map(c => esc(c.name) + ' <span class="pl-help">(station ' + esc(c.stations) + ')</span>').join(', ')}</div>
-                    ${cfg.canEdit && S.me.canEdit ? '<button type="button" class="btn btn-outline-primary btn-sm" data-st-give="all"><i class="bi bi-person-check me-1"></i>Ge stationscheferna tillgång till fältkonfigurationen</button>'
-                        : '<div class="pl-help small">Den som äger fältkonfigurationen — eller arbetar med den — kan ge dem tillgång.</div>'}` : ''}</div>`;
-        }
-        // Omgång 3 (3.3): varje område kan ha en egen fältkonfiguration för sina stationer — byggs, godkänns och skrivs ut
-        // av den förening som har stationerna, utan att någon behöver tävlingens hela konfiguration.
-        const areaMap = new Map();
-        rows.filter(s => s.areaId).forEach(s => {
-            if (!areaMap.has(s.areaId)) areaMap.set(s.areaId, { id: s.areaId, name: s.area, host: s.host, planningId: s.planningId, planning: s.planning, stations: [] });
-            areaMap.get(s.areaId).stations.push(s.number);
-        });
-        const acfg = new Map((r.areaConfigs || []).map(c => [c.areaId, c]));
-        const stLabel = { Draft: ['Utkast', 'draft'], PendingApproval: ['Väntar på godkännande', 'draft'], Approved: ['Godkänd', 'live'] };
-        const areaRows = [...areaMap.values()].map(a => {
-            const c = acfg.get(a.id);
-            const what = `<b>${esc(a.host || a.name)}</b>${a.host ? ` <span class="pl-help small">· ${esc(a.name)}</span>` : ''} <span class="pl-help small">· station ${esc(a.stations.join(', '))}</span>`;
-            if (c) {
-                const [lbl, tone] = stLabel[c.status] || stLabel.Draft;
-                return `<li class="mb-2" data-area-config="${a.id}">${what}<div class="small">
-                    ${c.canView ? `<a href="${esc(c.url)}">${esc(c.name)}</a>` : esc(c.name)}
-                    <span class="hpsk-state hpsk-state--${tone} ms-1"><span class="hpsk-state-dot"></span>${esc(lbl)}</span>
-                    ${c.canEdit && S.me.canEdit ? ` · <a href="#" data-st-give="${a.id}">Ge områdets stationschefer tillgång</a>` : ''}</div></li>`;
-            }
-            const mine = a.planningId === ID;
-            return `<li class="mb-2" data-area-config="${a.id}">${what}<div class="small">
-                ${mine && r.canCreateAreaConfig ? `<a href="#" data-st-areacfg="${a.id}">Skapa en fältkonfiguration för områdets stationer</a>`
-                    : '<span class="pl-help">Ingen egen fältkonfiguration</span>'}</div></li>`;
-        });
-        const isFalt = (r.competition && r.competition.falt) || FALT_KEYS.includes(S.planning.disciplineKey);
-        const courseHtml = isFalt || r.course ? courseSectionHtml(r, rows) : '';
-        const areaCfgHtml = areaRows.length && isFalt ? `<div class="px-3 pb-3" id="plAreaConfigs">
-            <h3 class="h6 mt-2 mb-1">Områdenas fältkonfigurationer</h3>
-            <p class="pl-help small mb-2">Ett område kan bygga sina stationer i en egen fältkonfiguration och få den godkänd av en banläggare.
-                Den börjar som en kopia av områdets stationer i banan (eller tävlingens konfiguration), visar banans stationsnummer, och läggs
-                ihop till banan med <b>Sätt ihop banan</b>. Områdets ansvarige och stationschefer kan ändra den.</p>
-            <ul class="list-unstyled mb-0">${areaRows.join('')}</ul></div>` : '';
-        $('plStationsWrap').innerHTML = `<div class="pl-card p-0" id="plStations"><div class="pl-cardh px-3 pt-3"><h2>Stationerna</h2>
-                ${S.me.canEdit && !TOKEN ? '<a href="#vy=installningar" data-pl-go="installningar">Fördela stationerna</a>' : ''}</div>
-            <p class="pl-help small px-3 mb-2">Vilken förening som ansvarar för vilka stationer (under Inställningar → Områden), och stationscheferna ur bemanningen.
-                ${r.competition && r.competition.falt ? `Tävlingen ${esc(r.competition.name)} har ${r.competition.stationCount} stationer.` : ''}</p>
-            ${warn ? `<div class="alert alert-warning mx-3 py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>${esc(warn.charAt(0).toUpperCase() + warn.slice(1))}.</div>` : ''}
-            <div class="table-responsive"><table class="table align-middle mb-0">
-            <thead><tr><th class="ps-3">Station</th><th>Ansvarar</th><th class="d-none d-md-table-cell">Stationschef</th><th class="d-none d-md-table-cell">Uppgifter</th></tr></thead>
-            <tbody>${rows.map(s => `<tr data-station="${s.number}"><td class="ps-3"><b>${s.number}</b></td>
-                <td>${s.area ? esc(s.host || s.area) + (s.host ? ` <span class="pl-help small">· ${esc(s.area)}</span>` : '') : '<span class="text-warning-emphasis">Ingen ännu</span>'}
-                    ${s.planning ? `<div class="pl-help small">Delplanering: ${esc(s.planning)}</div>` : ''}
-                    <div class="small d-md-none">${s.chiefs.length ? 'Stationschef: ' + esc(s.chiefs.join(', ')) : '<span class="pl-help">Ingen stationschef</span>'}</div></td>
-                <td class="d-none d-md-table-cell">${s.chiefs.length ? esc(s.chiefs.join(', ')) : '<span class="pl-help">—</span>'}</td>
-                <td class="d-none d-md-table-cell">${s.openTasks ? s.openTasks + ' öppna' : '<span class="pl-help">—</span>'}</td></tr>`).join('')}</tbody></table></div>
-            ${courseHtml}${cfgHtml}${areaCfgHtml}</div>`;
+        if (view !== 'stationer') { if (r.success) ST = r; return; }
+        if (!r.success) { $('plBody').innerHTML = `<div class="alert alert-danger">${esc(r.message || 'Stationerna kunde inte hämtas.')}</div>`; return; }
+        ST = r; drawStations();
+    }
+    async function afterStationChange() {
+        await Promise.all([reloadPeople(), reloadTasks()]);
+        renderRail();
+        await reloadStations();
     }
 
-    // ---------------------------------------------------------------- Banan i planeringen (Stefan 2026-10-24)
-    // Planeringen äger banans fältkonfiguration innan tävlingen finns. Föreningarna bygger sina stationer i varsin del
-    // (områdenas delkonfigurationer), och "Sätt ihop banan" lägger ihop delarna. Varje del godkänns, sedan helheten.
-    const COURSE_PART_STATE = { current: ['Med i banan', 'live'], changed: ['Ändrad sedan banan sattes ihop', 'draft'], new: ['Inte med i banan än', 'draft'] };
-    function courseSectionHtml(r, rows) {
-        const c = r.course;
-        const stLabel = { Draft: ['Utkast', 'draft'], PendingApproval: ['Väntar på godkännande', 'draft'], Approved: ['Godkänd', 'live'] };
-        const pill = (lbl, tone) => `<span class="hpsk-state hpsk-state--${tone}"><span class="hpsk-state-dot"></span>${esc(lbl)}</span>`;
+    function drawStations() {
+        const r = ST, c = r.course, edit = S.me.canEdit && !TOKEN;
+        const rows = r.stations || [], fa = r.areas || [];
+        const comp = c && c.competition;
+        const parts = fa.filter(a => a.part).map(a => a.part);
+        const pending = parts.filter(p => p.state !== 'current').length;
+        const canAttach = comp && comp.canAttach && edit && (!comp.attached || comp.stale) && c.builtStations > 0;
+        setActions(edit && !c ? [
+            rows.length && { label: 'Lägg till en förening…', icon: 'bi-plus-lg', fn: () => openStationArea(null) },
+            rows.length && TASKS && TASKS.canManageAreas && { label: 'En uppgift per station', icon: 'bi-signpost-split', fn: seedStations },
+        ] : edit && c ? [
+            { label: 'Lägg till en förening…', icon: 'bi-plus-lg', fn: () => openStationArea(null) },
+            { label: 'Ändra antalet stationer…', icon: 'bi-123', fn: openStationCount },
+            { divider: true },
+            { label: 'Sätt ihop stationerna' + (pending ? ` (${pending} ${pending === 1 ? 'del' : 'delar'} att ta med)` : ''), icon: 'bi-diagram-3', fn: assembleStations },
+            c.canView && { label: 'Öppna alla stationer i konfiguratorn', icon: 'bi-box-arrow-up-right', fn: () => { location.href = c.url; } },
+            c.canEdit && { label: 'Begär godkännande av stationerna…', icon: 'bi-patch-check', fn: () => { location.href = c.url; } },
+            TASKS && TASKS.canManageAreas && { label: 'En uppgift per station', icon: 'bi-signpost-split', fn: seedStations },
+            canAttach && { divider: true },
+            canAttach && { label: comp.attached ? 'Uppdatera tävlingens stationer' : 'Anslut stationerna till tävlingen', icon: 'bi-box-arrow-in-right', fn: attachStations },
+        ] : []);
+        rowFns = [];
+        // Utan stationer i planeringen: skapa-kortet i stället för läget — men föreningarna och stationerna (ur en kopplad
+        // tävling eller områdena) syns ändå.
         if (!c) {
-            if (!r.canCreateCourse) return '';
-            const suggested = Math.max(rows.length ? rows[rows.length - 1].number : 0, (r.competition && r.competition.stationCount) || 0) || 8;
-            return `<div class="px-3 pb-3 border-top pt-3" id="plCourse"><h3 class="h6 mb-1">Banan</h3>
-                <p class="pl-help small mb-2">Planeringen kan äga banans fältkonfiguration redan innan tävlingen finns. Föreningarna bygger sina stationer
-                    i varsin del (områdenas fältkonfigurationer nedan), och <b>Sätt ihop banan</b> lägger ihop delarna. När planeringen kopplas till
-                    tävlingen följer banan med.</p>
-                <div class="d-flex flex-wrap gap-2 align-items-end"><div><label class="form-label small mb-1" for="plCourseCount">Antal stationer</label>
-                    <input id="plCourseCount" class="form-control form-control-sm" style="max-width:7rem" inputmode="numeric" value="${suggested}"></div>
-                    <button type="button" class="btn btn-primary btn-sm" data-course-create="1"><i class="bi bi-plus-lg me-1"></i>Skapa banans fältkonfiguration</button></div></div>`;
+            $('plBody').innerHTML = stationsEmptyHtml(r, rows) + (rows.length || fa.length ? areasHtml(fa, edit) + stationRowsHtml(rows, fa, edit) : '');
+            return;
         }
-        const [sl, st] = stLabel[c.status] || stLabel.Draft;
-        const partsHtml = (c.parts || []).length ? `<ul class="list-unstyled small mb-2">${c.parts.map(p => {
-            const [pl, pt] = COURSE_PART_STATE[p.state] || COURSE_PART_STATE.new;
-            const [al, at] = stLabel[p.status] || stLabel.Draft;
-            return `<li class="mb-1" data-course-part="${p.id}"><a href="/faltkonfig/${p.id}/redigera">${esc(p.name)}</a>
-                <span class="pl-help">· station ${esc((p.stations || []).join(', '))}</span> ${pill(al, at)} ${pill(pl, pt)}</li>`;
-        }).join('')}</ul>` : `<p class="pl-help small mb-2">Inga delar än. Fördela stationerna på områden (Inställningar → Områden) och skapa en fältkonfiguration per område nedan — eller bygg hela banan i en konfiguration.</p>`;
-        const pending = (c.parts || []).filter(p => p.state !== 'current').length;
-        const comp = c.competition;
-        let compHtml = '';
-        if (comp) {
-            compHtml = comp.attached
-                ? (comp.stale ? `<div class="small text-warning-emphasis mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Tävlingens kopia av banan är äldre än banan.</div>`
-                    : `<div class="small text-success mb-2"><i class="bi bi-check2 me-1"></i>Banan är ansluten till tävlingen.</div>`)
-                : comp.hasOther ? `<div class="small text-warning-emphasis mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Tävlingen har en annan fältkonfiguration ansluten.</div>`
-                : `<div class="small mb-2 pl-help">Banan är inte ansluten till tävlingen än.</div>`;
-            if (comp.canAttach && S.me.canEdit && (!comp.attached || comp.stale) && c.builtStations > 0)
-                compHtml += `<button type="button" class="btn btn-outline-primary btn-sm mb-2" data-course-attach="1">${comp.attached ? 'Uppdatera tävlingens bana' : 'Anslut banan till tävlingen'}</button>`;
+        $('plBody').innerHTML = `<p class="pl-help mb-3">Stationerna hör till planeringen och finns innan tävlingen. Varje förening bygger sina stationer
+                i en egen del. Delarna läggs sedan ihop till tävlingens stationer.</p>
+            ${stepsHtml(r, rows, fa, edit)}${areasHtml(fa, edit)}${stationRowsHtml(rows, fa, edit)}`;
+    }
+
+    function stationsEmptyHtml(r, rows) {
+        const suggested = Math.max(rows.length ? rows[rows.length - 1].number : 0, r.stationCount || 0, (r.competition && r.competition.stationCount) || 0) || 8;
+        if (!r.canCreateCourse) return `<div class="pl-card" id="plStEmpty"><h2>Stationerna är inte skapade än</h2>
+            <p class="mb-0">Den som kan ändra planeringen skapar stationerna här. Sedan väljer varje förening sina stationer och bygger dem.</p></div>`;
+        return `<div class="pl-card" id="plStEmpty"><h2>Skapa stationerna</h2>
+            <p>Börja med hur många stationer tävlingen har. Sedan lägger du till föreningarna och väljer vilka stationer var och en bygger.
+                ${r.competition && r.competition.falt ? `Stationerna börjar som en kopia av tävlingens fältkonfiguration (${esc(r.competition.name)}).` : ''}</p>
+            <div class="d-flex flex-wrap gap-2 align-items-end"><div><label class="form-label" for="plStCount">Antal stationer</label>
+                <input id="plStCount" class="form-control" style="max-width:8rem" inputmode="numeric" value="${suggested}"></div>
+                <button type="button" class="btn btn-primary" data-st-create="1">Skapa stationerna</button></div></div>`;
+    }
+
+    function stepsHtml(r, rows, fa, edit) {
+        const c = r.course, comp = c.competition;
+        const total = r.stationCount || rows.length;
+        const assigned = rows.filter(s => s.areaId).length, built = rows.filter(s => s.built).length;
+        const parts = fa.filter(a => a.part).map(a => a.part);
+        const approved = parts.filter(p => p.status === 'Approved').length;
+        const pending = parts.filter(p => p.state !== 'current').length;
+        const unassigned = rows.filter(s => !s.areaId).map(s => s.number);
+        const done = [
+            total > 0 && assigned === total,
+            total > 0 && built === total && approved === parts.length,
+            !!c.assembledAt && pending === 0 && c.status === 'Approved',
+            !!(comp && comp.attached && !comp.stale),
+        ];
+        const now = done.indexOf(false);
+        const step = (i, label, big, small, extra) => `<div class="pl-step${done[i] ? ' done' : i === now ? ' now' : ''}" data-st-step="${i + 1}">
+            <span class="n">${i + 1} · ${esc(label)}</span><b>${big}</b><span class="small">${small}</span>${extra || ''}</div>`;
+        const s1 = step(0, 'Fördela', `${assigned} av ${total} stationer`,
+            unassigned.length ? `Utan förening: ${esc(unassigned.join(', '))}` : 'har en förening');
+        const s2 = step(1, 'Bygg', `${built} av ${total} byggda`,
+            parts.length ? `${approved} av ${parts.length} ${parts.length === 1 ? 'del' : 'delar'} godkända` : 'Ingen förening har en egen del än');
+        const s3 = step(2, 'Sätt ihop och godkänn', c.assembledAt ? `Ihopsatta ${esc(c.assembledAt)}` : 'Inte ihopsatta än',
+            pending ? `${pending} ${pending === 1 ? 'del har' : 'delar har'} ändrats eller är nya`
+                : c.status === 'Approved' ? 'Helheten är godkänd' : c.status === 'PendingApproval' ? 'Helheten väntar på godkännande'
+                : 'Helheten godkänns i konfiguratorn när delarna är godkända',
+            edit ? `<button type="button" class="btn btn-outline-primary btn-sm justify-self-start mt-1" style="justify-self:start" data-st-assemble="1">Sätt ihop stationerna</button>` : '');
+        const s4 = comp
+            ? step(3, 'Tävlingen', comp.attached ? (comp.stale ? 'Tävlingens kopia är äldre' : 'Anslutna till tävlingen') : comp.hasOther ? 'Tävlingen har en annan fältkonfiguration' : 'Inte anslutna än',
+                esc(r.competition.name),
+                comp.canAttach && edit && (!comp.attached || comp.stale) && c.builtStations > 0
+                    ? `<button type="button" class="btn btn-outline-primary btn-sm mt-1" style="justify-self:start" data-st-attach="1">${comp.attached ? 'Uppdatera tävlingens stationer' : 'Anslut till tävlingen'}</button>` : '')
+            : step(3, 'Tävlingen', 'Ingen fälttävling kopplad', 'Stationerna följer med när planeringen kopplas');
+        return `<div class="pl-card" id="plStSteps"><h2>Läget</h2><div class="pl-steps">${s1}${s2}${s3}${s4}</div>
+            <div id="plStResult" class="mt-2"></div></div>`;
+    }
+
+    function partCellHtml(a) {
+        if (!a.part) return '<span class="pl-help">Ingen egen del</span>';
+        const p = a.part;
+        return `${p.canView ? `<a href="${esc(p.url)}">${esc(p.name)}</a>` : esc(p.name)}
+            <div class="d-flex flex-wrap gap-1 mt-1">${stPill(ST_STATUS[p.status] || ST_STATUS.Draft)} ${stPill(ST_PART[p.state] || ST_PART.new)}</div>`;
+    }
+    function areasHtml(fa, edit) {
+        const body = fa.map(a => {
+            const own = (areas() || []).find(x => x.id === a.id);
+            const menu = a.editable ? rowMenu([
+                { label: 'Välj stationer…', fn: () => openStationArea(a) },
+                a.part ? (a.part.canView && { label: 'Öppna delen', fn: () => { location.href = a.part.url; } })
+                    : { label: 'Skapa föreningens del', fn: () => createPart(a) },
+                a.part && a.part.canEdit && { label: 'Ge stationscheferna tillgång till delen', fn: () => giveChiefs(a) },
+                own && { divider: true },
+                own && { label: 'Ändra föreningen…', fn: () => openArea(own) },
+                own && { label: 'Ta bort föreningen', danger: true, fn: () => deleteArea(own) },
+            ]) : rowMenu([
+                a.part && a.part.canView && { label: 'Öppna delen', fn: () => { location.href = a.part.url; } },
+                { label: 'Öppna delplaneringen', fn: () => { location.href = '/tavlingsplanering/' + a.planningId + '#vy=stationer'; } },
+            ]);
+            return `<tr data-st-area="${a.id}">
+                <td><b>${esc(a.host || a.name)}</b>${a.host && a.host !== a.name ? `<div class="pl-help small">${esc(a.name)}</div>` : ''}
+                    ${a.planning ? `<div class="pl-help small">Delplanering: ${esc(a.planning)}</div>` : ''}
+                    <div class="d-md-none small mt-1">${partCellHtml(a)}</div></td>
+                <td><div class="pl-chips">${a.stations.map(n => `<span class="pl-chip">${n}</span>`).join('')}</div></td>
+                <td class="d-none d-md-table-cell">${partCellHtml(a)}</td>
+                <td class="d-none d-md-table-cell">${a.responsible ? esc(a.responsible) : '<span class="pl-help">—</span>'}</td>
+                <td class="text-end">${menu}</td></tr>`;
+        }).join('');
+        return `<div class="pl-card p-0" id="plStAreas"><div class="pl-cardh px-3 pt-3 d-block"><h2>Föreningarna</h2>
+                <p class="pl-help small mb-2">Vem som bygger och bemannar vilka stationer. Varje förening kan bygga sina stationer i en egen del.</p></div>
+            ${fa.length ? `<div class="table-responsive"><table class="table align-middle mb-0">
+                <thead><tr><th class="ps-3">Förening</th><th>Stationer</th><th class="d-none d-md-table-cell">Delen</th><th class="d-none d-md-table-cell">Ansvarig</th><th></th></tr></thead>
+                <tbody>${body}</tbody></table></div>`
+            : `<p class="px-3 pb-3 mb-0">Ingen förening har stationer än.${edit ? ' Välj <b>Lägg till en förening</b> under Åtgärder.' : ''}</p>`}</div>`;
+    }
+
+    function stationRowsHtml(rows, fa, edit) {
+        const byArea = new Map(fa.map(a => [a.id, a]));
+        const body = rows.map(s => {
+            const a = s.areaId ? byArea.get(s.areaId) : null;
+            const where = a && a.part ? 'Föreningens del' : 'Helheten';
+            const builtHtml = s.built ? esc(where) : stMiss('Inte byggd');
+            const chiefHtml = s.chiefs.length ? esc(s.chiefs.join(', ')) : stMiss('Saknas');
+            const menu = rowMenu([
+                s.url && { label: 'Öppna stationen i konfiguratorn', fn: () => { location.href = s.url; } },
+                edit && (!s.areaId || s.planningId === ID) && { label: s.areaId ? 'Ge stationen till en annan förening…' : 'Ge stationen till en förening…', fn: () => openGiveStation(s) },
+                TASKS && TASKS.canCreate && !TOKEN && { label: 'Lägg till en uppgift för stationen…',
+                    fn: () => openTaskEdit(null, s.areaId && s.planningId === ID ? s.areaId : null, { scopeType: 'Station', scopeKey: String(s.number) }) },
+            ]);
+            return `<tr data-station="${s.number}"><td class="ps-3"><b>${s.number}</b></td>
+                <td>${s.areaId ? esc(stWho(s)) : stMiss('Ingen förening')}${s.planning ? `<div class="pl-help small">Delplanering: ${esc(s.planning)}</div>` : ''}
+                    <div class="d-md-none small mt-1">${builtHtml} · Stationschef: ${chiefHtml}</div></td>
+                <td class="d-none d-md-table-cell">${builtHtml}</td>
+                <td class="d-none d-md-table-cell">${chiefHtml}</td>
+                <td class="d-none d-md-table-cell">${s.openTasks ? s.openTasks + ' öppna' : '<span class="pl-help">—</span>'}</td>
+                <td class="text-end">${menu}</td></tr>`;
+        }).join('');
+        return `<div class="pl-card p-0" id="plStRows"><div class="pl-cardh px-3 pt-3 d-block"><h2>Stationerna</h2>
+                <p class="pl-help small mb-2">En rad per station: vem som har den, var den byggs, stationschefen ur bemanningen och de öppna uppgifterna.</p></div>
+            <div class="table-responsive"><table class="table align-middle mb-0">
+            <thead><tr><th class="ps-3">Station</th><th>Förening</th><th class="d-none d-md-table-cell">Byggs i</th><th class="d-none d-md-table-cell">Stationschef</th>
+                <th class="d-none d-md-table-cell">Uppgifter</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+    }
+
+    // ---------------------------------------------------------------- dialogerna
+    // Rutnätet: en ruta per station. En station som en annan förening i planeringen har flyttas hit; en som hör till en
+    // delplanering (eller huvudplaneringen) ändras där och går inte att välja.
+    function stationGridHtml(areaId, chosen) {
+        return `<div class="pl-stgrid" id="stGrid">${(ST.stations || []).map(s => {
+            const mine = chosen.has(s.number), other = !!s.areaId && s.areaId !== areaId, locked = other && s.planningId !== ID;
+            return `<button type="button" class="pl-st${mine ? ' on' : ''}" data-st-n="${s.number}" aria-pressed="${mine}"${locked ? ' disabled' : ''}
+                title="${esc(other ? stWho(s) : 'Ledig')}"><b>${s.number}</b><span>${esc(stGridLabel(s, areaId, mine))}</span></button>`;
+        }).join('')}</div>`;
+    }
+    function stGridLabel(s, areaId, mine) {
+        const other = !!s.areaId && s.areaId !== areaId;
+        if (mine) return other ? 'flyttas hit' : 'vald';
+        return other ? stWho(s) : 'ledig';
+    }
+    function wireStationGrid(body, areaId, chosen) {
+        body.querySelector('#stGrid').addEventListener('click', e => {
+            const b = e.target.closest('[data-st-n]'); if (!b || b.disabled) return;
+            const n = parseInt(b.dataset.stN, 10), s = ST.stations.find(x => x.number === n);
+            if (chosen.has(n)) chosen.delete(n); else chosen.add(n);
+            const mine = chosen.has(n);
+            b.classList.toggle('on', mine); b.setAttribute('aria-pressed', mine);
+            b.querySelector('span').textContent = stGridLabel(s, areaId, mine);
+        });
+    }
+    async function openStationArea(a, presetStation) {
+        const chosen = new Set(a ? a.stations : presetStation ? [presetStation] : []);
+        let hosts = [];
+        if (!a) {
+            const o = await get('AreaHostOptions');
+            if (!o.success) { failMsg(o); return; }
+            hosts = o.hosts;
         }
-        return `<div class="px-3 pb-3 border-top pt-3" id="plCourse" data-course-id="${c.id}"><h3 class="h6 mb-1">Banan</h3>
-            <div class="mb-2">${c.canView ? `<a href="${esc(c.url)}"><b>${esc(c.name)}</b></a>` : `<b>${esc(c.name)}</b>`} ${pill(sl, st)}
-                <span class="pl-help small d-block">${c.builtStations} av ${c.stationCount} stationer byggda${c.assembledAt ? ` · ihopsatt ${esc(c.assembledAt)}` : ''}</span></div>
-            <div class="small fw-semibold mb-1">Föreningarnas delar</div>${partsHtml}
-            ${S.me.canEdit && !TOKEN ? `<div class="d-flex flex-wrap gap-2 mb-2"><button type="button" class="btn btn-primary btn-sm" data-course-assemble="1"><i class="bi bi-diagram-3 me-1"></i>Sätt ihop banan${pending ? ` (${pending} ${pending === 1 ? 'del' : 'delar'} att ta med)` : ''}</button></div>` : ''}
-            <div id="plCourseResult"></div>
-            <p class="pl-help small mb-2">Varje del godkänns av en banläggare. Hela banan kan begäras godkänd när alla delar är godkända och banan är ihopsatt av dem.</p>
-            ${compHtml}</div>`;
+        formModal({
+            title: a ? `${a.host || a.name}: stationer` : 'Lägg till en förening', okLabel: a ? 'Spara' : 'Lägg till', wide: false,
+            html: (a ? '' : `<div class="mb-3"><label class="form-label fw-semibold" for="saHost">Förening</label>
+                    <select id="saHost" class="form-select"><option value="">Välj…</option>${hosts.map(h => `<option value="${h.ownerType}:${h.ownerId}">${esc(h.name)}</option>`).join('')}
+                        <option value="text">Annan (skriv)</option></select>
+                    <div class="pl-help small mt-1">Klubbarna och kretsarna som någon i planeringen företräder.</div>
+                    <input id="saHostText" class="form-control mt-2 d-none" maxlength="200" placeholder="Föreningens namn"></div>
+                <div class="mb-3"><label class="form-label" for="saResp">Ansvarig (valfritt)</label>
+                    <select id="saResp" class="form-select">${peopleOptions(null)}</select>
+                    <div class="pl-help small mt-1">Den ansvarige kan bygga föreningens del.</div></div>`)
+                + `<div class="form-label fw-semibold mb-1">Stationer</div>
+                <div class="pl-help small mb-2">Tryck på en station för att ta den eller släppa den. En station som en annan förening har flyttas hit.</div>
+                ${stationGridHtml(a ? a.id : 0, chosen)}
+                ${a && a.part ? '<div class="pl-help small mt-2">Föreningens del följer med: en ny station hämtas ur helheten, och en station som släpps tas bort ur delen.</div>' : ''}`,
+            onOpen: body => {
+                wireStationGrid(body, a ? a.id : 0, chosen);
+                const host = body.querySelector('#saHost');
+                host?.addEventListener('change', () => body.querySelector('#saHostText').classList.toggle('d-none', host.value !== 'text'));
+            },
+            onOk: async body => {
+                let areaId = a ? a.id : 0;
+                if (!a) {
+                    const host = body.querySelector('#saHost').value, text = body.querySelector('#saHostText').value.trim();
+                    if (!host) return 'Välj föreningen.';
+                    if (host === 'text' && !text) return 'Skriv föreningens namn.';
+                    if (!chosen.size) return 'Välj minst en station.';
+                    const [ht, hid] = host !== 'text' ? host.split(':') : ['', ''];
+                    const name = host === 'text' ? text : body.querySelector('#saHost').selectedOptions[0].textContent.trim();
+                    const r = await post('SaveArea', { areaId: 0, name, responsibleId: body.querySelector('#saResp').value, responsibleName: '',
+                        details: '1', description: '', hostType: ht, hostId: hid, hostText: host === 'text' ? text : '' });
+                    if (!r.success) return r.message;
+                    areaId = r.areaId;
+                }
+                const r2 = await post('AssignStations', { areaId, stations: [...chosen].sort((x, y) => x - y).join(',') });
+                if (!r2.success) { if (!a) await afterStationChange(); return r2.message; }
+                await afterStationChange();
+                if ((r2.reopened || []).length) showMsg(`${esc(r2.reopened.join(', '))} fick andra stationer och är ett utkast igen. Den behöver godkännas på nytt.`, 'warning');
+                return true;
+            },
+        });
+    }
+    function openGiveStation(s) {
+        const opts = (ST.areas || []).filter(a => a.editable && a.id !== s.areaId);
+        formModal({
+            title: `Station ${s.number}`, okLabel: 'Spara', wide: false,
+            html: `<label class="form-label fw-semibold" for="gsArea">Vilken förening har stationen?</label>
+                <select id="gsArea" class="form-select">${opts.map(a => `<option value="${a.id}">${esc(a.host || a.name)}</option>`).join('')}
+                    <option value="__new">＋ En ny förening…</option>
+                    ${s.areaId ? '<option value="__none">Ingen (släpp stationen)</option>' : ''}</select>
+                ${s.areaId ? `<div class="pl-help small mt-1">I dag: ${esc(stWho(s))}.</div>` : ''}`,
+            onOk: async body => {
+                const v = body.querySelector('#gsArea').value;
+                if (v === '__new') { openStationArea(null, s.number); return; }
+                let r;
+                if (v === '__none') {
+                    const cur = (ST.areas || []).find(a => a.id === s.areaId);
+                    r = await post('AssignStations', { areaId: s.areaId, stations: (cur ? cur.stations : []).filter(n => n !== s.number).join(',') });
+                } else {
+                    const to = (ST.areas || []).find(a => a.id === parseInt(v, 10));
+                    r = await post('AssignStations', { areaId: to.id, stations: to.stations.concat([s.number]).sort((x, y) => x - y).join(',') });
+                }
+                if (!r.success) return r.message;
+                await afterStationChange();
+                if ((r.reopened || []).length) showMsg(`${esc(r.reopened.join(', '))} fick andra stationer och är ett utkast igen. Den behöver godkännas på nytt.`, 'warning');
+                return true;
+            },
+        });
+    }
+    function openStationCount() {
+        formModal({
+            title: 'Antal stationer', okLabel: 'Spara', wide: false,
+            html: `<label class="form-label fw-semibold" for="scCount">Hur många stationer har tävlingen?</label>
+                <input id="scCount" class="form-control" style="max-width:8rem" inputmode="numeric" value="${ST.stationCount || ''}">
+                <div class="pl-help small mt-1">Färre stationer går bara när ingen förening har en station över gränsen och ingen sådan station är byggd.</div>`,
+            onOpen: body => body.querySelector('#scCount').focus(),
+            onOk: async body => {
+                const n = parseInt(body.querySelector('#scCount').value, 10);
+                if (!(n > 0)) return 'Skriv antalet stationer.';
+                const r = await post('SetStationCount', { stationCount: n });
+                if (!r.success) return r.message;
+                await reloadStations(); return true;
+            },
+        });
+    }
+    async function assembleStations() {
+        const r = await post('AssembleCourse', {});
+        if (!r.success) { failMsg(r, 'Stationerna kunde inte sättas ihop.'); return; }
+        await reloadStations();
+        const notes = (r.warnings || []).map(w => `<div>· ${esc(w)}</div>`).join('')
+            + ((r.missing || []).length ? `<div>· Ingen har byggt station ${esc(r.missing.join(', '))} än.</div>` : '');
+        const box = $('plStResult');
+        if (box) box.innerHTML = `<div class="alert alert-${notes ? 'warning' : 'success'} py-2 small mb-0" role="status"><div class="fw-semibold">${r.changed ? 'Stationerna är ihopsatta.' : 'Stationerna var redan ihopsatta. Ingenting ändrades.'}</div>${notes}</div>`;
+    }
+    async function attachStations() {
+        const r = await post('AttachCourseToCompetition', {});
+        if (!r.success) { failMsg(r, 'Stationerna kunde inte anslutas.'); return; }
+        await reloadStations();
+        showMsg(`Stationerna är anslutna till ${esc(r.competition || 'tävlingen')}.`, 'success');
+    }
+    async function createPart(a) {
+        const r = await post('CreateAreaConfig', { areaId: a.id });
+        if (!r.success) { failMsg(r, 'Delen kunde inte skapas.'); return; }
+        await reloadStations();
+        const who = (r.added || []).length ? ` ${esc(r.added.join(', '))} kan läsa och ändra den.` : '';
+        showMsg(`${esc(a.host || a.name)} har fått en egen del${r.copied ? ' med stationerna ur helheten' : ''}.${who} <a href="${esc(r.url)}">Öppna den</a>`);
+    }
+    async function giveChiefs(a) {
+        const r = await post('GiveChiefsConfigAccess', { areaId: a.id });
+        if (!r.success) { failMsg(r); return; }
+        showMsg((r.added || []).length ? esc(r.added.join(', ')) + ' kan nu läsa och ändra delen.' : 'Alla stationschefer hade redan tillgång.');
+        await reloadStations();
     }
     document.addEventListener('click', async e => {
-        const b = e.target.closest('[data-course-create],[data-course-assemble],[data-course-attach]'); if (!b) return;
+        const b = e.target.closest('[data-st-create],[data-st-assemble],[data-st-attach]'); if (!b) return;
         e.preventDefault(); if (b.dataset.busy) return; b.dataset.busy = '1';
         try {
-            if (b.dataset.courseCreate) {
-                const n = parseInt(($('plCourseCount') || {}).value, 10);
+            if (b.dataset.stCreate) {
+                const n = parseInt(($('plStCount') || {}).value, 10);
                 const r = await post('CreateCourseConfig', { stationCount: n > 0 ? n : '' });
-                if (!r.success) { failMsg(r, 'Banans fältkonfiguration kunde inte skapas.'); return; }
-                showMsg(`Banans fältkonfiguration är skapad. <a href="${esc(r.url)}">Öppna den</a>`, 'success');
-            } else if (b.dataset.courseAssemble) {
-                const r = await post('AssembleCourse', {});
-                if (!r.success) { failMsg(r, 'Banan kunde inte sättas ihop.'); return; }
-                await loadStationsCard();
-                const res = $('plCourseResult');
-                const notes = (r.warnings || []).map(w => `<div>· ${esc(w)}</div>`).join('')
-                    + ((r.missing || []).length ? `<div>· Ingen har byggt station ${esc(r.missing.join(', '))} än.</div>` : '');
-                if (res) res.innerHTML = `<div class="alert alert-${notes ? 'warning' : 'success'} py-2 small" role="status"><div class="fw-semibold">${r.changed ? 'Banan är ihopsatt.' : 'Banan var redan aktuell — ingenting ändrades.'}</div>${notes}</div>`;
-                return;
-            } else if (b.dataset.courseAttach) {
-                const r = await post('AttachCourseToCompetition', {});
-                if (!r.success) { failMsg(r, 'Banan kunde inte anslutas.'); return; }
-                showMsg(`Banan är ansluten till ${esc(r.competition || 'tävlingen')}.`, 'success');
-            }
-            await loadStationsCard();
+                if (!r.success) { failMsg(r, 'Stationerna kunde inte skapas.'); return; }
+                await reloadStations();
+            } else if (b.dataset.stAssemble) await assembleStations();
+            else if (b.dataset.stAttach) await attachStations();
         } finally { delete b.dataset.busy; }
     });
-    document.addEventListener('click', async e => {
-        const b = e.target.closest('[data-st-give]'); if (!b) return;
-        e.preventDefault(); if (b.dataset.busy) return; b.dataset.busy = '1';
-        const area = b.dataset.stGive !== 'all' ? b.dataset.stGive : null;
-        const r = await post('GiveChiefsConfigAccess', area ? { areaId: area } : {});
-        delete b.dataset.busy;
-        if (!r.success) { failMsg(r); return; }
-        showMsg(r.added.length ? esc(r.added.join(', ')) + ' kan nu läsa och ändra fältkonfigurationen.' : 'Alla stationschefer hade redan tillgång.');
-        await loadStationsCard();
-    });
-    document.addEventListener('click', async e => {
-        const b = e.target.closest('[data-st-areacfg]'); if (!b) return;
-        e.preventDefault(); if (b.dataset.busy) return; b.dataset.busy = '1';
-        const r = await post('CreateAreaConfig', { areaId: b.dataset.stAreacfg });
-        delete b.dataset.busy;
-        if (!r.success) { failMsg(r, 'Fältkonfigurationen kunde inte skapas.'); return; }
-        const who = r.added.length ? ` ${esc(r.added.join(', '))} kan läsa och ändra den.` : '';
-        showMsg(`Fältkonfigurationen är skapad${r.copied ? ' med områdets stationer ur tävlingens konfiguration' : ''}.${who}
-            <a href="${esc(r.url)}">Öppna den</a>`);
-        await loadStationsCard();
-    });
+
+    // Översikt: en rad i stället för hela kortet.
+    async function loadStationsSummary() {
+        if (!$('plStationsSum') || TOKEN || !stationsWanted()) return;
+        const r = await get('Stations');
+        const w = $('plStationsSum');
+        if (!r.success || !w) return;
+        ST = r;
+        const rows = r.stations || [];
+        let text;
+        if (!r.course) {
+            if (!r.canCreateCourse && !rows.length) return;
+            text = 'inte skapade än';
+        } else {
+            const total = r.stationCount || rows.length, built = rows.filter(s => s.built).length;
+            const parts = (r.areas || []).filter(a => a.part), approved = parts.filter(a => a.part.status === 'Approved').length;
+            const noHost = rows.filter(s => !s.areaId).length, noChief = rows.filter(s => !s.chiefs.length).length;
+            text = `${built} av ${total} byggda` + (parts.length ? ` · ${approved} av ${parts.length} ${parts.length === 1 ? 'del' : 'delar'} godkända` : '')
+                + (noHost ? ` · ${stMiss(noHost === 1 ? 'en utan förening' : noHost + ' utan förening')}` : '')
+                + (noChief ? ` · ${stMiss(noChief === 1 ? 'en saknar stationschef' : noChief + ' saknar stationschef')}` : '');
+        }
+        w.innerHTML = `<div class="pl-card" id="plStationsSummary"><div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+            <div><b>Stationerna</b> · ${text}</div>
+            <a class="btn btn-outline-primary btn-sm" href="#vy=stationer" data-pl-go="stationer">Till Stationerna</a></div></div>`;
+    }
 
     // ================================================================ Överskottet (P4, fråga 15)
     // "Det finns ingen regel — det måste vara flexibelt." Ett underlag, ingen bokföring: beloppet, fasta poster först och en

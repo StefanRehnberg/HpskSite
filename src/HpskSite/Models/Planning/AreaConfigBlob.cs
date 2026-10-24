@@ -60,5 +60,48 @@ namespace HpskSite.Models.Planning
             try { return (JObject.Parse(blob)[CourseStationsKey] as JArray)?.Select(t => t.Value<int>()).Where(n => n > 0).ToList() ?? new(); }
             catch { return new(); }
         }
+
+        /// <summary>
+        /// Stationerna-vyn (Stefan 2026-10-24): föreningen har fått andra stationer. Delen behåller sitt eget arbete för de
+        /// stationer den har kvar, tar en ny station ur helheten (<paramref name="courseBlob"/>) och släpper de stationer den
+        /// lämnat. Delen numreras om 1..N i tävlingens ordning — den är ett utkast före tävlingen; tävlingens nummer (det
+        /// som resultat och QR bygger på) står i <c>_courseStations</c> och i helheten.
+        /// </summary>
+        public static string Resync(string? partBlob, string? courseBlob, IReadOnlyList<int> courseStations)
+        {
+            JObject part, course;
+            try { part = string.IsNullOrWhiteSpace(partBlob) ? new JObject() : JObject.Parse(partBlob); } catch { part = new JObject(); }
+            try { course = string.IsNullOrWhiteSpace(courseBlob) ? new JObject() : JObject.Parse(courseBlob); } catch { course = new JObject(); }
+            var old = CourseStations(partBlob);
+            var wanted = courseStations.Where(n => n > 0).Distinct().OrderBy(n => n).ToList();
+            var result = new JObject();
+            foreach (var p in part.Properties().Where(p => p.Name.StartsWith("_") && p.Name != CourseStationsKey))
+                result[p.Name] = p.Value.DeepClone();
+            static IEnumerable<JObject> Of(JObject o, string wc) =>
+                ((o[wc] as JObject)?["stations"] as JArray ?? (o[wc] as JObject)?["Stations"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>();
+            static int No(JObject s) => s.Value<int?>("station") ?? s.Value<int?>("Station") ?? 0;
+            var classes = part.Properties().Concat(course.Properties())
+                .Where(p => !p.Name.StartsWith("_") && p.Value is JObject).Select(p => p.Name).Distinct().ToList();
+            foreach (var wc in classes)
+            {
+                var picked = new JArray();
+                for (var i = 0; i < wanted.Count; i++)
+                {
+                    var n = wanted[i];
+                    var oldIndex = old.IndexOf(n);
+                    var hit = oldIndex >= 0 ? Of(part, wc).FirstOrDefault(s => No(s) == oldIndex + 1) : null;
+                    hit ??= Of(course, wc).FirstOrDefault(s => No(s) == n);
+                    if (hit == null) continue;
+                    var copy = (JObject)hit.DeepClone();
+                    copy.Remove("Station");
+                    copy["station"] = i + 1;
+                    foreach (var k in copy.Properties().Where(p => p.Name.StartsWith("_linkedFrom")).Select(p => p.Name).ToList()) copy.Remove(k);
+                    picked.Add(copy);
+                }
+                if (picked.Count > 0) result[wc] = new JObject { ["stations"] = picked };
+            }
+            result[CourseStationsKey] = new JArray(wanted.Cast<object>().ToArray());
+            return result.ToString(Newtonsoft.Json.Formatting.None);
+        }
     }
 }
