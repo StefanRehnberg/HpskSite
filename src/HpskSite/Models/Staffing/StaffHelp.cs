@@ -134,5 +134,13 @@ namespace HpskSite.Models.Staffing
         public int PlanningId { get; set; }
         public string? Comment { get; set; }
         public List<HelpSlotChoice> Slots { get; set; } = new();
+        /// <summary>Omgång 3 steg 9: veckans tävlingar funktionären tänker tävla i. Null = rör inte (en äldre sida).</summary>
+        public List<ShootIntentChoice>? ShootIntents { get; set; }
+    }
+
+    public class ShootIntentChoice
+    {
+        public int TargetPlanningId { get; set; }
+        public string? Classes { get; set; }
     }
 }

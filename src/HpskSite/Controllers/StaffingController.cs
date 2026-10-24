@@ -227,6 +227,20 @@ namespace HpskSite.Controllers
                 var viewer = await ResolveViewerAsync();
                 var discipline = _owners.Discipline(owner);
                 var resp = _grid.BuildGrid(owner, discipline, viewer?.Id ?? 0);
+                // Omgång 3 steg 9: krockar över hela veckan (familjen). Ett fel här får inte fälla rutnätet.
+                if (owner.PlanningIdOrNull is int pid && pid > 0)
+                {
+                    try
+                    {
+                        var intents = HttpContext.RequestServices.GetRequiredService<ShootIntentService>();
+                        resp.FamilyClashes = intents.Clashes(pid).Select(c => new GridClash
+                        {
+                            PersonKey = c.PersonKey, Name = c.Name, DateKey = c.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                            A = c.A, B = c.B, Kind = c.Kind,
+                        }).ToList();
+                    }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Staffing: family clashes failed for planning {Planning}", pid); }
+                }
                 return Json(resp);
             }
             catch (Exception ex)

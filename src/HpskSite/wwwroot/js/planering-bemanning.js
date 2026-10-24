@@ -180,6 +180,16 @@ window.PlaneringBemanning = (function () {
         if (clashes.length) notes += `<div class="alert alert-danger py-2 small"><div class="fw-semibold mb-1"><i class="bi bi-exclamation-octagon me-1" aria-hidden="true"></i>Samma person på två poster samtidigt</div>`
             + clashes.slice(0, 8).map(c => `<div>· <button type="button" class="btn btn-link p-0 align-baseline fw-semibold" data-plb-person="${esc(c.personKey)}">${esc(c.name)}</button> — ${esc(c.a)} och ${esc(c.b)}${c.dateKey ? ` <span class="text-body-secondary">(${esc(dayLabel(c.dateKey))})</span>` : ''}</div>`).join('')
             + (clashes.length > 8 ? `<div class="text-body-secondary">…och ${clashes.length - 8} till</div>` : '') + '</div>';
+        // Omgång 3 steg 9: krockar över hela veckan — med en annan del av veckan, en egen start eller en avsikt att tävla.
+        const fam = g.familyClashes || [];
+        if (fam.length) {
+            const KIND = { uppdrag: 'två uppdrag samtidigt', start: 'uppdrag under egen start', avsikt: 'tänker tävla samma dag' };
+            notes += `<div class="alert alert-warning py-2 small" id="plbFamilyClashes"><div class="fw-semibold mb-1"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Krockar i veckan</div>`
+                + fam.slice(0, 10).map(c => `<div data-clash-kind="${esc(c.kind || '')}">· <button type="button" class="btn btn-link p-0 align-baseline fw-semibold" data-plb-person="${esc(c.personKey)}">${esc(c.name)}</button>
+                    <span class="badge ${c.kind === 'avsikt' ? 'text-bg-light border' : 'text-bg-warning'} fw-normal">${esc(KIND[c.kind] || c.kind || '')}</span>
+                    ${esc(c.a)} — ${esc(c.b)}${c.dateKey ? ` <span class="text-body-secondary">(${esc(dayLabel(c.dateKey))})</span>` : ''}</div>`).join('')
+                + (fam.length > 10 ? `<div class="text-body-secondary">…och ${fam.length - 10} till</div>` : '') + '</div>';
+        }
         const un = g.unreachable || [];
         if (un.length) notes += `<div class="alert alert-danger py-2 small d-flex gap-2 align-items-center flex-wrap"><div class="flex-grow-1"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i><b>${un.length} kan inte nås alls</b> — varken konto eller e-post: ${esc(un.slice(0, 10).join(', '))}${un.length > 10 ? ' m.fl.' : ''}.</div>
             <button type="button" class="btn btn-sm btn-danger" data-plb-match>Koppla till medlemmar…</button></div>`;
@@ -820,6 +830,57 @@ window.PlaneringBemanning = (function () {
             || (B.people || []).find(x => (x.displayName || '').toLowerCase() === String(key).replace(/^n:/, ''))
             || null;
     }
+    // ---- Omgång 3 steg 9: tävlar själv (avsikterna) ----
+    async function shootData() {
+        return A.req('/umbraco/surface/Planning/ShootIntents?id=' + A.ID, { headers: { 'Accept': 'application/json' } });
+    }
+    async function loadShootCard(p) {
+        const box = $('plbShoot'); if (!box) return;
+        let r;
+        try { r = await shootData(); } catch (e) { r = null; }
+        if (!$('plbShoot')) return;
+        if (!r || !r.success || !(r.targets || []).length) { box.remove(); return; }
+        const mine = (r.intents || []).filter(i => i.personKey === p.key);
+        const byId = new Map(r.targets.map(t => [t.planningId, t]));
+        const when = t => t.from ? fmtDate(t.from) + (t.to && t.to !== t.from ? '–' + fmtDate(t.to) : '') : '';
+        box.innerHTML = `<div class="pl-cardh"><h2>Tävlar själv</h2>${r.canEdit && !p.readOnly ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-plb-shoot>Ändra…</button>' : ''}</div>`
+            + (mine.length ? `<ul class="list-unstyled mb-0">${mine.map(i => { const t = byId.get(i.targetPlanningId) || {};
+                return `<li><i class="bi bi-bullseye me-1" aria-hidden="true"></i><b>${esc(t.name || '')}</b>${i.classes ? ' · ' + esc(i.classes) : ''}${when(t) ? ` <span class="plb-dim small">· ${esc(when(t))}</span>` : ''}</li>`; }).join('')}</ul>
+                <p class="pl-help small mt-2 mb-0">Uppdrag samma dagar visas som krockar i rutnätet.</p>`
+                : `<p class="pl-help mb-0">${esc(first(p.displayName))} har inte sagt att hen tänker tävla i någon av veckans tävlingar.</p>`);
+        const btn = box.querySelector('[data-plb-shoot]');
+        if (btn) btn.addEventListener('click', () => openShoot(p, r, mine));
+    }
+    function fmtDate(d) {
+        try { return new Date(d + 'T00:00:00').toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }); } catch (e) { return d; }
+    }
+    function openShoot(p, r, mine) {
+        const picked = new Map(mine.map(i => [i.targetPlanningId, i.classes || '']));
+        A.formModal({
+            title: 'Vilka tävlingar tänker ' + first(p.displayName) + ' tävla i?', okLabel: 'Spara', wide: false,
+            html: r.targets.map((t, i) => `<div class="border rounded p-2 mb-2"><div class="form-check">
+                    <input class="form-check-input plb-shoot-cb" type="checkbox" id="plbSh${i}" data-t="${i}"${picked.has(t.planningId) ? ' checked' : ''}>
+                    <label class="form-check-label" for="plbSh${i}"><b>${esc(t.name)}</b>${t.from ? ` <span class="plb-dim small">· ${esc(fmtDate(t.from))}</span>` : ''}</label></div>
+                    <input type="text" class="form-control form-control-sm mt-1 plb-shoot-cls" data-t="${i}" maxlength="200" placeholder="Klass (valfritt), t.ex. C1" value="${esc(picked.get(t.planningId) || '')}"></div>`).join('')
+                + '<p class="pl-help small mb-0">Uppdrag de dagarna visas som krockar i rutnätet, så att du kan lägga dem när hen inte skjuter.</p>',
+            onOk: async b => {
+                const picks = [];
+                b.querySelectorAll('.plb-shoot-cb').forEach(cb => {
+                    if (!cb.checked) return;
+                    const t = r.targets[+cb.dataset.t];
+                    const cls = b.querySelector(`.plb-shoot-cls[data-t="${cb.dataset.t}"]`);
+                    picks.push({ targetPlanningId: t.planningId, classes: cls ? cls.value.trim() : '' });
+                });
+                const d = await A.req('/umbraco/surface/Planning/SaveShootIntents', { method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': A.token() },
+                    body: new URLSearchParams({ id: A.ID, personKey: p.key, displayName: p.displayName, picks: JSON.stringify(picks) }).toString() });
+                if (!d.success) return d.message || 'Det gick inte att spara.';
+                loadShootCard(p);
+                return true;
+            }
+        });
+    }
+
     function drawPerson(key) {
         const p = findPerson(key);
         if (!p) {
@@ -903,6 +964,9 @@ window.PlaneringBemanning = (function () {
                 : `<p class="pl-help mb-0">${p.representsName ? esc(p.representsName) : 'Ingen förening känd. Koppla personen till en medlem, så kan du välja.'}</p>`) + '</div>';
         }
 
+        // Omgång 3 steg 9: vilka av veckans tävlingar personen tänker tävla i — läses för sig (en lista för hela familjen).
+        h += `<div class="pl-card" id="plbShoot"><h2>Tävlar själv</h2><p class="pl-help mb-0">Läser…</p></div>`;
+
         // Övrigt
         const extras = [];
         if (p.volunteer) extras.push(`<li><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>Har anmält sig: ${esc(p.volunteer.slotsSummary || '—')}${p.volunteer.comment ? ' — ”' + esc(p.volunteer.comment) + '”' : ''}</li>`);
@@ -911,6 +975,7 @@ window.PlaneringBemanning = (function () {
         if (extras.length) h += `<div class="pl-card"><h2>Övrigt</h2><ul class="list-unstyled mb-0">${extras.join('')}</ul></div>`;
 
         area().innerHTML = h;
+        loadShootCard(p);
         const acc = $('plbAccess');
         if (acc) acc.addEventListener('change', async () => {
             acc.disabled = true;

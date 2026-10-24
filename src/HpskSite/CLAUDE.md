@@ -12833,10 +12833,31 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       tar med båda kolumnerna; planeringskopian tar med stationens behov men inte passens.
     - Rutan: "FM 2/3 · EM 3/3" när dagen har flera pass med tider, annars `fyllda/behov`, och "N uppdrag, högst M
       samtidigt" när de skiljer. Behovsdialogen: "Antalet gäller: Varje station / Bara station N" och ett antal per pass.
+  - **Krockar och tävlingsavsikter (steg 9, Stefan: "de som anmäler sig som funktionärer meddelar vilka tävlingar de
+    tänker anmäla sig till … långt innan anmälningstiden öppnar"):**
+    - **`PlanningShootIntent`** (RootPlanningId, TargetPlanningId, MemberId ELLER DisplayName, Classes, Source Self/Organiser).
+      ⚠️ Tävlingen är familjens PLANERING (en delplanering = en tävling), så avsikten står kvar när planeringen kopplas.
+      **`ShootIntentService.Targets`** = veckans tävlingar: varje kopplad planering, varje delplanering och en ensam
+      planering — en okopplad huvudplanering med delplaneringar är veckan själv, ingen tävling. `Save` skriver om en
+      persons avsikter (personnyckeln `m:{id}`/`n:{namn}` som bemanningen) och vägrar en tävling utanför veckan.
+      I GDPR-rensningens karta (`MemberDataPurgeService`).
+    - **Ytor:** `/bemanna` — kortet "Tänker du själv tävla?" (`for-competition` bär `shootTargets`/`myShootIntents`,
+      `help-signup` tar `shootIntents`; null = rör inte). Personens panel i Bemanning — "Tävlar själv" med *Ändra…*
+      (`Planning/ShootIntents` + `SaveShootIntents`; den som bemannar för vem som helst, en deltagare bara för sig).
+      Den som inte bemannar ser bara antalen. Kortet **Tävlingarna** på Översikt: antalet som tänker tävla per
+      tävling och **Veckoprogrammet** dag för dag (`family.week`).
+    - **`FamilyClashRules`** (rena funktioner) + `ShootIntentService.Clashes`: över hela familjen — **uppdrag** mot uppdrag i
+      en ANNAN planering (inom en planering räknar rutnätet själv), **start** (uppdrag under egen start ur
+      `MyScheduleService`, bara medlemmar med uppdrag under tävlingens dagar; utan sluttid antas 2 h) och **avsikt**
+      (uppdrag en dag personen tänker tävla — en varning som tystnar när personen har en start i tävlingen).
+      Rutnätet visar dem som "Krockar i veckan" (`GridResponse.FamilyClashes`, satt i `StaffingController.GetGrid`;
+      ett fel fäller inte rutnätet).
+    - Index `IX_StaffAssignment_MemberId` (steg 10) ligger i samma migrering.
   - **Migrering `add-planning-omgang3.sql` (körordning P3j) FÖRE deployen.** Körd i dev, EJ i prod.
-  - Svit `tavlingsplanering-o3-verify.mjs` 109/109 (A/B steg 7: utan omnumreringen och utan länkstädningen → 2 röda;
-    steg 8: antal uppdrag i stället för samtidigt + utan stationsrader → 5 röda). Test `PlanningFamilyRulesTests`,
-    `StaffingInviteTokenTests`, `PlanningTaskRulesTests`, `AreaConfigBlobTests`, `StaffTimeCoverageTests`.
+  - Svit `tavlingsplanering-o3-verify.mjs` 123/123 (A/B steg 9: avsiktsregeln bort + planeringsvillkoret vänt → 2 röda);
+    steg 7: utan omnumreringen och utan länkstädningen → 2 röda; steg 8: antal uppdrag i stället för samtidigt + utan
+    stationsrader → 5 röda. Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`, `PlanningTaskRulesTests`,
+    `AreaConfigBlobTests`, `StaffTimeCoverageTests`, `FamilyClashRulesTests`.
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

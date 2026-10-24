@@ -35,6 +35,11 @@
             <div class="card-body py-2">
                 <p class="text-muted small mb-2" id="beIntro">Kryssa i det du kan hjälpa till med. Du kan (valfritt) ange vilka tider du kan. Skriv gärna en kommentar om vad du kan bidra med, eller vad du inte kan göra. Arrangören fördelar uppdragen och hör av sig.</p>
                 <div id="beSlots"><div class="text-muted small">Laddar…</div></div>
+                <div id="beShoot" class="mt-3" style="display:none">
+                    <div class="fw-semibold"><i class="bi bi-bullseye me-1"></i>Tänker du själv tävla?</div>
+                    <p class="text-muted small mb-2">Kryssa i de tävlingar du tänker anmäla dig till, och skriv gärna klassen. Då kan arrangören lägga dina uppdrag så att du hinner skjuta — långt innan anmälan öppnar. Du anmäler dig till tävlingen som vanligt när anmälan öppnar.</p>
+                    <div id="beShootList"></div>
+                </div>
                 <div class="mb-2 mt-3">
                     <label class="form-label fw-semibold">Kommentar (valfritt)</label>
                     <textarea class="form-control" id="beComment" rows="3" placeholder="t.ex. Jag kan hjälpa i kansliet men inte stå i markeringsgraven. Kan köra material på fredagen."></textarea>
@@ -59,6 +64,7 @@
     // (needDays), plus arrangörens egna "något annat"-tillfällen (slots). Ett val har en nyckel:
     // "n:{datum}|{roll}" (tom roll = var det behövs) eller "s:{id}".
     var slots = [], needDays = [], roleChoice = true;
+    var shootTargets = null, shootPicked = {};   // omgång 3 steg 9: veckans tävlingar och de funktionären tänker tävla i
     var checked = {};            // { nyckel: [{from,to}, ...] }
     var items = [];              // det som ritades, i ordning — kryssrutorna bär index hit, aldrig text
 
@@ -95,8 +101,12 @@
                     checked[key] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; });
                 });
             }
+            shootTargets = d.shootTargets || null;
+            shootPicked = {};
+            (d.myShootIntents || []).forEach(function (i) { shootPicked[i.targetPlanningId] = i.classes || ''; });
             renderMine(d.assignments || []);
             renderSlots();
+            renderShoot();
             if (PREVIEW) { q('beSaveBtn').disabled = true; q('beSaveBtn').textContent = 'Förhandsgranskning'; }
         } catch (e) { q('beHeader').textContent = 'Kunde inte läsa bemanningen.'; }
     }
@@ -174,6 +184,36 @@
         host.innerHTML = html;
     }
 
+    // Omgång 3 steg 9: en rad per tävling i veckan — kryssruta och (när ikryssad) klass. Index i data-attributet, aldrig text.
+    function renderShoot() {
+        var box = q('beShoot');
+        if (!shootTargets || !shootTargets.length) { box.style.display = 'none'; return; }
+        box.style.display = '';
+        q('beShootList').innerHTML = shootTargets.map(function (t, i) {
+            var on = Object.prototype.hasOwnProperty.call(shootPicked, t.planningId);
+            var when = t.from ? longDate(t.from) + (t.to && t.to !== t.from ? ' – ' + longDate(t.to) : '') : '';
+            return '<div class="border rounded p-2 mb-2' + (on ? ' border-primary' : '') + '">'
+                + '<div class="form-check"><input class="form-check-input be-shoot" type="checkbox" id="beS' + i + '" data-t="' + i + '"' + (on ? ' checked' : '') + '>'
+                + '<label class="form-check-label" for="beS' + i + '"><strong>' + esc(t.name) + '</strong></label>'
+                + (when ? '<div class="text-muted small">' + esc(when) + '</div>' : '') + '</div>'
+                + (on ? '<div class="ms-4 mt-1" style="max-width:300px"><label class="small text-muted" for="beSC' + i + '">Klass (valfritt)</label>'
+                    + '<input type="text" class="form-control form-control-sm be-shoot-class" id="beSC' + i + '" data-t="' + i + '" maxlength="200" placeholder="t.ex. C1, A3" value="' + esc(shootPicked[t.planningId] || '') + '"></div>' : '')
+                + '</div>';
+        }).join('');
+    }
+    function readShootClasses() {
+        document.querySelectorAll('.be-shoot-class').forEach(function (inp) {
+            var t = shootTargets[+inp.getAttribute('data-t')]; if (t && Object.prototype.hasOwnProperty.call(shootPicked, t.planningId)) shootPicked[t.planningId] = inp.value.trim();
+        });
+    }
+    document.addEventListener('change', function (e) {
+        var cb = e.target.closest && e.target.closest('.be-shoot'); if (!cb) return;
+        var t = shootTargets[+cb.getAttribute('data-t')]; if (!t) return;
+        readShootClasses();
+        if (cb.checked) shootPicked[t.planningId] = shootPicked[t.planningId] || ''; else delete shootPicked[t.planningId];
+        renderShoot();
+    });
+
     function timesBlock(i, key) {
         var wins = checked[key] || [];
         var rows = wins.map(function (w, j) {
@@ -244,7 +284,10 @@
             return { slotId: 0, date: rest.slice(0, bar), roleKey: rest.slice(bar + 1), times: times };
         });
         var btn = q('beSaveBtn'); btn.disabled = true;
-        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots });
+        readShootClasses();
+        var shootIntents = shootTargets && shootTargets.length
+            ? Object.keys(shootPicked).map(function (k) { return { targetPlanningId: +k, classes: shootPicked[k] || '' }; }) : null;
+        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots, shootIntents: shootIntents });
         btn.disabled = false;
         if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 2500); }
         else alert(d.message || 'Kunde inte spara.');

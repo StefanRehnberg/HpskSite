@@ -3774,12 +3774,32 @@
     // Omgång 3 (Stefan 2026-10-24: familjen är veckan): tävlingarna i familjen — en per delplanering — på ett ställe.
     function familyCompetitionsCardHtml() {
         const f = S.planning.family;
-        if (!f || !(f.competitions || []).length) return '';
-        return `<div class="pl-card" id="plFamilyComps"><h2>${f.competitions.length === 1 ? 'Tävlingen' : 'Tävlingarna'}</h2>
-            <ul class="list-unstyled mb-0">${f.competitions.map(c => `<li class="py-1 d-flex flex-wrap gap-2 align-items-baseline">
+        const comps = (f && f.competitions) || [], week = (f && f.week) || [];
+        if (!f || (!comps.length && !week.length)) return '';
+        const shooting = new Map(week.map(w => [w.planningId, w.intents || 0]));
+        const list = comps.length ? `<ul class="list-unstyled mb-0">${comps.map(c => `<li class="py-1 d-flex flex-wrap gap-2 align-items-baseline">
                 ${c.url ? `<a href="${esc(c.url)}"><b>${esc(c.name)}</b></a>` : `<b>${esc(c.name)}</b>`}
                 ${c.date ? `<span class="pl-help small">${esc(fmtDay(c.date))}${c.endDate && c.endDate !== c.date ? '–' + esc(fmtDay(c.endDate)) : ''}</span>` : ''}
-                <span class="pl-help small">· ${esc(c.planningName)}</span></li>`).join('')}</ul></div>`;
+                <span class="pl-help small">· ${esc(c.planningName)}</span>
+                ${shooting.get(c.planningId) ? `<span class="pl-help small">· ${shooting.get(c.planningId)} av funktionärerna tänker tävla</span>` : ''}</li>`).join('')}</ul>` : '';
+        return `<div class="pl-card" id="plFamilyComps"><h2>${comps.length === 1 ? 'Tävlingen' : 'Tävlingarna'}</h2>${list}${weekProgramHtml(week)}</div>`;
+    }
+    // Omgång 3 steg 9: veckoprogrammet — dag för dag vilka av veckans tävlingar som pågår, och hur många av funktionärerna
+    // som tänker tävla. Ett underlag för att lägga uppdragen när folk inte skjuter.
+    function weekProgramHtml(week) {
+        const dated = week.filter(w => w.from);
+        if (!dated.length) return '';
+        const days = new Map();
+        dated.forEach(w => {
+            const d = new Date(w.from + 'T00:00:00'), end = new Date((w.to || w.from) + 'T00:00:00');
+            for (let n = 0; d <= end && n < 31; n++, d.setDate(d.getDate() + 1)) {
+                const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                (days.get(k) || days.set(k, []).get(k)).push(w);
+            }
+        });
+        const keys = [...days.keys()].sort();
+        return `<h3 class="h6 mt-3 mb-1" id="plWeekProgram">Veckoprogrammet</h3><ul class="list-unstyled mb-0 small">${keys.map(k =>
+            `<li class="py-1" data-week-day="${esc(k)}"><b>${esc(fmtDay(k))}</b> · ${days.get(k).map(w => esc(w.name) + (w.intents ? ` <span class="pl-help">(${w.intents} funktionärer tänker tävla)</span>` : '')).join(', ')}</li>`).join('')}</ul>`;
     }
 
     function subPlanningsCardHtml() {

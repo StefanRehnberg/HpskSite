@@ -125,6 +125,8 @@ namespace HpskSite.Services
             // gallringen tar bort personuppgifterna men lämnar raden (tillagt 2026-10-21).
             ("StaffAvailability",            "MemberId"),
             ("StaffHelpSignup",              "MemberId"),
+            // Omgång 3 steg 9: vilka tävlingar funktionären tänker tävla i (funktionärens egna uppgifter).
+            ("PlanningShootIntent",          "MemberId"),
 
             // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
             // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.

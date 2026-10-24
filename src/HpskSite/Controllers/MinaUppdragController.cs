@@ -183,6 +183,29 @@ namespace HpskSite.Controllers
             // In preview a manager sees the page as a fresh member: no own assignments, no prior sign-up.
             var assignments = preview ? new List<Models.Staffing.MyAssignmentView>() : (mine?.Assignments ?? new List<Models.Staffing.MyAssignmentView>());
             var mySignup = preview ? null : _help.GetMySignup(owner, memberId.Value);
+            // Omgång 3 steg 9 (Stefan 2026-10-24): veckans tävlingar (familjen) och de funktionären tänker tävla i — så att
+            // planeringen kan ta hänsyn till det långt innan anmälan öppnar.
+            object? shootTargets = null, myShootIntents = null;
+            if (owner.PlanningId > 0)
+            {
+                try
+                {
+                    var intents = HttpContext.RequestServices.GetRequiredService<ShootIntentService>();
+                    shootTargets = intents.Targets(owner.PlanningId).Select(t => new
+                    {
+                        planningId = t.PlanningId, name = t.Name,
+                        from = t.From?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), to = t.To?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    }).ToList();
+                    if (!preview)
+                        myShootIntents = intents.ForFamily(owner.PlanningId).Where(i => i.MemberId == memberId.Value)
+                            .Select(i => new { targetPlanningId = i.TargetPlanningId, classes = i.Classes }).ToList();
+                }
+                catch (Exception ex)
+                {
+                    HttpContext.RequestServices.GetRequiredService<ILogger<MinaUppdragController>>()
+                        .LogWarning(ex, "Bemanna: tävlingsavsikterna gick inte att läsa för planering {Planning}", owner.PlanningId);
+                }
+            }
 
             return Json(new
             {
@@ -195,6 +218,8 @@ namespace HpskSite.Controllers
                 // Planens dagar med rollerna som behövs (Stefan 2026-10-23: anmälan bygger på behoven).
                 needDays = _help.NeedDays(owner),
                 roleChoice = _owners.SignupRoleChoice(owner),
+                shootTargets,
+                myShootIntents,
             });
         }
 
@@ -210,6 +235,13 @@ namespace HpskSite.Controllers
             var name = md == null ? $"Medlem {memberId}"
                 : ($"{md.GetValue<string>("firstName")} {md.GetValue<string>("lastName")}".Trim() is { Length: > 0 } n ? n : (md.Name ?? $"Medlem {memberId}"));
             _help.SaveMySignup(owner, memberId.Value, name, request.Comment, request.Slots);
+            // Omgång 3 steg 9: tävlingarna funktionären tänker tävla i sparas med anmälan (null = en äldre sida, rör inte).
+            if (request.ShootIntents != null && owner.PlanningId > 0)
+            {
+                var err = HttpContext.RequestServices.GetRequiredService<ShootIntentService>().Save(owner.PlanningId, "m:" + memberId.Value, name,
+                    request.ShootIntents.Select(i => (i.TargetPlanningId, i.Classes)), Models.Planning.ShootIntentSource.Self, memberId.Value);
+                if (err != null) return Json(new { success = false, message = err });
+            }
             return Json(new { success = true });
         }
 

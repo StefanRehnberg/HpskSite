@@ -90,9 +90,22 @@ namespace HpskSite.Controllers
                     url = comp == null ? "" : _competitionLinks.Url(comp.Id),
                 };
             }).OrderBy(x => x.date).ThenBy(x => x.name).ToList();
+            // Omgång 3 steg 9: veckoprogrammet — veckans tävlingar (även okopplade delplaneringar) med hur många av
+            // funktionärerna som tänker tävla i var och en.
+            object? week = null;
+            try
+            {
+                var intents = Intents.ForFamily(p.Id);
+                week = Intents.Targets(p.Id).Select(t => new
+                {
+                    planningId = t.PlanningId, name = t.Name, from = Day(t.From), to = Day(t.To),
+                    intents = intents.Count(i => i.TargetPlanningId == t.PlanningId),
+                }).ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: veckoprogrammet gick inte att läsa.", p.Id); }
             return new
             {
-                competitions = comps, ownLink = links.ContainsKey(p.Id), staffsFor = p.StaffsForCompetitionId,
+                competitions = comps, week, ownLink = links.ContainsKey(p.Id), staffsFor = p.StaffsForCompetitionId,
                 parentCompetitionId = p.ParentPlanningId > 0 && links.TryGetValue(p.ParentPlanningId!.Value, out var pc) ? pc : (int?)null,
                 staffingCompetitionId = PlanningFamilyRules.StaffingCompetition(p, links),
             };
