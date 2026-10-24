@@ -62,14 +62,30 @@ namespace HpskSite.Services.Staffing
             catch { return null; }
         }
 
-        private static (TimeSpan start, TimeSpan end)? ParseShiftRange(string? label)
+        private static (TimeSpan start, TimeSpan end)? ParseShiftRange(string? label) => StaffTimeCoverage.ParseRange(label);
+
+        /// <summary>Ett pass klockslag som ett f\u00f6nster; null utan b\u00e5da tiderna.</summary>
+        private static (TimeSpan Start, TimeSpan End)? PassWindow(StaffPassView p) =>
+            StaffTimeCoverage.ParseRange(string.IsNullOrEmpty(p.StartTime) || string.IsNullOrEmpty(p.EndTime) ? null : p.StartTime + "-" + p.EndTime);
+
+        /// <summary>
+        /// Omg\u00e5ng 3 (3.2): banans stationer \u2014 en kopplad f\u00e4ltt\u00e4vlings antal stationer, annars omr\u00e5denas stationer i hela
+        /// planeringsfamiljen. Tom lista = inga stationsrader.
+        /// </summary>
+        private List<int> PlanStations(StaffOwner owner, string? discipline)
         {
-            if (string.IsNullOrWhiteSpace(label)) return null;
-            var parts = label.Split('\u2013', '-');
-            if (parts.Length != 2) return null;
-            if (!TimeSpan.TryParse(parts[0].Trim(), CultureInfo.InvariantCulture, out var s)) return null;
-            if (!TimeSpan.TryParse(parts[1].Trim(), CultureInfo.InvariantCulture, out var e)) return null;
-            return e <= s ? null : (s, e);
+            try
+            {
+                if (owner.Comp > 0 && FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase)
+                    && _competitions.Get(owner.Comp)?.NumberOfSeriesOrStations is int n && n > 0)
+                    return Enumerable.Range(1, Math.Min(n, HpskSite.Models.Planning.PlanningStations.Max)).ToList();
+                return _pass.FamilyAreaStations(owner);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: station list failed for {Owner}", owner.MemoKey);
+                return new List<int>();
+            }
         }
 
         private static bool ShiftsOverlap(StaffAssignmentView a, StaffAssignmentView b)
@@ -135,6 +151,11 @@ namespace HpskSite.Services.Staffing
                     HasAssignments = withWork.Contains(key),
                     TimeLabel = DayTimeLabel(dayPasses),
                     PassIds = dayPasses.Select(p => p.Id).ToList(),
+                    Passes = dayPasses.Where(p => PassWindow(p) != null).Select(p => new GridPassCover
+                    {
+                        PassId = p.Id,
+                        Label = string.IsNullOrWhiteSpace(p.Label) ? $"{p.StartTime}–{p.EndTime}" : $"{p.Label} {p.StartTime}–{p.EndTime}",
+                    }).ToList(),
                 };
             }
 
@@ -169,6 +190,10 @@ namespace HpskSite.Services.Staffing
             try { needRows = _pass.GetAllCrewNeeds(owner); }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: crew-need read failed for {Comp}", competitionId); }
             var datedKeys = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).Select(c => c.Key).ToList();
+            // Omgång 3 (3.2): stationerna (en rad per station för stationsrollerna) och passens fönster.
+            var stations = PlanStations(owner, discipline);
+            var passWindows = passes.ToDictionary(p => p.Id, PassWindow);
+            static DateTime Day(string key) => DateTime.ParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture);
 
             foreach (var role in catalog)
             {
@@ -182,12 +207,34 @@ namespace HpskSite.Services.Staffing
                 var scopeKeys = mine
                     .Select(a => (ScopeType: NormScope(a.ScopeType), a.ScopeKey, a.ScopeLabel))
                     .Distinct()
-                    .OrderBy(x => x.ScopeKey, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                // Omgång 3 (3.2): en stationsroll får en rad per station, även tom — "station 5, markörer" ska gå att se
+                // och fylla. Raden för hela tävlingen står kvar bara om någon står där.
+                var stationRole = stations.Count > 0 && string.Equals(role.DefaultScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase);
+                if (stationRole)
+                    foreach (var n in stations)
+                    {
+                        var k = n.ToString(CultureInfo.InvariantCulture);
+                        if (!scopeKeys.Any(x => string.Equals(x.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase) && x.ScopeKey == k))
+                            scopeKeys.Add((StaffScopeType.Station, k, $"Station {k}"));
+                    }
+                scopeKeys = scopeKeys
+                    .OrderBy(x => x.ScopeType == null ? 0 : 1)
+                    .ThenBy(x => int.TryParse(x.ScopeKey, out var sn) ? sn : int.MaxValue)
+                    .ThenBy(x => x.ScopeKey, StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 if (scopeKeys.Count == 0) scopeKeys.Add((null, null, ""));
+                // En stationsrad läser behovet "per station" (varje station, eller just den här) — och, när inget sådant
+                // gäller stationen, rollens antal (som förut, när varje stationsrad visade samma tal).
+                bool StationNeedFor(string? key) => needRows.Any(n => string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(n.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)
+                    && (string.IsNullOrEmpty(n.ScopeKey) || string.Equals(n.ScopeKey, key, StringComparison.OrdinalIgnoreCase)));
 
                 foreach (var (scopeType, scopeKey, scopeLabel) in scopeKeys)
                 {
+                    var isStation = string.Equals(scopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase);
+                    var needKind = isStation && StationNeedFor(scopeKey) ? CrewNeedScope.Station : CrewNeedScope.All;
+                    var needKey = needKind == CrewNeedScope.Station ? scopeKey : null;
                     var row = new GridRow
                     {
                         RoleKey = role.Key,
@@ -199,16 +246,16 @@ namespace HpskSite.Services.Staffing
                         SupportsTargetRange = role.SupportsTargetRange,
                         SupportsFunctionTitle = role.SupportsFunctionTitle,
                         DefaultScopeType = role.DefaultScopeType,
-                        Needed = CrewNeedRules.Default(needRows, CrewNeedScope.All, role.Key),
+                        Needed = CrewNeedRules.For(needRows, needKind, role.Key, null, needKey, null),
                         SortOrder = role.SortOrder,
+                        HasOwnStationNeed = isStation && needRows.Any(n => string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(n.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase) && string.Equals(n.ScopeKey, scopeKey, StringComparison.OrdinalIgnoreCase)),
                     };
                     foreach (var k in datedKeys)
-                    {
-                        var n = CrewNeedRules.ForDay(needRows, CrewNeedScope.All, role.Key,
-                            DateTime.ParseExact(k, "yyyy-MM-dd", CultureInfo.InvariantCulture));
-                        row.NeededByDay[k] = n;
-                    }
-                    if (!row.HasNeed) row.NeededByDay.Clear();
+                        row.NeededByDay[k] = CrewNeedRules.For(needRows, needKind, role.Key, Day(k), needKey, null);
+                    foreach (var p in passes.Where(p => !string.IsNullOrEmpty(p.Date) && datedKeys.Contains(p.Date!)))
+                        row.NeededByPass[p.Id] = CrewNeedRules.For(needRows, needKind, role.Key, Day(p.Date!), needKey, p.Id);
+                    if (!row.HasNeed) { row.NeededByDay.Clear(); row.NeededByPass.Clear(); }
 
                     foreach (var a in mine.Where(a => NormScope(a.ScopeType) == scopeType && a.ScopeKey == scopeKey))
                     {
@@ -233,8 +280,27 @@ namespace HpskSite.Services.Staffing
                             HasContact = a.MemberId is > 0 || !string.IsNullOrWhiteSpace(a.Email),
                             ReadOnly = a.ReadOnly,
                             Note = a.Note,
+                            PassId = a.PassId,
                         });
                         row.Filled++;
+                    }
+
+                    // Omgång 3 (3.2): tiden är sanningen — flest samtidigt per dag, och per pass när dagen har flera pass.
+                    (TimeSpan Start, TimeSpan End)? SpanOf(GridEntry e) =>
+                        e.PassId is int pid && passWindows.TryGetValue(pid, out var w) && w != null ? w : StaffTimeCoverage.ParseRange(e.TimeLabel);
+                    foreach (var k in datedKeys)
+                    {
+                        var list = row.Cells.TryGetValue(k, out var l) ? l : new List<GridEntry>();
+                        if (list.Count > 0) row.FilledByDay[k] = StaffTimeCoverage.Peak(list.Select(SpanOf));
+                        var dayPasses = passes.Where(p => p.Date == k && passWindows.TryGetValue(p.Id, out var w) && w != null).ToList();
+                        if (dayPasses.Count < 2 || (list.Count == 0 && !row.HasNeed)) continue;
+                        row.PassCover[k] = dayPasses.Select(p => new GridPassCover
+                        {
+                            PassId = p.Id,
+                            Label = string.IsNullOrWhiteSpace(p.Label) ? $"{p.StartTime}–{p.EndTime}" : p.Label,
+                            Filled = StaffTimeCoverage.Peak(list.Where(e => e.PassId == null || e.PassId == p.Id).Select(SpanOf), passWindows[p.Id]),
+                            Needed = row.NeededByPass.TryGetValue(p.Id, out var pn) ? pn : row.NeedFor(k),
+                        }).ToList();
                     }
                     resp.Rows.Add(row);
                 }
@@ -261,6 +327,9 @@ namespace HpskSite.Services.Staffing
             resp.Rows = resp.Rows
                 .OrderBy(r => r.SortOrder)
                 .ThenBy(r => r.RoleName, svCmp)
+                // Station 2 före station 10.
+                .ThenBy(r => r.ScopeType == null ? 0 : 1)
+                .ThenBy(r => int.TryParse(r.ScopeKey, out var sn) ? sn : int.MaxValue)
                 .ThenBy(r => r.ScopeLabel ?? "", svCmp)
                 .ToList();
 

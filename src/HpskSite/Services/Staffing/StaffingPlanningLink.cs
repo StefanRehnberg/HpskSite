@@ -26,7 +26,7 @@ namespace HpskSite.Services.Staffing
         private static readonly (string Table, string[] Keys)[] Unique =
         {
             ("StaffDay", new[] { "DayDate" }),
-            ("StaffCrewNeed", new[] { "ScopeKind", "RoleKey", "DayDate" }),
+            ("StaffCrewNeed", new[] { "ScopeKind", "RoleKey", "DayDate", "ScopeKey", "PassId" }),
             ("StaffHelpSignup", new[] { "MemberId" }),
             ("StaffingSourceScope", new[] { "ScopeType", "ScopeKey" }),
         };

@@ -1468,9 +1468,25 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ett datum gick inte att läsa." });
                 days.Add((day, d.Count));
             }
+            // Omgång 3 (3.2): passen måste vara ägarens egna — ett främmande pass-id hade lagt ett behov ingen kan se.
+            var passes = new List<(int, DateTime, int)>();
+            if ((request.Passes ?? new()).Count > 0)
+            {
+                var own = _pass.GetPasses(owner).ToDictionary(p => p.Id, p => p.Date);
+                foreach (var p in request.Passes!)
+                {
+                    if (p.Count < 0 || p.Count > 999) return Json(new { success = false, message = "Ange ett antal mellan 0 och 999." });
+                    if (!own.TryGetValue(p.PassId, out var pd) || !DateTime.TryParseExact(pd, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var passDay))
+                        return Json(new { success = false, message = "Passet finns inte i bemanningen." });
+                    passes.Add((p.PassId, passDay, p.Count));
+                }
+            }
+            var scopeKey = string.IsNullOrWhiteSpace(request.ScopeKey) ? null : request.ScopeKey.Trim();
+            if (scopeKey != null && (scopeKey.Length > 50 || !string.Equals(request.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)))
+                return Json(new { success = false, message = "Bara ett stationsbehov kan gälla en bestämd station." });
             try
             {
-                _pass.SetRoleNeeds(owner, request.RoleKey, request.All, days);
+                _pass.SetRoleNeeds(owner, request.RoleKey, request.ScopeKind ?? CrewNeedScope.All, scopeKey, request.All, days, passes);
                 return Json(new { success = true });
             }
             catch (Exception ex)

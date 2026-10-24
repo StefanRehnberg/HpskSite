@@ -104,11 +104,12 @@ namespace HpskSite.Services.Planning
                     newId, sourceId, comp, offset.Value, i.CopierMemberId, now);
             else daysDropped = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM StaffDay WHERE {owner}", newId, sourceId, comp);
             var needs = offset.HasValue
-                ? db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate)
-                    SELECT NULL, @0, ScopeKind, RoleKey, Count, CASE WHEN DayDate IS NULL THEN NULL ELSE DATEADD(day, @3, DayDate) END
-                    FROM StaffCrewNeed WHERE {owner}", newId, sourceId, comp, offset.Value)
-                : db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate)
-                    SELECT NULL, @0, ScopeKind, RoleKey, Count, NULL FROM StaffCrewNeed WHERE {owner} AND DayDate IS NULL", newId, sourceId, comp);
+                // Passens behov följer inte med (passen kopieras inte); stationens behov (ScopeKey) gör det.
+                ? db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate, ScopeKey)
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, CASE WHEN DayDate IS NULL THEN NULL ELSE DATEADD(day, @3, DayDate) END, ScopeKey
+                    FROM StaffCrewNeed WHERE {owner} AND PassId IS NULL", newId, sourceId, comp, offset.Value)
+                : db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate, ScopeKey)
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, NULL, ScopeKey FROM StaffCrewNeed WHERE {owner} AND DayDate IS NULL AND PassId IS NULL", newId, sourceId, comp);
 
             if (i.AddCopier && i.CopierMemberId != i.RecipientMemberId)
             {

@@ -143,10 +143,17 @@ window.PlaneringBemanning = (function () {
         return Object.keys(m).some(k => m[k] > 0);
     }
     function dayLabel(key) { const c = (B.grid.columns || []).find(x => x.key === key); return c ? c.label : key; }
+    // Omgång 3 (3.2, "tiden är sanningen"): flest på plats samtidigt — inte antalet uppdrag. Servern räknar.
+    function filledFor(row, key) {
+        const m = row.filledByDay || {};
+        if (Object.prototype.hasOwnProperty.call(m, key)) return m[key] || 0;
+        return ((row.cells && row.cells[key]) || []).length;
+    }
 
     function gridSummary() {
         const g = B.grid, cols = (g.columns || []).filter(c => c.key);
-        const short = (g.rows || []).reduce((acc, r) => acc + cols.filter(c => { const n = needFor(r, c.key); return n > 0 && ((r.cells && r.cells[c.key]) || []).length < n; }).length, 0);
+        const passShort = r => cols.filter(c => (((r.passCover || {})[c.key]) || []).some(p => p.needed > 0 && p.filled < p.needed)).length;
+        const short = (g.rows || []).reduce((acc, r) => acc + cols.filter(c => { const n = needFor(r, c.key); return n > 0 && filledFor(r, c.key) < n; }).length + passShort(r), 0);
         const holes = (g.rows || []).reduce((a, r) => a + (r.gaps || []).length, 0);
         const parts = [`${g.totalAssigned || 0} uppdrag`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
         if (short) parts.push(`<span class="text-danger fw-semibold">${short} ${short === 1 ? 'ruta saknar' : 'rutor saknar'} folk</span>`);
@@ -219,13 +226,24 @@ window.PlaneringBemanning = (function () {
                 if (!showCol(c)) return;
                 const entries = (row.cells && row.cells[c.key]) || [];
                 const need = needFor(row, c.key);
+                const filled = filledFor(row, c.key);
+                const pcov = ((row.passCover || {})[c.key]) || [];
                 let cls = 'plb-cell', tally = '';
-                if (need === 0 && c.key && hasNeed(row) && !entries.length) tally = '<div class="plb-need plb-dim">behövs inte</div>';
-                if (need > 0 && c.key) {
-                    const short = entries.length < need;
+                if (need === 0 && c.key && hasNeed(row) && !entries.length && !pcov.some(p => p.needed > 0)) tally = '<div class="plb-need plb-dim">behövs inte</div>';
+                if (pcov.length) {
+                    // Omgång 3 (3.2): flera pass samma dag — ett tal per pass, "FM 2/3 · EM 3/3".
+                    const anyShort = pcov.some(p => p.needed > 0 && p.filled < p.needed);
+                    if (pcov.some(p => p.needed > 0)) cls += anyShort ? ' plb-short' : ' plb-full';
+                    tally = `<div class="plb-need plb-passes">${pcov.map(p => {
+                        const s = p.needed > 0 && p.filled < p.needed;
+                        return `<span class="${s ? 'text-danger fw-semibold' : (p.needed > 0 ? 'text-success' : 'plb-dim')}" data-plb-pass="${p.passId}">${esc(p.label)} ${p.filled}${p.needed > 0 ? '/' + p.needed : ''}</span>`;
+                    }).join(' · ')}</div>`;
+                } else if (need > 0 && c.key) {
+                    const short = filled < need;
                     cls += short ? ' plb-short' : ' plb-full';
-                    tally = `<div class="plb-need ${short ? 'text-danger fw-semibold' : 'text-success'}">${entries.length}/${need}${short ? ' — saknas ' + (need - entries.length) : ''}</div>`;
+                    tally = `<div class="plb-need ${short ? 'text-danger fw-semibold' : 'text-success'}" title="Flest på plats samtidigt">${filled}/${need}${short ? ' — saknas ' + (need - filled) : ''}</div>`;
                 }
+                if (entries.length > filled && filled > 0) tally += `<div class="plb-dim small">${entries.length} uppdrag, högst ${filled} samtidigt</div>`;
                 const holes = (row.gaps || []).filter(x => x.dateKey === c.key);
                 if (holes.length) {
                     cls += ' plb-short';
@@ -541,22 +559,35 @@ window.PlaneringBemanning = (function () {
         const days = (B.grid.columns || []).filter(c => c.key);
         const kinds = [...new Set(days.map(c => c.kind).filter(Boolean))];
         const word = { Tavlingsdag: 'tävlingsdagar', Forberedelse: 'förberedelsedagar', Efterarbete: 'dagar med efterarbete' };
+        // Omgång 3 (3.2): en stationsrad gäller varje station — eller bara den här. Dagar med flera pass får ett antal per pass.
+        const station = !!row.isStation;
+        const byPass = row.neededByPass || {};
+        const passInputs = c => (c.passes || []).length < 2 ? '' : `<div class="d-flex flex-wrap gap-2 justify-content-end pb-1">${c.passes.map(p =>
+            `<label class="small d-flex align-items-center gap-1 mb-0">${esc(p.label)}
+                <input type="number" min="0" max="999" class="form-control form-control-sm plb-need-pass" style="width:70px" inputmode="numeric" data-pass="${p.passId}" data-day="${esc(c.key)}"
+                    value="${Object.prototype.hasOwnProperty.call(byPass, p.passId) ? byPass[p.passId] : needFor(row, c.key)}"></label>`).join('')}</div>`;
         A.formModal({
-            title: 'Hur många behövs — ' + row.roleName + '?', okLabel: 'Spara', wide: false,
-            html: `<div class="d-flex align-items-center gap-2 mb-2 flex-wrap"><label class="form-label mb-0" for="plbNeedAll">Samma antal alla dagar</label>
+            title: 'Hur många behövs — ' + row.roleName + (station ? ' · ' + (row.scopeLabel || 'station') : '') + '?', okLabel: 'Spara', wide: false,
+            html: `${station ? `<div class="mb-2"><label class="form-label small mb-1" for="plbNeedScope">Antalet gäller</label>
+                    <select id="plbNeedScope" class="form-select form-select-sm"><option value="">Varje station</option>
+                        <option value="${esc(row.scopeKey || '')}"${row.hasOwnStationNeed ? ' selected' : ''}>Bara ${esc(row.scopeLabel || 'den här stationen')}</option></select></div>` : ''}
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap"><label class="form-label mb-0" for="plbNeedAll">Samma antal alla dagar</label>
                     <input type="number" min="0" max="999" class="form-control form-control-sm" id="plbNeedAll" style="width:90px" inputmode="numeric" value="${row.needed || 0}"></div>
                 ${kinds.length > 1 ? `<div class="d-flex gap-1 flex-wrap mb-3"><button type="button" class="btn btn-sm btn-outline-secondary" data-need-quick="">Alla dagar</button>${kinds.map(k => `<button type="button" class="btn btn-sm btn-outline-secondary" data-need-quick="${esc(k)}">Bara ${esc(word[k] || k)}</button>`).join('')}</div>` : ''}
-                ${days.length ? days.map(c => `<div class="d-flex justify-content-between align-items-center border-bottom py-1 gap-2">
+                ${days.length ? days.map(c => `<div class="border-bottom py-1"><div class="d-flex justify-content-between align-items-center gap-2">
                     <label class="mb-0" for="plbNeed_${esc(c.key)}">${esc(c.label)}${c.dayLabel ? ` <span class="plb-dim small">· ${esc(c.dayLabel)}</span>` : ''}</label>
-                    <input type="number" min="0" max="999" class="form-control form-control-sm plb-need-day" style="width:80px" inputmode="numeric" id="plbNeed_${esc(c.key)}" data-day="${esc(c.key)}" data-kind="${esc(c.kind || '')}" value="${needFor(row, c.key)}"></div>`).join('')
+                    <input type="number" min="0" max="999" class="form-control form-control-sm plb-need-day" style="width:80px" inputmode="numeric" id="plbNeed_${esc(c.key)}" data-day="${esc(c.key)}" data-kind="${esc(c.kind || '')}" value="${needFor(row, c.key)}"></div>
+                    ${passInputs(c)}</div>`).join('')
                     : '<p class="pl-help small mb-0">Planen har inga dagar än — lägg till en dag, eller ange bara antalet för alla dagar.</p>'}
-                <p class="pl-help small mb-0 mt-2">0 betyder att rollen inte behövs den dagen.</p>`,
+                <p class="pl-help small mb-0 mt-2">0 betyder att rollen inte behövs den dagen. ${days.some(c => (c.passes || []).length > 1) ? 'Med flera pass räknas de som är på plats samtidigt under varje pass.' : 'Räknas som flest på plats samtidigt.'}</p>`,
             onOpen: b => {
-                b.querySelector('#plbNeedAll').addEventListener('input', e => b.querySelectorAll('.plb-need-day').forEach(i => { i.value = e.target.value; }));
+                const setDay = (i, v) => { i.value = v; b.querySelectorAll(`.plb-need-pass[data-day="${i.dataset.day}"]`).forEach(p => { p.value = v; }); };
+                b.querySelector('#plbNeedAll').addEventListener('input', e => b.querySelectorAll('.plb-need-day').forEach(i => setDay(i, e.target.value)));
+                b.querySelectorAll('.plb-need-day').forEach(i => i.addEventListener('input', () => setDay(i, i.value)));
                 b.addEventListener('click', e => {
                     const q = e.target.closest('[data-need-quick]'); if (!q) return;
                     const kind = q.dataset.needQuick, v = b.querySelector('#plbNeedAll').value || '0';
-                    b.querySelectorAll('.plb-need-day').forEach(i => { i.value = (!kind || i.dataset.kind === kind) ? v : '0'; });
+                    b.querySelectorAll('.plb-need-day').forEach(i => setDay(i, (!kind || i.dataset.kind === kind) ? v : '0'));
                 });
             },
             onOk: async b => {
@@ -568,8 +599,16 @@ window.PlaneringBemanning = (function () {
                     if (isNaN(n) || n < 0 || n > 999) bad = true;
                     list.push({ date: i.dataset.day, count: isNaN(n) ? 0 : n });
                 });
+                const passes = [];
+                b.querySelectorAll('.plb-need-pass').forEach(i => {
+                    const n = parseInt(i.value || '0', 10);
+                    if (isNaN(n) || n < 0 || n > 999) bad = true;
+                    passes.push({ passId: parseInt(i.dataset.pass, 10), count: isNaN(n) ? 0 : n });
+                });
                 if (bad) return 'Ange ett antal mellan 0 och 999 för varje dag.';
-                const d = await spost('SetRoleNeeds', { roleKey: row.roleKey, all, days: list });
+                const scopeSel = b.querySelector('#plbNeedScope');
+                const d = await spost('SetRoleNeeds', { roleKey: row.roleKey, all, days: list, passes,
+                    scopeKind: station ? 'Station' : 'All', scopeKey: scopeSel ? scopeSel.value : '' });
                 if (!d.success) return d.message || 'Behovet kunde inte sparas.';
                 await loadGrid(); drawGrid();
                 return true;

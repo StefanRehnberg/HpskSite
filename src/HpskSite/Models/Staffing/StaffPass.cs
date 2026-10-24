@@ -36,6 +36,10 @@ namespace HpskSite.Models.Staffing
         public int Count { get; set; }
         /// <summary>Null = antalet för alla dagar; en dag = antalet just den dagen (<see cref="CrewNeedRules"/>).</summary>
         public DateTime? DayDate { get; set; }
+        /// <summary>Omgång 3 (3.2): en bestämd station (stationens nummer); null = varje station / hela tävlingen.</summary>
+        public string? ScopeKey { get; set; }
+        /// <summary>Omgång 3 (3.2): ett bestämt pass; null = hela dagen. Raden bär då också passets dag.</summary>
+        public int? PassId { get; set; }
     }
 
     public static class CrewNeedScope

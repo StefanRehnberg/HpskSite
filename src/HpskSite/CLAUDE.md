@@ -12816,9 +12816,27 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       och `AreaId` (en per område, `LinkAreaConfig`); ⚠️ varje fråga på tävlingskopplingen filtrerar `TargetKind = competition`.
       En borttagen konfiguration tar bort sin länk. Områdets stationschefer blir medarbetare; `GiveChiefsConfigAccess` tar
       `areaId`. Stationskortet på Översikt listar områdena.
+  - **⚠️⚠️ Bemanning per station och pass — TIDEN ÄR SANNINGEN (3.2):**
+    - **`StaffTimeCoverage.Peak`** (rena funktioner) är ENDA räkningen av "hur många är på plats": flest SAMTIDIGT, inte
+      antalet uppdrag (tio markörer i två skift om fem = fem). Utan tid = hela dagen; ett uppdrag i ett pass har passets
+      tider; kant i kant är en överlämning. Rutnätet (`GridRow.FilledByDay`, `PassCover`) och täckningen
+      (`StaffPassService.BuildCoverage` — ett uppdrag utan pass täcker passet när tiderna överlappar) läser den.
+      `ParseRange` går genom `ClockTime` ("8" = klockan 8, inte 8 dygn).
+    - **Stationsroller** (`DefaultScopeType = Station`) får en rad per station, även tom: en kopplad fälttävlings
+      stationer, annars områdenas stationer i hela familjen (`StaffPassService.FamilyAreaStations`). Rutans "lägg till" ger
+      uppdraget stationen. Rader sorteras numeriskt (2 före 10).
+    - **`StaffCrewNeed.ScopeKey` / `PassId`** (null = varje station / hela dagen; en passrad bär passets dag).
+      `CrewNeedRules.For` väljer det mest bestämda: station+pass → station → pass → dagen. ⚠️ `ForDay`/`EffectiveFor`
+      läser bara raderna utan station och pass. En stationsrad läser "per station" när något sådant gäller stationen,
+      annars rollens antal (som förut). `SetRoleNeeds` tar `scopeKind`, `scopeKey` och `passes` (bara de som avviker
+      från sin dag lagras, `PlanPasses`); passen prövas mot ägarens egna. De unika indexen och `StaffingPlanningLink.Unique`
+      tar med båda kolumnerna; planeringskopian tar med stationens behov men inte passens.
+    - Rutan: "FM 2/3 · EM 3/3" när dagen har flera pass med tider, annars `fyllda/behov`, och "N uppdrag, högst M
+      samtidigt" när de skiljer. Behovsdialogen: "Antalet gäller: Varje station / Bara station N" och ett antal per pass.
   - **Migrering `add-planning-omgang3.sql` (körordning P3j) FÖRE deployen.** Körd i dev, EJ i prod.
-  - Svit `tavlingsplanering-o3-verify.mjs` 97/97 (A/B steg 7: utan omnumreringen och utan länkstädningen → 2 röda).
-    Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`, `PlanningTaskRulesTests`, `AreaConfigBlobTests`.
+  - Svit `tavlingsplanering-o3-verify.mjs` 109/109 (A/B steg 7: utan omnumreringen och utan länkstädningen → 2 röda;
+    steg 8: antal uppdrag i stället för samtidigt + utan stationsrader → 5 röda). Test `PlanningFamilyRulesTests`,
+    `StaffingInviteTokenTests`, `PlanningTaskRulesTests`, `AreaConfigBlobTests`, `StaffTimeCoverageTests`.
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

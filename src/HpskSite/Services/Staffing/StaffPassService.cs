@@ -76,27 +76,59 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
+        /// Omgång 3 (3.2): banans stationer för en planering som inte (eller inte ännu) har en fälttävling — områdenas
+        /// stationer i hela familjen (huvudplaneringen och delplaneringarna), stigande.
+        /// </summary>
+        public List<int> FamilyAreaStations(StaffOwner owner)
+        {
+            if (owner.PlanningIdOrNull is not int pid || pid <= 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var root = db.ExecuteScalar<int?>("SELECT CASE WHEN ParentPlanningId > 0 THEN ParentPlanningId ELSE Id END FROM Planning WHERE Id = @0", pid) ?? 0;
+            if (root <= 0) return new();
+            var raw = db.Fetch<string>(@"SELECT a.Stations FROM PlanningArea a JOIN Planning p ON p.Id = a.PlanningId
+                WHERE (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL AND a.DeletedAt IS NULL AND a.Stations IS NOT NULL", root);
+            return raw.SelectMany(s => HpskSite.Models.Planning.PlanningStations.Parse(s).Stations).Distinct().OrderBy(n => n).ToList();
+        }
+
+        /// <summary>
         /// Skriver om en rolls behov: alla dagars antal och de dagar som avviker (<see cref="CrewNeedRules.Plan"/>).
         /// Bara hela-tävlingen-behovet (ScopeKind All) — stationernas behov rörs inte.
         /// </summary>
         public void SetRoleNeeds(StaffOwner owner, string roleKey, int all, IEnumerable<(DateTime Day, int Count)> days)
+            => SetRoleNeeds(owner, roleKey, CrewNeedScope.All, null, all, days, Array.Empty<(int, DateTime, int)>());
+
+        /// <summary>
+        /// Omgång 3 (3.2): rollens behov för en sort (hela tävlingen eller varje station), en bestämd station
+        /// (<paramref name="scopeKey"/>) och passen som avviker från sin dag. Skriver om just den stationens rader — varken
+        /// de andra stationernas eller hela tävlingens rörs.
+        /// </summary>
+        public void SetRoleNeeds(StaffOwner owner, string roleKey, string scopeKind, string? scopeKey, int all,
+            IEnumerable<(DateTime Day, int Count)> days, IEnumerable<(int PassId, DateTime Day, int Count)> passes)
         {
             var key = (roleKey ?? "").Trim();
             if (key.Length == 0) return;
+            var kind = string.Equals(scopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase) ? CrewNeedScope.Station : CrewNeedScope.All;
+            var sk = string.IsNullOrWhiteSpace(scopeKey) ? null : scopeKey.Trim();
+            var dayList = days.ToList();
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND ScopeKind = @2 AND RoleKey = @3",
-                owner.P, owner.C, CrewNeedScope.All, key);
-            foreach (var (day, count) in CrewNeedRules.Plan(all, days))
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND ScopeKind = @2 AND RoleKey = @3 AND ISNULL(ScopeKey, N'') = @4",
+                owner.P, owner.C, kind, key, sk ?? "");
+            foreach (var (day, count) in CrewNeedRules.Plan(all, dayList))
                 db.Insert(new StaffCrewNeed { PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull,
-                    ScopeKind = CrewNeedScope.All, RoleKey = key, Count = count, DayDate = day?.Date });
+                    ScopeKind = kind, RoleKey = key, Count = count, DayDate = day?.Date, ScopeKey = sk });
+            // Ett pass räknas mot SIN dag: utan rad för dagen är det alla dagars antal.
+            foreach (var (passId, day, count) in CrewNeedRules.PlanPasses(all, dayList, passes))
+                db.Insert(new StaffCrewNeed { PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull,
+                    ScopeKind = kind, RoleKey = key, Count = count, DayDate = day, ScopeKey = sk, PassId = passId });
         }
 
         /// <summary>Alla dagars antal per roll (raderna utan dag) — "Skift och behov"-dialogen.</summary>
         public List<CrewNeedRow> GetCrewNeeds(StaffOwner owner, string? discipline)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL", owner.P, owner.C)
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P, owner.C)
                 .Select(n => new CrewNeedRow
                 {
                     ScopeKind = n.ScopeKind,
@@ -112,7 +144,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL", owner.P, owner.C);
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P, owner.C);
             foreach (var n in (needs ?? new()).Where(n => n.Count > 0 && !string.IsNullOrWhiteSpace(n.RoleKey)))
             {
                 var kind = string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase) ? CrewNeedScope.Station : CrewNeedScope.All;
@@ -131,19 +163,33 @@ namespace HpskSite.Services.Staffing
             {
                 var db = scope.Database;
                 needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
-                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId IS NOT NULL", owner.P, owner.C);
+                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0), owner.P, owner.C);
             }
             bool isFalt = FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase);
             int stations = isFalt ? Math.Max(0, stationCount) : 0;
 
             string RoleName(string key) => _roles.NameFor(owner, discipline, key);
-            // filled counts keyed for fast lookup
-            int FilledStation(int passId, string station, string role) => assignments.Count(a => a.PassId == passId
-                && string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase)
+            // Omgång 3 (3.2, "tiden är sanningen"): ett uppdrag täcker passet när det ligger i passet ELLER, utan pass, samma
+            // dag och tiderna överlappar (utan tid = hela dagen). Räknas som flest samtidigt under passet.
+            var passDays = passes.ToDictionary(p => p.Id, p => DateTime.TryParse(p.Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d.Date : (DateTime?)null);
+            (TimeSpan, TimeSpan)? WindowOf(StaffPassView p) =>
+                StaffTimeCoverage.ParseRange(string.IsNullOrEmpty(p.StartTime) || string.IsNullOrEmpty(p.EndTime) ? null : p.StartTime + "-" + p.EndTime);
+            DateTime? DayOf(StaffAssignment a) => a.StartsAt?.Date ?? a.DayDate?.Date ?? (a.PassId is int ap && passDays.TryGetValue(ap, out var pd) ? pd : null);
+            (TimeSpan, TimeSpan)? SpanOf(StaffAssignment a) =>
+                a.StartsAt is DateTime s && a.EndsAt is DateTime e && e > s ? (s.TimeOfDay, e.TimeOfDay) : null;
+            int Filled(StaffPassView p, Func<StaffAssignment, bool> mine)
+            {
+                var w = WindowOf(p);
+                var day = passDays.GetValueOrDefault(p.Id);
+                var inPass = assignments.Where(a => mine(a) && (a.PassId == p.Id || (w != null && a.PassId == null && day != null && DayOf(a) == day)));
+                return StaffTimeCoverage.Peak(inPass.Select(a => a.PassId == p.Id ? w : SpanOf(a)), w);
+            }
+            int FilledStation(StaffPassView p, string station, string role) => Filled(p, a =>
+                string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(a.ScopeKey, station, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(a.RoleKey, role, StringComparison.OrdinalIgnoreCase));
-            int FilledGeneral(int passId, string role) => assignments.Count(a => a.PassId == passId
-                && string.Equals(a.RoleKey, role, StringComparison.OrdinalIgnoreCase)
+            int FilledGeneral(StaffPassView p, string role) => Filled(p, a =>
+                string.Equals(a.RoleKey, role, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(a.ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase));
 
             var resp = new CoverageResponse
@@ -167,7 +213,7 @@ namespace HpskSite.Services.Staffing
                     var unit = new CoverageUnit { ScopeKey = n.ToString() };
                     foreach (var need in stationNeeds)
                     {
-                        var filled = FilledStation(p.Id, n.ToString(), need.RoleKey);
+                        var filled = FilledStation(p, n.ToString(), need.RoleKey);
                         unit.Roles.Add(new CoverageRole { RoleKey = need.RoleKey, RoleName = RoleName(need.RoleKey), Needed = need.Count, Filled = filled });
                         unit.Needed += need.Count; unit.Filled += filled;
                     }
@@ -175,7 +221,7 @@ namespace HpskSite.Services.Staffing
                 }
                 foreach (var need in allNeeds)
                 {
-                    var filled = FilledGeneral(p.Id, need.RoleKey);
+                    var filled = FilledGeneral(p, need.RoleKey);
                     cp.General.Add(new CoverageRole { RoleKey = need.RoleKey, RoleName = RoleName(need.RoleKey), Needed = need.Count, Filled = filled });
                     cp.Needed += need.Count; cp.Filled += filled;
                 }

@@ -112,6 +112,17 @@ namespace HpskSite.Models.Staffing
         public bool HasContact { get; set; }
         public bool ReadOnly { get; set; }
         public string? Note { get; set; }
+        /// <summary>Omgång 3 (3.2): passet uppdraget ligger i, om det ligger i ett.</summary>
+        public int? PassId { get; set; }
+    }
+
+    /// <summary>Omgång 3 (3.2): ett pass i en ruta — hur många som är där samtidigt under passet, mot behovet.</summary>
+    public class GridPassCover
+    {
+        public int PassId { get; set; }
+        public string Label { get; set; } = "";
+        public int Filled { get; set; }
+        public int Needed { get; set; }
     }
 
     /// <summary>A column: one day of the plan (see <see cref="StaffDay"/>). Passes on that day are the
@@ -130,6 +141,8 @@ namespace HpskSite.Models.Staffing
         public bool HasAssignments { get; set; }
         public string? TimeLabel { get; set; }       // "09:00–19:00" from the day's passes
         public List<int> PassIds { get; set; } = new();
+        /// <summary>Omgång 3 (3.2): dagens pass med tider (namn), för behovet per pass. Antalen är inte satta här.</summary>
+        public List<GridPassCover> Passes { get; set; } = new();
     }
 
     /// <summary>A row: one role (optionally narrowed to one scope, e.g. "Skjutledare · Bana 3").</summary>
@@ -157,8 +170,21 @@ namespace HpskSite.Models.Staffing
         /// <summary>Antalet per dag (kolumnens nyckel → antal), med dagarnas avvikelser inräknade. Bär en
         /// nyckel per daterad kolumn så fort rollen har ett behov någon dag.</summary>
         public Dictionary<string, int> NeededByDay { get; set; } = new();
+        /// <summary>
+        /// Omgång 3 (3.2, "tiden är sanningen"): flest som är på plats samtidigt per dag. Tio markörer i två skift om fem
+        /// är fem på plats — antalet uppdrag (<see cref="Cells"/>) och antalet samtidigt är olika saker.
+        /// </summary>
+        public Dictionary<string, int> FilledByDay { get; set; } = new();
+        /// <summary>Omgång 3: per dag, passen med flest samtidigt under passet och behovet för passet.</summary>
+        public Dictionary<string, List<GridPassCover>> PassCover { get; set; } = new();
+        /// <summary>Omgång 3: behovet per pass (passets id → antal) — förifyllning i "Antal per dag".</summary>
+        public Dictionary<int, int> NeededByPass { get; set; } = new();
+        /// <summary>Omgång 3: raden är en station (stationsroll × station). Behovet är då "per station".</summary>
+        public bool IsStation => string.Equals(ScopeType, StaffScopeType.Station, StringComparison.OrdinalIgnoreCase);
+        /// <summary>Omgång 3: just den här stationen har ett eget behov (annars gäller "varje station").</summary>
+        public bool HasOwnStationNeed { get; set; }
         /// <summary>Behövs rollen någon dag alls?</summary>
-        public bool HasNeed => Needed > 0 || NeededByDay.Values.Any(v => v > 0);
+        public bool HasNeed => Needed > 0 || NeededByDay.Values.Any(v => v > 0) || NeededByPass.Values.Any(v => v > 0);
         /// <summary>Antalet som behövs i kolumnen.</summary>
         public int NeedFor(string columnKey) =>
             NeededByDay.TryGetValue(columnKey ?? "", out var v) ? v : (string.IsNullOrEmpty(columnKey) ? 0 : Needed);
@@ -180,11 +206,23 @@ namespace HpskSite.Models.Staffing
         public string RoleKey { get; set; } = "";
         public int All { get; set; }
         public List<RoleNeedDay> Days { get; set; } = new();
+        /// <summary>Omgång 3 (3.2): "Station" = behovet per station; annars hela tävlingen.</summary>
+        public string? ScopeKind { get; set; }
+        /// <summary>Omgång 3: en bestämd station; tomt = varje station.</summary>
+        public string? ScopeKey { get; set; }
+        /// <summary>Omgång 3: passen (bara de som avviker från sin dag lagras).</summary>
+        public List<RoleNeedPass> Passes { get; set; } = new();
     }
 
     public class RoleNeedDay
     {
         public string Date { get; set; } = "";
+        public int Count { get; set; }
+    }
+
+    public class RoleNeedPass
+    {
+        public int PassId { get; set; }
         public int Count { get; set; }
     }
 
@@ -213,6 +251,8 @@ namespace HpskSite.Models.Staffing
         public List<GridVolunteer> Volunteers { get; set; } = new();
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
+        /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>
+        public List<GridClash> FamilyClashes { get; set; } = new();
     }
 
     public class GridClash
@@ -222,6 +262,8 @@ namespace HpskSite.Models.Staffing
         public string? DateKey { get; set; }
         public string A { get; set; } = "";
         public string B { get; set; } = "";
+        /// <summary>Omgång 3 steg 9: null = inom planeringen; annars <see cref="FamilyClashRules"/> (uppdrag, start, avsikt).</summary>
+        public string? Kind { get; set; }
     }
 
     /// <summary>An uncovered stretch between two shifts on the same role and day.</summary>
