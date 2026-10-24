@@ -229,7 +229,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveArea(int id, int areaId, string name, int? responsibleId, string? responsibleName,
-            string? description = null, int? hostType = null, int? hostId = null, string? hostText = null, string? details = null)
+            string? description = null, int? hostType = null, int? hostId = null, string? hostText = null, string? details = null,
+            string? stations = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
@@ -247,7 +248,8 @@ namespace HpskSite.Controllers
                         return No("Välj en klubb eller krets som någon i planeringen företräder, eller skriv värden som text.");
                     if (hostType == Models.DocumentOwnerType.Club) club = hostId; else region = hostId;
                 }
-                extra = new PlanningService.AreaDetails(description, club, region, hostText);
+                // P4: stationerna skickas av områdesdialogen; tomt fält = inga stationer.
+                extra = new PlanningService.AreaDetails(description, club, region, hostText, stations ?? "");
             }
             var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId, extra);
             return r.Error == null ? Ok(new { success = true, areaId = r.AreaId }) : No(r.Error);

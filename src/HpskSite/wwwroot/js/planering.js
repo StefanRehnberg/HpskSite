@@ -445,6 +445,7 @@
         }
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
         html.push(subPlanningsCardHtml());
+        html.push('<div id="plStationsWrap"></div>');
 
         // Kom igång — för en ny planering
         if (p.me.isParticipant && p.participants.length <= 1 && (!MEET || MEET.meetings.length === 0)) {
@@ -477,6 +478,7 @@
             <a href="#vy=deltagare" data-pl-go="deltagare">Visa alla</a></div>
             <div>${p.participants.slice(0, 8).map(x => esc(x.name) + (x.represents ? ` <span class="pl-help">(${esc(x.represents)})</span>` : '')).join(', ')}${p.participants.length > 8 ? ' …' : ''}</div></div>`);
         $('plBody').innerHTML = html.join('');
+        loadStationsCard();
     }
     document.addEventListener('click', e => {
         const b = e.target.closest('[data-pl-meet]'); if (!b) return;
@@ -1855,6 +1857,9 @@
                         <option value="text"${hostVal === 'text' ? ' selected' : ''}>Annan (skriv)</option></select>
                     <div class="pl-help small mt-1">Den klubb eller krets som står för området. Klubbarna och kretsarna som någon i planeringen företräder.</div>
                     <input id="arHostText" class="form-control mt-2${hostVal === 'text' ? '' : ' d-none'}" maxlength="200" value="${esc(a ? a.hostText || '' : '')}" placeholder="Till exempel: Förbundets kansli"></div>
+                <div class="mb-3"><label class="form-label" for="arStations">Stationer (fältskytte, valfritt)</label>
+                    <input id="arStations" class="form-control" maxlength="200" value="${esc(a ? a.stations || '' : '')}" placeholder="Till exempel 3-6, 9" inputmode="text">
+                    <div class="pl-help small mt-1">De stationer värden ansvarar för. En station kan bara höra till ett område.</div></div>
                 <div class="mb-1"><label class="form-label" for="arDesc">Beskrivning (valfri)</label>
                     <textarea id="arDesc" class="form-control" rows="3" maxlength="2000">${esc(a ? a.description || '' : '')}</textarea></div>`,
             onOpen: body => {
@@ -1871,7 +1876,8 @@
                 const r = await post('SaveArea', { areaId: a ? a.id : 0, name: body.querySelector('#arName').value,
                     responsibleId: v === '__name' ? '' : v, responsibleName: v === '__name' ? body.querySelector('#arRespName').value : '',
                     details: '1', description: body.querySelector('#arDesc').value,
-                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#arHostText').value : '' });
+                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#arHostText').value : '',
+                    stations: body.querySelector('#arStations').value.trim() });
                 if (!r.success) return r.message;
                 await Promise.all([reloadTasks(), reloadPeople()]); rerender(); return true;
             }
@@ -3379,7 +3385,7 @@
                     { label: 'Ta bort området…', danger: true, fn: () => deleteArea(a) },
                 ]) : '';
                 const sub = [a.responsible ? 'Ansvarig: ' + a.responsible : '', a.host ? 'Värd: ' + a.host : ''].filter(Boolean).join(' · ');
-                return `<tr data-area-row="${a.id}"><td class="ps-3"><b>${esc(a.name)}</b>
+                return `<tr data-area-row="${a.id}"><td class="ps-3"><b>${esc(a.name)}</b>${a.stations ? ` <span class="badge text-bg-light border" data-area-stations>Stationer ${esc(a.stations)}</span>` : ''}
                         ${sub ? `<div class="pl-help small d-md-none">${esc(sub)}</div>` : ''}
                         ${a.description ? `<div class="small mt-1" style="white-space:pre-wrap;">${esc(a.description)}</div>` : ''}</td>
                     <td class="d-none d-md-table-cell">${esc(a.responsible || '—')}</td><td class="d-none d-md-table-cell">${esc(a.host || '—')}</td>
@@ -3459,6 +3465,57 @@
             },
         });
     }
+
+    // ================================================================ Stationerna (P4, fråga 13)
+    // I fältskytte delas stationerna mellan klubbar och kretsar: ett område bär sina stationer och sin värd, och
+    // stationschefen är bemanningens roll Stationschef per station. Huvudplaneringen visar också delplaneringarnas.
+    const FALT_KEYS = ['Faltskytte', 'MagnumFalt'];
+    function stationsWanted() {
+        return areas().some(a => a.stations) || FALT_KEYS.includes(S.planning.disciplineKey) || (S.planning.subPlannings || []).length > 0;
+    }
+    async function loadStationsCard() {
+        const wrap = $('plStationsWrap');
+        if (!wrap || !stationsWanted()) return;
+        const r = await get('Stations');
+        if (!r.success || !$('plStationsWrap')) return;
+        const rows = r.stations || [];
+        if (!rows.length && !(r.competition && r.competition.falt)) { $('plStationsWrap').innerHTML = ''; return; }
+        const noChief = rows.filter(s => !s.chiefs.length).length, noHost = rows.filter(s => !s.area).length;
+        const warn = [noHost ? `${noHost === 1 ? 'En station har' : noHost + ' stationer har'} ingen förening som ansvarar` : '',
+            noChief ? `${noChief === 1 ? 'en station saknar' : noChief + ' stationer saknar'} stationschef` : ''].filter(Boolean).join(', och ');
+        const cfg = r.config;
+        let cfgHtml = '';
+        if (cfg) {
+            const lacking = cfg.chiefs.filter(c => !c.hasAccess);
+            cfgHtml = `<div class="px-3 pb-3" id="plStationsConfig"><div class="pl-help small mb-1">Fältkonfigurationen
+                <a href="${esc(cfg.url)}">${esc(cfg.name)}</a>: ${cfg.chiefs.length - lacking.length} av ${cfg.chiefs.length} stationschefer kan läsa och ändra den.</div>
+                ${lacking.length ? `<div class="small mb-2">Saknar tillgång: ${lacking.map(c => esc(c.name) + ' <span class="pl-help">(station ' + esc(c.stations) + ')</span>').join(', ')}</div>
+                    ${cfg.canEdit && S.me.canEdit ? '<button type="button" class="btn btn-outline-primary btn-sm" data-st-give="1"><i class="bi bi-person-check me-1"></i>Ge stationscheferna tillgång till fältkonfigurationen</button>'
+                        : '<div class="pl-help small">Den som äger fältkonfigurationen — eller arbetar med den — kan ge dem tillgång.</div>'}` : ''}</div>`;
+        }
+        $('plStationsWrap').innerHTML = `<div class="pl-card p-0" id="plStations"><div class="pl-cardh px-3 pt-3"><h2>Stationerna</h2>
+                ${S.me.canEdit && !TOKEN ? '<a href="#vy=installningar" data-pl-go="installningar">Fördela stationerna</a>' : ''}</div>
+            <p class="pl-help small px-3 mb-2">Vilken förening som ansvarar för vilka stationer (under Inställningar → Områden), och stationscheferna ur bemanningen.
+                ${r.competition && r.competition.falt ? `Tävlingen ${esc(r.competition.name)} har ${r.competition.stationCount} stationer.` : ''}</p>
+            ${warn ? `<div class="alert alert-warning mx-3 py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>${esc(warn.charAt(0).toUpperCase() + warn.slice(1))}.</div>` : ''}
+            <div class="table-responsive"><table class="table align-middle mb-0">
+            <thead><tr><th class="ps-3">Station</th><th>Ansvarar</th><th class="d-none d-md-table-cell">Stationschef</th><th class="d-none d-md-table-cell">Uppgifter</th></tr></thead>
+            <tbody>${rows.map(s => `<tr data-station="${s.number}"><td class="ps-3"><b>${s.number}</b></td>
+                <td>${s.area ? esc(s.host || s.area) + (s.host ? ` <span class="pl-help small">· ${esc(s.area)}</span>` : '') : '<span class="text-warning-emphasis">Ingen ännu</span>'}
+                    ${s.planning ? `<div class="pl-help small">Delplanering: ${esc(s.planning)}</div>` : ''}
+                    <div class="small d-md-none">${s.chiefs.length ? 'Stationschef: ' + esc(s.chiefs.join(', ')) : '<span class="pl-help">Ingen stationschef</span>'}</div></td>
+                <td class="d-none d-md-table-cell">${s.chiefs.length ? esc(s.chiefs.join(', ')) : '<span class="pl-help">—</span>'}</td>
+                <td class="d-none d-md-table-cell">${s.openTasks ? s.openTasks + ' öppna' : '<span class="pl-help">—</span>'}</td></tr>`).join('')}</tbody></table></div>
+            ${cfgHtml}</div>`;
+    }
+    document.addEventListener('click', async e => {
+        const b = e.target.closest('[data-st-give]'); if (!b) return;
+        e.preventDefault(); b.disabled = true;
+        const r = await post('GiveChiefsConfigAccess', {});
+        if (!r.success) { failMsg(r); b.disabled = false; return; }
+        showMsg(r.added.length ? esc(r.added.join(', ')) + (r.added.length === 1 ? ' kan nu' : ' kan nu') + ' läsa och ändra fältkonfigurationen.' : 'Alla stationschefer hade redan tillgång.');
+        await loadStationsCard();
+    });
 
     // Den sammankallande är alltid med (delegerat: dialogens kropp byts ut varje gång).
     document.addEventListener('change', e => {

@@ -58,20 +58,33 @@ namespace HpskSite.Services.Staffing
                 planningId, competitionId, RoleOwnerType.Planning, RoleOwnerType.Competition);
         }
 
+        /// <summary>P4: delplaneringarna utan egen koppling — de bemannar huvudplaneringens tävling.</summary>
+        private const string InheritingChildren =
+            "PlanningId IN (SELECT c.Id FROM Planning c WHERE c.ParentPlanningId = @0 AND NOT EXISTS (SELECT 1 FROM PlanningLink l WHERE l.PlanningId = c.Id))";
+
         public static void Attach(IUmbracoDatabase db, int planningId, int competitionId)
         {
             if (planningId <= 0 || competitionId <= 0) return;
             Adopt(db, planningId, competitionId);
             foreach (var t in AllTables)
+            {
                 db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE PlanningId = @0", planningId, competitionId);
+                db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE {InheritingChildren}", planningId, competitionId);
+            }
         }
 
         public static void Detach(IUmbracoDatabase db, int planningId, int competitionId)
         {
             if (planningId <= 0) return;
             if (competitionId > 0) Adopt(db, planningId, competitionId);
+            // P4: en delplanering som kopplas loss faller tillbaka på huvudplaneringens tävling (om den har en);
+            // huvudplaneringens delplaneringar utan egen koppling tappar tävlingen tillsammans med den.
+            const string parentComp = "(SELECT TOP 1 l.TargetId FROM Planning p JOIN PlanningLink l ON l.PlanningId = p.ParentPlanningId WHERE p.Id = @0)";
             foreach (var t in AllTables)
-                db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE PlanningId = @0", planningId);
+            {
+                db.Execute($"UPDATE {t} SET CompetitionId = {parentComp} WHERE PlanningId = @0", planningId);
+                db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE {InheritingChildren}", planningId);
+            }
         }
     }
 }

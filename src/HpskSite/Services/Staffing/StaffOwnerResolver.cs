@@ -42,7 +42,10 @@ namespace HpskSite.Services.Staffing
             StaffOwner? owner = null;
             if (p != null)
             {
-                var link = _planning.LinkFor(planningId);
+                // P4: en delplanering utan egen koppling bemannar huvudplaneringens tävling (en utdelad stationsplanering
+                // ska nå tävlingens Stationer-flik). Egen koppling vinner.
+                var link = _planning.LinkFor(planningId)
+                    ?? (p.ParentPlanningId > 0 ? _planning.LinkFor(p.ParentPlanningId.Value) : null);
                 owner = new StaffOwner(planningId, link?.TargetId > 0 ? link.TargetId : null);
             }
             _byPlanning[planningId] = owner;

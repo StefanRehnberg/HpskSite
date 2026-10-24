@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
                 responsible = a.ResponsibleParticipantId.HasValue ? names.GetValueOrDefault(a.ResponsibleParticipantId.Value, "Har lämnat planeringen") : a.ResponsibleName,
                 responsibleName = a.ResponsibleName,
                 hostClubId = a.HostClubId, hostRegionId = a.HostRegionId, hostText = a.HostText,
+                stations = a.Stations ?? "",
                 host = a.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, a.HostClubId) : a.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, a.HostRegionId) : a.HostText,
                 openTasks = tasks.Count(t => t.AreaId == a.Id && PlanningTaskStatus.IsOpen(t.Status)),
                 tasks = tasks.Count(t => t.AreaId == a.Id),

@@ -194,11 +194,26 @@ namespace HpskSite.Services.Planning
                 return map[pid.Value] = twin != null ? map[twin.Id] : CopyRow(src, false);
             }
 
+            // P4: ett område med stationer följer med som område i delplaneringen — stationerna, värden och beskrivningen
+            // behövs i stationsöversikten. Utan stationer är delplaneringen själv området.
+            int? childArea = null;
+            if (!string.IsNullOrWhiteSpace(area.Stations))
+            {
+                var ca = new PlanningAreaRow
+                {
+                    PlanningId = childId, Name = area.Name, Description = area.Description, HostClubId = area.HostClubId,
+                    HostRegionId = area.HostRegionId, HostText = area.HostText, Stations = area.Stations, ResponsibleName = area.ResponsibleName, ResponsibleParticipantId = R(area.ResponsibleParticipantId),
+                    SortOrder = 1, CreatedAt = now, CreatedBy = ownerPid,
+                };
+                db.Insert(ca);
+                childArea = ca.Id;
+            }
+
             foreach (var t in tasks)
             {
-                db.Execute(@"UPDATE PlanningTask SET PlanningId = @1, AreaId = NULL, AssigneeParticipantId = @2, CreatedBy = @3, DoneBy = @4,
+                db.Execute(@"UPDATE PlanningTask SET PlanningId = @1, AreaId = @7, AssigneeParticipantId = @2, CreatedBy = @3, DoneBy = @4,
                         LatestReportBy = @5, SentToForbundetBy = @6, FromMeetingId = NULL, DoneAtMeetingId = NULL WHERE Id = @0",
-                    t.Id, childId, R(t.AssigneeParticipantId), R(t.CreatedBy) ?? ownerPid, R(t.DoneBy), R(t.LatestReportBy), R(t.SentToForbundetBy));
+                    t.Id, childId, R(t.AssigneeParticipantId), R(t.CreatedBy) ?? ownerPid, R(t.DoneBy), R(t.LatestReportBy), R(t.SentToForbundetBy), childArea);
             }
             foreach (var e in events)
                 db.Execute("UPDATE PlanningTaskEvent SET PlanningId = @1, ParticipantId = @2, MeetingId = NULL WHERE Id = @0", e.Id, childId, R(e.ParticipantId));
@@ -206,9 +221,9 @@ namespace HpskSite.Services.Planning
             {
                 // En hänvisning till något som stannar (ett möte, ett förslag) släpps.
                 var keepRef = m.RefKind == "task" && m.RefId.HasValue && taskIds.Contains(m.RefId.Value);
-                db.Execute(@"UPDATE PlanningMessage SET PlanningId = @1, AreaId = NULL, ParticipantId = @2, SubjectParticipantId = @3,
+                db.Execute(@"UPDATE PlanningMessage SET PlanningId = @1, AreaId = @6, ParticipantId = @2, SubjectParticipantId = @3,
                         RefKind = @4, RefId = @5 WHERE Id = @0",
-                    m.Id, childId, R(m.ParticipantId), R(m.SubjectParticipantId), keepRef ? m.RefKind : null, keepRef ? m.RefId : null);
+                    m.Id, childId, R(m.ParticipantId), R(m.SubjectParticipantId), keepRef ? m.RefKind : null, keepRef ? m.RefId : null, childArea);
             }
             foreach (var mn in mentions)
             {

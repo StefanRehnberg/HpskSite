@@ -291,7 +291,8 @@ namespace HpskSite.Services.Planning
         public sealed record AreaResult(int AreaId, string? Error);
 
         /// <summary>Omgång 2 steg 4: det delarna hade. Värden är EN sak: en klubb, en krets eller fri text.</summary>
-        public sealed record AreaDetails(string? Description, int? HostClubId, int? HostRegionId, string? HostText);
+        /// <param name="Stations">P4: stationerna området ansvarar för ("3-6, 9"); null = rör inte, tom text = inga.</param>
+        public sealed record AreaDetails(string? Description, int? HostClubId, int? HostRegionId, string? HostText, string? Stations = null);
 
         /// <summary>Nytt område (<paramref name="areaId"/> = 0) eller ändrat. <paramref name="details"/> null = rör inte beskrivning och värd.</summary>
         public AreaResult SaveArea(int planningId, int areaId, string name, int? responsiblePid, string? responsibleName, int byParticipantId,
@@ -307,6 +308,16 @@ namespace HpskSite.Services.Planning
             var others = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WITH (UPDLOCK) WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId);
             if (others.Any(a => a.Id != areaId && string.Equals(a.Name, n, StringComparison.OrdinalIgnoreCase)))
                 return new AreaResult(areaId, $"Det finns redan ett område som heter \"{n}\".");
+            // P4: stationerna — läsbara, och inte redan ett annat områdes (i planeringen eller dess delplaneringar).
+            string? stations = null;
+            if (details?.Stations != null)
+            {
+                var (list, perr) = PlanningStations.Parse(details.Stations);
+                if (perr != null) return new AreaResult(areaId, perr);
+                var conflict = StationConflict(db, planningId, areaId, list);
+                if (conflict != null) return new AreaResult(areaId, conflict);
+                stations = list.Count == 0 ? "" : PlanningStations.Format(list);
+            }
             PlanningAreaRow row;
             if (areaId > 0)
             {
@@ -315,7 +326,7 @@ namespace HpskSite.Services.Planning
                 row.Name = n;
                 row.ResponsibleParticipantId = responsiblePid > 0 ? responsiblePid : null;
                 row.ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200);
-                ApplyAreaDetails(row, details);
+                ApplyAreaDetails(row, details, stations);
                 db.Update(row);
             }
             else
@@ -326,7 +337,7 @@ namespace HpskSite.Services.Planning
                     ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200),
                     SortOrder = (others.Count == 0 ? 0 : others.Max(a => a.SortOrder)) + 1, CreatedAt = now, CreatedBy = byParticipantId,
                 };
-                ApplyAreaDetails(row, details);
+                ApplyAreaDetails(row, details, stations);
                 db.Insert(row);
             }
             Bump(db, planningId);
@@ -347,9 +358,10 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d)
+        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d, string? stations = null)
         {
             if (d == null) return;
+            if (stations != null) row.Stations = stations.Length == 0 ? null : stations;
             row.Description = Clean(d.Description, 2000);
             row.HostClubId = d.HostClubId > 0 ? d.HostClubId : null;
             row.HostRegionId = row.HostClubId.HasValue ? null : (d.HostRegionId > 0 ? d.HostRegionId : null);
