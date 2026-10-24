@@ -51,7 +51,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Tasks(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             var now = DateTime.Now;
             var comp = LinkedCompetition(id);
@@ -85,7 +85,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> TaskHistory(int id, int taskId, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             if (_planning.GetTask(id, taskId) == null) return No("Uppgiften finns inte.");
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);

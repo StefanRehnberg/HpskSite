@@ -23,7 +23,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Documents(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
             var docs = _planning.Documents(id);
@@ -163,7 +163,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> DownloadDocument(int id, int documentId, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return NotFound();
             var d = _planning.Document(id, documentId);
             if (d == null || !d.IsFile) return NotFound();

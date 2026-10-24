@@ -167,6 +167,11 @@ namespace HpskSite.Models.Planning
         public bool SignupRoleChoice { get; set; } = true;
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
+        /// <summary>
+        /// Omgång 2 steg 5: huvudplaneringen, när planeringen är en delplanering (ett område som delats ut). En nivå —
+        /// en delplanering delas inte i sin tur. Huvudplaneringens sammankallande läser delplaneringen utan att vara med.
+        /// </summary>
+        public int? ParentPlanningId { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CreatedBy { get; set; }
         public DateTime UpdatedAt { get; set; }

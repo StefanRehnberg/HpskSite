@@ -32,8 +32,43 @@ namespace HpskSite.Tests.Services
         {
             // Stefan 2026-10-23: planeringsgruppen är sin egen enhet. Ingen förening, styrelse eller
             // roll ger läsrätt — anroparens typ har inte ens ett fält för det.
+            // Enda undantaget (Stefan 2026-10-24, omgång 2 steg 5): huvudplaneringens sammankallande LÄSER en delplanering.
+            // Ett nytt fält här är en ny väg in — lägg aldrig till ett utan ett beslut.
             typeof(PlanningCaller).GetConstructors().Single().GetParameters().Select(x => x.Name)
-                .Should().BeEquivalentTo(new[] { "Participant", "ViaLink" });
+                .Should().BeEquivalentTo(new[] { "Participant", "ViaLink", "ParentReader" });
+        }
+
+        [Fact]
+        public void The_parent_convener_reads_a_sub_planning_but_does_nothing_else()
+        {
+            var c = new PlanningCaller(null, false, ParentReader: true);
+            PlanningAccess.CanReadContent(c).Should().BeTrue();
+            PlanningAccess.CanReadMessages(c).Should().BeTrue();
+            c.IsParticipant.Should().BeFalse();
+            PlanningAccess.CanWriteMessages(c).Should().BeFalse();
+            PlanningAccess.CanUseMeetings(c).Should().BeFalse();
+            PlanningAccess.CanEditPlanning(c).Should().BeFalse();
+            PlanningAccess.CanManagePlanning(c).Should().BeFalse();
+            PlanningAccess.CanCreateTasks(c).Should().BeFalse();
+            PlanningAccess.CanAddDocument(c).Should().BeFalse();
+            PlanningAccess.CanProposeDecision(c).Should().BeFalse();
+            PlanningAccess.CanRespondToDecision(c).Should().BeFalse();
+            PlanningAccess.CanEditTask(c, new PlanningTaskRow { CreatedBy = 0 }).Should().BeFalse();
+            PlanningAccess.CanReportOnTask(c, new PlanningTaskRow { AssigneeParticipantId = 0 }).Should().BeFalse();
+            // Läsaren läser aldrig via en mejllänk (länken bär en deltagare).
+            PlanningAccess.CanReadContent(new PlanningCaller(null, true, ParentReader: true)).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Only_the_convener_splits_and_never_in_a_sub_planning()
+        {
+            var top = new PlanningRow { Id = 1 };
+            var sub = new PlanningRow { Id = 2, ParentPlanningId = 1 };
+            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner)), top).Should().BeTrue();
+            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner)), sub).Should().BeFalse();
+            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Editor)), top).Should().BeFalse();
+            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner), link: true), top).Should().BeFalse();
+            PlanningAccess.CanSplitArea(new PlanningCaller(null, false, ParentReader: true), top).Should().BeFalse();
         }
 
         [Fact]

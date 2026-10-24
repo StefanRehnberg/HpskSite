@@ -63,7 +63,7 @@ namespace HpskSite.Services.Planning
                                                  ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate"),
                                                  ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy"),
                                                  ("PlanningPart", "HostText"), ("PlanningArea", "HostText"), ("PlanningMessage", "AreaId"),
-                                                 ("PlanningDocumentCategory", "AreaId"),
+                                                 ("PlanningDocumentCategory", "AreaId"), ("Planning", "ParentPlanningId"),
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);

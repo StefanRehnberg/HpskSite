@@ -289,7 +289,8 @@
     });
 
     function unreadCount() {
-        if (!MSG) return 0;
+        // Den som bara läser (huvudplaneringens sammankallande) har inget läst-läge här — inget är "nytt" för hen.
+        if (!MSG || !S || !S.me.isParticipant) return 0;
         return MSG.messages.filter(m => m.id > MSG.myLastRead && !m.mine && !m.deleted && m.kind === 'Message').length;
     }
     function votesOwed() {
@@ -371,6 +372,8 @@
         if (p.targetText) parts.push(esc(p.targetText));
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
+        // Omgång 2 steg 5: en delplanering säger vilken planering den är en del av.
+        if (p.parent) parts.push('Del av ' + (p.parent.url ? `<a href="${esc(p.parent.url)}">${esc(p.parent.name)}</a>` : esc(p.parent.name)));
         if (p.competition) parts.push(`Tävlingen <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>`
             + (TOKEN || !p.competition.manageUrl ? '' : ` · <a href="${esc(p.competition.manageUrl)}">Tävlingshanteringen</a>`));
         return parts.join(' · ');
@@ -396,6 +399,11 @@
         if (p.me.access === 'Follower') {
             html.push(`<div class="pl-card"><p class="mb-0">Du <b>följer</b> planeringen: du läser allt, även meddelandena, men skriver inte och svarar inte på mötestider.
                 Vill du vara med och bestämma — be den sammankallande ändra din nivå till <i>Deltar</i>.</p></div>`);
+        }
+        if (p.me.isParentReader) {
+            html.push(`<div class="pl-card" id="plParentReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen som sammankallande i
+                ${p.planning.parent && p.planning.parent.url ? `<a href="${esc(p.planning.parent.url)}">${esc(p.planning.parent.name)}</a>` : 'huvudplaneringen'}.
+                Du är inte med i den: du skriver inget här och får inga notiser härifrån. Vill du vara med — be den sammankallande bjuda in dig.</p></div>`);
         }
         // Bara en sammankallande: gruppen står utan ledning om hen blir sjuk eller slutar.
         if (p.me.canManage && p.participants.filter(x => x.access === 'Owner').length === 1 && p.participants.length > 1) {
@@ -436,6 +444,7 @@
                 <a class="btn btn-outline-primary" href="#vy=mote&id=${m.id}" data-pl-open-meeting="${m.id}">Visa</a></div>`);
         }
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
+        html.push(subPlanningsCardHtml());
 
         // Kom igång — för en ny planering
         if (p.me.isParticipant && p.participants.length <= 1 && (!MEET || MEET.meetings.length === 0)) {
@@ -3360,6 +3369,7 @@
                     S.me.canReadMessages && { label: 'Visa områdets meddelanden', fn: () => { msgArea = String(a.id); go('meddelanden'); } },
                     i > 0 && { label: 'Flytta upp', fn: () => moveArea(a, -1) },
                     i < list.length - 1 && { label: 'Flytta ner', fn: () => moveArea(a, 1) },
+                    S.me.canSplit && { label: 'Dela ut till en egen planering…', fn: () => openSplit(a) },
                     { divider: true },
                     { label: 'Ta bort området…', danger: true, fn: () => deleteArea(a) },
                 ]) : '';
@@ -3377,6 +3387,100 @@
         const a = e.target.closest('[data-area-tasks]'); if (!a) return;
         e.preventDefault(); tkArea = a.dataset.areaTasks; tkFilter = 'open'; go('uppgifter');
     });
+    // ================================================================ Dela ut ett område (omgång 2 steg 5)
+    // Området blir en egen planering — en delplanering — med egna deltagare, möten, meddelanden, uppgifter, dokument och
+    // bemanning. Uppgifterna och trådarna flyttar; deltagarna och dokumenten väljs. Huvudplaneringens sammankallande läser
+    // delplaneringen, och Översikt visar hur det går för den.
+    async function openSplit(a) {
+        const r = await get('SplitPreview', { areaId: a.id });
+        if (!r.success) { failMsg(r, 'Det gick inte att läsa området.'); return; }
+        const people = S.participants;
+        const conv = people.filter(p => !p.isGuest);
+        const sugP = new Set(r.suggestedParticipants), sugD = new Set(r.suggestedDocuments);
+        const docs = (DOCS && DOCS.documents) || [];
+        const discOpts = (S.planning.disciplines || []).map(d => `<option value="${esc(d.id)}"${d.id === r.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('');
+        const moves = [];
+        moves.push(r.tasks === 1 ? '1 uppgift' : `${r.tasks} uppgifter`);
+        moves.push(r.threads === 1 ? '1 tråd' : `${r.threads} trådar`);
+        const html = `
+            <p class="mb-2">Området <b>${esc(a.name)}</b> blir en egen planering. Den får egna deltagare, möten, meddelanden, uppgifter, dokument och bemanning.</p>
+            <div class="pl-card mb-3" style="background:var(--bs-tertiary-bg)"><ul class="mb-0 small">
+                <li><b>Flyttar dit:</b> områdets ${esc(moves.join(' och '))}, med historiken.</li>
+                <li><b>Deltagarna</b> du väljer blir med i den nya planeringen — och är kvar här.</li>
+                <li><b>Dokumenten</b> du väljer flyttar dit. De förvalda hör till området.</li>
+                <li><b>Stannar här:</b> mötena, förslagen och bemanningen.</li>
+                <li>Du som är sammankallande här kan läsa den nya planeringen, och Översikt visar hur det går för den.</li></ul></div>
+            <div class="row g-3">
+                <div class="col-md-7"><label class="form-label" for="spName">Namn</label>
+                    <input id="spName" class="form-control" maxlength="200" value="${esc(a.name + ' — ' + S.planning.name)}"></div>
+                <div class="col-md-5"><label class="form-label" for="spDisc">Gren</label>
+                    <select id="spDisc" class="form-select"><option value="">Ingen gren</option>${discOpts}</select></div>
+                <div class="col-12"><label class="form-label" for="spConv">Sammankallande i den nya planeringen</label>
+                    <select id="spConv" class="form-select">${conv.map(p => `<option value="${p.id}"${p.id === r.suggestedConvener ? ' selected' : ''}>${esc(p.name)}${p.represents ? ' (' + esc(p.represents) + ')' : ''}</option>`).join('')}</select>
+                    <div class="pl-help small mt-1">Den som leder delen. Hen är också med här, i huvudplaneringen.</div></div>
+            </div>
+            <h3 class="h6 mt-3 mb-1">Deltagare <span class="pl-help small fw-normal">(${people.length})</span></h3>
+            <div class="pl-help small mb-1">Förvalda: den som ansvarar för området och de som har dess uppgifter.</div>
+            <div id="spPeople" class="border rounded p-2" style="max-height:220px;overflow:auto">
+                ${people.map(p => `<div class="form-check"><input class="form-check-input" type="checkbox" id="spP${p.id}" value="${p.id}"${sugP.has(p.id) ? ' checked' : ''}>
+                    <label class="form-check-label" for="spP${p.id}">${esc(p.name)} <span class="pl-help small">· ${esc(p.accessLabel)}${p.represents ? ' · ' + esc(p.represents) : ''}</span></label></div>`).join('')}
+            </div>
+            <h3 class="h6 mt-3 mb-1">Dokument <span class="pl-help small fw-normal">(${docs.length})</span></h3>
+            ${docs.length ? `<div class="pl-help small mb-1">Förvalda: områdets kategorier och det som är bifogat till områdets uppgifter och trådar.</div>
+            <div id="spDocs" class="border rounded p-2" style="max-height:220px;overflow:auto">
+                ${docs.map(d => `<div class="form-check"><input class="form-check-input" type="checkbox" id="spD${d.id}" value="${d.id}"${sugD.has(d.id) ? ' checked' : ''}>
+                    <label class="form-check-label" for="spD${d.id}">${esc(d.title)}${d.categoryId ? ` <span class="pl-help small">· ${esc(catName(d.categoryId))}</span>` : ''}</label></div>`).join('')}
+            </div>` : '<p class="pl-help small mb-0" id="spDocs">Planeringen har inga dokument.</p>'}`;
+        formModal({
+            title: 'Dela ut ' + a.name + ' till en egen planering', okLabel: 'Skapa planeringen', html,
+            onOk: async body => {
+                const name = body.querySelector('#spName').value.trim();
+                if (!name) return 'Ge den nya planeringen ett namn.';
+                const convId = body.querySelector('#spConv').value;
+                if (!convId) return 'Välj vem som ska vara sammankallande.';
+                const ids = [...body.querySelectorAll('#spPeople input:checked')].map(i => i.value);
+                if (!ids.includes(convId)) ids.push(convId);
+                const docIds = [...body.querySelectorAll('#spDocs input:checked')].map(i => i.value);
+                const res = await post('SplitArea', { areaId: a.id, name, discipline: body.querySelector('#spDisc').value,
+                    convenerParticipantId: convId, participants: ids.join(','), documents: docIds.join(',') });
+                if (!res.success) return res.message || 'Det gick inte att dela ut området.';
+                if (String(tkArea) === String(a.id)) tkArea = '';
+                if (String(msgArea) === String(a.id)) msgArea = '';
+                await loadAll(); render(view);
+                const det = res.detached ? ` ${res.detached === 1 ? 'En bifogning' : res.detached + ' bifogningar'} mellan något som flyttade och något som stannade släpptes.` : '';
+                showMsg(`<b>${esc(res.name)}</b> är skapad: ${res.tasks} uppgifter, ${res.messages} meddelanden och ${res.documents} dokument flyttade dit, och ${res.participants} deltagare är med.${esc(det)}
+                    <a href="${esc(res.url)}">Öppna den nya planeringen</a>`);
+                return true;
+            },
+        });
+    }
+
+    // Den sammankallande är alltid med (delegerat: dialogens kropp byts ut varje gång).
+    document.addEventListener('change', e => {
+        if (e.target.id !== 'spConv') return;
+        const cb = document.getElementById('spP' + e.target.value); if (cb) cb.checked = true;
+    });
+
+    // Översikt: delplaneringarnas läge (huvudplaneringen) och huvudplaneringen (delplaneringen).
+    function subPlanningsCardHtml() {
+        const list = S.planning.subPlannings || [];
+        if (!list.length) return '';
+        return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2></div>
+            <p class="pl-help small px-3 mb-2">Områden som delats ut till egna planeringar. ${S.me.canManage ? 'Som sammankallande här kan du läsa dem.' : ''}</p>
+            <div class="table-responsive"><table class="table align-middle mb-0">
+            <thead><tr><th class="ps-3">Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th>Uppgifter</th><th class="d-none d-md-table-cell">Nästa</th></tr></thead>
+            <tbody>${list.map(s => {
+                const next = [s.nextMilestone ? `<i class="bi bi-flag-fill text-primary"></i> ${esc(s.nextMilestone)}${s.nextMilestoneDue ? ' · ' + esc(fmtDay(s.nextMilestoneDue)) : ''}` : '',
+                    s.nextMeeting ? `<i class="bi bi-calendar-event"></i> ${esc(s.nextMeeting)} · ${esc(fmtShort(s.nextMeetingAt))}` : ''].filter(Boolean).join('<br>');
+                return `<tr data-sub-row="${s.id}"><td class="ps-3">${s.url ? `<a href="${esc(s.url)}"><b>${esc(s.name)}</b></a>` : `<b>${esc(s.name)}</b>`}
+                        ${s.status === 'Archived' ? ' <span class="pl-state off">Arkiverad</span>' : ''}
+                        <div class="pl-help small d-md-none">${esc(s.conveners)}</div></td>
+                    <td class="d-none d-md-table-cell">${esc(s.conveners || '—')}</td>
+                    <td>${s.openTasks} öppna <span class="pl-help small">av ${s.tasks}</span>${s.overdue ? `<div class="small text-danger">${s.overdue} försenade</div>` : ''}</td>
+                    <td class="d-none d-md-table-cell small">${next || '<span class="pl-help">—</span>'}</td></tr>`;
+            }).join('')}</tbody></table></div></div>`;
+    }
+
     function openMessageArea(m) {
         formModal({
             title: 'Vilket område gäller meddelandet?', okLabel: 'Spara', wide: false,

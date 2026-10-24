@@ -123,7 +123,11 @@ namespace HpskSite.Controllers
         /// Planeringen och den som frågar. Null = planeringen finns inte ELLER får inte läsas — de två
         /// går medvetet inte att skilja åt utåt.
         /// </summary>
-        private async Task<Ctx?> ResolveAsync(int planningId, string? t)
+        /// <param name="allowParentReader">
+        /// Omgång 2 steg 5: släpp in huvudplaneringens sammankallande som LÄSARE av en delplanering. ⚠️ Bara de läsande
+        /// anropen sätter den — ett skrivande anrop som fick en läsare skulle annars bara ha sina Can-regler kvar som skydd.
+        /// </param>
+        private async Task<Ctx?> ResolveAsync(int planningId, string? t, bool allowParentReader = false)
         {
             var p = _planning.Get(planningId);
             if (p == null) return null;
@@ -145,6 +149,8 @@ namespace HpskSite.Controllers
             var participant = _planning.ParticipantForMember(planningId, me);
             participant = await ApplyCompetitionAccessAsync(planningId, me, participant);
             var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, false);
+            if (!c.IsParticipant && allowParentReader && _planning.IsParentConvener(p, me))
+                c = new PlanningCaller(null, false, ParentReader: true);
             if (!PlanningAccess.CanReadContent(c)) return null;
             return new Ctx(p, c, me);
         }
@@ -337,7 +343,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Get(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             var c = x.Caller;
             if (c.IsParticipant) _planning.TouchSeen(c.ParticipantId);
@@ -368,12 +374,15 @@ namespace HpskSite.Controllers
                     agendaUrl = _planning.LinkFor(x.Planning.Id) != null ? $"/tavlingsplanering/{x.Planning.Id}/dagsprogram" : "",
                     // P3 steg F: ansökan till kretsen ur planeringen (ett utkast i klubbens ansökningar).
                     application = await ApplicationJsonAsync(x.Planning.Id, c),
+                    // Omgång 2 steg 5: huvudplaneringen (för en delplanering) och delplaneringarnas läge (för huvudplaneringen).
+                    parent = ParentJson(x.Planning, x.MemberId),
+                    subPlannings = SubPlanningsJson(x.Planning, c, x.MemberId),
                 },
                 me = new
                 {
                     participantId = c.ParticipantId, isParticipant = c.IsParticipant,
                     viaLink = c.ViaLink, isGuest = c.Participant?.IsGuest ?? false, name = c.Participant?.DisplayName,
-                    access = c.Access, accessLabel = PlanningAccessLevel.Label(c.Access),
+                    access = c.Access, accessLabel = c.ParentReader && !c.IsParticipant ? ParentReaderLabel : PlanningAccessLevel.Label(c.Access),
                     notifyMode = c.Participant?.NotifyMode, notifyLabel = PlanningNotifyMode.Label(c.Participant?.NotifyMode),
                     canEdit = PlanningAccess.CanEditPlanning(c), canManage = PlanningAccess.CanManagePlanning(c),
                     canInvite = PlanningAccess.CanInvite(c), canReadMessages = PlanningAccess.CanReadMessages(c),
@@ -389,6 +398,9 @@ namespace HpskSite.Controllers
                     canAddDocument = PlanningAccess.CanAddDocument(c),
                     canLinkCompetition = PlanningAccess.CanLinkCompetition(c),
                     viaCompetition = c.Participant?.ViaCompetition ?? false,
+                    // Omgång 2 steg 5: läser delplaneringen som sammankallande i huvudplaneringen (inte med, inga notiser).
+                    isParentReader = c.ParentReader && !c.IsParticipant,
+                    canSplit = PlanningAccess.CanSplitArea(c, x.Planning),
                     openTasks = c.IsParticipant ? tasks.Count(tk => tk.AssigneeParticipantId == c.ParticipantId && PlanningTaskStatus.IsOpen(tk.Status)) : 0,
                 },
                 participants = people.Select(p => new
@@ -427,7 +439,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Version(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Json(new { ok = false });
             return Json(new { ok = true, version = _planning.Version(id) });
         }
@@ -895,7 +907,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Messages(int id, string? t, int take = 300)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             if (!PlanningAccess.CanReadMessages(x.Caller)) return No("Meddelandena är deltagarnas.");
             var rows = _planning.Messages(id, 0, Math.Clamp(take, 20, 1000));
@@ -983,7 +995,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Meetings(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             var meetings = _planning.Meetings(id);
             var ids = meetings.Select(m => m.Id).ToList();
@@ -992,7 +1004,7 @@ namespace HpskSite.Controllers
             var people = _planning.Participants(id);
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
             var me = x.Caller.ParticipantId;
-            var showNotes = x.Caller.IsParticipant;
+            var showNotes = PlanningAccess.CanReadContent(x.Caller);
             var topics = _planning.Topics(id, ids).ToLookup(tp => tp.PlanningMeetingId);
             var now = DateTime.Now;
             return Json(new

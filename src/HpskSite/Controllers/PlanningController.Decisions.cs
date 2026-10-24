@@ -91,7 +91,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> Decisions(int id, string? t)
         {
-            var x = await ResolveAsync(id, t);
+            var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
             var c = x.Caller;
             var people = _planning.Participants(id, includeRemoved: true);

@@ -10,7 +10,11 @@ namespace HpskSite.Services.Planning
     /// </summary>
     /// <param name="Participant">Den aktiva deltagarraden, eller null.</param>
     /// <param name="ViaLink">Kom in genom en signerad länk i ett mejl (utan inloggning).</param>
-    public sealed record PlanningCaller(PlanningMemberRow? Participant, bool ViaLink)
+    /// <param name="ParentReader">
+    /// Omgång 2 steg 5: sammankallande i huvudplaneringen som läser en delplanering utan att vara med i den. Läser allt
+    /// som en deltagare läser — men är ingen deltagare: skriver inget, får inga notiser, räknas inte någonstans.
+    /// </param>
+    public sealed record PlanningCaller(PlanningMemberRow? Participant, bool ViaLink, bool ParentReader = false)
     {
         public static readonly PlanningCaller Nobody = new(null, false);
         public bool IsParticipant => Participant is { IsActive: true };
@@ -37,8 +41,15 @@ namespace HpskSite.Services.Planning
         private static bool AtLeast(PlanningCaller c, string level) =>
             c.IsParticipant && PlanningAccessLevel.Rank(c.Access) >= PlanningAccessLevel.Rank(level);
 
-        public static bool CanReadContent(PlanningCaller c) => c.IsParticipant;
-        public static bool CanReadMessages(PlanningCaller c) => c.IsParticipant;
+        /// <summary>Läsa planeringen. Deltagarna — och huvudplaneringens sammankallande i en delplanering (bara läsa).</summary>
+        public static bool CanReadContent(PlanningCaller c) => c.IsParticipant || (c.ParentReader && !c.ViaLink);
+        public static bool CanReadMessages(PlanningCaller c) => CanReadContent(c);
+
+        /// <summary>
+        /// Dela ut ett område till en egen planering: den sammankallande, inloggad, och bara i en planering som inte själv
+        /// är en delplanering (en nivå).
+        /// </summary>
+        public static bool CanSplitArea(PlanningCaller c, PlanningRow p) => CanManagePlanning(c) && !(p.ParentPlanningId > 0);
 
         /// <summary>Skriva meddelanden. Deltar och uppåt — Följer läser bara.</summary>
         public static bool CanWriteMessages(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Participant);

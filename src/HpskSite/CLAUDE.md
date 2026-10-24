@@ -12707,6 +12707,25 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   `CompetitionTypes`) och ändras på raden `#plbDisc` i Bemanningens rutnät (`SetDiscipline`); Gren-kortet i
   Inställningar är borta. Ingen gren per område. Svit p3 180/180 (A/B: områdesprövningen i `Post` → 1 röd;
   `wireNewArea` som inte sparar → 2 röda).
+- **Omgång 2 steg 5 (2026-10-24): dela ut ett område till en egen planering.** `Planning.ParentPlanningId` (migrering
+  `add-parent-to-planning.sql`, körordning P3h) — EN nivå: `PlanningAccess.CanSplitArea` = sammankallande, inloggad, och
+  planeringen är inte själv en delplanering. `PlanningService.Split.cs`: `SplitPreview` (skriver inget; förslag till
+  deltagare, dokument och sammankallande) och `SplitArea` (EN transaktion): ny planering via `Create` med den valda som
+  Owner (gäst vägras), gren + `DoneAtMeetingsOnly`/`SignupRoleChoice`/målen följer; valda deltagare KOPIERAS (Owner →
+  Editor, bara den valda leder); områdets uppgifter (+ `PlanningTaskEvent`) och trådar (+ svaren + omnämnanden) flyttar med
+  deltagar-id:n omskrivna — den som nämns i det som flyttar men inte valdes följer med som BORTTAGEN rad (namnen står kvar;
+  en medlem = en rad, `UX_PlanningMember_Member`). Mötes-id:n på uppgifter nollas (mötena stannar). Valda dokument flyttar
+  (kategori med samma namn skapas); en bifogning mellan något som flyttar och något som stannar släpps (`RemovedAt`,
+  räknas i svaret). Området mjukraderas, kategoriernas `AreaId` nollas, systemrader i båda (`planning-split`,
+  `planning-split-child`). **Läsaren:** `PlanningCaller.ParentReader` (det enda undantaget i `PlanningRulesTests`) —
+  `ResolveAsync(..., allowParentReader: true)` bara i de läsande anropen (Get, Version, Messages, Meetings, Decisions,
+  Documents, DownloadDocument, Tasks, TaskHistory); `IsParentConvener` = aktiv Owner i huvudplaneringen. Läsaren är ingen
+  deltagare: skriver inget, får inga notiser, inget läst-läge (`unreadCount` 0), ingen Bemanning/Mina notiser/Inställningar.
+  `Get` bär `planning.parent` (url bara för huvudplaneringens deltagare), `planning.subPlannings` (läget: sammankallande,
+  öppna/alla/försenade uppgifter, nästa milstolpe och möte; url för huvudplaneringens sammankallande och delplaneringens
+  deltagare) och `me.isParentReader`, `me.canSplit`. Ytor: radmenyn i `#stAreas` (*Dela ut till en egen planering…*,
+  `openSplit`), kortet `#plSubPlannings` på Översikt, raden "Del av …" och kortet `#plParentReader`. Svit
+  `tavlingsplanering-dela-verify.mjs` 57/57 (A/B: läsaren utan Owner-villkoret + bifogningarna inte släppta → 3 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,
