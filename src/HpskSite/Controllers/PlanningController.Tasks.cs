@@ -18,7 +18,7 @@ namespace HpskSite.Controllers
     {
         private object TaskJson(PlanningTaskRow t, PlanningCaller c, IReadOnlyDictionary<int, string> names,
             IReadOnlyDictionary<int, PlanningMeetingRow> meetings, DateTime now, PlanningRow? planning = null,
-            IReadOnlyDictionary<int, int>? comments = null, int? stationConfigId = null) => new
+            IReadOnlyDictionary<int, int>? comments = null, IReadOnlyDictionary<int, string>? stationUrls = null) => new
         {
             id = t.Id, title = t.Title, description = t.Description,
             assigneeId = t.AssigneeParticipantId,
@@ -27,7 +27,7 @@ namespace HpskSite.Controllers
             due = D(t.DueDate), overdue = PlanningTaskRules.IsOverdue(t, now), dueDaysBefore = t.DueDaysBefore,
             areaId = t.AreaId, scopeType = t.ScopeType, scopeKey = t.ScopeKey, estimatedCost = t.EstimatedCost,
             sortOrder = t.SortOrder, source = t.ImportedFromWorkItemId.HasValue ? "Imported" : t.SourceKind,
-            stationUrl = t.ScopeType == "Station" && stationConfigId > 0 ? $"/faltkonfig/{stationConfigId}/redigera" : null,
+            stationUrl = t.ScopeType == "Station" && int.TryParse(t.ScopeKey, out var stNo) && stationUrls != null ? stationUrls.GetValueOrDefault(stNo) : null,
             comments = comments?.GetValueOrDefault(t.Id) ?? 0,
             canDecide = planning != null && !planning.DoneAtMeetingsOnly && PlanningAccess.CanDecideTask(c, false, planning, t),
             status = t.Status, statusLabel = PlanningTaskStatus.Label(t.Status),
@@ -48,6 +48,41 @@ namespace HpskSite.Controllers
             canReport = PlanningAccess.CanReportOnTask(c, t),
         };
 
+        /// <summary>
+        /// Banan i planeringen (2026-10-24): var station N byggs — i områdets delkonfiguration om stationen har en (med
+        /// delens eget nummer), annars i banans konfiguration, annars i tävlingens. <c>#station=N</c> rullar fram stationen.
+        /// </summary>
+        private async Task<Dictionary<int, string>> StationUrlsAsync(int planningId, int memberId, int? competitionConfigId)
+        {
+            var urls = new Dictionary<int, string>();
+            try
+            {
+                var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
+                var course = _planning.CourseConfigId(planningId) ?? competitionConfigId;
+                if (course > 0)
+                    for (var n = 1; n <= PlanningStations.Max; n++) urls[n] = $"/faltkonfig/{course}/redigera#station={n}";
+                foreach (var l in _planning.AreaConfigLinks(planningId))
+                {
+                    var cfg = await svc.GetByIdAsync(l.ConfigId);
+                    if (cfg == null) continue;
+                    var map = AreaConfigBlob.CourseStations(cfg.JsonBlob);
+                    for (var i = 0; i < map.Count; i++) urls[map[i]] = $"/faltkonfig/{cfg.Id}/redigera#station={i + 1}";
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: stationernas länkar kunde inte räknas.", planningId); }
+            return urls;
+        }
+
+        private async Task<int> StationCountAsync(int planningId)
+        {
+            try
+            {
+                var course = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+                return course.StationCount(planningId, (await course.CourseConfigAsync(planningId))?.JsonBlob);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: banans stationer kunde inte räknas.", planningId); return 0; }
+        }
+
         [HttpGet]
         public async Task<IActionResult> Tasks(int id, string? t)
         {
@@ -61,7 +96,7 @@ namespace HpskSite.Controllers
             var meetings = _planning.Meetings(id).ToDictionary(m => m.Id);
             var tasks = _planning.Tasks(id);
             var comments = _planning.CommentCounts(id);
-            var cfg = StationConfigId(comp);
+            var cfg = await StationUrlsAsync(id, x.MemberId, StationConfigId(comp));
             var anchor = AnchorFor(x.Planning, comp);
             return Json(new
             {
@@ -76,6 +111,7 @@ namespace HpskSite.Controllers
                 doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
                 anchor = D(anchor), anchorIsCompetition = comp?.CompetitionDate is { Year: > 1900 },
                 scopeTypes = PlanningTaskRules.ScopeTypes,
+                stationCount = await StationCountAsync(id),
                 statuses = PlanningTaskStatus.All.Select(s => new { value = s, label = PlanningTaskStatus.Label(s), assignee = PlanningTaskStatus.AssigneeSettable.Contains(s) }),
                 areas = AreasJson(id, names, tasks),
                 tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg)),

@@ -12816,6 +12816,28 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       och `AreaId` (en per område, `LinkAreaConfig`); ⚠️ varje fråga på tävlingskopplingen filtrerar `TargetKind = competition`.
       En borttagen konfiguration tar bort sin länk. Områdets stationschefer blir medarbetare; `GiveChiefsConfigAccess` tar
       `areaId`. Stationskortet på Översikt listar områdena.
+  - **⚠️⚠️ Banan ägs av planeringen (Stefan 2026-10-24: "planering ska kunna äga banans konfiguration innan tävlingen
+    finns … alla konfigurationer läggs sedan ihop till tävlingen")** — plan `notes/tavlingsplanering-banan-2026-10-24.md`.
+    - **Banan** = `PlanningLink` `TargetKind = faltconfig`, `AreaId NULL`, på FAMILJENS ROT (`PlanningService.CourseConfigId`,
+      `LinkCourseConfig`). Ingen migrering. `PlanningCourseService.CreateCourseAsync` är idempotent (finns banan → samma id),
+      kopierar tävlingens konfiguration om en tävling är kopplad, namn "{rot} – banan". **Delarna** = områdenas
+      delkonfigurationer (`_courseStations`); `CreateAreaConfig` kopierar nu ur BANAN först.
+    - **`CourseAssembly`** (rena funktioner, test `CourseAssemblyTests`): `Assemble` lägger delarna i banan per vapenklass
+      och numrerar om; en station som ingen del har behålls ur banan. Meta: `_stationCount`, `_assembledFrom`
+      [{configId, name, checksum, stations}], `_assembledAt`. **`Checksum`** (innehållet utan `_attachedConfigId`/
+      `_assembledAt`) avgör ny/ändrad/aktuell och att en oförändrad ihopsättning inte sparas. Ihopsättning bara med
+      knappen (`POST AssembleCourse`, Stefans val) — konfiguratorn visar "ändras här skrivs över".
+    - **Godkännande: varje del, sedan helheten** (Stefans val): `RequestApprovalAsync` vägras via
+      `CourseAssembly.ApprovalBlocker` tills varje del är Godkänd och oförändrad sedan ihopsättningen.
+    - **Behörighet:** `FaltskytteConfigurationService.PlanningAccessAsync` — deltagare i familjen läser banan och delarna,
+      Kan ändra i länkens planering eller roten ändrar. ⚠️ SQL:en BÖRJAR med SELECT (härledd tabell) — en CTE blev
+      `SELECT * FROM PlanningAccessRow` hos NPoco och tystades i catch.
+    - **Till tävlingen:** `AttachToCompetitionAsync` kopierar banan (inte en länk) till tävlingens `_attachedConfigId` +
+      `NumberOfSeriesOrStations`/`ScoringMode` — vid `LinkCompetition` och ansökningslänken bara om tävlingen saknar
+      konfiguration (`onlyIfEmpty`), annars med knappen (kortet visar `stale` när banan ändrats efter).
+    - **Uppgifterna:** `SeedStationTasks` kräver ingen tävling, lägger varje stationsuppgift i området som äger stationen
+      och milstolpen "Banläggaren godkänner banan"; uppgiften länkar till stationen i delen (`#station=N`, konfiguratorn
+      fokuserar den) annars i banan. Svit `tavlingsplanering-banan-verify.mjs`.
   - **⚠️⚠️ Bemanning per station och pass — TIDEN ÄR SANNINGEN (3.2):**
     - **`StaffTimeCoverage.Peak`** (rena funktioner) är ENDA räkningen av "hur många är på plats": flest SAMTIDIGT, inte
       antalet uppdrag (tio markörer i två skift om fem = fem). Utan tid = hela dagen; ett uppdrag i ett pass har passets

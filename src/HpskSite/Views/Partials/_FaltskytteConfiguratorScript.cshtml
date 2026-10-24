@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 // Station Configurator State
 let faltCfgData = {}; // { "C": { stations: [...] }, "A": { ... } }
 let faltCfgWeaponClasses = ["C"]; // Active weapon classes
@@ -28,7 +28,22 @@ const faltCfgScoringMode = () => {
 // of polluting the iteration sites.
 // _courseStations (omgång 3): en delkonfiguration för ett områdes stationer i en planering. Konfigurationens station N
 // är banans station _courseStations[N-1]; numret här ändras aldrig (det är stationens identitet), bara rubrikerna visar banans.
-const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode', '_courseStations']);
+// Banan i planeringen (2026-10-24): _stationCount (en tom banas antal stationer), _assembledFrom och _assembledAt (delarna
+// banan sattes ihop av, se CourseAssembly).
+const FALT_CFG_META_KEYS = new Set(['_linkedGroups', '_mode', '_morker', '_attachedConfigId', '_scoringMode', '_courseStations',
+    '_stationCount', '_assembledFrom', '_assembledAt']);
+// Delen som banans station kommer ifrån, eller null.
+function faltCfgPartOf(num) {
+    var parts = faltCfgData && faltCfgData._assembledFrom;
+    if (!Array.isArray(parts)) return null;
+    for (var i = 0; i < parts.length; i++)
+        if (Array.isArray(parts[i].stations) && parts[i].stations.indexOf(num) >= 0) return parts[i];
+    return null;
+}
+function faltCfgPartBadge(num) {
+    var p = faltCfgPartOf(num);
+    return p ? ' <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle text-wrap text-start" title="Byggs i delen ' + faltCfgEscapeHtml(p.name) + '">från ' + faltCfgEscapeHtml(p.name) + '</span>' : '';
+}
 function faltCfgCourseNo(num) {
     var cs = faltCfgData && faltCfgData._courseStations;
     return Array.isArray(cs) && cs[num - 1] > 0 ? cs[num - 1] : null;
@@ -704,12 +719,20 @@ function faltCfgOpen(weaponClasses, existingConfig) {
         document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
     }
 
-    // Detect station count from existing config (handle both camelCase and PascalCase)
+    // En tom bana i en planering: antalet stationer planeringen angav.
+    if (faltCfgData._stationCount > 0) {
+        faltCfgStationCount = faltCfgData._stationCount;
+        document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
+    }
+    // Detect station count from existing config (handle both camelCase and PascalCase).
+    // ⚠️ Det HÖGSTA stationsnumret, inte antalet: en ihopsatt bana kan ha en lucka (station 3 inte byggd än), och med
+    // antalet hade station 5 fallit bort i ensureStations.
     for (const wc of Object.keys(faltCfgData)) {
         if (faltCfgIsMetaKey(wc)) continue;
         var st = faltCfgData[wc]?.stations || faltCfgData[wc]?.Stations;
         if (st?.length > 0) {
-            faltCfgStationCount = st.length;
+            var top = Math.max(st.length, ...st.map(x => parseInt(x.station ?? x.Station, 10) || 0));
+            faltCfgStationCount = Math.max(top, faltCfgData._stationCount > 0 ? faltCfgData._stationCount : 0);
             document.getElementById('faltCfg_stationCount').value = faltCfgStationCount;
             break;
         }
@@ -769,6 +792,10 @@ function ensureStations(wc) {
     existing.forEach(function(s) {
         var num = s.station || s.Station;
         if (num >= 1 && num <= faltCfgStationCount && !seen.has(num)) {
+            // Banan i planeringen (2026-10-24): en station kan komma från en annan konfiguration (en ihopsatt bana) och
+            // sakna fält — fyll i standardvärdena för det som saknas i stället för att ritningen faller.
+            var def = createDefaultStation(num);
+            Object.keys(def).forEach(function (k) { if (s[k] === undefined || s[k] === null) s[k] = def[k]; });
             stations.push(s);
             seen.add(num);
         }
@@ -1258,7 +1285,7 @@ function renderActiveTab() {
             <div class="card-header py-2">
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" data-station-title="${st.station}">
-                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}${faltCfgCourseNo(st.station) ? ` <span class="badge text-bg-light border">banans station ${faltCfgCourseNo(st.station)}</span>` : ''}
+                        <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}${faltCfgCourseNo(st.station) ? ` <span class="badge text-bg-light border">banans station ${faltCfgCourseNo(st.station)}</span>` : ''}${faltCfgPartBadge(st.station)}
                         <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
                     </span>
@@ -2038,7 +2065,7 @@ function faltCfgRenderSimpleMode() {
               '<div class="card-header py-2">' +
                 '<div class="d-flex flex-wrap justify-content-between align-items-center gap-2">' +
                   '<span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" data-station-title="' + st.station + '"><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
-                  (faltCfgCourseNo(st.station) ? ' <span class="badge text-bg-light border">banans station ' + faltCfgCourseNo(st.station) + '</span>' : '') +
+                  (faltCfgCourseNo(st.station) ? ' <span class="badge text-bg-light border">banans station ' + faltCfgCourseNo(st.station) + '</span>' : '') + faltCfgPartBadge(st.station) +
                     '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
                     '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
                   '</span>' +
@@ -2640,4 +2667,62 @@ function faltCfgPrintWhenReady(w) {
         else { img.onload = done; img.onerror = done; }
     });
 }
+
+// ─── Banan i planeringen (2026-10-24) ───────────────────────────────
+// #station=N (länken från planeringens uppgift "Bygg station N") fäller ut och rullar fram stationen, en gång.
+var faltCfgHashStationDone = false;
+function faltCfgFocusStationFromHash() {
+    if (faltCfgHashStationDone) return;
+    var m = /(?:^|[#&])station=(\d+)/.exec(location.hash || '');
+    if (!m) { faltCfgHashStationDone = true; return; }
+    var card = document.querySelector('#faltCfgTabContent .card[data-station="' + m[1] + '"]');
+    if (!card) return;
+    faltCfgHashStationDone = true;
+    var col = card.querySelector('.collapse');
+    if (col && window.bootstrap) bootstrap.Collapse.getOrCreateInstance(col, { toggle: false }).show();
+    card.classList.add('border-primary', 'border-2');
+    card.setAttribute('data-station-focus', '1');
+    setTimeout(function () { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 50);
+}
+// En ihopsatt bana säger vilka stationer som byggs i vilken del — de ändras där och skrivs över här vid nästa ihopläggning.
+function faltCfgAssembledNote() {
+    var host = document.getElementById('faltCfgTabContent');
+    if (!host) return;
+    var note = document.getElementById('faltCfgAssembledNote');
+    var parts = faltCfgData && faltCfgData._assembledFrom;
+    if (!Array.isArray(parts) || parts.length === 0) { if (note) note.remove(); return; }
+    if (!note) {
+        note = document.createElement('div');
+        note.id = 'faltCfgAssembledNote';
+        note.className = 'alert alert-info py-2 small';
+        host.parentNode.insertBefore(note, host);
+    }
+    note.innerHTML = '<div class="fw-semibold mb-1"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Banan är ihopsatt av föreningarnas delar'
+        + (faltCfgData._assembledAt ? ' (' + faltCfgEscapeHtml(faltCfgData._assembledAt) + ')' : '') + '</div>'
+        + parts.map(function (p) {
+            return '<div>· <a href="/faltkonfig/' + parseInt(p.configId, 10) + '/redigera">' + faltCfgEscapeHtml(p.name) + '</a> — station '
+                + (p.stations || []).map(function (n) { return parseInt(n, 10); }).join(', ') + '</div>';
+        }).join('')
+        + '<div class="mt-1">Ändra de stationerna i delen. Ändras de här skrivs de över nästa gång banan sätts ihop i planeringen.</div>';
+}
+(function () {
+    var orig = renderActiveTab;
+    renderActiveTab = function () {
+        var r = orig.apply(this, arguments);
+        try { faltCfgAssembledNote(); faltCfgFocusStationFromHash(); } catch (e) { console.error(e); }
+        return r;
+    };
+    // Editorn kan ha ritat stationerna innan kroken ovan fanns (konfigurationen hämtas asynkront) — titta en stund efteråt.
+    var tries = 0;
+    var timer = setInterval(function () {
+        tries++;
+        try {
+            if (document.querySelector('#faltCfgTabContent .card[data-station]')) {
+                faltCfgAssembledNote(); faltCfgFocusStationFromHash();
+                if (faltCfgHashStationDone) { clearInterval(timer); return; }
+            }
+        } catch (e) { console.error(e); clearInterval(timer); return; }
+        if (tries > 60) clearInterval(timer);
+    }, 300);
+})();
 </script>

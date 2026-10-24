@@ -134,6 +134,57 @@ namespace HpskSite.Services.Planning
                 .Select(l => new AreaConfigLink(l.PlanningId, l.AreaId!.Value, l.TargetId)).ToList();
         }
 
+        // =====================================================================================
+        //  Banan i planeringen (Stefan 2026-10-24): banans konfiguration, ägd av huvudplaneringen
+        // =====================================================================================
+
+        /// <summary>Familjens huvudplanering (stationsnumren gäller hela familjen), eller 0.</summary>
+        public int FamilyRootId(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var p = s.Database.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            return p == null ? 0 : p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
+        }
+
+        /// <summary>Banans konfiguration: länken utan område på familjens huvudplanering, eller null.</summary>
+        public int? CourseConfigId(int planningId)
+        {
+            var root = FamilyRootId(planningId);
+            if (root == 0) return null;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.FirstOrDefault<int?>($@"SELECT TOP 1 TargetId FROM PlanningLink
+                WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId IS NULL ORDER BY Id", root);
+        }
+
+        /// <summary>Kopplar banans konfiguration till familjens huvudplanering. Vägrar en andra.</summary>
+        public string? LinkCourseConfig(int planningId, int configId, int byMemberId)
+        {
+            var root = FamilyRootId(planningId);
+            if (root == 0) return "Planeringen finns inte.";
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            if (db.ExecuteScalar<int>($"SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId IS NULL", root) > 0)
+                return "Planeringen har redan en fältkonfiguration för banan.";
+            db.Insert(new PlanningLinkRow
+            {
+                PlanningId = root, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltconfig, TargetId = configId, AreaId = null,
+                LinkedAt = Now, LinkedBy = byMemberId,
+            });
+            Bump(db, root);
+            return null;
+        }
+
+        /// <summary>Högsta stationsnumret i familjens områden, eller 0.</summary>
+        public int MaxAreaStation(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var family = StationFamily(s.Database, planningId);
+            if (family.Count == 0) return 0;
+            var areas = s.Database.Fetch<string>($@"SELECT Stations FROM PlanningArea WHERE PlanningId IN ({string.Join(",", family.Select(f => f.Id))})
+                AND DeletedAt IS NULL AND Stations IS NOT NULL");
+            return areas.SelectMany(a => PlanningStations.Parse(a).Stations).DefaultIfEmpty(0).Max();
+        }
+
         /// <summary>Kopplar en fältkonfiguration till ett område. Vägrar ett andra för samma område.</summary>
         public string? LinkAreaConfig(int planningId, int areaId, int configId, int byMemberId)
         {

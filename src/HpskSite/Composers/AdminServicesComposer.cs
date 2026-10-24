@@ -141,6 +141,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Planning.PlanningNotifier>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningNotificationHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Planning.PlanningPurgeService>();
+            builder.Services.AddScoped<HpskSite.Services.Planning.PlanningCourseService>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningPurgeHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningSchemaGuardHostedService>();
 

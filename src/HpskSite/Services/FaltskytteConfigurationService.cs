@@ -114,6 +114,9 @@ namespace HpskSite.Services
             if (config.ProjectId.HasValue && await IsProjectMemberOrOwnerAsync(config.ProjectId.Value, viewerMemberId.Value))
                 return true;
 
+            // Banan i planeringen (2026-10-24): alla som är med i planeringsfamiljen läser banan och delarna.
+            if ((await PlanningAccessAsync(config.Id, viewerMemberId.Value)).Any()) return true;
+
             // Currently-requested approver gets view rights even if the config is
             // Private / sekretessbelagd — otherwise the email link is unusable.
             if (config.RequestedApproverMemberId == viewerMemberId.Value) return true;
@@ -144,7 +147,44 @@ namespace HpskSite.Services
             if (await _authService.IsCurrentUserAdminAsync()) return true;
             if (await IsCollaboratorAsync(config.Id, viewerMemberId.Value)) return true;
             // Project member/owner — access rolls up to edit too.
-            return config.ProjectId.HasValue && await IsProjectMemberOrOwnerAsync(config.ProjectId.Value, viewerMemberId.Value);
+            if (config.ProjectId.HasValue && await IsProjectMemberOrOwnerAsync(config.ProjectId.Value, viewerMemberId.Value)) return true;
+            // Banan i planeringen (2026-10-24): den som kan ändra planeringen som äger länken (eller dess huvudplanering).
+            return (await PlanningAccessAsync(config.Id, viewerMemberId.Value))
+                .Any(a => a.Near && (a.Access == "Owner" || a.Access == "Editor"));
+        }
+
+        private sealed class PlanningAccessRow
+        {
+            public string Access { get; set; } = "";
+            public bool Near { get; set; }
+        }
+
+        /// <summary>
+        /// Banan i planeringen: medlemmens deltagarrader i familjen till planeringen som konfigurationen är kopplad till
+        /// (<c>PlanningLink</c>, <c>faltconfig</c>). <c>Near</c> = raden gäller planeringen som äger länken eller dess
+        /// huvudplanering — de får ändra; övriga i familjen läser. Rå SQL, som projekten, för att undvika ett cirkelberoende.
+        /// </summary>
+        private async Task<List<(string Access, bool Near)>> PlanningAccessAsync(int configId, int memberId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                // ⚠️ Frågan MÅSTE börja med SELECT — NPoco gör annars om den till "SELECT * FROM PlanningAccessRow" (ingen CTE).
+                var rows = await db.FetchAsync<PlanningAccessRow>(@"
+                    SELECT pm.Access, CAST(CASE WHEN pm.PlanningId IN (L.PlanningId, L.RootId) THEN 1 ELSE 0 END AS BIT) AS Near
+                      FROM (SELECT l.PlanningId, COALESCE(p.ParentPlanningId, p.Id) AS RootId FROM PlanningLink l
+                              JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL
+                             WHERE l.TargetKind = N'faltconfig' AND l.TargetId = @0) L
+                      JOIN Planning f ON (f.Id = L.RootId OR f.ParentPlanningId = L.RootId) AND f.DeletedAt IS NULL
+                      JOIN PlanningMember pm ON pm.PlanningId = f.Id AND pm.MemberId = @1 AND pm.RemovedAt IS NULL", configId, memberId);
+                return rows.Select(r => (r.Access, r.Near)).ToList();
+            }
+            catch (Exception ex)
+            {
+                // Planeringens tabeller kan saknas (äldre databas) — då ger planeringen ingen rätt.
+                _logger.LogDebug(ex, "Fältkonfiguration {Id}: planeringens behörighet kunde inte läsas.", configId);
+                return new List<(string, bool)>();
+            }
         }
 
         /// <summary>
@@ -470,6 +510,22 @@ namespace HpskSite.Services
                 requestedApproverMemberId, CertificationTypes.Banlaggare);
             if (!pickedHasCert)
                 return (false, "Vald medlem saknar aktiv Banläggare-certifiering.");
+
+            // Banan i planeringen (Stefan 2026-10-24, "varje del, sedan helheten"): en sammansatt bana begärs godkänd
+            // först när varje del är godkänd och oförändrad sedan den sattes ihop.
+            var parts = HpskSite.Models.Planning.CourseAssembly.AssembledFrom(config.JsonBlob);
+            if (parts.Count > 0)
+            {
+                var now = new Dictionary<int, FaltskytteConfiguration>();
+                foreach (var pt in parts)
+                {
+                    var c = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", pt.ConfigId);
+                    if (c != null) now[c.Id] = c;
+                }
+                var blocker = HpskSite.Models.Planning.CourseAssembly.ApprovalBlocker(config.JsonBlob, id =>
+                    now.TryGetValue(id, out var c) ? (c.Name, c.JsonBlob, NormalizeStatus(c.ApprovalStatus) == StatusApproved) : null);
+                if (blocker != null) return (false, blocker);
+            }
 
             config.ApprovalStatus = StatusPendingApproval;
             config.RequestedApproverMemberId = requestedApproverMemberId;

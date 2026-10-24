@@ -133,7 +133,11 @@ namespace HpskSite.Controllers
             var err = _planning.LinkToCompetition(id, competitionId, x.MemberId);
             if (err != null) return No(err);
             AfterStaffingLinkChanged(id, competitionId, x.MemberId);
-            return Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter" });
+            // Banan i planeringen (2026-10-24): en fälttävling utan stationer får planeringens bana.
+            string? courseNote = null;
+            try { courseNote = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().AttachToCompetitionAsync(id, competitionId, onlyIfEmpty: true); }
+            catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: banan kunde inte anslutas till tävling {Comp}.", id, competitionId); courseNote = "Banan kunde inte anslutas till tävlingen."; }
+            return Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter", courseNote });
         }
 
         [HttpPost]
@@ -399,11 +403,12 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Stationerna läggs in av den som kan ändra planeringen.");
-            var comp = LinkedCompetition(id);
-            if (comp == null || comp.TypeId is not ("Faltskytte" or "MagnumFalt")) return No("Stationerna finns bara för en kopplad fälttävling.");
-            if (comp.NumberOfSeriesOrStations <= 0) return No("Tävlingen har inga stationer angivna.");
-            var added = _planning.SeedStationTasks(id, comp.NumberOfSeriesOrStations, x.Caller.ParticipantId);
-            return Ok(new { success = true, added });
+            // Banan i planeringen (2026-10-24): antalet ur tävlingen, banan eller områdena — ingen tävling behövs.
+            var course = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+            var count = course.StationCount(id, (await course.CourseConfigAsync(id))?.JsonBlob);
+            if (count <= 0) return No("Planeringen har inga stationer än. Skapa banans fältkonfiguration eller ange områdenas stationer först.");
+            var added = _planning.SeedStationTasks(id, count, x.Caller.ParticipantId);
+            return Ok(new { success = true, added, stationCount = count });
         }
 
         /// <summary>

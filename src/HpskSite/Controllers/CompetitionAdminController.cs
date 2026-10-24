@@ -1149,6 +1149,11 @@ namespace HpskSite.Controllers
                     && HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningApplicationLink)) is HpskSite.Services.Planning.PlanningApplicationLink pl
                     && pl.LinkCompetition(a.PlanningId.Value, competitionId, data?.Id ?? 0) is { } planErr)
                     return "Tävlingen är skapad och kopplad till ansökan, men inte till planeringen: " + planErr;
+                // Banan i planeringen (2026-10-24): planeringens bana ansluts till den nya fälttävlingen.
+                if (a.PlanningId > 0
+                    && HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningCourseService)) is HpskSite.Services.Planning.PlanningCourseService course
+                    && course.AttachToCompetitionAsync(a.PlanningId.Value, competitionId, onlyIfEmpty: true).GetAwaiter().GetResult() is { } courseErr)
+                    return "Tävlingen är skapad och kopplad till planeringen, men banan kunde inte anslutas: " + courseErr;
                 return null;
             }
             catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)

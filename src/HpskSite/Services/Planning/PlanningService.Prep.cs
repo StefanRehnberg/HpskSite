@@ -541,23 +541,62 @@ namespace HpskSite.Services.Planning
             return added;
         }
 
-        /// <summary>"Bygg station N" för varje station som saknar en uppgift kopplad till sig (fältskytte).</summary>
+        public const string CourseApprovalTaskTitle = "Banläggaren godkänner banan";
+
+        /// <summary>
+        /// "Bygg station N" för varje station som saknar en uppgift (fältskytte). Banan i planeringen (2026-10-24): uppgiften
+        /// hamnar i det område som har stationen; en station utan område hamnar i <i>Stationsbygge</i>. En station som ett
+        /// område i en annan planering i familjen har läggs in där (av den planeringen), inte här. Huvudplaneringen får
+        /// dessutom milstolpen <see cref="CourseApprovalTaskTitle"/>. Inga dubbletter i familjen.
+        /// </summary>
         public int SeedStationTasks(int planningId, int stationCount, int byParticipantId)
         {
             if (stationCount <= 0) return 0;
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var area = EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
-            var have = db.Fetch<string>("SELECT ScopeKey FROM PlanningTask WHERE PlanningId = @0 AND ScopeType = N'Station' AND DeletedAt IS NULL", planningId)
+            var family = StationFamily(db, planningId);
+            var familyIds = family.Count == 0 ? planningId.ToString() : string.Join(",", family.Select(f => f.Id));
+            var isRoot = family.Count == 0 || family.Any(f => f.Id == planningId && !(f.ParentPlanningId > 0));
+            var owner = new Dictionary<int, PlanningAreaRow>();
+            foreach (var a in db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({familyIds}) AND DeletedAt IS NULL AND Stations IS NOT NULL"))
+                foreach (var n in PlanningStations.Parse(a.Stations).Stations) owner.TryAdd(n, a);
+            var have = db.Fetch<string>($"SELECT ScopeKey FROM PlanningTask WHERE PlanningId IN ({familyIds}) AND ScopeType = N'Station' AND DeletedAt IS NULL")
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var sort = NextTaskSort(db, planningId, area.Id);
+            PlanningAreaRow? fallback = null;
+            var sorts = new Dictionary<int, int>();
             var added = 0;
-            for (var n = 1; n <= stationCount; n++)
+            for (var n = 1; n <= Math.Min(stationCount, PlanningStations.Max); n++)
             {
                 if (have.Contains(n.ToString())) continue;
-                var t = NewTask(planningId, area.Id, $"Bygg station {n}", null, null, null, PlanningTaskSource.Station, n.ToString(), ++sort, byParticipantId, now);
+                int areaId;
+                if (owner.TryGetValue(n, out var a))
+                {
+                    if (a.PlanningId != planningId) continue; // delplaneringen lägger in sina egna
+                    areaId = a.Id;
+                }
+                else
+                {
+                    if (!isRoot) continue;
+                    fallback ??= EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
+                    areaId = fallback.Id;
+                }
+                if (!sorts.TryGetValue(areaId, out var sort)) sort = NextTaskSort(db, planningId, areaId);
+                sorts[areaId] = ++sort;
+                var t = NewTask(planningId, areaId, $"Bygg station {n}", null, null, null, PlanningTaskSource.Station, n.ToString(), sort, byParticipantId, now);
                 t.ScopeType = "Station"; t.ScopeKey = n.ToString();
+                db.Insert(t);
+                TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, null, null, false, now);
+                added++;
+            }
+            if (isRoot && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningTask WHERE PlanningId = @0 AND Title = @1 AND DeletedAt IS NULL",
+                    planningId, CourseApprovalTaskTitle) == 0)
+            {
+                fallback ??= EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
+                var t = NewTask(planningId, fallback.Id, CourseApprovalTaskTitle,
+                    "Varje förenings del godkänns av en banläggare, sedan banan som helhet (fältkonfigurationen i planeringen).",
+                    null, null, PlanningTaskSource.Station, "course", NextTaskSort(db, planningId, fallback.Id) + 1, byParticipantId, now);
+                t.IsMilestone = true;
                 db.Insert(t);
                 TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, null, null, false, now);
                 added++;

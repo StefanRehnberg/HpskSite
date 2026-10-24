@@ -34,8 +34,39 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             var comp = StationCompetition(x.Planning);
             var falt = comp != null && IsFalt(comp.CompetitionType);
-            var rows = _planning.Stations(id, falt ? comp!.NumberOfSeriesOrStations : 0);
+            // Banan i planeringen (2026-10-24): antalet stationer ur tävlingen, banan och områdena — det största.
+            var courseSvc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+            var course = x.Caller.ViaLink ? null : await courseSvc.CourseConfigAsync(id);
+            var rows = _planning.Stations(id, courseSvc.StationCount(id, course?.JsonBlob));
             var me = x.MemberId;
+            object? courseJson = null;
+            if (course != null)
+            {
+                var csvc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
+                var canView = await csvc.CanViewAsync(course, me);
+                var parts = await courseSvc.PartsAsync(id, course.JsonBlob);
+                var total = courseSvc.StationCount(id, course.JsonBlob);
+                var built = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(course.JsonBlob);
+                var attachedId = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.AttachedId(comp?.StationConfig);
+                courseJson = new
+                {
+                    id = course.Id, name = course.Name, url = $"/faltkonfig/{course.Id}/redigera", status = course.ApprovalStatus ?? "Draft",
+                    canView, canEdit = canView && await csvc.CanEditAsync(course, me),
+                    assembledAt = CourseAssembly.AssembledAt(course.JsonBlob),
+                    stationCount = total, builtStations = built,
+                    parts = parts.Select(p => new { id = p.ConfigId, name = p.Name, status = p.Status, stations = p.Stations, state = p.State }),
+                    // Tävlingens kopia: ansluten och aktuell, ansluten men äldre, en annan bana, eller ingen.
+                    competition = falt ? new
+                    {
+                        attached = attachedId == course.Id,
+                        stale = attachedId == course.Id
+                            && HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.Differs(comp!.StationConfig, course.JsonBlob),
+                        hasOther = attachedId != course.Id
+                            && HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(comp!.StationConfig) > 0,
+                        canAttach = await _auth.CanEditCompetitionAsync(comp!.Id),
+                    } : null,
+                };
+            }
             object? config = null;
             var configId = falt ? StationConfigId(comp) : null;
             if (configId > 0 && !x.Caller.ViaLink)
@@ -78,6 +109,8 @@ namespace HpskSite.Controllers
                 competition = comp == null ? null : new { id = comp.Id, name = comp.Name, falt, stationCount = falt ? comp.NumberOfSeriesOrStations : 0 },
                 config,
                 areaConfigs,
+                course = courseJson,
+                canCreateCourse = course == null && PlanningAccess.CanEditPlanning(x.Caller) && !x.Caller.ViaLink,
                 canCreateAreaConfig = PlanningAccess.CanEditPlanning(x.Caller) && !x.Caller.ViaLink,
                 stations = rows.Select(r => new
                 {
@@ -111,7 +144,11 @@ namespace HpskSite.Controllers
             var falt = comp != null && IsFalt(comp.CompetitionType);
             var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
             string? source = null;
-            var configId = falt ? StationConfigId(comp) : null;
+            // Banan i planeringen (2026-10-24): planeringens bana först — den är det föreningarna bygger vidare på.
+            var courseCfg = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().CourseConfigAsync(id);
+            if (courseCfg != null && HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(courseCfg.JsonBlob) > 0)
+                source = courseCfg.JsonBlob;
+            var configId = source == null && falt ? StationConfigId(comp) : null;
             if (configId > 0)
             {
                 var src = await svc.GetByIdAsync(configId.Value);
@@ -134,13 +171,72 @@ namespace HpskSite.Controllers
             var linkError = _planning.LinkAreaConfig(id, areaId, created.Id, x.MemberId);
             if (linkError != null) { await svc.DeleteAsync(created.Id); return No(linkError); }
             var added = new List<string>();
+            // Banan i planeringen (2026-10-24): områdets ansvarige bygger delen — även en som bara deltar i planeringen.
+            var resp = area.Area.ResponsibleParticipantId > 0 ? _planning.Participant(id, area.Area.ResponsibleParticipantId!.Value) : null;
+            if (resp is { IsActive: true, MemberId: > 0 } && resp.MemberId != x.MemberId)
+            {
+                var (respOk, _) = await svc.AddCollaboratorAsync(created.Id, resp.MemberId!.Value);
+                if (respOk) added.Add(resp.DisplayName);
+            }
             foreach (var c in _planning.StationChiefMembers(id).Where(c => ChiefStations(c.Station).Intersect(stations).Any()))
             {
-                if (c.MemberId == x.MemberId) continue;
+                if (c.MemberId == x.MemberId || c.MemberId == resp?.MemberId) continue;
                 var (addedOk, _) = await svc.AddCollaboratorAsync(created.Id, c.MemberId);
                 if (addedOk) added.Add(c.Name);
             }
             return Ok(new { success = true, id = created.Id, url = $"/faltkonfig/{created.Id}/redigera", copied = source != null, added });
+        }
+
+        /// <summary>
+        /// Banan i planeringen (Stefan 2026-10-24): planeringen äger banans fältkonfiguration innan tävlingen finns. Den hör
+        /// till familjens huvudplanering. <paramref name="stationCount"/>: hur många stationer banan har (annars ur tävlingen
+        /// eller områdena).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateCourseConfig(int id, int? stationCount)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som skapar banans fältkonfiguration.");
+            if (stationCount is < 1 or > PlanningStations.Max) return No($"Banan kan ha 1–{PlanningStations.Max} stationer.");
+            var svc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+            var (cfg, err) = await svc.CreateCourseAsync(x.Planning, x.MemberId, stationCount ?? 0);
+            return cfg == null ? No(err ?? "Banans fältkonfiguration kunde inte skapas.") : Ok(new { success = true, id = cfg.Id, url = $"/faltkonfig/{cfg.Id}/redigera" });
+        }
+
+        /// <summary>"Sätt ihop banan": områdenas delkonfigurationer läggs ihop till banans fältkonfiguration.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssembleCourse(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som sätter ihop banan.");
+            var r = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().AssembleAsync(x.Planning, x.MemberId);
+            if (r.Error != null) return No(r.Error);
+            return Ok(new
+            {
+                success = true, changed = r.Changed, url = $"/faltkonfig/{r.ConfigId}/redigera",
+                warnings = r.Result?.Warnings ?? new List<string>(), missing = r.Result?.Missing ?? new List<int>(),
+                fromCourse = r.Result?.FromCourse ?? new List<int>(), stationCount = r.Result?.StationCount ?? 0,
+            });
+        }
+
+        /// <summary>Ansluter banan till den kopplade fälttävlingen (en kopia, som i Redigera tävling).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AttachCourseToCompetition(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som ansluter banan.");
+            var svc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+            var comp = svc.FaltCompetition(id);
+            if (comp == null) return No("Planeringen är inte kopplad till någon fälttävling.");
+            if (!await _auth.CanEditCompetitionAsync(comp.Id)) return No("Du behöver kunna redigera tävlingen för att ansluta banan till den.");
+            var err = await svc.AttachToCompetitionAsync(id, comp.Id, onlyIfEmpty: false);
+            return err == null ? Ok(new { success = true, competition = comp.Name }) : No(err);
         }
 
         private static IEnumerable<int> ChiefStations(string stations) =>
