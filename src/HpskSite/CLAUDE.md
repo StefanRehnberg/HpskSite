@@ -12726,6 +12726,31 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   deltagare) och `me.isParentReader`, `me.canSplit`. Ytor: radmenyn i `#stAreas` (*Dela ut till en egen planering…*,
   `openSplit`), kortet `#plSubPlannings` på Översikt, raden "Del av …" och kortet `#plParentReader`. Svit
   `tavlingsplanering-dela-verify.mjs` 57/57 (A/B: läsaren utan Owner-villkoret + bifogningarna inte släppta → 3 röda).
+- **P4 (2026-10-24), plan `notes/tavlingsplanering-p4-arbetsplan-2026-10-24.md`:**
+  - **SM-annonsen** (fråga 17): `Models/Planning/NpIssues.cs` uppskattar Nationellt Pistolskyttes manusstopp (nr 1 fjärde
+    måndagen i februari, nr 2 första i maj, nr 3 andra i augusti, nr 4 första i november; utgivning +42 dagar).
+    `ForCompetition(datum)` = senaste nummer som kommer ut minst 14 dagar före tävlingen — SM-veckan blir nr 2, ett SM
+    senare på året nr 3. Mallens milstolpe "SM-annonsen till Nationellt Pistolskytte nr X/ÅR" (`PrepItem.TitleFromAnchor`),
+    ändras som vilken uppgift som helst. Test `NpIssuesTests`.
+  - **Gruppens namn** (`Planning.GroupName`): "X beslutar", "beslutat av X" (lagras i `DecidedBoardName`). Controllern tar
+    `groupNameSet="1"` — en tom sträng binds som null, och null = behåll.
+  - **Stationerna** (fråga 13a): `PlanningArea.Stations` ("3–6, 9", `PlanningStations.Parse/Format`); en station kan bara
+    höra till ETT område i hela familjen (huvud- + delplaneringar, `StationConflict` i `SaveArea`). Kortet Stationerna på
+    Översikt (`PlanningController.Stations.cs` → `GET Stations`, läsaren får läsa) visar ansvarig förening, stationschef
+    ur bemanningen och öppna uppgifter, och varnar för luckor. Delning tar med områdets stationer.
+  - **Fältkonfigurationen** (fråga 13b): `POST GiveChiefsConfigAccess` gör stationscheferna till medarbetare i tävlingens
+    `FaltskytteConfiguration` (`_attachedConfigId`) — kräver `CanEditPlanning` OCH `CanEditAsync` på konfigurationen.
+  - **Delplaneringens bemanning** följer huvudplaneringens tävling tills den kopplas till en egen
+    (`StaffOwnerResolver.ForPlanning` faller tillbaka på förälderns länk; `StaffingPlanningLink` Attach/Detach tar
+    `InheritingChildren` med).
+  - **Överskottet** (fråga 15, "ingen regel, flexibelt"): `PlanningSurplusRules.Distribute` (rena funktioner, test
+    `PlanningSurplusRulesTests`) — fasta poster först, resten efter personer/uppdrag/dagar/lika/egna andelar, största resten
+    i hela kronor. Föreningarna och talen ur bemanningen (*Ställer upp för*) i hela familjen; föreningar kan läggas till för
+    hand (`text:`-nyckel). `GET Surplus`, `POST CalculateSurplus` (räknar, sparar inget), `POST SaveSurplus` — alla
+    `CanEditPlanning`. Sparas i `PlanningSurplus` (en rad per planering). Kortet under Tävlingen, med utskrift. Inget bokförs.
+  - **Migrering `add-planning-p4.sql` (körordning P3i) FÖRE deployen** — NPoco skriver `GroupName`/`Stations` vid varje
+    sparning. Körd i dev, EJ i prod.
+  - Svit `tavlingsplanering-p4-verify.mjs` 59/59 (A/B: utan stationskonflikten + utan arvet vid koppling → 4 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,
