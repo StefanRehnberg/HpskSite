@@ -134,6 +134,8 @@ namespace HpskSite.Controllers
                         status, outcome = d.ForBoard ? (board?.Outcome == BoardDirectOutcome.Rejected ? PlanningDecisionOutcome.Rejected : boardDone ? PlanningDecisionOutcome.Approved : null) : d.Outcome,
                         outcomeLabel,
                         decisionNote = d.DecisionNote,
+                        // P4: gruppens namn när beslutet registrerades ("SSM-kommittén"), annars null.
+                        decidedGroupName = d.ForBoard ? null : d.DecidedBoardName,
                         decidedAt = DT(d.DecidedAt), decidedBy = d.DecidedBy.HasValue ? names.GetValueOrDefault(d.DecidedBy.Value, "Någon") : null,
                         responses = d.ForBoard ? Enumerable.Empty<object>() : rs.Select(r => (object)new
                         {

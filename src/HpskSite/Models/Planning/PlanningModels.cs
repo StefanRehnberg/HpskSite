@@ -172,6 +172,8 @@ namespace HpskSite.Models.Planning
         /// en delplanering delas inte i sin tur. Huvudplaneringens sammankallande läser delplaneringen utan att vara med.
         /// </summary>
         public int? ParentPlanningId { get; set; }
+        /// <summary>P4: gruppens namn i besluten ("SSM-kommittén"). Null = "arbetsgruppen".</summary>
+        public string? GroupName { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CreatedBy { get; set; }
         public DateTime UpdatedAt { get; set; }
@@ -599,6 +601,8 @@ namespace HpskSite.Models.Planning
         public int? HostClubId { get; set; }
         public int? HostRegionId { get; set; }
         public string? HostText { get; set; }
+        /// <summary>P4: stationerna området ansvarar för ("3-6, 9"), när en klubb eller krets har en eller flera stationer.</summary>
+        public string? Stations { get; set; }
     }
 
     /// <summary>

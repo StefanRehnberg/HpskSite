@@ -470,6 +470,8 @@ namespace HpskSite.Services.Planning
                     t.IsMilestone = item.Milestone;
                     t.SendToForbundet = item.Milestone && item.ToForbundet;
                     if (item.DueFromAnchor != null && anchor.HasValue) t.DueDate = item.DueFromAnchor(anchor.Value.Date);
+                    // P4: titeln kan bero på dagen (SM-annonsens nummer i tidningen).
+                    if (item.TitleFromAnchor != null && anchor.HasValue) t.Title = item.TitleFromAnchor(anchor.Value.Date);
                     db.Insert(t);
                     TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, "Från mallen.", null, false, now);
                     tasks++;

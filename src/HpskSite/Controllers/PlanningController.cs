@@ -362,7 +362,7 @@ namespace HpskSite.Controllers
                 {
                     id = x.Planning.Id, name = x.Planning.Name, kind = x.Planning.Kind, kindLabel = PlanningKind.Label(x.Planning.Kind),
                     targetText = x.Planning.TargetText, targetStart = D(x.Planning.TargetStart), targetEnd = D(x.Planning.TargetEnd),
-                    status = x.Planning.Status, listed = x.Planning.ListedForMembers,
+                    status = x.Planning.Status, listed = x.Planning.ListedForMembers, groupName = x.Planning.GroupName ?? "",
                     createdAt = D(x.Planning.CreatedAt),
                     doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
                     competition = CompetitionJson(x.Planning.Id),
@@ -446,7 +446,7 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? listed)
+        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? listed, string? groupName = null, string? groupNameSet = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
@@ -454,7 +454,9 @@ namespace HpskSite.Controllers
             bool? list = listed == null ? null : listed == "1";
             if (list.HasValue && list.Value != x.Planning.ListedForMembers && !PlanningAccess.CanManagePlanning(x.Caller))
                 return No("Bara den sammankallande väljer om planeringen visas för alla medlemmar.");
-            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), x.MemberId, list);
+            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), x.MemberId, list,
+                // P4: ett tomt textfält binds som null — flaggan säger att fältet skickades (tomt = ta bort namnet).
+                groupNameSet == "1" ? (groupName ?? "") : null);
             return err == null ? Ok() : No(err);
         }
 

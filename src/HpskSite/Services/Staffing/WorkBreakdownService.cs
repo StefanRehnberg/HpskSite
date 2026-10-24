@@ -103,7 +103,7 @@ namespace HpskSite.Services.Staffing
     /// <see cref="DueFromAnchor"/> räknar en förbundsfrist ur tävlingens dag ("1 oktober året före").
     /// </summary>
     internal record PrepItem(string Title, int? DaysBeforeComp, string? Description = null, bool Milestone = false,
-        bool ToForbundet = false, Func<DateTime, DateTime>? DueFromAnchor = null);
+        bool ToForbundet = false, Func<DateTime, DateTime>? DueFromAnchor = null, Func<DateTime, string>? TitleFromAnchor = null);
     internal record PrepArea(string Area, List<PrepItem> Items);
 
     /// <summary>
@@ -135,8 +135,10 @@ namespace HpskSite.Services.Staffing
             => new(title, days, description, true, toForbundet, rule);
 
         /// <summary>
-        /// SM: förbundets frister som milstolpar (beslut 9.1 och 10.1–10.2). Tidningens manusstopp publiceras inte,
-        /// så inbjudans milstolpe får sitt datum när redaktören svarat. SM är förbundets uppdrag — ingen sanktion att söka.
+        /// SM: förbundets frister som milstolpar (beslut 9.1 och 10.1–10.2). SM är förbundets uppdrag — ingen sanktion att söka.
+        /// <para>P4 (Stefan 2026-10-24): SM-annonsen ska med i förbundets tidning — den stora SM-veckan i nr 2, ett SM senare
+        /// på året (springskytte) i nr 3. <see cref="NpIssues.ForCompetition"/> väljer numret ur tävlingens dag och
+        /// uppskattar manusstoppet ur förbundets utgivningsplan. Titel och datum går att ändra på milstolpen.</para>
         /// </summary>
         private static PrepArea Forbundet(bool falt) => new("Förbundet", new List<PrepItem>
         {
@@ -144,10 +146,15 @@ namespace HpskSite.Services.Staffing
                 "Förbundets frist: 1 oktober året före tävlingsåret. Ansökan går genom kretsen.", false, d => new DateTime(d.Year - 1, 10, 1)),
             M("Tävlingen med i förbundets stomprogram", null,
                 "Förbundets frist: 30 juni året före tävlingsåret.", false, d => new DateTime(d.Year - 1, 6, 30)),
-            I("Kontrollera manusstoppet med tidningens redaktör", 240) with
-                { Description = "Manusstoppet publiceras inte. Fråga redaktören och skriv in datumet på milstolpen Inbjudan till förbundet." },
-            M("Inbjudan till förbundet (i tid till tidningen)", null,
-                "Datumet fylls i när redaktören svarat om manusstoppet. Bifoga inbjudan ur planeringens dokument.", true),
+            M("SM-annonsen till Nationellt Pistolskytte", null,
+                "SM-annonsen ska med i förbundets tidning i det nummer som kommer ut före tävlingen — den stora SM-veckan i nr 2 "
+                + "(juni), ett SM senare på året, till exempel springskytte, i nr 3 (september). Numret och sista dagen (tidningens "
+                + "manusstopp) är uppskattade ur förbundets utgivningsplan: kontrollera dem på pistolskytteforbundet.se under "
+                + "Om oss → Medlemstidningen, och ändra milstolpen om de skiljer. Bifoga annonsen ur planeringens dokument.",
+                true, d => NpIssues.ForCompetition(d).Deadline) with
+            {
+                TitleFromAnchor = d => { var n = NpIssues.ForCompetition(d); return $"SM-annonsen till Nationellt Pistolskytte nr {n.Issue}/{n.Year}"; },
+            },
         }.Concat(falt ? new[] { M("Fältets underlag till förbundet", 84,
                 "Banans underlag (målförutsättningar och stationsbeskrivningar) ska vara hos förbundet minst 12 veckor före tävlingen.", true) }
             : Array.Empty<PrepItem>()).ToList());

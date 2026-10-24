@@ -144,11 +144,13 @@ namespace HpskSite.Services.Planning
             if (d.ForBoard) return "Förslaget beslutas av styrelsen. Deras beslut syns här när det är fattat.";
             if (!d.IsOpen) return "Förslaget är redan avgjort.";
             d.Status = PlanningDecisionStatus.Decided; d.Outcome = o; d.DecidedByKind = k;
-            d.DecidedBoardName = k == PlanningDecisionMaker.Board ? bn : null;
+            // P4: gruppens namn ("SSM-kommittén") sparas med beslutet, så att ett senare namnbyte inte skriver om historiken.
+            var gn = Clean(db.ExecuteScalar<string?>("SELECT GroupName FROM Planning WHERE Id = @0", planningId), 100);
+            d.DecidedBoardName = k == PlanningDecisionMaker.Board ? bn : gn;
             d.DecisionNote = Clean(note, PlanningDecisionRules.MaxBody);
             d.DecidedAt = now; d.DecidedBy = byParticipantId; d.UpdatedAt = now;
             db.Update(d);
-            var who = k == PlanningDecisionMaker.Board ? $"beslutat av {d.DecidedBoardName}" : "arbetsgruppens beslut";
+            var who = d.DecidedBoardName != null ? $"beslutat av {d.DecidedBoardName}" : "arbetsgruppens beslut";
             InsertSystem(db, planningId, "decision-decided", $"{d.Title}: {PlanningDecisionOutcome.Label(o).ToLowerInvariant()} ({who}).",
                 byParticipantId, null, ("decision", d.Id), now);
             Bump(db, planningId);

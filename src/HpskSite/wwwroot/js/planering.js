@@ -3027,6 +3027,10 @@
                 <input id="stTarget" class="form-control" maxlength="200" value="${esc(p.targetText || '')}" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
             <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="stStart">Första dagen (om den är bestämd)</label><input id="stStart" class="form-control" value="${esc(p.targetStart || '')}"></div>
                 <div class="col-sm-6"><label class="form-label" for="stEnd">Sista dagen</label><input id="stEnd" class="form-control" value="${esc(p.targetEnd || '')}"></div></div>
+            <div class="mb-3"><label class="form-label fw-semibold" for="stGroup">Gruppens namn i besluten (valfritt)</label>
+                <input id="stGroup" class="form-control" maxlength="100" value="${esc(p.groupName || '')}" placeholder="Till exempel: SSM-kommittén">
+                <div class="pl-help small">Är gruppen en kommitté — till exempel landsdelens SM-kommitté — står namnet i förslagen och besluten:
+                    <i>beslutat av SSM-kommittén</i>. Tomt: <i>gruppens beslut</i>.</div></div>
             ${S.me.canManage ? `<div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" role="switch" id="stListed"${p.listed ? ' checked' : ''}>
                 <label class="form-check-label fw-semibold" for="stListed">Visa planeringen för alla medlemmar, så att de kan be om att få vara med</label>
                 <div class="pl-help small">Då ser alla inloggade medlemmar namnet, ungefär när och var, och vem som är sammankallande — men inget av innehållet.
@@ -3056,7 +3060,8 @@
             await reloadTasks(); $('stForbundetSaved').textContent = r.email ? 'Sparat.' : 'Adressen är borttagen.';
         });
         $('stSave').onclick = async () => {
-            const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };
+            const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim(),
+                groupName: $('stGroup').value.trim(), groupNameSet: '1' };
             if ($('stListed')) params.listed = $('stListed').checked ? '1' : '0';
             const r = await post('Update', params);
             if (!r.success) { failMsg(r); return; }
@@ -3132,8 +3137,8 @@
             d.canWithdraw && { divider: true },
             d.canWithdraw && { label: 'Dra tillbaka förslaget…', danger: true, fn: () => withdrawDecision(d) },
         ]);
-        const who = board ? `Styrelsen i ${esc(d.board ? d.board.org : '')} beslutar` : 'Gruppen beslutar';
-        const decided = !board && d.status === 'Decided' ? `<div class="mb-2"><b>${esc(d.outcomeLabel)}</b> — gruppens beslut
+        const who = board ? `Styrelsen i ${esc(d.board ? d.board.org : '')} beslutar` : (S.planning.groupName ? esc(S.planning.groupName) + ' beslutar' : 'Gruppen beslutar');
+        const decided = !board && d.status === 'Decided' ? `<div class="mb-2"><b>${esc(d.outcomeLabel)}</b> — ${d.decidedGroupName ? 'beslutat av ' + esc(d.decidedGroupName) : 'gruppens beslut'}
             <span class="pl-help small">· ${esc(fmtShort(d.decidedAt))}${d.decidedBy ? ', registrerat av ' + esc(d.decidedBy) : ''}</span>
             ${d.decisionNote ? `<div style="white-space:pre-wrap;">${esc(d.decisionNote)}</div>` : ''}</div>` : '';
         let answer = '';
@@ -3219,7 +3224,7 @@
                 <textarea id="deBody" class="form-control mb-3" rows="4" maxlength="4000">${esc(draft.body)}</textarea>
                 <div class="fw-semibold mb-1">Vem beslutar?</div>
                 <div class="form-check"><input class="form-check-input" type="radio" name="deBy" id="deByGroup" value="Group"${draft.decider !== 'Board' ? ' checked' : ''}>
-                    <label class="form-check-label" for="deByGroup">Vi i planeringen <span class="pl-help small">— alla som deltar svarar Ja eller Nej</span></label></div>
+                    <label class="form-check-label" for="deByGroup">${S.planning.groupName ? 'Vi i ' + esc(S.planning.groupName) : 'Vi i planeringen'} <span class="pl-help small">— alla som deltar svarar Ja eller Nej</span></label></div>
                 ${canBoard ? `<div class="form-check"><input class="form-check-input" type="radio" name="deBy" id="deByBoard" value="Board"${draft.decider === 'Board' ? ' checked' : ''}>
                     <label class="form-check-label" for="deByBoard">En styrelse <span class="pl-help small">— förslaget skickas till styrelsen, gruppen svarar inte</span></label></div>
                     <div id="deBoardBox" class="ms-4 mt-1${draft.decider === 'Board' ? '' : ' d-none'}">
@@ -3290,7 +3295,7 @@
                 <label class="form-label" for="deBody">Bakgrund (valfri)</label>
                 <textarea id="deBody" class="form-control" rows="5" maxlength="4000">${esc(d.body || '')}</textarea>
                 ${answered ? `<div class="alert alert-warning small mt-3 mb-0">${answered === 1 ? 'En har' : answered + ' har'} redan svarat. Svaren står kvar men märks som givna före ändringen.</div>` : ''}
-                <p class="pl-help small mt-3 mb-0">${isBoardDec(d) ? 'Styrelsen beslutar om förslaget.' : 'Gruppen beslutar om förslaget.'}
+                <p class="pl-help small mt-3 mb-0">${isBoardDec(d) ? 'Styrelsen beslutar om förslaget.' : (S.planning.groupName ? esc(S.planning.groupName) + ' beslutar' : 'Gruppen beslutar') + ' om förslaget.'}
                     Vill du ändra det, dra tillbaka förslaget och lägg fram det igen.</p>`,
             onOpen: body => body.querySelector('#deTitle').focus(),
             onOk: async body => {

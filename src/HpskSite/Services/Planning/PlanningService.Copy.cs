@@ -39,6 +39,7 @@ namespace HpskSite.Services.Planning
             copy.DisciplineKey = src.DisciplineKey;
             copy.SignupRoleChoice = src.SignupRoleChoice;
             copy.DoneAtMeetingsOnly = src.DoneAtMeetingsOnly;
+            copy.GroupName = src.GroupName;
             copy.CopiedFromPlanningId = src.Id;
             copy.CreatedBy = i.CopierMemberId; copy.UpdatedBy = i.CopierMemberId;
             db.Update(copy);

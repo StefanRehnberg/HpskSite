@@ -63,7 +63,7 @@ namespace HpskSite.Services.Planning
                                                  ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate"),
                                                  ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy"),
                                                  ("PlanningPart", "HostText"), ("PlanningArea", "HostText"), ("PlanningMessage", "AreaId"),
-                                                 ("PlanningDocumentCategory", "AreaId"), ("Planning", "ParentPlanningId"),
+                                                 ("PlanningDocumentCategory", "AreaId"), ("Planning", "ParentPlanningId"), ("Planning", "GroupName"), ("PlanningArea", "Stations"),
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
@@ -127,7 +127,7 @@ namespace HpskSite.Services.Planning
             return (p.Id, me.Id);
         }
 
-        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId, bool? listed = null)
+        public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId, bool? listed = null, string? groupName = null)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
@@ -141,6 +141,8 @@ namespace HpskSite.Services.Planning
             p.TargetStart = start?.Date;
             p.TargetEnd = end?.Date;
             if (listed.HasValue) p.ListedForMembers = listed.Value;
+            // P4: null = rör inte; tom text = inget eget namn.
+            if (groupName != null) p.GroupName = Clean(groupName, 100);
             p.UpdatedAt = Now;
             p.UpdatedBy = byMemberId;
             db.Update(p);
