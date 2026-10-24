@@ -228,12 +228,28 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveArea(int id, int areaId, string name, int? responsibleId, string? responsibleName)
+        public async Task<IActionResult> SaveArea(int id, int areaId, string name, int? responsibleId, string? responsibleName,
+            string? description = null, int? hostType = null, int? hostId = null, string? hostText = null, string? details = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Områdena ändras av den som kan ändra planeringen.");
-            var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId);
+            // Omgång 2 steg 4: beskrivning och värd skickas bara av områdesdialogen (details = "1"). Utelämnat = rör inte dem,
+            // så mallarna och snabbdialogerna inte tömmer en värd någon satt.
+            PlanningService.AreaDetails? extra = null;
+            if (details == "1")
+            {
+                int? club = null, region = null;
+                if (hostId > 0)
+                {
+                    // Bara en klubb eller krets som någon i planeringen företräder — samma urval som förslagens styrelser.
+                    if (!BoardTargets(id).Any(t => t.OwnerType == hostType && t.OwnerId == hostId))
+                        return No("Välj en klubb eller krets som någon i planeringen företräder, eller skriv värden som text.");
+                    if (hostType == Models.DocumentOwnerType.Club) club = hostId; else region = hostId;
+                }
+                extra = new PlanningService.AreaDetails(description, club, region, hostText);
+            }
+            var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId, extra);
             return r.Error == null ? Ok(new { success = true, areaId = r.AreaId }) : No(r.Error);
         }
 

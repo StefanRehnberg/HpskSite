@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -41,7 +41,7 @@ namespace HpskSite.Controllers
             doneAtMeetingId = t.DoneAtMeetingId,
             doneAtMeeting = t.DoneAtMeetingId.HasValue && meetings.TryGetValue(t.DoneAtMeetingId.Value, out var dm) ? dm.Title : null,
             mine = t.AssigneeParticipantId == c.ParticipantId && c.IsParticipant,
-            isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet, partId = t.PartId,
+            isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet,
             sentToForbundetAt = DT(t.SentToForbundetAt),
             sentToForbundetBy = t.SentToForbundetBy.HasValue ? names.GetValueOrDefault(t.SentToForbundetBy.Value, "Någon") : null,
             canEdit = PlanningAccess.CanEditTask(c, t),
@@ -77,12 +77,7 @@ namespace HpskSite.Controllers
                 anchor = D(anchor), anchorIsCompetition = comp?.CompetitionDate is { Year: > 1900 },
                 scopeTypes = PlanningTaskRules.ScopeTypes,
                 statuses = PlanningTaskStatus.All.Select(s => new { value = s, label = PlanningTaskStatus.Label(s), assignee = PlanningTaskStatus.AssigneeSettable.Contains(s) }),
-                areas = _planning.Areas(id).Select(a => new
-                {
-                    id = a.Id, name = a.Name, responsibleId = a.ResponsibleParticipantId,
-                    responsible = a.ResponsibleParticipantId.HasValue ? names.GetValueOrDefault(a.ResponsibleParticipantId.Value, "Har lämnat planeringen") : a.ResponsibleName,
-                    responsibleName = a.ResponsibleName,
-                }),
+                areas = AreasJson(id, names, tasks),
                 tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg)),
             });
         }
@@ -114,13 +109,13 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateTask(int id, string title, string? description, int? assignee, string? due, int? meetingId, string? t,
             int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
-            string? isMilestone = null, string? sendToForbundet = null, string? partId = null)
+            string? isMilestone = null, string? sendToForbundet = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanCreateTasks(x.Caller)) return No("Bara den som deltar lägger till uppgifter.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
-            if (input != null) input = input with { IsMilestone = Flag(isMilestone), SendToForbundet = Flag(sendToForbundet), PartId = PartArg(partId, null) };
+            if (input != null) input = input with { IsMilestone = Flag(isMilestone), SendToForbundet = Flag(sendToForbundet) };
             if (err != null) return No(err);
             var r = _planning.CreateTask(id, x.Caller.ParticipantId, input!, meetingId, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
@@ -132,7 +127,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UpdateTask(int id, int taskId, string title, string? description, int? assignee, string? due, string? t,
             int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
-            string? isMilestone = null, string? sendToForbundet = null, string? partId = null)
+            string? isMilestone = null, string? sendToForbundet = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
@@ -146,7 +141,6 @@ namespace HpskSite.Controllers
             {
                 IsMilestone = isMilestone == null ? task.IsMilestone : Flag(isMilestone),
                 SendToForbundet = sendToForbundet == null ? task.SendToForbundet : Flag(sendToForbundet),
-                PartId = PartArg(partId, task.PartId),
             };
             var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, input!, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);

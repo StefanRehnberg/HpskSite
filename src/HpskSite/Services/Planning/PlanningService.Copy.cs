@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using HpskSite.Models.Planning;
@@ -45,26 +45,6 @@ namespace HpskSite.Services.Planning
 
             var offset = PlanningCopyRules.Offset(i.SourceAnchor, i.TargetStart);
 
-            // Delarna (grunddelen finns redan i kopian).
-            var newRoot = db.ExecuteScalar<int>("SELECT Id FROM PlanningPart WHERE PlanningId = @0 AND Kind = N'Root' AND DeletedAt IS NULL", newId);
-            var parts = db.Fetch<PlanningPartRow>("SELECT * FROM PlanningPart WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY ParentPlanningPartId, SortOrder, Id", sourceId);
-            var partMap = new Dictionary<int, int>();
-            foreach (var root in parts.Where(p => p.Kind == "Root")) partMap[root.Id] = newRoot;
-            int partCount = 0;
-            foreach (var p in parts.Where(p => p.Kind != "Root").OrderBy(p => p.ParentPlanningPartId.HasValue ? 1 : 0))
-            {
-                var np = new PlanningPartRow
-                {
-                    PlanningId = newId, Kind = p.Kind, Name = p.Name, SortOrder = p.SortOrder, CreatedAt = now, CreatedBy = ownerPid,
-                    // Delens form följer med; den ansvarige bara som fritt namn (personerna följer inte med).
-                    Description = p.Description, DisciplineKey = p.DisciplineKey, ResponsibleName = p.ResponsibleName,
-                    HostClubId = p.HostClubId, HostRegionId = p.HostRegionId, HostText = p.HostText,
-                    ParentPlanningPartId = p.ParentPlanningPartId.HasValue && partMap.TryGetValue(p.ParentPlanningPartId.Value, out var pp) ? pp : newRoot,
-                };
-                db.Insert(np);
-                partMap[p.Id] = np.Id; partCount++;
-            }
-
             // Områdena: namn och ordning, och en ansvarig som fritt namn — aldrig en deltagare (personerna följer inte med).
             var areaMap = new Dictionary<int, int>();
             foreach (var a in db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY SortOrder, Id", sourceId))
@@ -72,6 +52,7 @@ namespace HpskSite.Services.Planning
                 var na = new PlanningAreaRow
                 {
                     PlanningId = newId, Name = a.Name, ResponsibleName = a.ResponsibleName, SortOrder = a.SortOrder,
+                    Description = a.Description, HostClubId = a.HostClubId, HostRegionId = a.HostRegionId, HostText = a.HostText,
                     CreatedAt = now, CreatedBy = ownerPid,
                 };
                 db.Insert(na);
@@ -96,7 +77,6 @@ namespace HpskSite.Services.Planning
                     AreaId = t.AreaId.HasValue && areaMap.TryGetValue(t.AreaId.Value, out var am) ? am : null,
                     ScopeType = t.ScopeType, ScopeKey = t.ScopeKey, EstimatedCost = t.EstimatedCost, SortOrder = t.SortOrder,
                     IsMilestone = t.IsMilestone, SendToForbundet = t.SendToForbundet, SourceKind = t.SourceKind, SourceKey = t.SourceKey,
-                    PartId = t.PartId.HasValue && partMap.TryGetValue(t.PartId.Value, out var ptm) && ptm != newRoot ? ptm : null,
                     Status = PlanningTaskStatus.NotStarted, CreatedAt = now, CreatedBy = ownerPid, UpdatedAt = now,
                 });
                 taskCount++;
@@ -137,7 +117,7 @@ namespace HpskSite.Services.Planning
             InsertSystem(db, newId, "planning-copied", $"Planeringen är en kopia av {src.Name}.", ownerPid, null, null, now);
             InsertSystem(db, sourceId, "planning-copy-made", $"Planeringen kopierades till {i.Name.Trim()}.", null, null, null, now);
             Bump(db, sourceId);
-            return (new PlanningCopyReport(newId, areaMap.Count, taskCount, partCount, roles, days, needs, datesDropped, daysDropped), null);
+            return (new PlanningCopyReport(newId, areaMap.Count, taskCount, roles, days, needs, datesDropped, daysDropped), null);
         }
 
         /// <summary>

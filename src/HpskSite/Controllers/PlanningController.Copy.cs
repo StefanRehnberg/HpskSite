@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using HpskSite.Models.Planning;
 using HpskSite.Services.Planning;
@@ -53,7 +53,7 @@ namespace HpskSite.Controllers
             return Ok(new
             {
                 success = true, planningId = report.PlanningId, url = $"/tavlingsplanering/{report.PlanningId}",
-                areas = report.Areas, tasks = report.Tasks, parts = report.Parts, roles = report.Roles, days = report.Days, needs = report.Needs,
+                areas = report.Areas, tasks = report.Tasks, roles = report.Roles, days = report.Days, needs = report.Needs,
                 datesDropped = report.DatesDropped, daysDropped = report.DaysDropped,
                 toSomeoneElse = recipientId != x.MemberId, recipient = MemberDisplayName(recipient), mailed,
             });

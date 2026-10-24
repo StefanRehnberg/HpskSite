@@ -100,6 +100,37 @@ window.PlaneringBemanning = (function () {
         return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
     }
 
+    // Omgång 2 steg 4: grenen väljs när planeringen skapas och styr bara vilka roller som föreslås — därför står den här,
+    // där den verkar, och inte under Inställningar. En kopplad planering följer tävlingens gren.
+    function disciplineLine() {
+        const p = A.S().planning, discs = p.disciplines || [];
+        const nameOf = id => (discs.find(d => d.id === id) || {}).name || id || '';
+        if (p.competition) return `<p class="pl-help small mb-2" id="plbDisc"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Rollerna följer tävlingens gren: <b>${esc(nameOf(p.competition.typeId))}</b>.</p>`;
+        return `<p class="pl-help small mb-2" id="plbDisc"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>${p.disciplineKey
+            ? `Rollerna föreslås för <b>${esc(nameOf(p.disciplineKey))}</b>.` : 'Ingen gren är vald — rollerna föreslås för alla grenar.'}
+            <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-disc="1">${p.disciplineKey ? 'Ändra…' : 'Välj gren…'}</button></p>`;
+    }
+    function openDiscipline() {
+        const p = A.S().planning;
+        A.formModal({
+            title: 'Vilken gren gäller planeringen?', okLabel: 'Spara', wide: false,
+            html: `<select id="plbDiscSel" class="form-select"><option value="">Ingen gren — eller flera</option>
+                ${(p.disciplines || []).map(d => `<option value="${esc(d.id)}"${d.id === p.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+                <p class="pl-help small mt-2 mb-0">Styr vilka roller bemanningen föreslår, till exempel stationschef i fältskytte. När planeringen kopplas till en tävling gäller tävlingens gren.</p>`,
+            onOk: async body => {
+                const v = body.querySelector('#plbDiscSel').value;
+                const r = await A.req('/umbraco/surface/Planning/SetDiscipline', { method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': A.token() },
+                    body: new URLSearchParams({ id: A.ID, value: v }).toString() });
+                if (!r.success) return r.message || 'Grenen kunde inte sparas.';
+                p.disciplineKey = v || null;
+                draw();
+                return true;
+            }
+        });
+    }
+    document.addEventListener('click', e => { if (A && A.isActive() && e.target.closest('[data-plb-disc]')) { e.preventDefault(); openDiscipline(); } });
+
     // ================================================================ Rutnätet
     function needFor(row, key) {
         if (!key) return 0;
@@ -133,7 +164,7 @@ window.PlaneringBemanning = (function () {
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
         ]);
 
-        let notes = '';
+        let notes = disciplineLine();
         if (!linked()) notes += `<p class="pl-help small mb-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen och följer med när den kopplas.</p>`;
         const vols = g.volunteers || [];
         if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>

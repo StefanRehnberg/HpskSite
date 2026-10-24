@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using HpskSite.Models.Planning;
@@ -72,7 +72,7 @@ namespace HpskSite.Services.Planning
         /// </summary>
         public sealed record TaskInput(string Title, string? Description, int? Assignee, string? AssigneeName,
             DateTime? Due, int? DueDaysBefore, int? AreaId, string? ScopeType, string? ScopeKey, decimal? EstimatedCost,
-            bool IsMilestone = false, bool SendToForbundet = false, int? PartId = null);
+            bool IsMilestone = false, bool SendToForbundet = false);
 
         private static string? ValidateInput(TaskInput i)
         {
@@ -92,7 +92,7 @@ namespace HpskSite.Services.Planning
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId) ?? PartError(db, planningId, i.PartId);
+            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId);
             if (err != null) return new TaskResult(0, err);
             if (fromMeetingId > 0 && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMeeting WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL",
                     fromMeetingId, planningId) != 1)
@@ -107,7 +107,7 @@ namespace HpskSite.Services.Planning
                 DueDate = i.DueDaysBefore.HasValue ? PlanningTaskRules.DueFromDaysBefore(i.DueDaysBefore, anchor) : i.Due?.Date,
                 AreaId = area, ScopeType = Clean(i.ScopeType, 20), ScopeKey = Clean(i.ScopeType, 20) == null ? null : Clean(i.ScopeKey, 100),
                 EstimatedCost = i.EstimatedCost, SortOrder = NextTaskSort(db, planningId, area) + 1,
-                IsMilestone = i.IsMilestone, SendToForbundet = i.IsMilestone && i.SendToForbundet, PartId = i.PartId > 0 ? i.PartId : null,
+                IsMilestone = i.IsMilestone, SendToForbundet = i.IsMilestone && i.SendToForbundet,
                 Status = PlanningTaskStatus.NotStarted, FromMeetingId = fromMeetingId > 0 ? fromMeetingId : null,
                 CreatedAt = now, CreatedBy = byParticipantId, UpdatedAt = now,
             };
@@ -128,9 +128,8 @@ namespace HpskSite.Services.Planning
             var t = db.SingleOrDefault<PlanningTaskRow>(
                 "SELECT * FROM PlanningTask WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", taskId, planningId);
             if (t == null) return new TaskResult(taskId, "Uppgiften finns inte.");
-            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId) ?? PartError(db, planningId, i.PartId);
+            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId);
             if (err != null) return new TaskResult(taskId, err);
-            var newPart = i.PartId > 0 ? i.PartId : null;
             var newAssignee = i.Assignee > 0 ? i.Assignee : null;
             var newName = newAssignee.HasValue ? null : Clean(i.AssigneeName, 200);
             var newDue = i.DueDaysBefore.HasValue ? PlanningTaskRules.DueFromDaysBefore(i.DueDaysBefore, anchor) : i.Due?.Date;
@@ -144,7 +143,6 @@ namespace HpskSite.Services.Planning
             if (t.DueDate != newDue || t.DueDaysBefore != i.DueDaysBefore) changed.Add("sista dagen");
             if (t.AreaId != newArea) changed.Add("området");
             if ((t.ScopeType ?? "") != (newScope ?? "") || (t.ScopeKey ?? "") != (newKey ?? "")) changed.Add("kopplingen");
-            if (t.PartId != newPart) changed.Add("delen");
             if (t.EstimatedCost != i.EstimatedCost) changed.Add("uppskattningen");
             var newSend = i.IsMilestone && i.SendToForbundet;
             if (t.IsMilestone != i.IsMilestone) changed.Add("milstolpen");
@@ -164,7 +162,6 @@ namespace HpskSite.Services.Planning
             t.EstimatedCost = i.EstimatedCost;
             t.IsMilestone = i.IsMilestone;
             t.SendToForbundet = newSend;
-            t.PartId = newPart;
             t.UpdatedAt = now;
             db.Update(t);
             TaskEvent(db, t, PlanningTaskEventKind.Edited, byParticipantId, null, null, "Ändrade " + string.Join(", ", changed) + ".", null, false, now);

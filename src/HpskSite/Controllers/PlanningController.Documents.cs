@@ -34,7 +34,7 @@ namespace HpskSite.Controllers
             return Ok(new
             {
                 success = true,
-                categories = _planning.DocumentCategories(id).Select(c => new { id = c.Id, name = c.Name }),
+                categories = _planning.DocumentCategories(id).Select(c => new { id = c.Id, name = c.Name, areaId = c.AreaId }),
                 documents = docs.Select(d => DocJson(d, x.Caller, names, t,
                     refs.Where(r => r.DocumentId == d.Id).Select(r => RefJson(r, x.Caller, targets)).ToList())),
                 // Bifogningar till dokument som tagits bort ur arkivet: de visas som "borttaget" där de satt.
@@ -71,12 +71,14 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveDocumentCategory(int id, int? categoryId, string? name)
+        public async Task<IActionResult> SaveDocumentCategory(int id, int? categoryId, string? name, string? areaId = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageDocumentCategories(x.Caller)) return No("Kategorierna ändras av den som kan ändra planeringen.");
-            var r = _planning.SaveDocumentCategory(id, categoryId ?? 0, name, x.Caller.ParticipantId);
+            // Utelämnat = rör inte området (en äldre klient får inte ta bort kopplingen); "" eller "0" = inget område.
+            int? area = areaId == null ? null : int.TryParse(areaId, out var a) && a > 0 ? a : 0;
+            var r = _planning.SaveDocumentCategory(id, categoryId ?? 0, name, x.Caller.ParticipantId, area);
             return r.Error == null ? Ok(new { success = true, categoryId = r.Id }) : No(r.Error);
         }
 

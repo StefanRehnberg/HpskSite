@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace HpskSite.Models.Planning
 {
@@ -41,6 +41,6 @@ namespace HpskSite.Models.Planning
     }
 
     /// <summary>Vad kopian fick med sig — svaret säger det, så att ingenting försvinner tyst.</summary>
-    public sealed record PlanningCopyReport(int PlanningId, int Areas, int Tasks, int Parts, int Roles, int Days, int Needs,
+    public sealed record PlanningCopyReport(int PlanningId, int Areas, int Tasks, int Roles, int Days, int Needs,
         int DatesDropped, int DaysDropped);
 }

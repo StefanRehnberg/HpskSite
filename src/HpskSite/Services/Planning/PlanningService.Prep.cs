@@ -290,7 +290,12 @@ namespace HpskSite.Services.Planning
 
         public sealed record AreaResult(int AreaId, string? Error);
 
-        public AreaResult SaveArea(int planningId, int areaId, string name, int? responsiblePid, string? responsibleName, int byParticipantId)
+        /// <summary>Omgång 2 steg 4: det delarna hade. Värden är EN sak: en klubb, en krets eller fri text.</summary>
+        public sealed record AreaDetails(string? Description, int? HostClubId, int? HostRegionId, string? HostText);
+
+        /// <summary>Nytt område (<paramref name="areaId"/> = 0) eller ändrat. <paramref name="details"/> null = rör inte beskrivning och värd.</summary>
+        public AreaResult SaveArea(int planningId, int areaId, string name, int? responsiblePid, string? responsibleName, int byParticipantId,
+            AreaDetails? details = null)
         {
             var n = Clean(name, MaxAreaName);
             if (n == null) return new AreaResult(areaId, "Ge området ett namn, till exempel \"Materiel\".");
@@ -310,6 +315,7 @@ namespace HpskSite.Services.Planning
                 row.Name = n;
                 row.ResponsibleParticipantId = responsiblePid > 0 ? responsiblePid : null;
                 row.ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200);
+                ApplyAreaDetails(row, details);
                 db.Update(row);
             }
             else
@@ -320,6 +326,7 @@ namespace HpskSite.Services.Planning
                     ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200),
                     SortOrder = (others.Count == 0 ? 0 : others.Max(a => a.SortOrder)) + 1, CreatedAt = now, CreatedBy = byParticipantId,
                 };
+                ApplyAreaDetails(row, details);
                 db.Insert(row);
             }
             Bump(db, planningId);
@@ -334,8 +341,19 @@ namespace HpskSite.Services.Planning
             var n = db.Execute("UPDATE PlanningArea SET DeletedAt = @2 WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", areaId, planningId, Now);
             if (n == 0) return "Området finns inte.";
             db.Execute("UPDATE PlanningTask SET AreaId = NULL WHERE PlanningId = @0 AND AreaId = @1", planningId, areaId);
+            db.Execute("UPDATE PlanningMessage SET AreaId = NULL WHERE PlanningId = @0 AND AreaId = @1", planningId, areaId);
+            db.Execute("UPDATE PlanningDocumentCategory SET AreaId = NULL WHERE PlanningId = @0 AND AreaId = @1", planningId, areaId);
             Bump(db, planningId);
             return null;
+        }
+
+        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d)
+        {
+            if (d == null) return;
+            row.Description = Clean(d.Description, 2000);
+            row.HostClubId = d.HostClubId > 0 ? d.HostClubId : null;
+            row.HostRegionId = row.HostClubId.HasValue ? null : (d.HostRegionId > 0 ? d.HostRegionId : null);
+            row.HostText = row.HostClubId.HasValue || row.HostRegionId.HasValue ? null : Clean(d.HostText, 200);
         }
 
         /// <summary>Flyttar området ett steg upp (-1) eller ner (+1).</summary>

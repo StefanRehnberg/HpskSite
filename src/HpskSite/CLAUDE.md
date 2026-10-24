@@ -12691,6 +12691,22 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     låg 2028 utanför de 30), DTO:n har `canDelete`, `planningId`, `planningName` (klubbens lista: "Från planeringen …").
     Svit `tavlingsplanering-tavling-verify.mjs` 57/57 (A/B: utan asClub → 2 röda; PlanningReader nekar → 3 röda;
     ClubCanDelete utan statusvillkoret → 4 röda). ⚠️ Guidens åtta steg körs inte i sviten (fältpåsen + återanropet).
+- ⚠️⚠️ **OMGJORT 2026-10-24 (omgång 2, steg 4): Områden ersätter Delar.** Steg D ovan gäller inte längre för
+  uppgifter/meddelanden: migrering `merge-planning-parts-into-areas.sql` (körordning efter P3c) slår ihop delarna
+  (utom `Root`) med `PlanningArea` (samma namn = samma område), flyttar `PartId` → `AreaId` och **tar bort
+  `PlanningTask.PartId` och `PlanningMessage.PartId`**. `PlanningArea` fick `Description`, `HostClubId`/`HostRegionId`/
+  `HostText`; `PlanningMessage.AreaId` och `PlanningDocumentCategory.AreaId` är nya. `PlanningPart` finns kvar BARA för
+  grunddelen (kopplingens ankare) — `SavePart`/`RemovePart`/`SetMessagePart`/`PartHostOptions` och `Get.parts` är borta;
+  nu `SaveArea(..., description, hostType, hostId, hostText, details="1")` (utan `details` behålls de),
+  `AreaHostOptions`, `SetMessageArea` (hela tråden; författaren eller den som kan ändra), `Post(..., areaId)` (svaret
+  ärver trådens), `SaveDocumentCategory(..., areaId)` (null = behåll, 0 = inget). `Get`/`Tasks` bär `areas`
+  (`AreasJson`: ansvarig, värd, öppna/alla uppgifter). `DeleteArea` lösgör uppgifter, meddelanden OCH kategorier.
+  Rälsposten Delar är borta; områdena hanteras i Inställningar-kortet `#stAreas`. **"＋ Nytt område…"** i varje
+  områdeslista (uppgift, inklistring, meddelande, kategori) är en rad i samma dialog (`wireNewArea`) — aldrig en dialog
+  i dialogen. **Grenen** väljs när planeringen skapas (`Planning/Create` tar `discipline`, prövas mot
+  `CompetitionTypes`) och ändras på raden `#plbDisc` i Bemanningens rutnät (`SetDiscipline`); Gren-kortet i
+  Inställningar är borta. Ingen gren per område. Svit p3 180/180 (A/B: områdesprövningen i `Post` → 1 röd;
+  `wireNewArea` som inte sparar → 2 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

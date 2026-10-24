@@ -80,6 +80,17 @@
                     <div class="col-sm-6"><label class="form-label" for="plhStart">Första dagen, om den är bestämd</label><input id="plhStart" class="form-control" placeholder="åååå-mm-dd"></div>
                     <div class="col-sm-6"><label class="form-label" for="plhEnd">Sista dagen</label><input id="plhEnd" class="form-control" placeholder="åååå-mm-dd"></div>
                 </div>
+                @* Omgång 2 steg 4: grenen väljs här (valfri) och styr vilka roller bemanningen föreslår. *@
+                <div class="mb-3"><label class="form-label" for="plhDisc">Gäller planeringen en gren? (valfritt)</label>
+                    <select id="plhDisc" class="form-select" style="max-width:320px">
+                        <option value="">Ingen gren — eller flera</option>
+                        @foreach (var d in HpskSite.Models.CompetitionTypes.All)
+                        {
+                            <option value="@d.Id">@d.Name</option>
+                        }
+                    </select>
+                    <div class="plh-help small mt-1">Välj grenen om det är en tävling i en gren — då föreslår bemanningen rätt roller, till exempel stationschef i fältskytte. En SM-vecka med flera grenar delar du i stället upp i områden.</div>
+                </div>
                 @*
                     ⚠️ Planeringsgruppen är sin egen enhet (Stefan 2026-10-23): den som är inbjuden är med, ingen
                     annan. Ingen förening eller styrelse får läsrätt — kretsar och klubbar utser personer, och vad var
@@ -274,7 +285,7 @@
         const btn = $('plhCreate'); btn.disabled = true;
         try {
             const body = new URLSearchParams({ name: $('plhName').value, targetText: $('plhTarget').value,
-                targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim() });
+                targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim(), discipline: $('plhDisc').value });
             const r = await req('/umbraco/surface/Planning/Create', { method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: body.toString() });
             if (!r.success) { $('plhErr').textContent = r.message; $('plhErr').classList.remove('d-none'); $('plhErr').scrollIntoView({ block: 'nearest' }); return; }

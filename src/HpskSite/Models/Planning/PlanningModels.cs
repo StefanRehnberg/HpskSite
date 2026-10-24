@@ -320,8 +320,8 @@ namespace HpskSite.Models.Planning
         public string? RefKind { get; set; }
         public int? RefId { get; set; }
         public int? ReplyToMessageId { get; set; }
-        /// <summary>P3 steg D: delen meddelandet gäller (PlanningPart.Id, aldrig grunddelen). Null = hela planeringen.</summary>
-        public int? PartId { get; set; }
+        /// <summary>Omgång 2 steg 4: området tråden gäller (PlanningArea.Id). Null = hela planeringen. Ersätter delarna.</summary>
+        public int? AreaId { get; set; }
         public bool ViaEmail { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? EditedAt { get; set; }
@@ -501,8 +501,6 @@ namespace HpskSite.Models.Planning
         public string? SourceKind { get; set; }
         public string? SourceKey { get; set; }
         public int? ImportedFromWorkItemId { get; set; }
-        /// <summary>P3 steg D: delen uppgiften hör till (PlanningPart.Id, aldrig grunddelen). Null = hela planeringen.</summary>
-        public int? PartId { get; set; }
     }
 
     /// <summary>Uppgiftens historik: lägen, rapporter och beslut. Raderas aldrig.</summary>
@@ -590,6 +588,12 @@ namespace HpskSite.Models.Planning
         public int CreatedBy { get; set; }
         public DateTime? DeletedAt { get; set; }
         public int? ImportedFromWorkAreaId { get; set; }
+        // ---- Omgång 2 steg 4: området har det delarna hade (delarna finns inte längre) ----
+        public string? Description { get; set; }
+        /// <summary>Vem som står för området: en klubb, en krets eller fri text ("Förbundets kansli").</summary>
+        public int? HostClubId { get; set; }
+        public int? HostRegionId { get; set; }
+        public string? HostText { get; set; }
     }
 
     /// <summary>
@@ -630,6 +634,9 @@ namespace HpskSite.Models.Planning
         public DateTime CreatedAt { get; set; }
         public int CreatedBy { get; set; }             // deltagare
         public DateTime? DeletedAt { get; set; }
+        /// <summary>Omgång 2 steg 4: området kategorin hör till (PlanningArea.Id). Vid utdelning till en egen planering
+        /// är kategorins dokument förvalda.</summary>
+        public int? AreaId { get; set; }
     }
 
     /// <summary>

@@ -31,13 +31,15 @@ namespace HpskSite.Services.Planning
                 "SELECT * FROM PlanningDocumentCategory WHERE PlanningId = @0 AND DeletedAt IS NULL ORDER BY SortOrder, Id", planningId);
         }
 
-        /// <summary>Ny kategori (id 0) eller nytt namn. Svarar kategorins id.</summary>
-        public (int Id, string? Error) SaveDocumentCategory(int planningId, int categoryId, string? name, int byParticipantId)
+        /// <summary>Ny kategori (id 0) eller nytt namn. Svarar kategorins id. <paramref name="areaId"/>: null = rör inte,
+        /// 0 = inget område, annars området kategorin hör till (omgång 2 steg 4).</summary>
+        public (int Id, string? Error) SaveDocumentCategory(int planningId, int categoryId, string? name, int byParticipantId, int? areaId = null)
         {
             var n = Clean(name, MaxCategoryName);
             if (n == null) return (0, "Skriv vad kategorin heter.");
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
+            if (AreaError(db, planningId, areaId) is { } ae) return (0, ae);
             var others = db.Fetch<PlanningDocumentCategoryRow>(
                 "SELECT * FROM PlanningDocumentCategory WITH (UPDLOCK, HOLDLOCK) WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId);
             if (others.Any(c => c.Id != categoryId && string.Equals(c.Name, n, StringComparison.CurrentCultureIgnoreCase)))
@@ -47,6 +49,7 @@ namespace HpskSite.Services.Planning
                 var row = others.FirstOrDefault(c => c.Id == categoryId);
                 if (row == null) return (0, "Kategorin finns inte.");
                 row.Name = n;
+                if (areaId.HasValue) row.AreaId = areaId > 0 ? areaId : null;
                 db.Update(row);
                 Bump(db, planningId);
                 return (row.Id, null);
@@ -54,7 +57,7 @@ namespace HpskSite.Services.Planning
             var created = new PlanningDocumentCategoryRow
             {
                 PlanningId = planningId, Name = n, SortOrder = others.Count == 0 ? 0 : others.Max(c => c.SortOrder) + 1,
-                CreatedAt = Now, CreatedBy = byParticipantId,
+                CreatedAt = Now, CreatedBy = byParticipantId, AreaId = areaId > 0 ? areaId : null,
             };
             db.Insert(created);
             Bump(db, planningId);

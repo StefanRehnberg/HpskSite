@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -300,7 +300,7 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create(string name, string? targetText, string? targetStart, string? targetEnd)
+        public async Task<IActionResult> Create(string name, string? targetText, string? targetStart, string? targetEnd, string? discipline = null)
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
@@ -308,12 +308,16 @@ namespace HpskSite.Controllers
             var end = ParseDate(targetEnd);
             var err = PlanningService.Validate(name, start, end);
             if (err != null) return No(err);
+            // Omgång 2 steg 4: grenen väljs när planeringen skapas (valfri). Den styr vilka roller bemanningen föreslår.
+            var disciplineKey = string.IsNullOrWhiteSpace(discipline) ? null : HpskSite.Models.CompetitionTypes.GetById(discipline.Trim())?.Id;
+            if (!string.IsNullOrWhiteSpace(discipline) && disciplineKey == null) return No("Grenen finns inte.");
 
             var member = _memberService.GetById(me);
             var display = MemberDisplayName(member);
             var primary = _memberClubs.GetPrimaryClubId(member);
             var (pid, _) = _planning.Create(new PlanningService.CreateInput(name, PlanningKind.Group, targetText,
                 start, end, me, display, primary > 0 ? primary : null, null));
+            if (disciplineKey != null) _planning.SetDisciplineKey(pid, disciplineKey, me);
             return Ok(new { success = true, id = pid, url = $"/tavlingsplanering/{pid}" });
         }
 
@@ -403,8 +407,8 @@ namespace HpskSite.Controllers
                     viaCompetition = p.ViaCompetition,
                     openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),
-                // P3 steg D: delarna (grenar och ansvar). Grunddelen är planeringen själv och kommer inte med.
-                parts = PartsJson(id, people, tasks),
+                // Omgång 2 steg 4: områdena (ersätter delarna) — för meddelandena, Inställningar och dokumentkategorierna.
+                areas = AreasJson(id, _planning.Participants(id, includeRemoved: true).ToDictionary(pp => pp.Id, pp => pp.DisplayName), tasks),
                 // Förslagen när en roll ges: bemanningens katalog + planeringens vanliga ansvar. Egen text går alltid.
                 roleSuggestions = PlanningTaskRules.RoleSuggestions().Select(r => r.Name),
                 // Nivåerna med förklaringar — texten finns bara i PlanningAccessLevel.Help.
@@ -884,7 +888,7 @@ namespace HpskSite.Controllers
                 body = m.DeletedAt == null ? m.Body : "", deleted = m.DeletedAt != null, edited = m.EditedAt != null,
                 systemText, replyTo = m.ReplyToMessageId, createdAt = DT(m.CreatedAt), viaEmail = m.ViaEmail,
                 mentions = mentions[m.Id].ToArray(), mine = m.ParticipantId == me,
-                refKind = m.RefKind, refId = m.RefId, partId = m.PartId,
+                refKind = m.RefKind, refId = m.RefId, areaId = m.AreaId,
             };
         }
 
@@ -913,12 +917,12 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? documents, string? t, int? partId = null)
+        public async Task<IActionResult> Post(int id, string body, int? replyTo, string? mentions, string? documents, string? t, int? areaId = null)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanWriteMessages(x.Caller)) return No("Bara den som är med skriver i planeringen.");
-            var r = _planning.Post(id, x.Caller.ParticipantId, body, replyTo, Ids(mentions), x.Caller.ViaLink, partId);
+            var r = _planning.Post(id, x.Caller.ParticipantId, body, replyTo, Ids(mentions), x.Caller.ViaLink, areaId);
             if (r.Error != null) return No(r.Error);
             // Bifogade dokument ur arkivet. Meddelandet är redan skickat; går bifogningen inte igenom sägs det.
             string? docWarning = null;
