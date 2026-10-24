@@ -159,7 +159,8 @@ namespace HpskSite.Services.Schedule
                 // Working side: one indexed query, no date filter needed (the table is small per member).
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 var staffed = scope.Database.Fetch<int>(
-                    "SELECT DISTINCT CompetitionId FROM StaffAssignment WHERE MemberId = @0", memberId);
+                    // Omgång 3: rader i en planering utan tävling har CompetitionId NULL — de hör inte hit (NULL i en int-lista kastar).
+                    "SELECT DISTINCT CompetitionId FROM StaffAssignment WHERE MemberId = @0 AND CompetitionId IS NOT NULL", memberId);
                 foreach (var id in staffed)
                 {
                     // Keep the ones whose RUN overlaps the window — the dates live in the content tree.

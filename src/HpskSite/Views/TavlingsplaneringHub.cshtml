@@ -11,9 +11,10 @@
     som väntar. Andras planeringar visar bara namn, tid och sammankallande — aldrig innehållet.
     Planeringar som hör till en tävling nås från tävlingens knapp Planering (/tavlingsplanering?c=…).
 *@
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
+<script src="~/js/planering-dates.js" asp-append-version="true"></script>
 <style>
     .plh-page { padding-bottom: 5rem; }
     .plh-help { color: var(--bs-secondary-color); }
@@ -280,12 +281,20 @@
         const m = bootstrap.Modal.getOrCreateInstance($('plhModal')); m.show();
         $('plhModal').addEventListener('shown.bs.modal', () => $('plhName').focus(), { once: true });
     });
-    if (window.flatpickr) ['plhStart', 'plhEnd'].forEach(id => window.flatpickr($(id), { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true }));
+    // Omgång 3 (K8): "16 maj 2027" blev tyst 1 januari — den gemensamma tolkningen läser svenska datum och gör fältet rött annars.
+    ['plhStart', 'plhEnd'].forEach(id => window.hpskPlDatePicker ? window.hpskPlDatePicker($(id))
+        : window.flatpickr && window.flatpickr($(id), { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true }));
     $('plhCreate').addEventListener('click', async () => {
-        const btn = $('plhCreate'); btn.disabled = true;
+        const btn = $('plhCreate');
+        const dates = ['plhStart', 'plhEnd'].map(id => window.hpskPlParseDate ? window.hpskPlParseDate($(id).value) : $(id).value.trim());
+        if (dates.some(d => d === null)) {
+            $('plhErr').textContent = 'Ett datum går inte att läsa. Skriv till exempel 16 maj 2027 eller 2027-05-16.';
+            $('plhErr').classList.remove('d-none'); return;
+        }
+        btn.disabled = true;
         try {
             const body = new URLSearchParams({ name: $('plhName').value, targetText: $('plhTarget').value,
-                targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim(), discipline: $('plhDisc').value });
+                targetStart: dates[0], targetEnd: dates[1], discipline: $('plhDisc').value });
             const r = await req('/umbraco/surface/Planning/Create', { method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: body.toString() });
             if (!r.success) { $('plhErr').textContent = r.message; $('plhErr').classList.remove('d-none'); $('plhErr').scrollIntoView({ block: 'nearest' }); return; }

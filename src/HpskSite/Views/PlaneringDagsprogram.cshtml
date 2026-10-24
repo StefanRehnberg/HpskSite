@@ -19,9 +19,10 @@
 @* Planeringens dagsprogram (Stefan 2026-10-23: en planering, inte två), i planeringens ram med vänstermenyn.
    Dagsprogrammet hör till tävlingen, så sidan har innehåll först när planeringen är kopplad.
    Se TavlingsplaneringController.PlanningAgenda. *@
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
+<script src="~/js/planering-dates.js" asp-append-version="true"></script>
 @await Html.PartialAsync("_PlaneringShellStyles")
 <style>.pl-page .pl-main { min-width: 0; }</style>
 

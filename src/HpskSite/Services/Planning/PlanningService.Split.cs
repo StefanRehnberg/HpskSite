@@ -23,14 +23,89 @@ namespace HpskSite.Services.Planning
     /// </summary>
     public partial class PlanningService
     {
-        /// <summary>Sammankallande (aktiv) i planeringens huvudplanering — den som får LÄSA delplaneringen.</summary>
+        /// <summary>
+        /// Sammankallande eller Kan ändra (aktiv) i planeringens huvudplanering — den som får LÄSA delplaneringen.
+        /// Omgång 3 (Expertgruppen, persona 3): Kan ändra kom till — banansvarige som leder arbetet i huvudplaneringen såg
+        /// annars inte de stationer hen delat ut. Bara läsa; inloggad (prövas i <see cref="PlanningAccess.CanReadContent"/>).
+        /// </summary>
         public bool IsParentConvener(PlanningRow p, int memberId)
         {
             if (!(p.ParentPlanningId > 0) || memberId <= 0) return false;
             using var s = _scopes.CreateScope(autoComplete: true);
             return s.Database.ExecuteScalar<int>(@"SELECT COUNT(*) FROM PlanningMember m JOIN Planning p ON p.Id = m.PlanningId
-                WHERE m.PlanningId = @0 AND m.MemberId = @1 AND m.RemovedAt IS NULL AND m.Access = N'Owner' AND p.DeletedAt IS NULL",
+                WHERE m.PlanningId = @0 AND m.MemberId = @1 AND m.RemovedAt IS NULL AND m.Access IN (N'Owner', N'Editor') AND p.DeletedAt IS NULL",
                 p.ParentPlanningId!.Value, memberId) > 0;
+        }
+
+        /// <summary>
+        /// Omgång 3: familjen = huvudplaneringen och dess delplaneringar (en nivå), i den ordningen. EN plats för regeln — den
+        /// stod som "Id = @0 OR ParentPlanningId = @0" på ett tiotal ställen. Raderade planeringar räknas inte.
+        /// </summary>
+        public List<PlanningRow> Family(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0", planningId);
+            if (p == null) return new();
+            var root = p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
+            return db.Fetch<PlanningRow>(@"SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL
+                ORDER BY CASE WHEN Id = @0 THEN 0 ELSE 1 END, Name", root);
+        }
+
+        private sealed class FamilyLink { public int PlanningId { get; set; } public int TargetId { get; set; } }
+
+        /// <summary>Familjens kopplingar, planering → tävling.</summary>
+        public Dictionary<int, int> FamilyLinks(IReadOnlyCollection<PlanningRow> family)
+        {
+            if (family.Count == 0) return new();
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<FamilyLink>($"SELECT PlanningId, TargetId FROM PlanningLink WHERE TargetKind = N'competition' AND PlanningId IN ({string.Join(",", family.Select(f => f.Id))})")
+                .GroupBy(l => l.PlanningId).ToDictionary(g => g.Key, g => g.First().TargetId);
+        }
+
+        /// <summary>Den tävling planeringens bemanning gäller (<see cref="PlanningFamilyRules.StaffingCompetition"/>).</summary>
+        public int? StaffingCompetitionFor(int planningId)
+        {
+            var family = Family(planningId);
+            var p = family.FirstOrDefault(f => f.Id == planningId);
+            return p == null ? null : PlanningFamilyRules.StaffingCompetition(p, FamilyLinks(family));
+        }
+
+        /// <summary>
+        /// "Bemannar för": vilken av familjens kopplade tävlingar planeringens bemanning gäller (null = huvudplaneringens).
+        /// Tävlingen måste vara kopplad till en planering i familjen. Bemanningens rader räknas om i samma transaktion.
+        /// </summary>
+        public string? SetStaffsFor(int planningId, int? competitionId, int byMemberId)
+        {
+            var family = Family(planningId);
+            var p = family.FirstOrDefault(f => f.Id == planningId);
+            if (p == null) return "Planeringen finns inte.";
+            var links = FamilyLinks(family);
+            if (links.ContainsKey(planningId)) return "Planeringen är kopplad till en egen tävling — bemanningen gäller den.";
+            if (competitionId > 0 && !links.Values.Contains(competitionId.Value)) return "Tävlingen hör inte till någon planering i familjen.";
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            db.Execute("UPDATE Planning SET StaffsForCompetitionId = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0",
+                planningId, competitionId > 0 ? competitionId : null, Now, byMemberId);
+            HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId);
+            Bump(db, planningId);
+            return null;
+        }
+
+        /// <summary>Samma person (medlem, annars gästens adress) som aktiv deltagare i familjens ANDRA planeringar.</summary>
+        public List<(PlanningRow Planning, PlanningMemberRow Participant)> FamilyMemberships(int planningId, PlanningMemberRow person)
+        {
+            var list = new List<(PlanningRow, PlanningMemberRow)>();
+            foreach (var f in Family(planningId).Where(f => f.Id != planningId))
+            {
+                using var s = _scopes.CreateScope(autoComplete: true);
+                var row = person.MemberId > 0
+                    ? s.Database.SingleOrDefault<PlanningMemberRow>("SELECT * FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1 AND RemovedAt IS NULL", f.Id, person.MemberId)
+                    : string.IsNullOrEmpty(person.GuestEmail) ? null
+                    : s.Database.SingleOrDefault<PlanningMemberRow>("SELECT * FROM PlanningMember WHERE PlanningId = @0 AND MemberId IS NULL AND GuestEmail = @1 AND RemovedAt IS NULL", f.Id, person.GuestEmail);
+                if (row != null) list.Add((f, row));
+            }
+            return list;
         }
 
         public sealed record SubPlanningSummary(int Id, string Name, string Status, string Conveners, int OpenTasks, int Tasks,
@@ -150,12 +225,12 @@ namespace HpskSite.Services.Planning
 
             // ---- deltagarna: de valda är med (nivån följer med, men bara den valda leder) ----
             var map = new Dictionary<int, int> { [convener.Id] = ownerPid };
-            int CopyRow(PlanningMemberRow src, bool active)
+            int CopyRow(PlanningMemberRow src, bool active, bool follower = false)
             {
                 var row = new PlanningMemberRow
                 {
                     PlanningId = childId, MemberId = src.MemberId, DisplayName = src.DisplayName, GuestEmail = src.GuestEmail,
-                    Access = src.Access == PlanningAccessLevel.Owner ? PlanningAccessLevel.Editor : src.Access,
+                    Access = follower ? PlanningAccessLevel.Follower : src.Access == PlanningAccessLevel.Owner ? PlanningAccessLevel.Editor : src.Access,
                     RepresentsClubId = src.RepresentsClubId, RepresentsRegionId = src.RepresentsRegionId, RepresentsText = src.RepresentsText,
                     NotifyMode = src.NotifyMode, AddedAt = now, AddedBy = i.ByMemberId,
                     RemovedAt = active ? null : now, RemovedBy = active ? null : i.ByMemberId,
@@ -183,7 +258,10 @@ namespace HpskSite.Services.Planning
             var refsDetached = refs.Where(r => docSet.Contains(r.DocumentId) != TargetMoves(r)
                 && (docSet.Contains(r.DocumentId) || TargetMoves(r))).ToList();
 
-            // Alla som nämns i det som flyttar och inte valdes: med som "inte längre med", så att namnen står kvar.
+            // Alla som nämns i det som flyttar och inte valdes. Omgång 3 (Expertgruppen, persona 3): den som fortfarande är
+            // med i huvudplaneringen FÖLJER delplaneringen — annars förlorade hen åtkomsten till sina egna meddelanden och
+            // uppgifter utan att få veta det. Den som redan lämnat huvudplaneringen står kvar som "inte längre med".
+            var followers = new List<string>();
             int? R(int? pid)
             {
                 if (!(pid > 0)) return null;
@@ -191,7 +269,13 @@ namespace HpskSite.Services.Planning
                 if (!all.TryGetValue(pid.Value, out var src)) return null;
                 // Samma medlem får bara EN rad i planeringen (UX_PlanningMember_Member).
                 var twin = src.MemberId > 0 ? all.Values.FirstOrDefault(o => o.MemberId == src.MemberId && map.ContainsKey(o.Id)) : null;
-                return map[pid.Value] = twin != null ? map[twin.Id] : CopyRow(src, false);
+                if (twin != null) return map[pid.Value] = map[twin.Id];
+                // Sammankallande och Kan ändra läser redan delplaneringen genom huvudplaneringen (IsParentConvener) — de
+                // blir inga deltagare där (inga notiser, inget läst-läge), bara en rad som bär det de skrev.
+                var readsViaParent = src.Access == PlanningAccessLevel.Owner || src.Access == PlanningAccessLevel.Editor;
+                var follows = src.IsActive && !readsViaParent;
+                if (follows) followers.Add(src.DisplayName);
+                return map[pid.Value] = CopyRow(src, follows, follower: follows);
             }
 
             // P4: ett område med stationer följer med som område i delplaneringen — stationerna, värden och beskrivningen
@@ -272,7 +356,9 @@ namespace HpskSite.Services.Planning
                 $"Planeringen är en del av {parent.Name}. Den skapades ur området {area.Name}: {what} flyttades hit."
                 + (string.IsNullOrWhiteSpace(area.Description) ? "" : $" Områdets beskrivning: {area.Description.Trim()}"), ownerPid, null, null, now);
             InsertSystem(db, planningId, "planning-split",
-                $"Området {area.Name} delades ut till en egen planering, {name}: {what} flyttades dit.", null, null, null, now);
+                $"Området {area.Name} delades ut till en egen planering, {name}: {what} flyttades dit."
+                + (followers.Count == 0 ? "" : $" {string.Join(", ", followers.Distinct())} skrev eller hade något i det som flyttade och följer {name}."),
+                null, null, null, now);
             Bump(db, planningId);
             Bump(db, childId);
             return (new SplitReport(childId, name, tasks.Count(t => t.DeletedAt == null), msgs.Count, activeCount, docIds.Count, refsDetached.Count), null);

@@ -53,6 +53,9 @@ namespace HpskSite.Models.Staffing
         /// skrivs på alla hens rader. Null på alla rader = förvalet, medlemmens huvudklubb.</summary>
         public int? RepresentsClubId { get; set; }
         public int? RepresentsRegionId { get; set; }
+        /// <summary>Omgång 3 (K3): byts vid varje överlämning, så att svarslänkar som gick till den förra personen slutar
+        /// gälla (<see cref="StaffingInviteToken"/> v2). Null = raden har aldrig lämnats över; v1-länkarna gäller.</summary>
+        public Guid? InviteNonce { get; set; }
 
         public int AssignedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }

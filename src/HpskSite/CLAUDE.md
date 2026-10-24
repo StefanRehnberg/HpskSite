@@ -12743,9 +12743,8 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     ur bemanningen och öppna uppgifter, och varnar för luckor. Delning tar med områdets stationer.
   - **Fältkonfigurationen** (fråga 13b): `POST GiveChiefsConfigAccess` gör stationscheferna till medarbetare i tävlingens
     `FaltskytteConfiguration` (`_attachedConfigId`) — kräver `CanEditPlanning` OCH `CanEditAsync` på konfigurationen.
-  - **Delplaneringens bemanning** följer huvudplaneringens tävling tills den kopplas till en egen
-    (`StaffOwnerResolver.ForPlanning` faller tillbaka på förälderns länk; `StaffingPlanningLink` Attach/Detach tar
-    `InheritingChildren` med).
+  - **Delplaneringens bemanning** följer huvudplaneringens tävling tills den kopplas till en egen — se omgång 3
+    (`PlanningFamilyRules.StaffingCompetition`, `StaffingPlanningLink.RecomputeFamily`).
   - **Överskottet** (fråga 15, "ingen regel, flexibelt"): `PlanningSurplusRules.Distribute` (rena funktioner, test
     `PlanningSurplusRulesTests`) — fasta poster först, resten efter personer/uppdrag/dagar/lika/egna andelar, största resten
     i hela kronor. Föreningarna och talen ur bemanningen (*Ställer upp för*) i hela familjen; föreningar kan läggas till för
@@ -12754,6 +12753,55 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   - **Migrering `add-planning-p4.sql` (körordning P3i) FÖRE deployen** — NPoco skriver `GroupName`/`Stations` vid varje
     sparning. Körd i dev, EJ i prod.
   - Svit `tavlingsplanering-p4-verify.mjs` 59/59 (A/B: utan stationskonflikten + utan arvet vid koppling → 4 röda).
+- **Omgång 3 (2026-10-24), efter persona-testet och Expertgruppen** — plan
+  `notes/tavlingsplanering-omgang3-arbetsplan-2026-10-24.md`, fynden `notes/planeringstest/expertgrupp-planeringstest-2026-10-24.md`.
+  - **Säkerheten (K1, K2):** en tillagd medlem räknas som INBJUDEN tills hen varit inne (`PlanningContactRules.IsPendingInvite`:
+    `LastSeenAt` null, inte via tävlingen, inte tillagd av sig själv) — `ContactInfo` svarar `pending` utan e-post och telefon;
+    tillagd igen av någon annan = inbjuden igen. Tak `MaxNewPlanningsPerDay` = 10 per medlem och dygn (sajtadmin undantagen).
+    **Mejllänken bär aldrig Kan ändra** (`PlanningAccess.EditorSignedIn`): via länken ändras/tas bort bara egna uppgifter,
+    möten ställs inte in, och på ett möte beslutas bara den egna uppgiften (`DecidesAtMeeting`).
+  - **⚠️ En uppgift går bara till någon som är med** (Stefan): `TaskInputAsync` vägrar `assigneeMemberId`, en inaktiv deltagare
+    och ett nytt fritt namn (ett gammalt fritt namn på en befintlig uppgift får stå kvar). Inklistring: ett okänt namn blir
+    ingen ansvarig. Formuläret erbjuder bara deltagarna ("bjud in hen först").
+  - **Överlämningen (K3):** `ApplyPersonIdentity` med `IsReplacement` till ett fritt namn nollar MemberId, e-post, telefon,
+    Företräder, incheckning och appåtkomst och sätter en ny **`StaffAssignment.InviteNonce`** — `StaffingInviteToken` v2
+    (`"id|nonce"`) bär nonce:n och `StillValid` vägrar en länk som gick till den förra personen. **Byt ut** i planeringen
+    (`ReplaceParticipant`) flyttar öppna uppgifter och områdesansvar och kopierar aktiva roller (`MoveWork`); `alsoIn` byter
+    också i familjens planeringar där den som frågar är sammankallande (`ReplaceFamily` visar var).
+  - **⚠️⚠️ Familjen är veckan** (Stefan: en tävling per delplanering): `PlanningFamilyRules.StaffingCompetition` — egen
+    koppling → **Bemannar för** (`Planning.StaffsForCompetitionId`, om tävlingen är familjens) → huvudplaneringens → ingen.
+    `StaffingPlanningLink.RecomputeFamily` är ENDA vägen som sätter `CompetitionId` på familjens bemanningsrader (koppling,
+    avkoppling, Bemannar för, borttagning). Tävlingens läsningar ser familjens rader (`StaffOwner.IncludeFamily` + `Filter`);
+    skrivningar använder fortfarande `Where`. **De fyra `*_Comp`-indexen gäller bara tävlingens egna rader**
+    (`WHERE PlanningId IS NULL AND CompetitionId IS NOT NULL`) — förut föll kopplingen när en delplanering hade samma dag
+    (K5). `Get` bär `planning.family` (kort *Tävlingarna* på Översikt, väljaren Bemannar för under Tävlingen).
+  - **Kan ändra** i huvudplaneringen läser delplaneringarna (`IsParentConvener`). Vid delning blir de som hade uppgifter i
+    området men inte valdes **Följare** i delplaneringen. **En planering med delplaneringar går inte att ta bort**;
+    borttagningen tar bort `PlanningLink`, släpper bemanningens `CompetitionId` och speglar om tävlingarna.
+  - **Kopplingen (K6):** `LinkableCompetitions` väljer kommande tävlingar vars VÄRD är en klubb eller **krets** som någon i
+    planeringen företräder (kretsens nod-id → `regionCode`; en kretsvärdad tävling har `ClubId` 0 — SM!), med seriens värd
+    för en omgång utan egen, eller där den som frågar är tävlingsansvarig. Redan kopplade i EN fråga
+    (`PlanningService.LinkedCompetitionIds`), behörigheten (`CanEditCompetitionAsync`) bara för de 60 närmaste.
+  - **UX (K8):** `wwwroot/js/planering-dates.js` (`hpskPlDatePicker`, `hpskPlParseDate`) läser "16 maj 2027", "16/5",
+    "16/5 2027", ISO — annars blir fältet RÖTT och texten står kvar (flatpickr tömde den; `isTrusted` skiljer användarens
+    inmatning från flatpickrs egna händelser). Flatpickr låst till 4.6.13. Servern vägrar ett ifyllt datum den inte kan
+    läsa (`UnreadableDate`) — förut blev det tyst inget datum. Mötesdialogen: *Fråga vilka tider som passar* / *Tiden är
+    bestämd* (en rad, ingen svarsfrist); rader utan dag hoppas över. Nästa steg: väntande godkännanden först, *Dina
+    uppgifter* = filtret Mina, tävlingssteget bara för sammankallande. **Bemanning syns för den som deltar** (vem som sköter
+    den och mina uppdrag, `viewStaffingInfo`). Nivåtexterna säger vad Kan ändra/Deltar gör. Mallens gren förvald efter
+    planeringens. **Inklistrade uppgifter mejlas** — ETT mejl per ansvarig (`PlanningNotifier.TasksAssignedAsync`).
+    **Att nämna någon mejlas direkt även med förvalet Ett mejl om dagen** (`PlanningNotifyRules.MailOnMention`).
+    Relämejlet (Hitta funktionärer → klubbarnas ansvariga) bär den som frågar (avsändarnamn, Reply-To), vad som fattas
+    per dag och `PublicBase` (`StaffRequestService.RequestContext`). Bemanningen på telefon: en dag i taget (dagväljare,
+    tävlingsdagen först), namnet på egen rad, "saknar konto och e-post" som en gul rad.
+  - **Mallarna (K10):** storlekar klubb · krets · nationell · ldm · sm (`PrepTemplates.Sizes`, `ApplyLevel` efter SHB
+    C.3.5.2–C.4.2.1: kretstävling söks hos kretsstyrelsen, nationell/LDM via kretsen före 1 oktober året före, inbjudan
+    för kännedom resp. godkännande, fältets underlag till kretsstyrelsen resp. förbundet, jury och vapenkontroll),
+    Milsnabb, och flera grenar på en gång (`ForMany`: gemensamma områden en gång, grenens med grennamn). Ett befintligt
+    område får de uppgifter som saknas (titel, även borttagna räknas) i stället för att hoppas över. Test `PrepTemplatesTests`.
+  - **Migrering `add-planning-omgang3.sql` (körordning P3j) FÖRE deployen.** Körd i dev, EJ i prod.
+  - Svit `tavlingsplanering-o3-verify.mjs` 56/56. Test `PlanningFamilyRulesTests`, `StaffingInviteTokenTests`,
+    `PlanningTaskRulesTests`.
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

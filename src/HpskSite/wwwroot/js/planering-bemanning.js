@@ -178,8 +178,21 @@ window.PlaneringBemanning = (function () {
             <button type="button" class="btn btn-sm btn-danger" data-plb-match>Koppla till medlemmar…</button></div>`;
         else if (g.externalCount) notes += `<p class="pl-help small mb-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${g.externalCount} ${g.externalCount === 1 ? 'person saknar' : 'personer saknar'} konto på pistol.nu. De kan få förfrågan med e-post, men inget eget schema och inga påminnelser förrän de har ett konto.</p>`;
 
+        // Omgång 3 (K8): på telefon en dag i taget — tävlingsdagen först — i stället för ett rutnät som rullar i sidled.
+        const phone = window.innerWidth < 576;
+        let dayKey = null;
+        if (phone && cols.length > 1) {
+            dayKey = cols.some(c => c.key === B.phoneDay) ? B.phoneDay
+                : ((cols.find(c => c.key && (!c.kind || c.kind === 'Tavlingsdag')) || cols[0]).key);
+            notes += `<div class="plb-days d-flex gap-1 flex-wrap mb-2" role="group" aria-label="Välj dag">${cols.map(c =>
+                `<button type="button" class="btn btn-sm ${c.key === dayKey ? 'btn-primary' : 'btn-outline-secondary'}" data-plb-day="${esc(c.key || '')}"${c.key === dayKey ? ' aria-pressed="true"' : ''}>${esc(c.label)}</button>`).join('')}</div>`;
+        }
+        const showCol = c => dayKey === null || c.key === dayKey;
+        const shownCount = cols.filter(showCol).length;
+
         let head = '<th class="plb-rolecol" scope="col">Roll</th>';
         cols.forEach((c, ci) => {
+            if (!showCol(c)) return;
             const prep = c.kind && c.kind !== 'Tavlingsdag';
             const menu = c.key ? A.rowMenu([
                 { label: 'Ändra dagen…', fn: () => openDay(c) },
@@ -203,6 +216,7 @@ window.PlaneringBemanning = (function () {
                 <div class="plb-roletitle"><button type="button" class="plb-grip" title="Dra för att flytta raden, eller använd piltangenterna" aria-label="Flytta ${esc(row.roleName)}"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button>
                 <div class="min-w-0"><span class="plb-rolename">${esc(row.roleName)}</span>${row.scopeLabel ? `<div class="plb-dim">${esc(row.scopeLabel)}</div>` : ''}</div></div>${menu}</div></th>`;
             cols.forEach((c, ci) => {
+                if (!showCol(c)) return;
                 const entries = (row.cells && row.cells[c.key]) || [];
                 const need = needFor(row, c.key);
                 let cls = 'plb-cell', tally = '';
@@ -224,13 +238,13 @@ window.PlaneringBemanning = (function () {
 
         area().innerHTML = notes
             + `<div class="plb-wrap border rounded"><table class="table table-sm mb-0 plb-grid" id="plbGrid"><thead><tr>${head}</tr></thead>
-                <tbody id="plbGridBody">${rows || `<tr><td class="plb-dim p-3" colspan="${cols.length + 1}">Inga roller än. Skriv den första nedan.</td></tr>`}</tbody>
+                <tbody id="plbGridBody">${rows || `<tr><td class="plb-dim p-3" colspan="${shownCount + 1}">Inga roller än. Skriv den första nedan.</td></tr>`}</tbody>
                 <tfoot><tr><td class="plb-rolecol"><label class="visually-hidden" for="plbNewRole">Ny roll</label><input type="text" class="form-control form-control-sm" id="plbNewRole" placeholder="+ Ny roll — skriv namnet" autocomplete="off"></td>
-                <td class="plb-dim small" colspan="${Math.max(1, cols.length)}">Skriv vad <em>ni</em> kallar funktionen och tryck Enter.</td></tr></tfoot></table></div>
+                <td class="plb-dim small" colspan="${Math.max(1, shownCount)}">Skriv vad <em>ni</em> kallar funktionen och tryck Enter.</td></tr></tfoot></table></div>
             <p class="pl-help small mt-2 mb-0">Klicka på <b>lägg till</b> i en ruta för att sätta in en person. Utan tid gäller uppdraget hela dagen. Gulmarkerade namn saknar konto på pistol.nu.</p>`;
         const t = $('plbGrid');
         // Rollkolumnen är smalare på telefon (se css) — samma mått här, annars rullar rutnätet i onödan.
-        if (t) t.style.minWidth = ((window.innerWidth < 576 ? 150 : 260) + Math.max(1, cols.length) * (window.innerWidth < 576 ? 190 : 215)) + 'px';
+        if (t) t.style.minWidth = phone ? '' : (260 + Math.max(1, shownCount) * 215) + 'px';
         const nr = $('plbNewRole');
         if (nr) nr.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); createRole(nr.value); } });
         wireRowOrder();
@@ -242,7 +256,8 @@ window.PlaneringBemanning = (function () {
             + `<span class="plb-name${e.isExternal ? ' text-warning-emphasis' : ''}">${esc(e.displayName)}</span>`
             + (e.clubName ? `<span class="plb-club">${esc(e.clubName)}</span>` : '')
             + (e.timeLabel ? `<span class="badge text-bg-light border fw-normal plb-time">${esc(e.timeLabel)}</span>` : '')
-            + (e.isExternal && !e.hasContact ? '<i class="bi bi-exclamation-triangle-fill text-danger" title="Saknar konto och e-post — kan inte nås" aria-label="Kan inte nås"></i>' : '')
+            // Omgång 3 (K8): en gul rad som säger vad det gäller, i stället för en röd triangel som såg ut som ett fel.
+            + (e.isExternal && !e.hasContact ? '<span class="plb-nocontact">saknar konto och e-post</span>' : '')
             + '</button>'
             + (e.readOnly ? '' : `<button type="button" class="plb-mini" data-plb-move="${e.id}" title="Flytta ${esc(e.displayName)} till en annan dag" aria-label="Flytta till en annan dag"><i class="bi bi-arrow-left-right" aria-hidden="true"></i></button>`
                 + `<button type="button" class="plb-mini text-danger" data-plb-del="${e.id}" title="Ta bort ${esc(e.displayName)} från rutan" aria-label="Ta bort från rutan">&times;</button>`)
@@ -981,18 +996,28 @@ window.PlaneringBemanning = (function () {
                 <label class="form-label" for="plbRepQ">Vem tar över?</label>
                 <input type="search" class="form-control" id="plbRepQ" autocomplete="off" placeholder="Sök medlem, eller skriv ett namn">
                 <div class="list-group mt-1 d-none" id="plbRepRes"></div>
-                <div class="mt-2" id="plbRepPicked"></div>`,
+                <div class="mt-2" id="plbRepPicked"></div>
+                <div id="plbRepContact" class="mt-3">
+                    <div class="pl-help small mb-1">Har personen inget konto? Skriv e-post och telefon, så når förfrågan och tävlingsdagens lista rätt person.</div>
+                    <div class="row g-2"><div class="col-sm-7"><input type="email" class="form-control" id="plbRepEmail" autocomplete="off" placeholder="E-post (valfritt)"></div>
+                        <div class="col-sm-5"><input type="tel" class="form-control" id="plbRepPhone" autocomplete="off" placeholder="Telefon (valfritt)"></div></div>
+                </div>
+                <div class="pl-help small mt-2">Länkar som skickats till ${esc(first(p.displayName))} slutar gälla.</div>`,
             onOpen: b => {
                 const i = b.querySelector('#plbRepQ'); i.focus();
-                i.addEventListener('input', () => { picked = null; b.querySelector('#plbRepPicked').innerHTML = ''; });
-                wireMemberSearch(b, '#plbRepQ', '#plbRepRes', m => { picked = m; i.value = m.memberName; b.querySelector('#plbRepPicked').innerHTML = `Tar över: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
+                const contact = b.querySelector('#plbRepContact');
+                i.addEventListener('input', () => { picked = null; b.querySelector('#plbRepPicked').innerHTML = ''; contact.classList.remove('d-none'); });
+                wireMemberSearch(b, '#plbRepQ', '#plbRepRes', m => { picked = m; i.value = m.memberName; contact.classList.add('d-none');
+                    b.querySelector('#plbRepPicked').innerHTML = `Tar över: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
             },
             onOk: async b => {
                 const typed = b.querySelector('#plbRepQ').value.trim();
                 if (!picked && !typed) return 'Skriv eller välj vem som tar över.';
+                // Omgång 3 (K3): hela identiteten byts — utan kontaktuppgifter står den nya utan e-post och telefon, aldrig med den förras.
                 const r = await spost('ApplyPersonIdentity', picked
                     ? { personKey: p.key, memberId: picked.memberId, isReplacement: true }
-                    : { personKey: p.key, newName: typed, isReplacement: true });
+                    : { personKey: p.key, newName: typed, isReplacement: true,
+                        email: b.querySelector('#plbRepEmail').value.trim(), phone: b.querySelector('#plbRepPhone').value.trim() });
                 if (!r.success) return r.message || 'Det gick inte att lämna över.';
                 await loadPeople();
                 nav('personer', picked ? 'm:' + picked.memberId : 'n:' + typed.toLowerCase());
@@ -1469,10 +1494,11 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
+        if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
+        else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { closeEditor(); nav('personer', t.dataset.plbPerson); }
         else if (t.hasAttribute('data-plb-add')) openEditor(t);
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));

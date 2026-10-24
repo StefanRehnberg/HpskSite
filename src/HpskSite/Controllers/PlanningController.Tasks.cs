@@ -134,7 +134,8 @@ namespace HpskSite.Controllers
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
             if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften ändras av den som lade till den, eller av den som kan ändra planeringen.");
-            var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
+            var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost,
+                task.AssigneeName);
             if (err != null) return No(err);
             // Utelämnat = behåll (en äldre klient som inte känner till milstolparna får inte ta bort flaggan).
             input = input! with
@@ -215,23 +216,23 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Formulärets fält som en <see cref="PlanningService.TaskInput"/>. En medlem som får uppgiften men inte är
-        /// med läggs till som Deltar (Stefan 2026-10-23), inom inbjudningstaket.
+        /// Formulärets fält som en <see cref="PlanningService.TaskInput"/>.
+        /// <para>⚠️ Omgång 3 (Stefan 2026-10-24, upphäver 2026-10-23): en uppgift går bara till någon som ÄR med. Att ge en
+        /// uppgift till en medlem utanför lade förr till hen som Deltar — en väg förbi inbjudningsnivån (Expertgruppen K2).
+        /// Ett fritt namn godtas bara när det redan står på uppgiften (<paramref name="keepName"/>).</para>
         /// </summary>
         private Task<(PlanningService.TaskInput? Input, string? Error)> TaskInputAsync(Ctx x, string title, string? description, int? assignee,
-            int? assigneeMemberId, string? assigneeName, string? due, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
+            int? assigneeMemberId, string? assigneeName, string? due, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost,
+            string? keepName = null)
         {
             int? pid = assignee > 0 ? assignee : null;
             if (pid == null && assigneeMemberId > 0)
-            {
-                if (x.Caller.ViaLink) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Logga in för att ge uppgiften till någon som inte är med."));
-                var m = _memberService.GetById(assigneeMemberId.Value);
-                if (m == null || !m.IsApproved) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Medlemmen finns inte."));
-                if (_planning.ParticipantForMember(x.Planning.Id, m.Id) is not { IsActive: true } && _planning.InvitesLastDay(x.Planning.Id) >= PlanningInviteRules.MaxPerDay)
-                    return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, PlanningInviteRules.LimitMessage));
-                pid = _planning.EnsureParticipantForMember(x.Planning.Id, m.Id, MemberDisplayName(m), x.MemberId);
-                if (!(pid > 0)) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Personen kunde inte läggas till i planeringen."));
-            }
+                return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Bara den som är med i planeringen kan få en uppgift. Bjud in hen först."));
+            if (pid is int p && _planning.Participant(x.Planning.Id, p) is not { IsActive: true })
+                return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Personen är inte med i planeringen."));
+            if (pid == null && !string.IsNullOrWhiteSpace(assigneeName)
+                && !string.Equals(assigneeName.Trim(), (keepName ?? "").Trim(), StringComparison.Ordinal))
+                return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Bara den som är med i planeringen kan få en uppgift. Bjud in hen först."));
             decimal? cost = null;
             var costText = (estimatedCost ?? "").Trim().Replace(" ", "").Replace(",", ".");
             if (costText.Length > 0)

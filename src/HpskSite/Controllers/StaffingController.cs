@@ -761,7 +761,12 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var (ok, msg, sent, push, recipients) = _request.Send(owner, request.Mode, request.Message, viewer.Id);
+            // Omgång 3: relämejlet bär den som frågar (namn, Reply-To), vad som fattas och sajtens riktiga adress.
+            var senderEmail = _memberService.GetById(viewer.Id)?.Email;
+            List<NeedDayView>? needs = null;
+            try { needs = _help.NeedDays(owner); } catch (Exception ex) { _logger.LogWarning(ex, "Förfrågan om funktionärer: behoven kunde inte läsas."); }
+            var (ok, msg, sent, push, recipients) = _request.Send(owner, request.Mode, request.Message, viewer.Id,
+                new StaffRequestService.RequestContext(Request.PublicBase(), viewer.Name, senderEmail, needs));
             return Json(new { success = ok, message = msg, sent, push, recipients });
         }
 
@@ -806,7 +811,7 @@ namespace HpskSite.Controllers
             else if (!string.IsNullOrWhiteSpace(a.Email))
             {
                 // External (non-member) helper: a tokened accept/decline link, no login required.
-                var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
+                var token = StaffingInviteToken.Protect(_dataProtection, a);
                 var html = NotifyEmailHtml(bodyText, "Svara på förfrågan", $"/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}", viewer.Name);
                 try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { }
             }
@@ -831,7 +836,7 @@ namespace HpskSite.Controllers
             if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
             if (await RowOwnerAsync(_staffing.OwnerOf(a.Id)) == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
+            var token = StaffingInviteToken.Protect(_dataProtection, a);
             var url = $"{Request.PublicBase()}/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}";
             return Json(new { success = true, url, token });
         }

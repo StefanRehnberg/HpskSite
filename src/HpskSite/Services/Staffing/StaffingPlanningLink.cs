@@ -58,32 +58,46 @@ namespace HpskSite.Services.Staffing
                 planningId, competitionId, RoleOwnerType.Planning, RoleOwnerType.Competition);
         }
 
-        /// <summary>P4: delplaneringarna utan egen koppling — de bemannar huvudplaneringens tävling.</summary>
-        private const string InheritingChildren =
-            "PlanningId IN (SELECT c.Id FROM Planning c WHERE c.ParentPlanningId = @0 AND NOT EXISTS (SELECT 1 FROM PlanningLink l WHERE l.PlanningId = c.Id))";
-
         public static void Attach(IUmbracoDatabase db, int planningId, int competitionId)
         {
             if (planningId <= 0 || competitionId <= 0) return;
             Adopt(db, planningId, competitionId);
-            foreach (var t in AllTables)
-            {
-                db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE PlanningId = @0", planningId, competitionId);
-                db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE {InheritingChildren}", planningId, competitionId);
-            }
+            RecomputeFamily(db, planningId);
         }
 
         public static void Detach(IUmbracoDatabase db, int planningId, int competitionId)
         {
             if (planningId <= 0) return;
             if (competitionId > 0) Adopt(db, planningId, competitionId);
-            // P4: en delplanering som kopplas loss faller tillbaka på huvudplaneringens tävling (om den har en);
-            // huvudplaneringens delplaneringar utan egen koppling tappar tävlingen tillsammans med den.
-            const string parentComp = "(SELECT TOP 1 l.TargetId FROM Planning p JOIN PlanningLink l ON l.PlanningId = p.ParentPlanningId WHERE p.Id = @0)";
-            foreach (var t in AllTables)
+            RecomputeFamily(db, planningId);
+        }
+
+        private sealed class LinkPair { public int PlanningId { get; set; } public int TargetId { get; set; } }
+
+        /// <summary>
+        /// Omgång 3: varje planering i familjen får den tävling dess bemanning gäller (<see cref="PlanningFamilyRules.StaffingCompetition"/>)
+        /// på alla sina rader. EN väg — koppla, koppla loss, "Bemannar för" och borttagning går hit, så att familjens
+        /// planeringar aldrig kan säga olika saker om vilken tävling de bemannar. Familjen är högst några tiotal planeringar.
+        /// </summary>
+        public static void RecomputeFamily(IUmbracoDatabase db, int planningId)
+        {
+            var p = db.SingleOrDefault<HpskSite.Models.Planning.PlanningRow>("SELECT * FROM Planning WHERE Id = @0", planningId);
+            if (p == null) return;
+            var root = p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
+            var family = db.Fetch<HpskSite.Models.Planning.PlanningRow>(
+                "SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", root);
+            if (family.Count == 0) return;
+            var ids = string.Join(",", family.Select(f => f.Id));
+            var links = db.Fetch<LinkPair>($"SELECT PlanningId, TargetId FROM PlanningLink WHERE TargetKind = N'competition' AND PlanningId IN ({ids})")
+                .GroupBy(l => l.PlanningId).ToDictionary(g => g.Key, g => g.First().TargetId);
+            foreach (var f in family)
             {
-                db.Execute($"UPDATE {t} SET CompetitionId = {parentComp} WHERE PlanningId = @0", planningId);
-                db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE {InheritingChildren}", planningId);
+                var comp = HpskSite.Models.Planning.PlanningFamilyRules.StaffingCompetition(f, links);
+                foreach (var t in AllTables)
+                {
+                    if (comp is int c) db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE PlanningId = @0 AND (CompetitionId IS NULL OR CompetitionId <> @1)", f.Id, c);
+                    else db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE PlanningId = @0 AND CompetitionId IS NOT NULL", f.Id);
+                }
             }
         }
     }

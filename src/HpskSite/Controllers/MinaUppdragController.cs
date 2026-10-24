@@ -78,11 +78,20 @@ namespace HpskSite.Controllers
 
         // ---- External (non-member) helper accept/decline via tokened link (no login) ----
 
+        /// <summary>Raden länken gäller — null om länken är fel eller uppdraget har lämnats över sedan den skickades (K3).</summary>
+        private int? InviteRowId(string? t)
+        {
+            var read = string.IsNullOrEmpty(t) ? null : StaffingInviteToken.Read(_dataProtection, t!);
+            if (read is not { } r) return null;
+            var a = _staffing.GetById(r.Id);
+            return a != null && StaffingInviteToken.StillValid(r.Nonce, a.InviteNonce) ? r.Id : null;
+        }
+
         [HttpGet("svar")]
         public IActionResult Svar(string? t)
         {
             var model = new InviteResponseModel { Token = t ?? "" };
-            var id = string.IsNullOrEmpty(t) ? null : StaffingInviteToken.Unprotect(_dataProtection, t!);
+            var id = InviteRowId(t);
             if (id != null)
             {
                 var info = _staffing.GetInviteInfo(id.Value);
@@ -95,7 +104,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public IActionResult SvarRespond([FromForm] string t, [FromForm] string status)
         {
-            var id = string.IsNullOrEmpty(t) ? null : StaffingInviteToken.Unprotect(_dataProtection, t);
+            var id = InviteRowId(t);
             if (id == null) return View("UppdragSvar", new InviteResponseModel { Token = t ?? "" });
             _staffing.SetInviteResponse(id.Value, status);
             var info = _staffing.GetInviteInfo(id.Value) ?? new InviteResponseModel { Token = t };

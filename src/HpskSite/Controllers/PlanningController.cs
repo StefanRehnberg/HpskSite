@@ -184,6 +184,9 @@ namespace HpskSite.Controllers
         private static string D(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd", Inv) : "";
         private static DateTime? ParseDate(string? s) =>
             DateTime.TryParseExact((s ?? "").Trim(), "yyyy-MM-dd", Inv, DateTimeStyles.None, out var d) ? d : null;
+        /// <summary>Omgång 3 (K8): ett ifyllt datum som inte går att läsa vägras — förut blev det tyst inget datum.</summary>
+        private static bool UnreadableDate(string? s) => !string.IsNullOrWhiteSpace(s) && ParseDate(s) == null;
+        private const string UnreadableDateMessage = "Ett datum går inte att läsa. Skriv till exempel 2027-05-16.";
         private static DateTime? ParseDateTime(string? s)
         {
             var v = (s ?? "").Trim().Replace('T', ' ');
@@ -310,6 +313,7 @@ namespace HpskSite.Controllers
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
+            if (UnreadableDate(targetStart) || UnreadableDate(targetEnd)) return No(UnreadableDateMessage);
             var start = ParseDate(targetStart);
             var end = ParseDate(targetEnd);
             var err = PlanningService.Validate(name, start, end);
@@ -317,6 +321,10 @@ namespace HpskSite.Controllers
             // Omgång 2 steg 4: grenen väljs när planeringen skapas (valfri). Den styr vilka roller bemanningen föreslår.
             var disciplineKey = string.IsNullOrWhiteSpace(discipline) ? null : HpskSite.Models.CompetitionTypes.GetById(discipline.Trim())?.Id;
             if (!string.IsNullOrWhiteSpace(discipline) && disciplineKey == null) return No("Grenen finns inte.");
+            // Omgång 3 (Expertgruppen K1): inbjudningstaket gäller per planering — utan ett tak på planeringarna räckte det
+            // att skapa en till.
+            if (_planning.CreatedLastDay(me) >= PlanningContactRules.MaxNewPlanningsPerDay && !await _auth.IsCurrentUserAdminAsync())
+                return No($"Du har skapat {PlanningContactRules.MaxNewPlanningsPerDay} planeringar det senaste dygnet. Vänta till i morgon, eller fortsätt i en av dem.");
 
             var member = _memberService.GetById(me);
             var display = MemberDisplayName(member);
@@ -377,6 +385,8 @@ namespace HpskSite.Controllers
                     // Omgång 2 steg 5: huvudplaneringen (för en delplanering) och delplaneringarnas läge (för huvudplaneringen).
                     parent = ParentJson(x.Planning, x.MemberId),
                     subPlannings = SubPlanningsJson(x.Planning, c, x.MemberId),
+                    // Omgång 3: familjens tävlingar och "Bemannar för".
+                    family = FamilyJson(x.Planning),
                 },
                 me = new
                 {
@@ -451,6 +461,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Du kan inte ändra planeringen.");
+            if (UnreadableDate(targetStart) || UnreadableDate(targetEnd)) return No(UnreadableDateMessage);
             bool? list = listed == null ? null : listed == "1";
             if (list.HasValue && list.Value != x.Planning.ListedForMembers && !PlanningAccess.CanManagePlanning(x.Caller))
                 return No("Bara den sammankallande väljer om planeringen visas för alla medlemmar.");
@@ -478,7 +489,14 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den sammankallande tar bort planeringen.");
-            _planning.Delete(id, x.MemberId);
+            var r = _planning.Delete(id, x.MemberId);
+            if (r.Error != null) return No(r.Error);
+            // Tävlingarnas tävlingsansvariga och stationschefer speglas om — de som hade behörighet genom planeringen tappar den.
+            foreach (var c in r.ReleasedCompetitionIds)
+            {
+                try { _staffing.SyncCompetitionMirrors(c); }
+                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: speglingen till tävling {Comp} efter borttagningen misslyckades.", id, c); }
+            }
             return Ok();
         }
 
@@ -597,8 +615,14 @@ namespace HpskSite.Controllers
                 return Ok(new { success = true, name = row.DisplayName, email = row.GuestEmail ?? "", phone = "", club = "", isGuest = true });
             var m = _memberService.GetById(mid);
             if (m == null) return No("Personen finns inte längre.");
-            var phone = m.HasProperty("phoneNumber") ? (m.GetValue<string>("phoneNumber") ?? "") : "";
             var clubId = PrimaryClub(mid);
+            // ⚠️ Omgång 3 (Expertgruppen K1, Stefan 2026-10-24): en medlem som någon annan lagt till är INBJUDEN tills hen själv
+            // öppnat planeringen. Förut kunde vem som helst skapa en planering, lägga till medlemmar och läsa deras e-post och
+            // telefon. "Tackat ja" = har varit inne (LastSeenAt; sätts av Get och mejllänken, nollas när någon lägger till hen igen).
+            if (PlanningContactRules.IsPendingInvite(row) && row.Id != x.Caller.ParticipantId)
+                return Ok(new { success = true, name = row.DisplayName, email = "", phone = "", isGuest = false, pending = true,
+                    club = clubId > 0 ? (_clubs.GetClubNameById(clubId) ?? "") : "" });
+            var phone = m.HasProperty("phoneNumber") ? (m.GetValue<string>("phoneNumber") ?? "") : "";
             return Ok(new
             {
                 success = true, name = row.DisplayName, email = m.Email ?? "", phone = phone.Trim(),
@@ -826,14 +850,37 @@ namespace HpskSite.Controllers
         /// samma nivå och samma Företräder och ett inbjudningsmejl. Bara den sammankallande, och aldrig sig själv
         /// (den som själv slutar lämnar planeringen när någon annan är sammankallande).
         /// </summary>
+        /// <summary>
+        /// Omgång 3: var i familjen (huvud- och delplaneringar) personen som byts ut också är med, och om den som frågar får
+        /// byta ut hen där (sammankallande i just den planeringen). Skriver ingenting.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ReplaceFamily(int id, int participantId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den sammankallande byter ut någon.");
+            var old = _planning.Participant(id, participantId);
+            if (old == null || !old.IsActive) return No("Personen är inte med i planeringen.");
+            var list = new List<object>();
+            foreach (var (f, row) in _planning.FamilyMemberships(id, old))
+            {
+                var fx = await ResolveAsync(f.Id, null);
+                list.Add(new { planningId = f.Id, name = f.Name, access = PlanningAccessLevel.Label(row.Access),
+                    canReplace = fx != null && PlanningAccess.CanManageParticipants(fx.Caller) && row.Id != fx.Caller.ParticipantId });
+            }
+            return Ok(new { success = true, plannings = list });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ReplaceParticipant(int id, int participantId, int? memberId, string? name, string? email)
+        public async Task<IActionResult> ReplaceParticipant(int id, int participantId, int? memberId, string? name, string? email, string? alsoIn = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageParticipants(x.Caller)) return No("Bara den sammankallande byter ut någon.");
             if (participantId == x.Caller.ParticipantId) return No("Du kan inte byta ut dig själv. Gör någon annan till sammankallande och lämna sedan planeringen.");
+            var oldRow = _planning.Participant(id, participantId);
             string display;
             string? guestEmail = null;
             if (memberId > 0)
@@ -852,10 +899,28 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, isMember = true, message = "Adressen hör till en medlem på pistol.nu. Välj hen bland medlemmarna i stället — då deltar hen med sitt eget konto." });
                 display = name!.Trim();
             }
+            // Familjen räknas FÖRE bytet — efteråt är den gamla raden borttagen och går inte att matcha.
+            var family = oldRow == null ? new List<(PlanningRow Planning, PlanningMemberRow Participant)>() : _planning.FamilyMemberships(id, oldRow);
             var r = _planning.ReplaceParticipant(id, participantId, memberId ?? 0, display, guestEmail, x.MemberId);
             if (r.Error != null) return No(r.Error);
             var mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
-            return Ok(new { success = true, participantId = r.ParticipantId, mailed });
+
+            // Omgång 3 (Expertgruppen): Byt ut följer med ner i familjen — bara där den sammankallande valt det OCH själv är
+            // sammankallande. Personen får den nivå hen hade i varje planering, inte huvudplaneringens.
+            var wanted = (alsoIn ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => int.TryParse(s.Trim(), out var v) ? v : 0).Where(v => v > 0).ToHashSet();
+            var replacedIn = new List<string>(); var notIn = new List<string>();
+            foreach (var (f, row) in family.Where(f => wanted.Contains(f.Planning.Id)))
+            {
+                var fx = await ResolveAsync(f.Id, null);
+                if (fx == null || !PlanningAccess.CanManageParticipants(fx.Caller) || row.Id == fx.Caller.ParticipantId)
+                { notIn.Add(f.Name); continue; }
+                var fr = _planning.ReplaceParticipant(f.Id, row.Id, memberId ?? 0, display, guestEmail, x.MemberId);
+                if (fr.Error != null) { notIn.Add($"{f.Name} ({fr.Error})"); continue; }
+                await _notify.InviteAsync(f.Id, fr.ParticipantId, fx.Caller.Participant, false);
+                replacedIn.Add(f.Name);
+            }
+            return Ok(new { success = true, participantId = r.ParticipantId, mailed, replacedIn, notReplacedIn = notIn });
         }
 
         [HttpPost]

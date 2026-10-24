@@ -46,6 +46,15 @@ namespace HpskSite.Services.Planning
                   WHERE l.TargetKind = N'competition' AND l.TargetId = @0 AND p.DeletedAt IS NULL", competitionId);
         }
 
+        /// <summary>Omgång 3 (K6): alla tävlingar som redan har en planering, i en fråga (urvalet av tävlingar att koppla).</summary>
+        public HashSet<int> LinkedCompetitionIds()
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<int>(
+                @"SELECT l.TargetId FROM PlanningLink l JOIN Planning p ON p.Id = l.PlanningId
+                  WHERE l.TargetKind = N'competition' AND p.DeletedAt IS NULL").ToHashSet();
+        }
+
         /// <summary>Hur många uppgifter tävlingens gamla förberedelselista har (flyttas in när planeringen startas).</summary>
         public int OldPrepCount(int competitionId)
         {
@@ -471,12 +480,19 @@ namespace HpskSite.Services.Planning
             int areas = 0, tasks = 0;
             foreach (var def in template)
             {
-                if (names.Contains(def.Area)) continue;
+                // Omgång 3 (K10): ett område som redan finns får mallens uppgifter som saknas där (en andra gren, eller en
+                // större mall) — förut hoppades hela området över och den andra grenens uppgifter kom aldrig in.
+                var existed = names.Contains(def.Area);
                 var area = EnsureArea(db, planningId, def.Area, byParticipantId, now);
-                areas++;
-                var sort = 0;
+                if (!existed) areas++;
+                var have = existed
+                    ? db.Fetch<string>("SELECT Title FROM PlanningTask WHERE PlanningId = @0 AND AreaId = @1", planningId, area.Id).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var sort = existed ? NextTaskSort(db, planningId, area.Id) : 0;
                 foreach (var item in def.Items)
                 {
+                    var title = item.TitleFromAnchor != null && anchor.HasValue ? item.TitleFromAnchor(anchor.Value.Date) : item.Title;
+                    if (have.Contains(title) || have.Contains(item.Title)) continue;
                     var t = NewTask(planningId, area.Id, item.Title, item.Description, item.DaysBeforeComp, anchor, PlanningTaskSource.Template, null, ++sort, byParticipantId, now);
                     // P3: milstolparna, och förbundets frister ur tävlingens dag när den är känd.
                     t.IsMilestone = item.Milestone;
@@ -552,10 +568,12 @@ namespace HpskSite.Services.Planning
         public sealed record PastedTask(string Title, int? AssigneeParticipantId, string? AssigneeName, DateTime? Due);
 
         /// <summary>Uppgifter inklistrade ur ett kalkylark, i ett område eller utan.</summary>
-        public int AddPastedTasks(int planningId, int? areaId, IEnumerable<PastedTask> rows, int byParticipantId)
+        /// <summary>Lägger in de inklistrade raderna. Returnerar de nya uppgifterna (omgång 3: för mejlen till de ansvariga).</summary>
+        public List<PlanningTaskRow> AddPastedTasks(int planningId, int? areaId, IEnumerable<PastedTask> rows, int byParticipantId)
         {
+            var added = new List<PlanningTaskRow>();
             var list = rows.Take(MaxPasteRows).ToList();
-            if (list.Count == 0) return 0;
+            if (list.Count == 0) return added;
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
@@ -569,9 +587,10 @@ namespace HpskSite.Services.Planning
                 t.DueDate = r.Due?.Date;
                 db.Insert(t);
                 TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, "Inklistrad.", null, false, now);
+                added.Add(t);
             }
             Bump(db, planningId);
-            return list.Count;
+            return added;
         }
 
         // =====================================================================================

@@ -73,10 +73,10 @@ namespace HpskSite.Models.Planning
 
         public static string Help(string? v) => v switch
         {
-            Owner => "Leder gruppen. Kan dessutom ändra vem som är med och deras nivå, byta ut den som inte kan vara med längre, arkivera och ta bort planeringen. Ge det till en eller två personer — inte till alla.",
-            Editor => "Som Deltar, och kan dessutom bjuda in fler och ändra planeringens namn och datum.",
+            Owner => "Leder gruppen. Kan dessutom ändra vem som är med och deras nivå, byta ut den som inte kan vara med längre, dela ut områden, koppla planeringen till tävlingen, arkivera och ta bort planeringen. Ge det till en eller två personer — inte till alla.",
+            Editor => "Som Deltar, och kan dessutom bjuda in fler, sköta bemanningen, områdena och stationerna, ändra andras uppgifter och ändra planeringens namn och datum. Läser också delplaneringarna.",
             Follower => "Läser allt, även meddelandena, men skriver inte och svarar inte på mötestider. För den som vill hålla sig informerad, till exempel förbundets kontaktperson.",
-            _ => "Skriver meddelanden, svarar på mötestider, föreslår och bokar möten. Det vanliga — välj det för de flesta.",
+            _ => "Skriver meddelanden, svarar på mötestider, föreslår och bokar möten, skapar uppgifter och lägger till dokument. Bemanningen sköts av dem som kan ändra. Det vanliga — välj det för de flesta.",
         };
 
         public static int Rank(string? v) => v switch { Owner => 4, Editor => 3, Participant => 2, Follower => 1, _ => 0 };
@@ -116,7 +116,7 @@ namespace HpskSite.Models.Planning
             All => "Notis i telefonen direkt när någon nämner dig, annars högst en gång i timmen — och ett mejl om dagen med det du inte läst.",
             Mentions => "Bara när någon nämner dig: en notis och ett mejl direkt. Möten mejlas som vanligt.",
             Off => "Inga notiser och inga mejl alls från planeringen, inte heller om möten.",
-            _ => "Ett mejl på kvällen med det som är nytt och som du inte läst. Mötesförfrågningar och bokade möten mejlas direkt.",
+            _ => "Ett mejl på kvällen med det som är nytt och som du inte läst. Mötesförfrågningar, bokade möten och när någon nämner dig mejlas direkt.",
         };
     }
 
@@ -174,6 +174,12 @@ namespace HpskSite.Models.Planning
         public int? ParentPlanningId { get; set; }
         /// <summary>P4: gruppens namn i besluten ("SSM-kommittén"). Null = "arbetsgruppen".</summary>
         public string? GroupName { get; set; }
+        /// <summary>
+        /// Omgång 3 ("Bemannar för", Stefan 2026-10-24: familjen är veckan, en tävling per delplanering): vilken av
+        /// familjens kopplade tävlingar planeringens bemanning gäller, när planeringen inte har en egen koppling.
+        /// Null = huvudplaneringens tävling (P4). Regeln: <see cref="PlanningFamilyRules.StaffingCompetition"/>.
+        /// </summary>
+        public int? StaffsForCompetitionId { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CreatedBy { get; set; }
         public DateTime UpdatedAt { get; set; }

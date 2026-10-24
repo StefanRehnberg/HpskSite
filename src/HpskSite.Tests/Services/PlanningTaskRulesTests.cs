@@ -64,6 +64,44 @@ namespace HpskSite.Tests.Services
             PlanningAccess.CanDecideTask(C(P(3, PlanningAccessLevel.Owner), link: true), atCurrentMeeting: false).Should().BeFalse();
         }
 
+        // ---------------------------------------------------------------- omgång 3: mejllänken (Expertgruppen K2)
+
+        [Fact]
+        public void Via_mejllanken_andrar_Kan_andra_bara_sitt_eget()
+        {
+            var editorLink = C(P(2, PlanningAccessLevel.Editor), link: true);
+            PlanningAccess.CanEditTask(editorLink, T(createdBy: 1, assignee: 3)).Should().BeFalse();
+            PlanningAccess.CanEditTask(editorLink, T(createdBy: 2, assignee: 3)).Should().BeTrue();
+            PlanningAccess.CanReportOnTask(editorLink, T(1, 3)).Should().BeFalse();
+            PlanningAccess.CanReportOnTask(editorLink, T(1, 2)).Should().BeTrue();
+            PlanningAccess.CanEditMeeting(editorLink, new PlanningMeetingRow { CreatedBy = 1 }).Should().BeFalse();
+            PlanningAccess.CanEditMeeting(editorLink, new PlanningMeetingRow { CreatedBy = 2 }).Should().BeTrue();
+            PlanningAccess.CanRemoveTopic(editorLink, new PlanningMeetingTopicRow { AddedBy = 1 }).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Pa_motet_via_mejllanken_beslutar_man_bara_om_sin_egen_uppgift()
+        {
+            var p = new PlanningRow { Id = 1, DoneAtMeetingsOnly = true };
+            var guestLink = C(P(5, PlanningAccessLevel.Participant), link: true);
+            PlanningAccess.CanDecideTask(guestLink, true, p, T(createdBy: 1, assignee: 6)).Should().BeFalse();
+            PlanningAccess.CanDecideTask(guestLink, true, p, T(createdBy: 1, assignee: 5)).Should().BeTrue();
+            PlanningAccess.CanDecideTask(C(P(5, PlanningAccessLevel.Participant)), true, p, T(1, 6)).Should().BeTrue();
+            PlanningAccess.CanDecideTask(guestLink, atCurrentMeeting: true).Should().BeFalse();
+        }
+
+        [Fact]
+        public void En_tillagd_medlem_ar_inbjuden_tills_hen_varit_inne()
+        {
+            var added = new PlanningMemberRow { Id = 3, MemberId = 77, AddedBy = 10 };
+            PlanningContactRules.IsPendingInvite(added).Should().BeTrue();
+            PlanningContactRules.IsPendingInvite(new PlanningMemberRow { Id = 3, MemberId = 77, AddedBy = 10, LastSeenAt = Now }).Should().BeFalse();
+            // Den som skapade planeringen, gästen och den som kom via tävlingens behörighet är aldrig "inbjudna".
+            PlanningContactRules.IsPendingInvite(new PlanningMemberRow { MemberId = 77, AddedBy = 77 }).Should().BeFalse();
+            PlanningContactRules.IsPendingInvite(new PlanningMemberRow { MemberId = null, AddedBy = 10, GuestEmail = "g@example.org" }).Should().BeFalse();
+            PlanningContactRules.IsPendingInvite(new PlanningMemberRow { MemberId = 77, AddedBy = 10, ViaCompetition = true }).Should().BeFalse();
+        }
+
         [Fact]
         public void Roller_ges_bara_av_den_sammankallande()
         {

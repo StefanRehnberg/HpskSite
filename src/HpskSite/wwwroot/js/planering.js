@@ -166,9 +166,17 @@
         if (onOpen) m.addEventListener('shown.bs.modal', function h() { m.removeEventListener('shown.bs.modal', h); onOpen($('plFormBody')); });
         return modal;
     }
+    // Omgång 3 (K8): den gemensamma datumtolkningen (planering-dates.js) — "16 maj 2027" blir aldrig 1 januari.
     function datePicker(el) {
-        if (!el || !window.flatpickr) return;
-        window.flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+        if (!el) return;
+        if (window.hpskPlDatePicker) window.hpskPlDatePicker(el);
+        else if (window.flatpickr) window.flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+    }
+    // Fältets datum som åååå-mm-dd; en text som inte går att läsa skickas som den är, så att servern säger ifrån.
+    function dateValue(el) {
+        const v = ((el && el.value) || '').trim();
+        const p = window.hpskPlParseDate ? window.hpskPlParseDate(v) : v;
+        return p === null ? v : p;
     }
 
     // ---------------------------------------------------------------- läget
@@ -254,7 +262,9 @@
         // utan att kunna ändra ser den när det finns något att läsa.
         { key: 'tavling', label: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || !!(s.planning.application && s.planning.application.id) || !!s.planning.competition) },
         // Omgång 2 (2026-10-24): bemanningen är en del i planeringen, inte en egen sida (planering-bemanning.js).
-        { key: 'bemanning', label: 'Bemanning', need: s => s.me.canEdit && !TOKEN },
+        // Omgång 3 (K8): platsen syns för alla som är med — den som inte kan ändra får veta vem som sköter bemanningen
+        // och sina egna uppdrag, i stället för att delen tyst saknas.
+        { key: 'bemanning', label: 'Bemanning', need: s => !TOKEN && (s.me.canEdit || s.me.isParticipant) },
         // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad.
         { key: 'dagsprogram', label: 'Dagsprogram', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
         { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
@@ -357,7 +367,24 @@
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
            uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings,
            tavling: viewCompetition,
-           bemanning: () => window.PlaneringBemanning.render(STAFF_API) })[view]();
+           bemanning: () => S.me.canEdit ? window.PlaneringBemanning.render(STAFF_API) : viewStaffingInfo() })[view]();
+    }
+
+    // Omgång 3 (K8): Bemanning för den som inte kan ändra — vem som sköter den och mina egna uppdrag.
+    function viewStaffingInfo() {
+        setHead('Bemanning', esc(S.planning.name));
+        setActions([]);
+        const leads = (S.participants || []).filter(p => p.access === 'Owner' || p.access === 'Editor');
+        const me = (S.participants || []).find(p => p.isMe);
+        const mine = me && me.duties && me.duties.length ? me.duties : [];
+        $('plBody').innerHTML = `<div class="pl-card"><h2>Vem sköter bemanningen?</h2>
+                <p class="mb-2">Bemanningen — funktionärerna och deras pass — sköts av ${leads.length
+                    ? leads.map(p => `<b>${esc(p.name)}</b>`).join(', ').replace(/, ([^,]*)$/, ' och $1')
+                    : 'den som kan ändra planeringen'}. Hör av dig till ${leads.length === 1 ? 'hen' : 'någon av dem'} om du vill hjälpa till eller ändra något.</p>
+                <p class="pl-help small mb-0">Den som kan ändra planeringen ser hela bemanningen.</p></div>
+            <div class="pl-card"><h2>Dina uppdrag</h2>
+                ${mine.length ? `<ul class="mb-2">${mine.map(d => `<li>${esc(d)}</li>`).join('')}</ul>` : '<p class="mb-2">Du har inga uppdrag i bemanningen.</p>'}
+                <a class="btn btn-outline-secondary btn-sm" href="/mina-uppdrag">Mina uppdrag</a></div>`;
     }
 
     // Det bemanningens del (planering-bemanning.js) får av skalet: samma anrop, dialoger och meddelanden.
@@ -413,6 +440,9 @@
         }
         // Nästa steg
         const steps = [];
+        // Omgång 3 (K8): den som väntar på att bli godkänd står först — annars sa sidan "Inget väntar på dig".
+        if (p.me.pendingRequests) steps.push(`<div class="pl-next warn"><div class="t"><b>${p.me.pendingRequests === 1 ? 'En väntar' : p.me.pendingRequests + ' väntar'} på att du godkänner ${p.me.pendingRequests === 1 ? 'hen' : 'dem'}</b> — under Deltagare.</div>
+            <a class="btn btn-primary" href="#vy=deltagare" data-pl-go="deltagare">Visa</a></div>`);
         if (MEET) MEET.meetings.filter(m => m.status === 'Proposed' && p.me.canUseMeetings && m.options.every(o => !o.mine))
             .forEach(m => steps.push(`<div class="pl-next warn"><div class="t"><b>Svara på tiderna:</b> ${esc(m.title)}</div>
                 <button class="btn btn-primary" data-pl-meet="${m.id}">Svara</button></div>`));
@@ -424,7 +454,7 @@
                 <a class="btn btn-primary" href="#vy=beslut" data-pl-go="beslut">Svara</a></div>`));
         const myTasks = myOpenTasks();
         if (myTasks) steps.push(`<div class="pl-next"><div class="t"><b>${myTasks === 1 ? 'Du har en uppgift' : `Du har ${myTasks} uppgifter`}</b> — berätta hur det går.</div>
-            <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter">Dina uppgifter</a></div>`);
+            <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter" data-pl-filter="mine">Dina uppgifter</a></div>`);
         const late = TASKS ? TASKS.tasks.filter(t => t.overdue).length : 0;
         if (late && p.me.canEdit) steps.push(`<div class="pl-next warn"><div class="t"><b>${late === 1 ? 'En uppgift är försenad' : `${late} uppgifter är försenade`}</b></div>
             <a class="btn btn-outline-primary" href="#vy=uppgifter" data-pl-go="uppgifter" data-pl-filter="overdue">Visa</a></div>`);
@@ -444,6 +474,7 @@
                 <a class="btn btn-outline-primary" href="#vy=mote&id=${m.id}" data-pl-open-meeting="${m.id}">Visa</a></div>`);
         }
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
+        html.push(familyCompetitionsCardHtml());
         html.push(subPlanningsCardHtml());
         html.push('<div id="plStationsWrap"></div>');
 
@@ -503,7 +534,8 @@
     // Raden under Nästa steg på Översikt — null när inget väntar.
     function competitionNextStep() {
         const p = S.planning, a = p.application;
-        if (TOKEN || p.competition) return null;
+        // Omgång 3 (K8): steget är den sammankallandes — för den som deltar var det en uppmaning hen inte kan följa.
+        if (TOKEN || p.competition || !S.me.canManage) return null;
         if (a && a.id > 0) {
             if (a.status === 'Utkast') return S.me.canEdit ? { text: 'utkastet till ansökan är inte inskickat till kretsen.', button: 'Visa ansökan' } : null;
             if (a.status === 'Komplettering') return { warn: true, text: 'kretsen ber om mer i ansökan.', button: 'Visa ansökan' };
@@ -573,10 +605,37 @@
             <div class="d-flex gap-2 flex-wrap">${comp.manageUrl ? `<a class="btn btn-outline-primary btn-sm" href="${esc(comp.manageUrl)}">Tävlingshanteringen</a>` : ''}
                 ${p.agendaUrl && S.me.canEdit ? `<a class="btn btn-outline-primary btn-sm" href="${esc(p.agendaUrl)}">Dagsprogrammet</a>` : ''}</div></div>`);
         if (A) html.push(applicationCard(A), applicationHistory());
+        html.push(staffsForCardHtml());
         // P4: överskottets fördelning — för den som kan ändra planeringen.
         if (S.me.canEdit && !TOKEN) html.push('<div id="plSurplusWrap"></div>');
         $('plBody').innerHTML = html.join('');
         loadSurplus();
+        const sf = $('plStaffsFor');
+        if (sf) sf.addEventListener('change', async () => {
+            const r = await post('SetStaffsFor', { competitionId: sf.value });
+            if (!r.success) { failMsg(r); return; }
+            await reloadPeople(); drawCompetition();
+            showMsg('Bemanningen gäller nu ' + esc(sf.selectedOptions[0] ? sf.selectedOptions[0].textContent : '') + '.', 'success');
+        });
+    }
+
+    // Omgång 3 ("Bemannar för"): en planering utan egen koppling i en familj väljer vilken av familjens tävlingar dess
+    // bemanning gäller — funktionärerna får behörighet och syns i den tävlingens upprop. Förval: huvudplaneringens.
+    function staffsForCardHtml() {
+        const f = S.planning.family;
+        if (!f || f.ownLink || !(f.competitions || []).length) return '';
+        const parentComp = f.competitions.find(c => c.competitionId === f.parentCompetitionId);
+        const current = f.competitions.find(c => c.competitionId === f.staffingCompetitionId);
+        const label = current ? current.name : 'ingen tävling';
+        if (!S.me.canManage) return `<div class="pl-card" id="plStaffsForCard"><h2>Bemanningen</h2>
+            <p class="mb-0">Bemanningen i den här planeringen gäller <b>${esc(label)}</b>.</p></div>`;
+        const dflt = parentComp ? `Huvudplaneringens tävling (${parentComp.name})` : 'Ingen tävling';
+        return `<div class="pl-card" id="plStaffsForCard"><h2>Bemanningen</h2>
+            <label class="form-label" for="plStaffsFor">Vilken tävling gäller bemanningen här?</label>
+            <select id="plStaffsFor" class="form-select" style="max-width:32rem">
+                <option value="0"${f.staffsFor ? '' : ' selected'}>${esc(dflt)}</option>
+                ${f.competitions.filter(c => c.competitionId !== f.parentCompetitionId).map(c => `<option value="${c.competitionId}"${f.staffsFor === c.competitionId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+            <p class="pl-help small mt-2 mb-0">Funktionärerna du lägger in här får tillgång till den tävlingen och syns i dess upprop. Planeringen kopplas inte till tävlingen — den är kopplad till ${esc(f.competitions.find(c => c.competitionId === (f.staffsFor || f.parentCompetitionId))?.planningName || 'en annan planering i familjen')}.</p></div>`;
     }
 
     // Vad som gäller just nu, i ord, med knappen för steget man står på (resten under Åtgärder).
@@ -775,12 +834,12 @@
         formModal({
             title: 'Koppla till en befintlig tävling', okLabel: list.length ? 'Koppla' : 'Stäng',
             html: list.length
-                ? `<p class="pl-help small">Kommande tävlingar i klubbarna som någon i planeringen företräder, som du får redigera och som inte redan har en planering — närmast planeringens datum först.</p>
+                ? `<p class="pl-help small">Kommande tävlingar som klubbarna eller kretsarna som någon i planeringen företräder arrangerar, eller där du är tävlingsansvarig — som du får redigera och som inte redan har en planering, närmast planeringens datum först.</p>
                    <div class="list-group" id="plLinkList">${list.map((c, i) => `<label class="list-group-item d-flex gap-2 align-items-start">
                        <input class="form-check-input mt-1" type="radio" name="plLinkComp" value="${c.id}"${i === 0 ? ' checked' : ''}>
                        <span><b>${esc(c.name)}</b><span class="d-block pl-help small">${esc([c.date ? fmtDay(c.date) : '', c.club].filter(Boolean).join(' · '))}</span></span></label>`).join('')}</div>
                    <p class="pl-help small mt-2 mb-0">Bemanningen får tävlingens dagar, och de som har tillgång till tävlingen kommer in i planeringen.</p>`
-                : `<p class="mb-0">Det finns ingen kommande tävling att koppla till: ingen i klubbarna som någon här företräder som du får redigera och som saknar planering.</p>`,
+                : `<p class="mb-0">Det finns ingen kommande tävling att koppla till: ingen som klubbarna eller kretsarna som någon här företräder arrangerar (eller där du är tävlingsansvarig) som du får redigera och som saknar planering.</p>`,
             onOk: async body => {
                 const pick = body.querySelector('input[name="plLinkComp"]:checked');
                 if (!pick) return list.length ? 'Välj en tävling.' : true;
@@ -871,7 +930,7 @@
                 ${canAddDocs() ? '<button class="btn btn-outline-secondary" type="button" id="plAttach"><i class="bi bi-paperclip me-1"></i>Bifoga dokument</button>' : ''}
                 ${!target && (areas().length || newAreaOption()) ? `<div><select id="plArea" class="form-select" style="max-width:15rem" aria-label="Meddelandet gäller">
                     <option value="">Gäller hela planeringen</option>${areas().map(a => `<option value="${a.id}"${String(a.id) === msgArea ? ' selected' : ''}>Gäller ${esc(a.name)}</option>`).join('')}${newAreaOption()}</select></div>` : ''}
-                <span class="pl-help small" id="plMentionNote">${pendingMentions.size ? 'Nämner: ' + esc([...pendingMentions.values()].join(', ')) : 'Den du nämner får en notis.'}</span>
+                <span class="pl-help small" id="plMentionNote">${pendingMentions.size ? 'Nämner: ' + esc([...pendingMentions.values()].join(', ')) : 'Den du nämner får ett mejl direkt.'}</span>
             </div><div id="plPendingDocs">${pendingDocsHtml()}</div></div>`;
     }
     function pendingDocsHtml() {
@@ -1120,13 +1179,15 @@
                 || (a.due || '9999').localeCompare(b.due || '9999') || a.id - b.id);
     }
     function meetingTaskRow(m, t) {
+        // Omgång 3: via mejllänken beslutar man bara om sin egen uppgift (servern prövar detsamma).
+        const decides = m.canDecideTasks || (!!TOKEN && m.isCurrent && t.assigneeId != null && t.assigneeId === S.me.participantId);
         if (t.status === 'Done') {
             return `<div class="pl-tkdone"><span><b>${esc(t.title)}</b>${t.assignee ? ' · ' + esc(t.assignee) : ''}</span>
-                <span class="small">Utförd — bestämt på mötet${m.canDecideTasks ? ` · <button type="button" class="btn btn-link btn-sm p-0 align-baseline pl-tkundo" data-tk-undo="${t.id}" data-tk-meeting="${m.id}">Ångra</button>` : ''}</span></div>`;
+                <span class="small">Utförd — bestämt på mötet${decides ? ` · <button type="button" class="btn btn-link btn-sm p-0 align-baseline pl-tkundo" data-tk-undo="${t.id}" data-tk-meeting="${m.id}">Ångra</button>` : ''}</span></div>`;
         }
         const ready = t.status === 'ReadyForReview';
         let side = '';
-        if (m.canDecideTasks && m.isCurrent) {
+        if (decides && m.isCurrent) {
             side = `<div class="d-flex gap-2 flex-shrink-0">
                 <button type="button" class="btn ${ready ? 'btn-success' : 'btn-outline-success'}" data-tk-done="${t.id}" data-tk-meeting="${m.id}">Klar ✓</button>
                 <button type="button" class="btn btn-outline-secondary" data-tk-continue="${t.id}" data-tk-meeting="${m.id}">Fortsätter</button></div>`;
@@ -1291,10 +1352,13 @@
             const d = row.querySelector('[data-opt-date]').value.trim();
             const f = window.hpskNormalizeTime ? window.hpskNormalizeTime(row.querySelector('[data-opt-from]').value) : row.querySelector('[data-opt-from]').value.trim();
             const t = window.hpskNormalizeTime ? window.hpskNormalizeTime(row.querySelector('[data-opt-to]').value) : row.querySelector('[data-opt-to]').value.trim();
-            if (!d && !f) return;
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { err = 'Välj en dag för varje tid.'; return; }
+            // Omgång 3 (K8): en rad utan dag hoppas över — raderna har förifyllda klockslag, så "både dag och tid tomma"
+            // hände aldrig och dialogen vägrade boka.
+            if (row.hidden || !d) return;
+            const day = window.hpskPlParseDate ? window.hpskPlParseDate(d) : d;
+            if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) { err = 'Datumet går inte att läsa. Skriv till exempel 16 maj 2027.'; return; }
             if (!f || !t) { err = 'Skriv klockslag, till exempel 19 eller 19:00.'; return; }
-            out.push(`${d} ${f}|${d} ${t}`);
+            out.push(`${day} ${f}|${day} ${t}`);
         });
         return { options: out, err };
     }
@@ -1304,13 +1368,15 @@
             title: 'Föreslå ett möte', okLabel: 'Skicka förslaget',
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="nmTitle">Vad gäller mötet?</label>
                     <input id="nmTitle" class="form-control" maxlength="200" placeholder="Till exempel: Första träffen om SM 2028"></div>
-                <div class="mb-2 fw-semibold">Föreslå några tider</div>
-                <div class="pl-help mb-2">Alla som är med får ett mejl och svarar <i>Passar / Kanske / Passar inte</i> för varje tid — utan att logga in.</div>
+                <div class="mb-3">
+                    <label class="pl-radio"><input class="form-check-input me-2" type="radio" name="nmMode" value="ask" checked>
+                        <b>Fråga vilka tider som passar</b><div class="pl-help small ms-4">Alla som är med får ett mejl och svarar <i>Passar / Kanske / Passar inte</i> för varje tid — utan att logga in.</div></label>
+                    <label class="pl-radio"><input class="form-check-input me-2" type="radio" name="nmMode" value="book" id="nmBook">
+                        <b>Tiden är bestämd — boka mötet</b><div class="pl-help small ms-4">Ingen röstning. Alla får ett mejl med tiden.</div></label></div>
+                <div class="mb-2 fw-semibold" id="nmOptsHead">Föreslå några tider</div>
                 <div id="nmOpts">${optRowHtml(0)}${optRowHtml(1)}${optRowHtml(2)}</div>
                 <button type="button" class="btn btn-outline-secondary btn-sm mb-3" id="nmAdd">+ Ytterligare en tid</button>
-                <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="nmBook">
-                    <label class="form-check-label" for="nmBook">Tiden är redan bestämd — boka den första tiden direkt (ingen röstning)</label></div>
-                <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="nmDeadline">Svara senast (valfritt)</label>
+                <div class="row g-2 mb-3" id="nmDeadlineRow"><div class="col-sm-6"><label class="form-label" for="nmDeadline">Svara senast (valfritt)</label>
                     <input id="nmDeadline" class="form-control" placeholder="åååå-mm-dd"></div></div>
                 <div class="mb-3"><label class="form-label" for="nmUrl">Länk till onlinemötet (valfritt)</label>
                     <input id="nmUrl" class="form-control" placeholder="https://teams.microsoft.com/… eller https://zoom.us/…" inputmode="url"></div>
@@ -1326,6 +1392,16 @@
                     datePicker(body.querySelector(`[data-opt-row="${n}"] [data-opt-date]`));
                 };
                 body.addEventListener('click', ev => { const d = ev.target.closest('[data-opt-del]'); if (d) d.closest('[data-opt-row]').remove(); });
+                // "Tiden är bestämd": en tid, ingen svarsfrist — de andra raderna göms (och läses inte).
+                const syncMode = () => {
+                    const book = body.querySelector('#nmBook').checked;
+                    body.querySelectorAll('[data-opt-row]').forEach((r, i) => { r.hidden = book && i > 0; });
+                    body.querySelector('#nmAdd').hidden = book;
+                    body.querySelector('#nmDeadlineRow').hidden = book;
+                    body.querySelector('#nmOptsHead').textContent = book ? 'Tiden' : 'Föreslå några tider';
+                    const ok = $('plFormOk'); if (ok) ok.textContent = book ? 'Boka mötet' : 'Skicka förslaget';
+                };
+                body.querySelectorAll('input[name="nmMode"]').forEach(r => r.addEventListener('change', syncMode));
                 body.querySelector('#nmTitle').focus();
             },
             onOk: async body => {
@@ -1333,9 +1409,8 @@
                 if (!title) return 'Skriv vad mötet gäller.';
                 const { options, err } = readOptions(body);
                 if (err) return err;
-                if (!options.length) return 'Föreslå minst en tid.';
                 const book = body.querySelector('#nmBook').checked;
-                if (book && options.length !== 1) return 'Ska tiden bokas direkt, låt bara en tid stå kvar.';
+                if (!options.length) return book ? 'Välj dag för mötet.' : 'Föreslå minst en tid.';
                 const r = await post('CreateMeeting', {
                     title, options: options.join(';'), bookNow: book ? '1' : '0',
                     voteDeadline: body.querySelector('#nmDeadline').value.trim(), onlineUrl: body.querySelector('#nmUrl').value.trim(),
@@ -1596,46 +1671,19 @@
         return '<option value="">Utan område</option>' + (TASKS.areas || [])
             .map(a => `<option value="${a.id}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('') + newAreaOption();
     }
-    // Vem: en deltagare, en medlem som inte är med (läggs till som Deltar), eller ett fritt namn.
+    // Vem: en deltagare. Omgång 3 (Stefan 2026-10-24): en uppgift går bara till någon som är med — den som ska ha den
+    // bjuds in först. Ett fritt namn från förr (t.ex. inläst ur tävlingens gamla lista) står kvar tills någon ändrar det.
     function whoField(t) {
         const free = t && !t.assigneeId && t.assigneeName;
         return `<label class="form-label" for="teWho">Vem gör det?</label>
             <select id="teWho" class="form-select">${peopleOptions(t ? t.assigneeId : null)}
-                ${TOKEN ? '' : '<option value="__member">Någon som inte är med i planeringen…</option>'}
-                <option value="__name"${free ? ' selected' : ''}>Skriv ett namn (t.ex. en sektion eller ett företag)…</option></select>
-            <div id="teMemberBox" class="mt-2 d-none"><input id="teMemberQ" class="form-control" placeholder="Sök på medlemmens namn" autocomplete="off">
-                <div id="teMemberHits" class="list-group mt-1"></div><input type="hidden" id="teMemberId">
-                <div class="pl-help small mt-1">Den du väljer läggs till i planeringen som <i>Deltar</i> och får ett mejl om uppgiften.</div></div>
-            <div id="teNameBox" class="mt-2${free ? '' : ' d-none'}"><input id="teName" class="form-control" maxlength="200" value="${esc(free ? t.assigneeName : '')}" placeholder="Till exempel Ungdomssektionen"></div>`;
+                ${free ? `<option value="__name" selected>${esc(t.assigneeName)} (inte med i planeringen)</option>` : ''}</select>
+            <input type="hidden" id="teName" value="${esc(free ? t.assigneeName : '')}">
+            <div class="pl-help small mt-1">Bara de som är med i planeringen kan få en uppgift. Saknas någon — bjud in hen först under <i>Deltagare</i>.</div>`;
     }
-    function wireWho(body) {
-        const sel = body.querySelector('#teWho');
-        const sync = () => {
-            body.querySelector('#teMemberBox').classList.toggle('d-none', sel.value !== '__member');
-            body.querySelector('#teNameBox').classList.toggle('d-none', sel.value !== '__name');
-            if (sel.value === '__member') body.querySelector('#teMemberQ').focus();
-        };
-        sel.addEventListener('change', sync);
-        let seq = 0;
-        body.querySelector('#teMemberQ')?.addEventListener('input', async e => {
-            const q = e.target.value.trim(), my = ++seq;
-            const hits = body.querySelector('#teMemberHits');
-            if (q.length < 2) { hits.innerHTML = ''; return; }
-            const r = await get('SearchMembers', { q });
-            if (my !== seq || !r.success) return;
-            hits.innerHTML = r.members.length ? r.members.map(m => `<button type="button" class="list-group-item list-group-item-action" data-pick-member="${m.memberId}">
-                ${esc(m.name)}${m.club ? ` <span class="pl-help small">${esc(m.club)}</span>` : ''}${m.alreadyIn ? ' <span class="badge text-bg-light border">med</span>' : ''}</button>`).join('')
-                : '<div class="pl-help small p-2">Ingen träff.</div>';
-        });
-        body.addEventListener('click', e => {
-            const b = e.target.closest('[data-pick-member]'); if (!b) return;
-            body.querySelector('#teMemberId').value = b.dataset.pickMember;
-            body.querySelectorAll('[data-pick-member]').forEach(x => x.classList.toggle('active', x === b));
-        });
-    }
+    function wireWho() { }
     function whoParams(body) {
         const v = body.querySelector('#teWho').value;
-        if (v === '__member') return { assignee: '', assigneeMemberId: body.querySelector('#teMemberId').value, assigneeName: '' };
         if (v === '__name') return { assignee: '', assigneeMemberId: '', assigneeName: body.querySelector('#teName').value.trim() };
         return { assignee: v, assigneeMemberId: '', assigneeName: '' };
     }
@@ -1686,7 +1734,6 @@
                 const daysMode = !!body.querySelector('#teDueDays') && body.querySelector('#teDueDays').checked;
                 const milestone = body.querySelector('#teMilestone').checked;
                 const w = whoParams(body);
-                if (body.querySelector('#teWho').value === '__member' && !w.assigneeMemberId) return 'Sök fram och välj medlemmen först.';
                 const p = Object.assign({
                     title: body.querySelector('#teTitle').value,
                     due: daysMode ? '' : body.querySelector('#teDue').value.trim(),
@@ -1702,7 +1749,7 @@
                 if (daysMode && p.dueDaysBefore === '') return 'Skriv hur många dagar före.';
                 const r = t ? await post('UpdateTask', Object.assign({ taskId: t.id }, p)) : await post('CreateTask', p);
                 if (!r.success) return r.message;
-                await Promise.all([reloadTasks(), w.assigneeMemberId ? reloadPeople() : Promise.resolve()]);
+                await reloadTasks();
                 rerender();
                 if (r.mailed) showMsg('Den som fick uppgiften har fått ett mejl.', 'success');
                 return true;
@@ -1904,21 +1951,36 @@
     // ---------------------------------------------------------------- mall, checklista, stationer, inklistring
     function openTemplate() {
         const c = competition();
-        const discOpt = c ? '' : `<div class="mb-3"><label class="form-label" for="tmDisc">Gren</label><select id="tmDisc" class="form-select">
-            <option value="Precision">Precision</option><option value="Faltskytte">Fältskytte</option><option value="Springskytte">Springskytte</option></select></div>`;
+        // Omgång 3 (K8, K10): grenen förvald efter planeringens egen (stod alltid på Precision), och flera grenar på en gång
+        // (en SM-vecka med fält och precision) — grenens egna områden får då grenens namn.
+        const dk = (S.planning.disciplineKey || '').toLowerCase();
+        const own = /falt/.test(dk) ? 'Faltskytte' : /spring/.test(dk) ? 'Springskytte' : /milsnabb/.test(dk) ? 'Milsnabb' : 'Precision';
+        const discOpt = c ? '' : `<div class="mb-3"><div class="form-label">Gren — välj en eller flera</div>
+            ${[['Precision', 'Precision'], ['Milsnabb', 'Milsnabb'], ['Faltskytte', 'Fältskytte'], ['Springskytte', 'Springskytte']].map(([v, l]) =>
+                `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" data-tm-disc value="${v}" id="tmD${v}"${v === own ? ' checked' : ''}>
+                    <label class="form-check-label" for="tmD${v}">${l}</label></div>`).join('')}
+            <div class="pl-help small">Med flera grenar kommer de gemensamma områdena en gång, och grenens egna områden får grenens namn, till exempel <i>Materiel – Fält</i>.</div></div>`;
+        const sizes = [['klubb', 'Klubbtävling', 'Ingen ansökan.'],
+            ['krets', 'Kretstävling', 'Ansökan till kretsstyrelsen.'],
+            ['nationell', 'Nationell tävling', 'Ansökan via kretsen före 1 oktober året före; inbjudan till förbundet för kännedom.'],
+            ['ldm', 'Landsdelsmästerskap', 'Ansökan via kretsen före 1 oktober året före; inbjudan till förbundet för godkännande.'],
+            ['sm', 'Svenskt mästerskap', 'Förbundets uppdrag — ingen ansökan; inbjudan för godkännande och SM-annonsen.']];
         formModal({
             title: 'Fyll i från en mall', okLabel: 'Fyll i', wide: false,
-            html: `<p>Mallen lägger till de vanliga områdena och uppgifterna för en tävling av den storleken${c ? ' i tävlingens gren' : ''}.
-                    Sista dagarna räknas ${esc(daysWord())}. Ett område som redan finns rörs inte.</p>
+            html: `<p>Mallen lägger till de vanliga områdena och uppgifterna för den sortens tävling${c ? ' i tävlingens gren' : ''}, enligt Skjuthandboken.
+                    Sista dagarna räknas ${esc(daysWord())}. Finns ett område redan läggs bara de uppgifter in som saknas där.</p>
                 ${discOpt}
-                <div class="mb-1">${[['klubb', 'Klubbtävling'], ['krets', 'Kretstävling'], ['sm', 'Mästerskap (SM eller landsdel)']].map(([v, l], i) =>
-                    `<div class="form-check"><input class="form-check-input" type="radio" name="tmSize" id="tm${v}" value="${v}"${i === 0 ? ' checked' : ''}><label class="form-check-label" for="tm${v}">${esc(l)}</label></div>`).join('')}</div>`,
+                <div class="form-label">Vilken sorts tävling?</div>
+                <div class="mb-1">${sizes.map(([v, l, h], i) =>
+                    `<div class="form-check"><input class="form-check-input" type="radio" name="tmSize" id="tm${v}" value="${v}"${i === 0 ? ' checked' : ''}><label class="form-check-label" for="tm${v}">${esc(l)} <span class="pl-help small">— ${esc(h)}</span></label></div>`).join('')}</div>`,
             onOk: async body => {
                 const size = body.querySelector('[name=tmSize]:checked').value;
-                const r = await post('SeedTemplate', { size, discipline: body.querySelector('#tmDisc') ? body.querySelector('#tmDisc').value : '' });
+                const discs = [...body.querySelectorAll('[data-tm-disc]:checked')].map(x => x.value);
+                if (!c && !discs.length) return 'Välj minst en gren.';
+                const r = await post('SeedTemplate', { size, discipline: discs.join(',') });
                 if (!r.success) return r.message;
                 await reloadTasks(); rerender();
-                showMsg(r.tasks ? `${r.areas} områden och ${r.tasks} uppgifter lades till.` : 'Mallens områden fanns redan — ingenting lades till.', r.tasks ? 'success' : 'info');
+                showMsg(r.tasks ? `${r.areas} nya områden och ${r.tasks} uppgifter lades till.` : 'Mallens uppgifter fanns redan — ingenting lades till.', r.tasks ? 'success' : 'info');
                 return true;
             }
         });
@@ -1978,7 +2040,7 @@
                     const r = await post('PasteTasks', params);
                     body.querySelector('#psPreview').innerHTML = (r.rows || []).length ? `<table class="table table-sm"><thead><tr><th>Uppgift</th><th>Vem</th><th>Sista dag</th></tr></thead><tbody>${r.rows.map(x =>
                         `<tr class="${x.error ? 'table-danger' : ''}"><td>${esc(x.title)}${x.error ? `<div class="small text-danger">${esc(x.error)}</div>` : ''}</td>
-                        <td>${esc(x.who || '')}${x.who && !x.matched ? ' <span class="pl-help small">(skrivs som namn)</span>' : ''}</td><td>${esc(x.due || '')}</td></tr>`).join('')}</tbody></table>` : '';
+                        <td>${esc(x.who || '')}${x.who && !x.matched ? ' <span class="pl-help small">(inte med i planeringen — läggs in utan ansvarig)</span>' : ''}</td><td>${esc(x.due || '')}</td></tr>`).join('')}</tbody></table>` : '';
                     if (!r.success) return r.message;
                     ready = true; $('plFormOk').textContent = `Lägg in ${r.rows.length} uppgifter`;
                     return false;
@@ -2637,9 +2699,10 @@
             title: 'Kontaktuppgifter', wide: false, cancelLabel: 'Stäng',
             html: `<div class="mb-2"><b class="fs-5">${esc(r.name)}</b>${r.isGuest ? ' <span class="badge rounded-pill text-bg-light border">Gäst</span>' : ''}
                     ${r.club ? `<div class="pl-help">${esc(r.club)}</div>` : ''}${p.represents ? `<div class="pl-help">Företräder ${esc(p.represents)}</div>` : ''}</div>
+                ${r.pending ? `<p class="mb-0">${esc(r.name)} är inbjuden men har inte öppnat planeringen än. E-post och telefon visas när hen har varit inne.</p>` : `
                 ${line('bi-envelope', 'E-post', r.email, 'mailto:' + r.email)}
                 ${r.isGuest ? '' : line('bi-telephone', 'Telefon', r.phone, 'tel:' + tel)}
-                <p class="pl-help small mt-2 mb-0">Uppgifterna är till för planeringen — dela dem inte vidare.</p>`,
+                <p class="pl-help small mt-2 mb-0">Uppgifterna är till för planeringen — dela dem inte vidare.</p>`}`,
         });
     }
 
@@ -2842,8 +2905,10 @@
         let timer = null, chosen = 0, chosenName = '';
         formModal({
             title: 'Byt ut ' + p.name, okLabel: 'Byt ut', wide: true,
-            html: `<p>Den nya personen får samma nivå (<b>${esc(p.accessLabel)}</b>)${p.represents ? ` och företräder samma (<b>${esc(p.represents)}</b>)` : ''}.
-                ${esc(p.name)} lämnar planeringen; hens meddelanden står kvar. Den nya får ett mejl med inbjudan.</p>
+            html: `<p>Den nya personen får samma nivå (<b>${esc(p.accessLabel)}</b>)${p.represents ? ` och företräder samma (<b>${esc(p.represents)}</b>)` : ''}
+                och tar över de öppna uppgifterna, ansvaret för områden och rollerna från ${esc(p.name)}.
+                ${esc(p.name)} lämnar planeringen; hens meddelanden och avslutade uppgifter står kvar. Den nya får ett mejl med inbjudan.</p>
+                <div id="rpFamily"></div>
                 <div class="mb-2"><label class="pl-radio d-inline-block me-3"><input type="radio" name="rpMode" value="member" class="form-check-input me-2" checked> En medlem</label>
                     <label class="pl-radio d-inline-block"><input type="radio" name="rpMode" value="email" class="form-check-input me-2"> Någon utan konto (e-post)</label></div>
                 <div id="rpMember"><label class="form-label" for="rpQ">Sök på namn</label>
@@ -2853,6 +2918,15 @@
                     <div class="mb-2"><label class="form-label" for="rpName">Namn</label><input id="rpName" class="form-control" maxlength="200" autocomplete="off"></div>
                     <div class="mb-1"><label class="form-label" for="rpMail">E-post</label><input id="rpMail" class="form-control" type="email" inputmode="email" autocomplete="off"></div></div>`,
             onOpen: body => {
+                // Omgång 3: samma person i familjens andra planeringar — byt där också (förvalt där du får).
+                get('ReplaceFamily', { participantId: p.id }).then(f => {
+                    if (!f.success || !(f.plannings || []).length) return;
+                    body.querySelector('#rpFamily').innerHTML = `<div class="pl-card p-2 mb-3"><b>${esc(p.name)} är också med i</b>
+                        ${f.plannings.map(x => `<div class="form-check mt-1"><input class="form-check-input" type="checkbox" id="rpF${x.planningId}" data-rp-family="${x.planningId}"${x.canReplace ? ' checked' : ' disabled'}>
+                            <label class="form-check-label" for="rpF${x.planningId}">${esc(x.name)} <span class="pl-help small">(${esc(x.access)})</span>
+                            ${x.canReplace ? '' : '<span class="pl-help small"> — byts ut av den planeringens sammankallande</span>'}</label></div>`).join('')}
+                        <div class="pl-help small mt-1">Byt ut där också. Den nya får den nivå ${esc(p.name)} har i varje planering.</div></div>`;
+                });
                 body.addEventListener('change', ev => {
                     if (!ev.target.matches('input[name="rpMode"]')) return;
                     const email = ev.target.value === 'email';
@@ -2885,13 +2959,17 @@
             onOk: async body => {
                 const email = body.querySelector('input[name="rpMode"]:checked').value === 'email';
                 if (!email && !chosen) return 'Sök fram och välj den som ska ta över.';
-                const r = await post('ReplaceParticipant', email
+                const alsoIn = [...body.querySelectorAll('[data-rp-family]:checked')].map(c => c.dataset.rpFamily).join(',');
+                const r = await post('ReplaceParticipant', Object.assign(email
                     ? { participantId: p.id, name: body.querySelector('#rpName').value, email: body.querySelector('#rpMail').value }
-                    : { participantId: p.id, memberId: chosen });
+                    : { participantId: p.id, memberId: chosen }, { alsoIn }));
                 if (!r.success) return r.message;
                 await reloadPeople(); viewPeople();
-                showMsg(`${esc(email ? body.querySelector('#rpName').value : chosenName)} har ersatt ${esc(p.name)}.`
-                    + (r.mailed ? ' Ett mejl med inbjudan är skickat.' : ' Men mejlet kunde inte skickas — skicka inbjudan igen under Deltagare.'), r.mailed ? 'success' : 'warning');
+                const fam = (r.replacedIn || []).length ? ` Också i ${esc(r.replacedIn.join(', '))}.` : '';
+                const notFam = (r.notReplacedIn || []).length ? ` Inte i ${esc(r.notReplacedIn.join(', '))}.` : '';
+                showMsg(`${esc(email ? body.querySelector('#rpName').value : chosenName)} har ersatt ${esc(p.name)}.${fam}${notFam}`
+                    + (r.mailed ? ' Ett mejl med inbjudan är skickat.' : ' Men mejlet kunde inte skickas — skicka inbjudan igen under Deltagare.'),
+                    r.mailed && !notFam ? 'success' : 'warning');
                 return true;
             }
         });
@@ -2957,8 +3035,8 @@
                 const other = body.querySelector('#cpOther').checked;
                 if (other && !chosen) return 'Sök fram och välj den som ska leda kopian.';
                 const r = await post('CopyPlanning', {
-                    name: body.querySelector('#cpName').value.trim(), targetStart: body.querySelector('#cpStart').value.trim(),
-                    targetEnd: body.querySelector('#cpEnd').value.trim(), recipientMemberId: other ? chosen : 0,
+                    name: body.querySelector('#cpName').value.trim(), targetStart: dateValue(body.querySelector('#cpStart')),
+                    targetEnd: dateValue(body.querySelector('#cpEnd')), recipientMemberId: other ? chosen : 0,
                     includeMe: other && !body.querySelector('#cpIncludeMe').checked ? '0' : '1',
                 });
                 if (!r.success) return r.message || 'Det gick inte att kopiera.';
@@ -3069,7 +3147,7 @@
             await reloadTasks(); $('stForbundetSaved').textContent = r.email ? 'Sparat.' : 'Adressen är borttagen.';
         });
         $('stSave').onclick = async () => {
-            const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim(),
+            const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: dateValue($('stStart')), targetEnd: dateValue($('stEnd')),
                 groupName: $('stGroup').value.trim(), groupNameSet: '1' };
             if ($('stListed')) params.listed = $('stListed').checked ? '1' : '0';
             const r = await post('Update', params);
@@ -3421,9 +3499,10 @@
             <div class="pl-card mb-3" style="background:var(--bs-tertiary-bg)"><ul class="mb-0 small">
                 <li><b>Flyttar dit:</b> områdets ${esc(moves.join(' och '))}, med historiken.</li>
                 <li><b>Deltagarna</b> du väljer blir med i den nya planeringen — och är kvar här.</li>
+                <li>Den som skrivit i området eller har något där men inte väljs <b>följer</b> den nya planeringen, så att hen kan läsa sitt.</li>
                 <li><b>Dokumenten</b> du väljer flyttar dit. De förvalda hör till området.</li>
                 <li><b>Stannar här:</b> mötena, förslagen och bemanningen.</li>
-                <li>Du som är sammankallande här kan läsa den nya planeringen, och Översikt visar hur det går för den.</li></ul></div>
+                <li>Den som är sammankallande eller kan ändra här kan läsa den nya planeringen, och Översikt visar hur det går för den.</li></ul></div>
             <div class="row g-3">
                 <div class="col-md-7"><label class="form-label" for="spName">Namn</label>
                     <input id="spName" class="form-control" maxlength="200" value="${esc(a.name + ' — ' + S.planning.name)}"></div>
@@ -3649,11 +3728,22 @@
     });
 
     // Översikt: delplaneringarnas läge (huvudplaneringen) och huvudplaneringen (delplaneringen).
+    // Omgång 3 (Stefan 2026-10-24: familjen är veckan): tävlingarna i familjen — en per delplanering — på ett ställe.
+    function familyCompetitionsCardHtml() {
+        const f = S.planning.family;
+        if (!f || !(f.competitions || []).length) return '';
+        return `<div class="pl-card" id="plFamilyComps"><h2>${f.competitions.length === 1 ? 'Tävlingen' : 'Tävlingarna'}</h2>
+            <ul class="list-unstyled mb-0">${f.competitions.map(c => `<li class="py-1 d-flex flex-wrap gap-2 align-items-baseline">
+                ${c.url ? `<a href="${esc(c.url)}"><b>${esc(c.name)}</b></a>` : `<b>${esc(c.name)}</b>`}
+                ${c.date ? `<span class="pl-help small">${esc(fmtDay(c.date))}${c.endDate && c.endDate !== c.date ? '–' + esc(fmtDay(c.endDate)) : ''}</span>` : ''}
+                <span class="pl-help small">· ${esc(c.planningName)}</span></li>`).join('')}</ul></div>`;
+    }
+
     function subPlanningsCardHtml() {
         const list = S.planning.subPlannings || [];
         if (!list.length) return '';
         return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2></div>
-            <p class="pl-help small px-3 mb-2">Områden som delats ut till egna planeringar. ${S.me.canManage ? 'Som sammankallande här kan du läsa dem.' : ''}</p>
+            <p class="pl-help small px-3 mb-2">Områden som delats ut till egna planeringar. ${S.me.canEdit ? 'Du som kan ändra här kan också läsa dem.' : ''}</p>
             <div class="table-responsive"><table class="table align-middle mb-0">
             <thead><tr><th class="ps-3">Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th>Uppgifter</th><th class="d-none d-md-table-cell">Nästa</th></tr></thead>
             <tbody>${list.map(s => {

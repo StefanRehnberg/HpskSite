@@ -18,9 +18,10 @@
     Samma sida i LÄNKLÄGE (/tavlingsplanering/svar?t=…): mejlets knappar landar här utan inloggning,
     och varje anrop bär länken. All logik i /js/planering.js.
 *@
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
+<script src="~/js/planering-dates.js" asp-append-version="true"></script>
 @await Html.PartialAsync("_PlaneringShellStyles")
 <link rel="stylesheet" href="~/css/planering-bemanning.css" asp-append-version="true">
 

@@ -419,6 +419,33 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>
+        /// Omgång 3 (K8): flera uppgifter till samma person på en gång (inklistringen) — ETT mejl med alla, inte ett per
+        /// uppgift. En enda uppgift går som vanligt (<see cref="TaskAssignedAsync"/>). Returnerar om mejlet gick iväg.
+        /// </summary>
+        public async Task<bool> TasksAssignedAsync(int planningId, int assigneeParticipantId, IReadOnlyList<int> taskIds, PlanningMemberRow? by)
+        {
+            if (taskIds.Count == 0) return false;
+            if (taskIds.Count == 1) return await TaskAssignedAsync(planningId, taskIds[0], assigneeParticipantId, by);
+            var p = _planning.Get(planningId);
+            var who = _planning.Participant(planningId, assigneeParticipantId);
+            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            var r = ResolveRecipient(who);
+            if (r == null) return false;
+            var tasks = _planning.Tasks(planningId).Where(t => taskIds.Contains(t.Id)).OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();
+            if (tasks.Count == 0) return false;
+            var inner = new StringBuilder();
+            inner.Append($"<p>{H(by?.DisplayName ?? "Någon")} har gett dig {tasks.Count} uppgifter i planeringen:</p><ul>");
+            foreach (var t in tasks.Take(30))
+                inner.Append($"<li><b>{H(t.Title)}</b>{(t.DueDate.HasValue ? $" <span style=\"color:#555\">(senast {H(t.DueDate.Value.ToString("d MMM yyyy", Sv))})</span>" : "")}</li>");
+            inner.Append("</ul>");
+            inner.Append($"<p>{Button("Visa mina uppgifter", OpenUrl(r, planningId, "uppgifter"))}</p>");
+            inner.Append("<p style=\"color:#555\">Där säger du hur långt du kommit med var och en och skriver gärna en rad.</p>");
+            // Nyckeln = den första uppgiften och dagen: samma inklistring mejlas inte två gånger.
+            return await SendMail(r, planningId, "task-assigned", "task", tasks[0].Id, DateTime.Today,
+                $"{tasks.Count} nya uppgifter: {p.Name}", Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
+        }
+
+        /// <summary>
         /// P3: milstolpen till förbundet. Mejlet går från "{planeringen} via Pistol.nu" med svarsadress till den
         /// som skickar — förbundet svarar alltså en människa, inte sajten. Returnerar om det gick iväg.
         /// </summary>

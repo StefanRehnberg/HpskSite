@@ -189,7 +189,8 @@ namespace HpskSite.Tests.Services
         }
 
         [Theory]
-        [InlineData(PlanningNotifyMode.Daily, false, true, false, true)]
+        // Omgång 3 (K8): att nämna någon går direkt även med förvalet "ett mejl om dagen".
+        [InlineData(PlanningNotifyMode.Daily, true, true, false, true)]
         [InlineData(PlanningNotifyMode.All, true, true, true, true)]
         [InlineData(PlanningNotifyMode.Mentions, true, false, false, true)]
         [InlineData(PlanningNotifyMode.Off, false, false, false, false)]

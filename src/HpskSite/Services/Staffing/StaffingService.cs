@@ -53,7 +53,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " ORDER BY RoleKey, ScopeKey, StartsAt, Id",
+                "SELECT * FROM StaffAssignment WHERE " + owner.Filter(0) + " ORDER BY RoleKey, ScopeKey, StartsAt, Id",
                 owner.P, owner.C);
         }
 
@@ -170,7 +170,7 @@ namespace HpskSite.Services.Staffing
             try
             {
                 using var pscope = _scopeProvider.CreateScope(autoComplete: true);
-                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE " + owner.Filter(0), owner.P, owner.C);
                 if (passes.Count > 0)
                 {
                     var byId = passes.ToDictionary(p => p.Id, p =>
@@ -371,7 +371,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
-                "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND " + StaffOwner.Where(3),
+                "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND " + owner.Filter(3),
                 checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, owner.P, owner.C);
         }
 
@@ -643,20 +643,33 @@ namespace HpskSite.Services.Staffing
                                   || (memberId != null && r.MemberId != memberId);
                 if (changesName && string.IsNullOrEmpty(r.OriginalName)) r.OriginalName = r.DisplayName;
 
-                if (memberId != null) r.MemberId = memberId;
-                if (name != null) r.DisplayName = name;
-                // Renamed back to what it was → there is nothing left to undo, so don't keep claiming
-                // "hette X i planen" about a name that is X.
-                if (string.Equals(r.OriginalName, r.DisplayName, StringComparison.Ordinal)) r.OriginalName = null;
-                if (phone != null) r.Phone = phone;
-                if (!string.IsNullOrWhiteSpace(req.Email)) r.Email = req.Email.Trim();
                 if (req.IsReplacement)
                 {
+                    // ⚠️ Omgång 3 (Expertgruppen K3): a replacement is a DIFFERENT human — the whole identity goes, not
+                    // just the name. Keeping the old MemberId left the work on the sick person's account (their
+                    // schedule, their notifications, their "Tacka ja"); keeping Email/Phone sent the request and the
+                    // day-of phone number to the wrong person. Null = the member's own (CompetitionPeopleService).
+                    r.MemberId = memberId;
+                    r.Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim();
+                    r.Phone = phone;
+                    r.RepresentsClubId = null; r.RepresentsRegionId = null;
                     r.Status = StaffAssignmentStatus.Planned;
                     r.CheckedInAt = null;
                     // App access was granted to a login, not to a slot on the roster.
                     r.HasAdminAccess = false;
+                    // Links already sent to the previous person stop working (StaffingInviteToken v2).
+                    r.InviteNonce = Guid.NewGuid();
                 }
+                else
+                {
+                    if (memberId != null) r.MemberId = memberId;
+                    if (phone != null) r.Phone = phone;
+                    if (!string.IsNullOrWhiteSpace(req.Email)) r.Email = req.Email.Trim();
+                }
+                if (name != null) r.DisplayName = name;
+                // Renamed back to what it was → there is nothing left to undo, so don't keep claiming
+                // "hette X i planen" about a name that is X.
+                if (string.Equals(r.OriginalName, r.DisplayName, StringComparison.Ordinal)) r.OriginalName = null;
                 r.ModifiedDate = now;
                 db.Update(r);
                 n++;
@@ -905,7 +918,7 @@ namespace HpskSite.Services.Staffing
                 rows = scope.Database.Fetch<DutyRow>(@"
                     SELECT sa.MemberId, sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day
                     FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND sa.MemberId > 0 AND ISNULL(sa.Status, '') <> @2",
+                    WHERE " + owner.Filter(0, "sa.") + @" AND sa.MemberId > 0 AND ISNULL(sa.Status, '') <> @2",
                     owner.P, owner.C, StaffAssignmentStatus.Declined);
             }
             if (rows.Count == 0) return result;

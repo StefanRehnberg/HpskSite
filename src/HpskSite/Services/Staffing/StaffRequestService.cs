@@ -64,15 +64,25 @@ namespace HpskSite.Services.Staffing
             return p;
         }
 
-        public (bool Ok, string? Message, int Sent, int Push, int Recipients) Send(StaffOwner owner, string mode, string? message, int byMemberId)
+        /// <summary>
+        /// Den som frågar och vad som fattas (omgång 3, persona 2): relämejlet sa varken vem som frågade, vilka dagar, vad
+        /// som behövdes eller vem man svarar — och ett svar hamnade hos sajten. <paramref name="publicBase"/> = sajtens
+        /// adress för länken (tom = pistol.nu).
+        /// </summary>
+        public sealed record RequestContext(string? PublicBase, string? SenderName, string? SenderEmail, IReadOnlyList<NeedDayView>? Needs);
+
+        public (bool Ok, string? Message, int Sent, int Push, int Recipients) Send(StaffOwner owner, string mode, string? message, int byMemberId,
+            RequestContext? context = null)
         {
             var scopes = _signup.GetScopes(owner);
             if (scopes.Count == 0) return (false, "Öppna först för självanmälan (välj klubb/krets) — då vet vi vilka som ska få förfrågan.", 0, 0, 0);
 
             var competitionId = owner.Comp;
             var compName = _owners.Name(owner);
-            var link = $"https://pistol.nu{owner.SignupPath}";
-            var extra = string.IsNullOrWhiteSpace(message) ? "" : $"<p>{System.Net.WebUtility.HtmlEncode(message!.Trim())}</p>";
+            var baseUrl = string.IsNullOrWhiteSpace(context?.PublicBase) ? "https://pistol.nu" : context!.PublicBase!.TrimEnd('/');
+            var link = $"{baseUrl}{owner.SignupPath}";
+            var extra = (string.IsNullOrWhiteSpace(message) ? "" : $"<p style='white-space:pre-wrap'>{System.Net.WebUtility.HtmlEncode(message!.Trim())}</p>")
+                + NeedsHtml(context?.Needs) + SenderHtml(context);
             int sent = 0, push = 0, recipients;
 
             if (string.Equals(mode, StaffRequestMode.Direct, StringComparison.OrdinalIgnoreCase))
@@ -99,9 +109,12 @@ namespace HpskSite.Services.Staffing
                 recipients = admins.Count;
                 var subject = $"Funktionärer sökes: {compName}";
                 var html = Html($"Din klubb/krets ombeds hjälpa till att bemanna <strong>{System.Net.WebUtility.HtmlEncode(compName)}</strong>. Vidarebefordra gärna till era medlemmar, eller uppmana dem att anmäla sig:", extra, link, "Öppna bemanningssidan");
+                // Svaret går till den som frågar, och mejlet bär hens namn ("NN via Pistol.nu").
+                var replyTo = string.IsNullOrWhiteSpace(context?.SenderEmail) ? null : context!.SenderEmail;
+                var fromName = string.IsNullOrWhiteSpace(context?.SenderName) ? null : $"{context!.SenderName} via Pistol.nu";
                 foreach (var (emailAddr, _) in admins)
                 {
-                    try { if (_email.SendHtmlEmailAsync(emailAddr, subject, html).GetAwaiter().GetResult()) sent++; } catch { }
+                    try { if (_email.SendHtmlEmailAsync(emailAddr, subject, html, fromName, replyTo, context?.SenderName).GetAwaiter().GetResult()) sent++; } catch { }
                 }
             }
 
@@ -194,6 +207,30 @@ namespace HpskSite.Services.Staffing
             return scope.Database.FirstOrDefault<StaffRequestLog>(
                 "SELECT * FROM StaffRequestLog WHERE " + StaffOwner.Where(0) + " ORDER BY Id DESC", owner.P, owner.C);
         }
+
+        private static readonly System.Globalization.CultureInfo Sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+
+        /// <summary>Dagarna och rollerna där det fattas folk — högst tio dagar.</summary>
+        private static string NeedsHtml(IReadOnlyList<NeedDayView>? needs)
+        {
+            var days = (needs ?? Array.Empty<NeedDayView>()).Where(d => d.Missing > 0).Take(10).ToList();
+            if (days.Count == 0) return "";
+            var sb = new System.Text.StringBuilder("<p><b>Det här behövs:</b></p><ul>");
+            foreach (var d in days)
+            {
+                var when = DateTime.TryParse(d.Date, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt)
+                    ? dt.ToString("dddd d MMMM", Sv) : d.Date;
+                var roles = string.Join(", ", d.Roles.Where(r => r.Missing > 0).Select(r => $"{r.RoleName} ({r.Missing})"));
+                sb.Append($"<li>{System.Net.WebUtility.HtmlEncode(when)}: {System.Net.WebUtility.HtmlEncode(roles)}</li>");
+            }
+            return sb.Append("</ul>").ToString();
+        }
+
+        private static string SenderHtml(RequestContext? c) =>
+            string.IsNullOrWhiteSpace(c?.SenderName) ? ""
+            : $"<p>Hälsningar<br>{System.Net.WebUtility.HtmlEncode(c!.SenderName)}"
+              + (string.IsNullOrWhiteSpace(c.SenderEmail) ? "" : $" — svara på det här mejlet så når svaret {System.Net.WebUtility.HtmlEncode(c.SenderName)}")
+              + "</p>";
 
         private static string Html(string lead, string extra, string link, string cta) => $@"<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222'>
 <p>Hej!</p><p>{lead}</p>{extra}

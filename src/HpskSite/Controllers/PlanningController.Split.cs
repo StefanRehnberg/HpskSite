@@ -70,11 +70,61 @@ namespace HpskSite.Controllers
             return new { id = parent.Id, name = parent.Name, url = canOpen ? $"/tavlingsplanering/{parent.Id}" : null };
         }
 
+        /// <summary>
+        /// Omgång 3 (Stefan 2026-10-24: familjen är veckan): familjens kopplade tävlingar, och vilken av dem planeringens
+        /// bemanning gäller. Null när planeringen är ensam (ingen familj).
+        /// </summary>
+        private object? FamilyJson(PlanningRow p)
+        {
+            var family = _planning.Family(p.Id);
+            if (family.Count <= 1) return null;
+            var links = _planning.FamilyLinks(family);
+            var comps = links.Select(kv =>
+            {
+                var comp = _competitions.GetSaved(kv.Value);
+                var owner = family.FirstOrDefault(f => f.Id == kv.Key);
+                return new
+                {
+                    planningId = kv.Key, planningName = owner?.Name ?? "", competitionId = kv.Value,
+                    name = comp?.DisplayName ?? "Tävlingen finns inte längre", date = D(comp?.CompetitionDate), endDate = D(comp?.CompetitionEndDate),
+                    url = comp == null ? "" : _competitionLinks.Url(comp.Id),
+                };
+            }).OrderBy(x => x.date).ThenBy(x => x.name).ToList();
+            return new
+            {
+                competitions = comps, ownLink = links.ContainsKey(p.Id), staffsFor = p.StaffsForCompetitionId,
+                parentCompetitionId = p.ParentPlanningId > 0 && links.TryGetValue(p.ParentPlanningId!.Value, out var pc) ? pc : (int?)null,
+                staffingCompetitionId = PlanningFamilyRules.StaffingCompetition(p, links),
+            };
+        }
+
+        /// <summary>Omgång 3: "Bemannar för" — vilken av familjens tävlingar planeringens bemanning gäller (0 = huvudplaneringens).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetStaffsFor(int id, int? competitionId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Det väljs av den sammankallande.");
+            var before = _planning.StaffingCompetitionFor(id);
+            var err = _planning.SetStaffsFor(id, competitionId, x.MemberId);
+            if (err != null) return No(err);
+            var after = _planning.StaffingCompetitionFor(id);
+            // Speglingarna (tävlingsansvariga, stationschefer) för både den gamla och den nya tävlingen.
+            foreach (var cid in new[] { before, after }.Where(v => v > 0).Distinct())
+            {
+                try { _staffing.SyncCompetitionMirrors(cid!.Value); }
+                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: speglingen till tävling {Comp} misslyckades.", id, cid); }
+            }
+            return Ok(new { success = true, staffingCompetitionId = after });
+        }
+
         /// <summary>Delplaneringarnas läge, för huvudplaneringens Översikt. Länken bara för den som kan läsa delplaneringen.</summary>
         private object SubPlanningsJson(PlanningRow p, PlanningCaller c, int memberId)
         {
             if (p.ParentPlanningId > 0 || !c.IsParticipant) return Array.Empty<object>();
-            var convener = c.Access == PlanningAccessLevel.Owner && !c.ViaLink;
+            // Omgång 3: Kan ändra läser också delplaneringarna (IsParentConvener).
+            var convener = (c.Access == PlanningAccessLevel.Owner || c.Access == PlanningAccessLevel.Editor) && !c.ViaLink;
             return _planning.SubPlannings(p.Id, c.ViaLink ? 0 : memberId).Select(s => new
             {
                 id = s.Id, name = s.Name, status = s.Status, conveners = s.Conveners, openTasks = s.OpenTasks, tasks = s.Tasks,

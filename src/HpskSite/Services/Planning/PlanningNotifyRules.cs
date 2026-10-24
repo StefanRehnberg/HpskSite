@@ -22,7 +22,7 @@ namespace HpskSite.Services.Planning
         public const int DigestHour = 18;
 
         public static bool MailOnMention(string? mode) =>
-            PlanningNotifyMode.Normalize(mode) is PlanningNotifyMode.All or PlanningNotifyMode.Mentions;
+            PlanningNotifyMode.Normalize(mode) is PlanningNotifyMode.All or PlanningNotifyMode.Mentions or PlanningNotifyMode.Daily;
 
         public static bool PushOnMention(string? mode) => MailOnMention(mode);
 

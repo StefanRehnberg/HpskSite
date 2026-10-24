@@ -118,16 +118,145 @@ namespace HpskSite.Services.Staffing
     /// </summary>
     internal static class PrepTemplates
     {
+        /// <summary>
+        /// Storlekarna (omgång 3, K10 — SHB C.3.5): klubb · krets · nationell · ldm (landsdelsmästerskap) · sm. Ett okänt
+        /// värde läses som klubb; det äldre valet "Mästerskap" skickade "sm".
+        /// </summary>
+        public static readonly string[] Sizes = { "klubb", "krets", "nationell", "ldm", "sm" };
+
         public static List<PrepArea> For(string? discipline, string? size)
         {
-            var s = (size ?? "klubb").ToLowerInvariant();
-            var big = s == "sm";
-            var mid = s == "krets" || big;
+            var s = NormalizeSize(size);
+            var big = s is "sm" or "ldm";
+            var mid = s != "klubb";
             var d = (discipline ?? "").ToLowerInvariant();
 
-            if (d is "faltskytte" or "magnumfalt") return Falt(mid, big);
-            if (d == "springskytte") return Spring(mid, big);
-            return Precision(mid, big);
+            var list = d is "faltskytte" or "magnumfalt" ? Falt(mid, big)
+                : d == "springskytte" ? Spring(mid, big)
+                : d == "milsnabb" ? Milsnabb(mid, big)
+                : Precision(mid, big);
+            ApplyLevel(list, s, falt: d is "faltskytte" or "magnumfalt");
+            return list;
+        }
+
+        /// <summary>
+        /// Flera grenar på en gång (omgång 3, persona 3: en SM-vecka med fält och precision). De gemensamma områdena
+        /// (kansliet, sekretariatet, förbundet …) kommer en gång, med uppgifterna sammanslagna; grenens egna områden får
+        /// grenens namn ("Materiel – Fält"), så att uppgifterna hamnar i grenens område.
+        /// </summary>
+        public static List<PrepArea> ForMany(IEnumerable<string?> disciplines, string? size)
+        {
+            var list = disciplines.Select(d => (d ?? "").Trim()).Where(d => d.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (list.Count <= 1) return For(list.FirstOrDefault(), size);
+            var merged = new List<PrepArea>();
+            foreach (var d in list)
+                foreach (var a in For(d, size))
+                {
+                    var name = Common.Contains(a.Area) ? a.Area : $"{a.Area} – {DisciplineLabel(d)}";
+                    var have = merged.FindIndex(m => string.Equals(m.Area, name, StringComparison.OrdinalIgnoreCase));
+                    if (have < 0) { merged.Add(new PrepArea(name, a.Items.ToList())); continue; }
+                    var items = merged[have].Items;
+                    items.AddRange(a.Items.Where(i => !items.Any(x => string.Equals(x.Title, i.Title, StringComparison.OrdinalIgnoreCase))));
+                }
+            return merged;
+        }
+
+        private static readonly HashSet<string> Common = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Tävlingsledning", "Förbundet", "Kretsen", "Sanktion & administration", "Kansli & inbjudan", "Sekretariat",
+            "Servering", "Boende & logistik", "Marknad & media",
+        };
+
+        private static string DisciplineLabel(string d) => d.ToLowerInvariant() switch
+        {
+            "faltskytte" or "magnumfalt" => "Fält",
+            "springskytte" => "Spring",
+            "milsnabb" => "Milsnabb",
+            _ => "Precision",
+        };
+
+        public static string NormalizeSize(string? size)
+        {
+            var s = (size ?? "").Trim().ToLowerInvariant();
+            return Array.IndexOf(Sizes, s) >= 0 ? s : "klubb";
+        }
+
+        /// <summary>
+        /// Det som skiljer nivåerna åt enligt SHB (omgång 3, K10). Mallarna ovan bär SM:s förbundsområde; här läggs
+        /// ansökan, inbjudan, jury och vapenkontroll in per nivå.
+        /// <list type="bullet">
+        /// <item>Kretstävling: ansökan till kretsstyrelsen på den tid kretsen föreskriver (C.3.5.4).</item>
+        /// <item>Nationell tävling: ansökan via kretsen, hos förbundet före 1 oktober året före (C.3.5.3.2); inbjudan till
+        /// förbundet för kännedom (C.3.5.2.1); i fält målförutsättningar och stationsbeskrivning till kretsstyrelsen
+        /// (C.3.5.2.2).</item>
+        /// <item>Landsdelsmästerskap: datumet i stomprogrammet (C.3.5.3.1), ansökan som nationell, inbjudan för
+        /// godkännande och i fält banans underlag till förbundet 12 veckor före (C.3.5.2.1–2).</item>
+        /// <item>Jury vid mästerskap och större nationella tävlingar (C.4.1.5); vapenkontroll vid mästerskap, nationella
+        /// tävlingar och tävlingar med standardmedaljer (C.4.2.1).</item>
+        /// </list>
+        /// </summary>
+        private static void ApplyLevel(List<PrepArea> list, string size, bool falt)
+        {
+            var admin = list.FirstOrDefault(a => a.Area == "Sanktion & administration");
+            if (admin != null)
+            {
+                var items = admin.Items;
+                // Mallarnas "stora" variant är SM:s — ett landsdelsmästerskap har ingen SM-ansvarig på förbundet.
+                if (size != "sm") items.RemoveAll(x => x.Title == "Kontakta förbundets SM-ansvarige");
+                var i = items.FindIndex(x => x.Title == "Sök sanktion (SPSF/krets)");
+                if (i >= 0)
+                {
+                    if (size == "krets")
+                        items[i] = M("Ansökan om kretstävling till kretsstyrelsen", 120,
+                            "En kretstävling söks hos kretsstyrelsen på den tid kretsen föreskriver (SHB C.3.5.4). Sök under Tävlingen → "
+                            + "Sök om tävlingen hos kretsen. Ändra sista dagen efter kretsens frist.");
+                    else items.RemoveAt(i); // klubb: ingen ansökan; nationell/ldm: ansökan står under Förbundet
+                }
+                if (size is "nationell" or "ldm" or "sm")
+                {
+                    var j = items.FindIndex(x => x.Title == "Boka domare / jury");
+                    if (j >= 0) items[j] = I("Utse tävlingsjury — tre i skyttefrågor väl förfarna personer (SHB C.4.1.5)", size == "nationell" ? 45 : 90);
+                }
+                if (size != "klubb")
+                    items.Add(I("Boka vapenkontrollant(er) — krävs vid mästerskap, nationella tävlingar och standardmedaljer (SHB C.4.2.1)",
+                        size is "sm" or "ldm" ? 60 : 30));
+            }
+            if (size is not ("nationell" or "ldm")) return;
+
+            // Förbundets område byggs för nationell tävling och landsdelsmästerskap i stället för SM:s.
+            list.RemoveAll(a => a.Area == "Förbundet");
+            var ansokan = M("Ansökan via kretsen till förbundet", null,
+                "Ansökan om nationell tävling eller landsdelstävling ska ha kommit in till förbundsstyrelsen före 1 oktober året "
+                + "innan (SHB C.3.5.3.2). Den skickas till kretsen, som yttrar sig och skickar den vidare — sista dagen är satt "
+                + "en månad före; ändra den efter kretsens egen frist. Sök under Tävlingen → Sök om tävlingen hos kretsen.",
+                false, d => new DateTime(d.Year - 1, 9, 1));
+            var items2 = new List<PrepItem>();
+            if (size == "ldm")
+            {
+                items2.Add(M("Förbundet fastställer datumet i stomprogrammet", null,
+                    "Förbundsstyrelsen fastställer stomprogrammet med landsdelsmästerskapens datum senast 30 juni året före "
+                    + "(SHB C.3.5.3.1). Kontrollera att datumet stämmer med planeringen.", false, d => new DateTime(d.Year - 1, 6, 30)));
+                items2.Add(ansokan);
+                items2.Add(M("Förslag till inbjudan till förbundet för godkännande", 120,
+                    "Arrangören skickar i god tid förslaget till inbjudan till förbundet, som godkänner den (SHB C.3.5.2.1). "
+                    + "Inbjudan publiceras först när förbundet har godkänt.", true));
+                if (falt) items2.Add(M("Fältets underlag till förbundet", 84,
+                    "Målförutsättningar och stationsbeskrivningar ska vara hos förbundet minst 12 veckor före tävlingen (SHB C.3.5.2.2).", true));
+            }
+            else
+            {
+                items2.Add(ansokan);
+                items2.Add(M("Inbjudan till förbundet för kännedom", 45,
+                    "Inbjudan till en nationell tävling skickas till förbundet för kännedom. Inget godkännande kommer tillbaka, "
+                    + "men fel som upptäcks meddelas (SHB C.3.5.2.1).", true));
+                if (falt) list.Insert(0, new PrepArea("Kretsen", new List<PrepItem>
+                {
+                    M("Målförutsättningar och stationsbeskrivning till kretsstyrelsen", 84,
+                        "För en nationell fältskjutning skickas målförutsättningarna och stationsbeskrivningarna till kretsstyrelsen, "
+                        + "som låter dem granskas (SHB C.3.5.2.2). Ändra sista dagen efter kretsens frist."),
+                }));
+            }
+            list.Insert(0, new PrepArea("Förbundet", items2));
         }
 
         private static PrepItem I(string title, int? days = null) => new(title, days);
@@ -224,6 +353,16 @@ namespace HpskSite.Services.Staffing
             list.Add(Kansli(big));
             if (mid) list.Add(Servering(big));
             if (big) { list.Insert(0, Forbundet(false)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            return list;
+        }
+
+        /// <summary>Milsnabb (omgång 3, persona 3): precisionens mall med snabbserierna — vändanordning och tidtagning.</summary>
+        private static List<PrepArea> Milsnabb(bool mid, bool big)
+        {
+            var list = Precision(mid, big);
+            var bana = list.First(a => a.Area == "Mark & bana");
+            bana.Items.Insert(1, I("Vändanordning för figurerna och tidtagning för serierna 10, 8 och 6 sekunder", big ? 45 : 21));
+            bana.Items.Insert(2, I("Prova vändningen och tiderna på banan", 7));
             return list;
         }
 

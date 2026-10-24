@@ -10,7 +10,9 @@ using HpskSite.Services.Planning;
 using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -151,8 +153,10 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Omgång 2, rälsposten Tävlingen: tävlingar planeringen kan kopplas till — kommande tävlingar i klubbarna som
-        /// någon i planeringen företräder, som den som frågar får redigera och som inte redan har en planering.
+        /// Rälsposten Tävlingen: tävlingar planeringen kan kopplas till — kommande tävlingar som inte redan har en planering
+        /// och som den som frågar får redigera, värdade av (omgång 3, K6) en klubb som någon i planeringen företräder, eller
+        /// av KRETSEN som någon företräder (SM och kretstävlingar har ingen klubb), med seriens värd för en omgång utan egen,
+        /// eller där den som frågar är tävlingsansvarig. Urvalet först, behörigheten bara för de närmaste.
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> LinkableCompetitions(int id)
@@ -161,17 +165,51 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             if (!PlanningAccess.CanLinkCompetition(x.Caller) || x.Caller.ViaLink) return No("Planeringen kopplas av den sammankallande.");
             if (_planning.LinkFor(id) != null) return No("Planeringen är redan kopplad till en tävling.");
-            var clubs = BoardTargets(id).Where(t => t.OwnerType == Models.DocumentOwnerType.Club).ToDictionary(t => t.OwnerId, t => t.Name);
+            var targets = BoardTargets(id);
+            var clubs = targets.Where(t => t.OwnerType == Models.DocumentOwnerType.Club).ToDictionary(t => t.OwnerId, t => t.Name);
+            // Planeringen bär kretsens nod-id, tävlingen kretsens kod.
+            var regions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (UmbracoContextAccessor.TryGetUmbracoContext(out var ctx))
+                foreach (var t in targets.Where(t => t.OwnerType == Models.DocumentOwnerType.Region))
+                {
+                    var node = ctx.Content?.GetById(t.OwnerId);
+                    var code = node?.ContentType.Alias == "regionalPage" ? node.Value<string>("regionCode") : null;
+                    if (!string.IsNullOrWhiteSpace(code)) regions[code.Trim()] = t.Name;
+                }
+            var series = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.ICompetitionSeriesStore>();
+            var seriesHost = new Dictionary<int, (int Club, string Region)>();
+            (int Club, string Region) HostOf(CompetitionInfo c)
+            {
+                var club = c.ClubId; var region = (c.RegionalFederation ?? "").Trim();
+                if (club > 0 || region.Length > 0 || c.SeriesId is not int sid) return (club, region);
+                if (!seriesHost.TryGetValue(sid, out var h))
+                {
+                    var s = series.GetSaved(sid);
+                    h = s == null ? (0, "") : (s.ClubId, (s.RegionalFederation ?? "").Trim());
+                    seriesHost[sid] = h;
+                }
+                return h;
+            }
+            var linked = _planning.LinkedCompetitionIds();
             var from = DateTime.Today.AddDays(-7);
             // Närmast planeringens datum först (en planering för 2028 ska inte få höstens tävlingar överst).
             var anchor = x.Planning.TargetStart ?? DateTime.Today;
-            var list = new List<object>();
-            foreach (var c in _competitions.List()
-                         .Where(c => c.ClubId > 0 && clubs.ContainsKey(c.ClubId) && c.CompetitionDate >= from)
-                         .OrderBy(c => Math.Abs((c.CompetitionDate!.Value - anchor).TotalDays)).ThenBy(c => c.CompetitionDate).Take(80))
+            var candidates = new List<(CompetitionInfo C, string Host)>();
+            foreach (var c in _competitions.List())
             {
-                if (_planning.ForCompetition(c.Id) != null || !await _auth.CanEditCompetitionAsync(c.Id)) continue;
-                list.Add(new { id = c.Id, name = c.DisplayName, date = D(c.CompetitionDate), club = clubs[c.ClubId] });
+                var last = c.CompetitionEndDate ?? c.CompetitionDate;
+                if (c.CompetitionDate == null || last < from || linked.Contains(c.Id)) continue;
+                var (club, region) = HostOf(c);
+                string? host = club > 0 && clubs.TryGetValue(club, out var cn) ? cn
+                    : club <= 0 && region.Length > 0 && regions.TryGetValue(region, out var rn) ? rn
+                    : c.ManagerIds.Contains(x.MemberId) ? "Du är tävlingsansvarig" : null;
+                if (host != null) candidates.Add((c, host));
+            }
+            var list = new List<object>();
+            foreach (var (c, host) in candidates.OrderBy(k => Math.Abs((k.C.CompetitionDate!.Value - anchor).TotalDays)).ThenBy(k => k.C.CompetitionDate).Take(60))
+            {
+                if (!await _auth.CanEditCompetitionAsync(c.Id)) continue;
+                list.Add(new { id = c.Id, name = c.DisplayName, date = D(c.CompetitionDate), club = host });
                 if (list.Count >= 30) break;
             }
             return Ok(new { success = true, competitions = list });
@@ -307,8 +345,9 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Mallen fylls i av den som kan ändra planeringen.");
             var comp = LinkedCompetition(id);
-            var disc = comp?.TypeId ?? discipline;
-            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.For(disc, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
+            // Omgång 3 (K10): flera grenar på en gång ("Precision,Faltskytte"); en kopplad tävling bestämmer sin egen.
+            var discs = comp != null ? new[] { comp.TypeId } : (discipline ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
             return Ok(new { success = true, areas, tasks });
         }
 
@@ -396,8 +435,18 @@ namespace HpskSite.Controllers
             var errors = preview.Where(p => p.error != null).Select(p => p.error!).ToList();
             if (apply != "1" || errors.Count > 0)
                 return Ok(new { success = errors.Count == 0, rows = preview, errors, message = errors.Count > 0 ? "Rätta raderna först: " + string.Join(" ", errors.Take(3)) : null });
-            var n = _planning.AddPastedTasks(id, areaId, rows.Select(r => new PlanningService.PastedTask(r.Title, Match(r.Who), Match(r.Who) == null ? r.Who : null, r.Due)), x.Caller.ParticipantId);
-            return Ok(new { success = true, added = n });
+            // Omgång 3 (Stefan 2026-10-24): en uppgift går bara till någon som är med — ett namn som inte är en deltagare
+            // blir ingen ansvarig, inget fritt namn.
+            var added = _planning.AddPastedTasks(id, areaId, rows.Select(r => new PlanningService.PastedTask(r.Title, Match(r.Who), null, r.Due)), x.Caller.ParticipantId);
+            // Omgång 3 (K8): de ansvariga får veta — ett mejl per person med alla hens nya uppgifter.
+            var mailed = 0;
+            foreach (var g in added.Where(t => t.AssigneeParticipantId > 0 && t.AssigneeParticipantId != x.Caller.ParticipantId)
+                         .GroupBy(t => t.AssigneeParticipantId!.Value))
+            {
+                try { if (await _notify.TasksAssignedAsync(id, g.Key, g.Select(t => t.Id).ToList(), x.Caller.Participant)) mailed++; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: mejlet om inklistrade uppgifter till {P} gick inte.", id, g.Key); }
+            }
+            return Ok(new { success = true, added = added.Count, mailed });
         }
 
         /// <summary>Uppgifterna som CSV (semikolon, UTF-8 med BOM — öppnas rätt i Excel).</summary>

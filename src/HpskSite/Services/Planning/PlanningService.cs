@@ -64,7 +64,8 @@ namespace HpskSite.Services.Planning
                                                  ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy"),
                                                  ("PlanningPart", "HostText"), ("PlanningArea", "HostText"), ("PlanningMessage", "AreaId"),
                                                  ("PlanningDocumentCategory", "AreaId"), ("Planning", "ParentPlanningId"), ("Planning", "GroupName"), ("PlanningArea", "Stations"),
-                                                 ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId") })
+                                                 ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
+                                                 ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -127,6 +128,13 @@ namespace HpskSite.Services.Planning
             return (p.Id, me.Id);
         }
 
+        /// <summary>Hur många planeringar medlemmen skapat det senaste dygnet (även raderade — taket ska inte gå att runda).</summary>
+        public int CreatedLastDay(int memberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.ExecuteScalar<int>("SELECT COUNT(*) FROM Planning WHERE CreatedBy = @0 AND CreatedAt > DATEADD(day, -1, @1)", memberId, Now);
+        }
+
         public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end, int byMemberId, bool? listed = null, string? groupName = null)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
@@ -177,12 +185,39 @@ namespace HpskSite.Services.Planning
             Bump(s.Database, planningId);
         }
 
-        /// <summary>Mjuk radering: raden står kvar, men planeringen syns ingenstans och länkarna slutar fungera.</summary>
-        public void Delete(int planningId, int byMemberId)
+        public sealed record DeleteResult(string? Error, List<int> ReleasedCompetitionIds);
+
+        /// <summary>
+        /// Mjuk radering: raden står kvar, men planeringen syns ingenstans och länkarna slutar fungera.
+        /// <para>⚠️ Omgång 3 (Expertgruppen K7, Stefan 2026-10-24):</para>
+        /// <list type="bullet">
+        /// <item>En planering med delplaneringar går inte att ta bort — de hade blivit föräldralösa.</item>
+        /// <item>Kopplingen tas bort (annars kan tävlingen aldrig få en ny planering), bemanningen tappar tävlingen och
+        ///   appbehörigheten (annars behöll funktionärerna den), och <c>SeededFromCompetitionId</c> nollas (dess unika
+        ///   index räknar även raderade planeringar).</item>
+        /// </list>
+        /// Anroparen speglar om de tävlingar som släpptes (<see cref="DeleteResult.ReleasedCompetitionIds"/>).
+        /// </summary>
+        public DeleteResult Delete(int planningId, int byMemberId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            s.Database.Execute("UPDATE Planning SET DeletedAt = @1, DeletedBy = @2 WHERE Id = @0 AND DeletedAt IS NULL",
+            var db = s.Database;
+            var kids = db.ExecuteScalar<int>("SELECT COUNT(*) FROM Planning WHERE ParentPlanningId = @0 AND DeletedAt IS NULL", planningId);
+            if (kids > 0)
+                return new DeleteResult(kids == 1
+                    ? "Planeringen har en delplanering. Ta bort delplaneringen först."
+                    : $"Planeringen har {kids} delplaneringar. Ta bort dem först.", new());
+            var comps = db.Fetch<int>(@"SELECT DISTINCT CompetitionId FROM StaffAssignment WHERE PlanningId = @0 AND CompetitionId IS NOT NULL
+                                        UNION SELECT TargetId FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId);
+            db.Execute("DELETE FROM PlanningLink WHERE PlanningId = @0", planningId);
+            foreach (var t in HpskSite.Services.Staffing.StaffingPlanningLink.AllTables)
+                db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE PlanningId = @0", planningId);
+            db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1", planningId);
+            db.Execute("UPDATE Planning SET DeletedAt = @1, DeletedBy = @2, SeededFromCompetitionId = NULL WHERE Id = @0 AND DeletedAt IS NULL",
                 planningId, Now, byMemberId);
+            // Syskon som bemannade den här planeringens tävling ("Bemannar för") faller tillbaka på huvudplaneringens.
+            HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId);
+            return new DeleteResult(null, comps);
         }
 
         public long Version(int planningId)
@@ -257,6 +292,8 @@ namespace HpskSite.Services.Planning
                 existing.RepresentsClubId = repClubId; existing.RepresentsRegionId = repClubId > 0 ? null : repRegionId;
                 existing.RepresentsText = Clean(repText, 200);
                 existing.AddedAt = now; existing.AddedBy = byMemberId;
+                // Omgång 3: tillagd igen av någon annan = inbjuden igen, tills hen själv öppnat planeringen (kontaktuppgifterna).
+                if (memberId > 0 && byMemberId != memberId) existing.LastSeenAt = null;
                 db.Update(existing);
                 EnsureRead(db, planningId, existing.Id, maxId);
                 InsertSystem(db, planningId, "member-joined", "", null, existing.Id, null, now);
@@ -573,9 +610,32 @@ namespace HpskSite.Services.Planning
 
             db.Execute("UPDATE PlanningMember SET RemovedAt = @2, RemovedBy = @3 WHERE Id = @0 AND PlanningId = @1",
                 old.Id, planningId, now, byMemberId);
+            // Omgång 3 (Expertgruppen, persona 3): den nya tar över arbetet — öppna uppgifter, områdesansvar och roller.
+            // Förut stod de kvar på en borttagen deltagare, och ingen såg att någon skulle göra dem. Avslutade uppgifter
+            // behåller den som gjorde dem (historiken).
+            MoveWork(db, planningId, old.Id, row.Id, all.FirstOrDefault(r => r.MemberId == byMemberId && r.IsActive)?.Id, now);
             InsertSystem(db, planningId, "member-replaced", "", null, row.Id, ("participant", old.Id), now);
             Bump(db, planningId);
             return new AddResult(row.Id, existing == null, existing != null, null);
+        }
+
+        /// <summary>Byt ut: öppna uppgifter, områdesansvar och aktiva roller går från den gamla deltagaren till den nya.</summary>
+        private static void MoveWork(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int planningId, int fromPid, int toPid, int? actorPid, DateTime now)
+        {
+            db.Execute(@"UPDATE PlanningTask SET AssigneeParticipantId = @2
+                         WHERE PlanningId = @0 AND AssigneeParticipantId = @1 AND DeletedAt IS NULL AND Status <> N'Done'",
+                planningId, fromPid, toPid);
+            db.Execute("UPDATE PlanningArea SET ResponsibleParticipantId = @2 WHERE PlanningId = @0 AND ResponsibleParticipantId = @1 AND DeletedAt IS NULL",
+                planningId, fromPid, toPid);
+            // En roll den nya redan har (samma namn) läggs inte till en gång till; den gamla avslutas i båda fallen.
+            db.Execute(@"INSERT INTO PlanningRole (PlanningId, ParticipantId, RoleKey, Name, AddedAt, AddedBy)
+                         SELECT r.PlanningId, @2, r.RoleKey, r.Name, @3, r.AddedBy FROM PlanningRole r
+                         WHERE r.PlanningId = @0 AND r.ParticipantId = @1 AND r.RemovedAt IS NULL
+                           AND NOT EXISTS (SELECT 1 FROM PlanningRole x WHERE x.PlanningId = r.PlanningId AND x.ParticipantId = @2
+                                           AND x.RemovedAt IS NULL AND x.Name = r.Name)",
+                planningId, fromPid, toPid, now);
+            db.Execute("UPDATE PlanningRole SET RemovedAt = @2, RemovedBy = @3 WHERE PlanningId = @0 AND ParticipantId = @1 AND RemovedAt IS NULL",
+                planningId, fromPid, now, actorPid);
         }
 
         public void SetNotifyMode(int planningId, int participantId, string mode)

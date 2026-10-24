@@ -24,12 +24,17 @@ namespace HpskSite.Services.Staffing
             _competitions = competitions;
         }
 
-        /// <summary>Tävlingens bemanning: dess planering om den har en, annars tävlingen ensam.</summary>
+        /// <summary>
+        /// Tävlingens bemanning: dess planering om den har en, annars tävlingen ensam.
+        /// <para>Omgång 3 (Expertgruppen K4): <see cref="StaffOwner.IncludeFamily"/> — tävlingens vyer (upprop, incheckning,
+        /// funktionärslistan) läser ALLA rader som bemannar tävlingen, även delplaneringarnas. Skrivningarna med
+        /// <see cref="StaffOwner.Where"/> gäller fortfarande bara den kopplade planeringens rader.</para>
+        /// </summary>
         public StaffOwner ForCompetition(int competitionId)
         {
             if (_byComp.TryGetValue(competitionId, out var cached)) return cached;
             var p = competitionId > 0 ? _planning.ForCompetition(competitionId) : null;
-            var owner = p != null ? new StaffOwner(p.Id, competitionId) : StaffOwner.ForCompetitionOnly(competitionId);
+            var owner = p != null ? new StaffOwner(p.Id, competitionId) { IncludeFamily = true } : StaffOwner.ForCompetitionOnly(competitionId);
             _byComp[competitionId] = owner;
             return owner;
         }
@@ -42,11 +47,9 @@ namespace HpskSite.Services.Staffing
             StaffOwner? owner = null;
             if (p != null)
             {
-                // P4: en delplanering utan egen koppling bemannar huvudplaneringens tävling (en utdelad stationsplanering
-                // ska nå tävlingens Stationer-flik). Egen koppling vinner.
-                var link = _planning.LinkFor(planningId)
-                    ?? (p.ParentPlanningId > 0 ? _planning.LinkFor(p.ParentPlanningId.Value) : null);
-                owner = new StaffOwner(planningId, link?.TargetId > 0 ? link.TargetId : null);
+                // P4 + omgång 3: egen koppling vinner; annars delplaneringens val bland familjens tävlingar ("Bemannar för");
+                // annars huvudplaneringens tävling. EN regel — PlanningFamilyRules.StaffingCompetition.
+                owner = new StaffOwner(planningId, _planning.StaffingCompetitionFor(planningId));
             }
             _byPlanning[planningId] = owner;
             return owner;

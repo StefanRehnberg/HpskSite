@@ -92,9 +92,15 @@ namespace HpskSite.Services.Planning
         /// <summary>Ändra en annans nivå eller vad hen företräder, byta ut eller ta bort hen. Bara Sammankallande.</summary>
         public static bool CanManageParticipants(PlanningCaller c) => CanManagePlanning(c);
 
-        /// <summary>Ändra eller ställa in ett möte: den som skapade det, eller den som kan ändra planeringen.</summary>
+        /// <summary>
+        /// Kan ändra och uppåt — men bara inloggad. Omgång 3 (Expertgruppen K2): en vidarebefordrad mejllänk ska inte bära
+        /// avsändarens rätt att ändra ANDRAS saker. Det egna (min uppgift, mitt möte, min punkt) går fortfarande via länken.
+        /// </summary>
+        private static bool EditorSignedIn(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Editor) && !c.ViaLink;
+
+        /// <summary>Ändra eller ställa in ett möte: den som skapade det, eller den som kan ändra planeringen (inloggad).</summary>
         public static bool CanEditMeeting(PlanningCaller c, PlanningMeetingRow m) =>
-            CanUseMeetings(c) && (m.CreatedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            CanUseMeetings(c) && (m.CreatedBy == c.ParticipantId || EditorSignedIn(c));
 
         // ---------------------------------------------------------------- uppgifter, punkter, roller
         // (Stefan 2026-10-23) Uppgifter fördelas på mötena av dem som deltar; den som har uppgiften säger
@@ -105,21 +111,24 @@ namespace HpskSite.Services.Planning
 
         /// <summary>Ändra en uppgifts innehåll, ansvarig och datum, eller ta bort den: den som skapade den, eller Kan ändra och uppåt.</summary>
         public static bool CanEditTask(PlanningCaller c, PlanningTaskRow t) =>
-            c.IsParticipant && (t.CreatedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && (t.CreatedBy == c.ParticipantId || EditorSignedIn(c));
 
         /// <summary>
         /// Ändra läget (fram till Klar att pröva) och skriva hur det går: den som har uppgiften — även den
-        /// som följer — eller Kan ändra och uppåt.
+        /// som följer — eller Kan ändra och uppåt (inloggad).
         /// </summary>
         public static bool CanReportOnTask(PlanningCaller c, PlanningTaskRow t) =>
-            c.IsParticipant && (t.AssigneeParticipantId == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && (t.AssigneeParticipantId == c.ParticipantId || EditorSignedIn(c));
 
         /// <summary>
-        /// Besluta Utförd / Fortsätter / ångra. På ett pågående möte: alla som deltar (mötet beslutar).
-        /// Mellan mötena: bara den sammankallande.
+        /// Besluta Utförd / Fortsätter / ångra. På ett pågående möte: alla som deltar (mötet beslutar) — inloggade;
+        /// via mejllänken bara den egna uppgiften (Stefan 2026-10-24). Mellan mötena: bara den sammankallande.
         /// </summary>
         public static bool CanDecideTask(PlanningCaller c, bool atCurrentMeeting) =>
-            atCurrentMeeting ? CanUseMeetings(c) : CanManagePlanning(c);
+            atCurrentMeeting ? CanUseMeetings(c) && !c.ViaLink : CanManagePlanning(c);
+
+        private static bool DecidesAtMeeting(PlanningCaller c, PlanningTaskRow? t) =>
+            CanUseMeetings(c) && (!c.ViaLink || (t != null && t.AssigneeParticipantId == c.ParticipantId));
 
         /// <summary>
         /// P2: samma beslut med planeringens val "Utförd beslutas på mötena". Är valet AV (tävlingens egen
@@ -127,9 +136,9 @@ namespace HpskSite.Services.Planning
         /// </summary>
         public static bool CanDecideTask(PlanningCaller c, bool atCurrentMeeting, PlanningRow p, PlanningTaskRow? t)
         {
-            if (atCurrentMeeting) return CanUseMeetings(c);
+            if (atCurrentMeeting) return DecidesAtMeeting(c, t);
             if (p.DoneAtMeetingsOnly) return CanManagePlanning(c);
-            return AtLeast(c, PlanningAccessLevel.Editor)
+            return EditorSignedIn(c)
                 || (t != null && c.IsParticipant && t.AssigneeParticipantId == c.ParticipantId);
         }
 
@@ -171,7 +180,7 @@ namespace HpskSite.Services.Planning
 
         /// <summary>Ta bort en punkt: den som lade till den, eller Kan ändra och uppåt.</summary>
         public static bool CanRemoveTopic(PlanningCaller c, PlanningMeetingTopicRow t) =>
-            c.IsParticipant && (t.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && (t.AddedBy == c.ParticipantId || EditorSignedIn(c));
 
         /// <summary>Ge och ta bort roller: den sammankallande (som nivån och vad man företräder).</summary>
         public static bool CanManageRoles(PlanningCaller c) => CanManagePlanning(c);
@@ -186,7 +195,7 @@ namespace HpskSite.Services.Planning
 
         /// <summary>Ändra eller dra tillbaka ett öppet förslag: den som lade fram det, eller Kan ändra och uppåt.</summary>
         public static bool CanEditDecision(PlanningCaller c, PlanningDecisionRow d) =>
-            c.IsParticipant && d.IsOpen && (d.ProposedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+            c.IsParticipant && d.IsOpen && (d.ProposedBy == c.ParticipantId || EditorSignedIn(c));
 
         /// <summary>Registrera eller ångra beslutet, och skicka förslaget till en styrelse: Kan ändra och uppåt, inloggad.</summary>
         public static bool CanDecideDecision(PlanningCaller c) => CanEditPlanning(c);
