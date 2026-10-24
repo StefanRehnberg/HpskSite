@@ -216,8 +216,21 @@
             <button type="button" class="btn btn-primary" data-sv-new-issue><i class="bi bi-inbox me-1" aria-hidden="true"></i>Anmäl ett ärende</button></div>`;
     }
 
+    // Ärendets bilagor (från en tävlingsplanering): filer öppnas i ny flik, länkar likaså.
+    function issueFiles(files, cls) {
+        if (!files || !files.length) return '';
+        return `<div class="${cls || ''}"><i class="bi bi-paperclip me-1" aria-hidden="true"></i>${files.map(f =>
+            `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.fileName)}</a>`).join(' · ')}</div>`;
+    }
+    // Vem ärendet kommer från. Ur en tävlingsplanering är PLANERINGEN avsändaren ("SM 2028"), personen skickade det.
+    function issueSender(i) {
+        if (i.sourceKind === 'Skrivelse') return 'Inkommen skrivelse';
+        if (i.sourceKind === 'Motion') return 'Motionerna';
+        if (i.sourceKind === 'Planering') return (i.sourceName || 'Tävlingsplanering') + ' (skickat av ' + i.submittedBy + ')';
+        return i.submittedBy;
+    }
     function stateClass(state) {
-        return ({ Waiting: 'wait', Placed: 'blue', Handled: 'ok', Withdrawn: 'off', Rejected: 'off',
+        return ({ Waiting: 'wait', Placed: 'blue', Handled: 'ok', Withdrawn: 'off', Rejected: 'off', DecidedDirect: 'ok',
                   Received: 'wait', OpinionReady: 'blue', OnAgenda: 'blue', Decided: 'ok',
                   Planerat: 'plan', 'Genomfört': 'blue', VantarJustering: 'wait', Justerat: 'ok' })[state] || 'plan';
     }
@@ -726,8 +739,9 @@
     function itemSource(it) {
         if (it.issue) {
             const src = it.issue.sourceKind === 'Motion' ? 'Från motionerna' : it.issue.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse'
-                : it.issue.sourceKind === 'Planering' ? 'Från tävlingsplaneringen, skickat av ' + esc(it.issue.submittedBy) : 'Anmält av ' + esc(it.issue.submittedBy);
-            return `<div class="sv-src">${src} · ${esc(it.issue.kindLabel)}</div>${it.issue.body ? `<div class="sv-src" style="white-space:pre-wrap;">${esc(it.issue.body)}</div>` : ''}`;
+                : it.issue.sourceKind === 'Planering' ? 'Från ' + esc(it.issue.sourceName || 'en tävlingsplanering') + ', skickat av ' + esc(it.issue.submittedBy) : 'Anmält av ' + esc(it.issue.submittedBy);
+            return `<div class="sv-src">${src} · ${esc(it.issue.kindLabel)}</div>${it.issue.body ? `<div class="sv-src" style="white-space:pre-wrap;">${esc(it.issue.body)}</div>` : ''}`
+                + issueFiles(it.issue.attachments, 'sv-src');
         }
         if (it.motion) {
             const p = (it.motion.proposals || []).map(x => `<li>${esc(x)}</li>`).join('');
@@ -1302,9 +1316,10 @@
                     <div class="table-responsive"><table class="table sv-table align-middle mb-0 bg-transparent"><thead><tr><th>Ärende</th><th class="d-none d-md-table-cell">Anmält av</th><th class="d-none d-md-table-cell">Önskat möte</th><th class="text-end"></th></tr></thead><tbody>`;
                 waiting.forEach(i => {
                     h += `<tr><td><strong>${esc(i.title)}</strong><div class="sv-help">${esc(i.kindLabel)} · ${esc(svDate(i.submittedDate))}<span class="d-md-none"> · ${esc(i.submittedBy)}</span></div></td>
-                        <td class="d-none d-md-table-cell">${esc(i.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse' : i.sourceKind === 'Motion' ? 'Motionerna' : i.sourceKind === 'Planering' ? 'Planeringen (' + i.submittedBy + ')' : i.submittedBy)}</td>
+                        <td class="d-none d-md-table-cell">${esc(issueSender(i))}${(i.attachments || []).length ? ` <i class="bi bi-paperclip" title="${i.attachments.length} bilagor" aria-label="${i.attachments.length} bilagor"></i>` : ''}</td>
                         <td class="d-none d-md-table-cell">${esc(i.wishMeeting ? svDate(i.wishMeeting.slice(-10)) : 'Nästa möte')}</td>
-                        <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-primary" data-place="${i.id}">Placera…</button>
+                        <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-outline-primary" data-decide="${i.id}">Besluta…</button>
+                        <button type="button" class="btn btn-sm btn-primary" data-place="${i.id}">Placera på möte…</button>
                         ${rowMenu([{ label: 'Visa ärendet', fn: () => issueDetail(i) }, { label: 'Ändra…', fn: () => issueDialog(i) }, { divider: true }, { label: 'Avvisa…', danger: true, fn: () => rejectDialog(i) }])}</td></tr>`;
                 });
                 h += '</tbody></table></div></div>';
@@ -1313,23 +1328,32 @@
             }
         }
         const rest = r.canPlace ? all.filter(i => i.state !== 'Waiting') : all;
-        const groups = { all: rest, Placed: rest.filter(i => i.state === 'Placed'), Handled: rest.filter(i => i.state === 'Handled'), closed: rest.filter(i => i.state === 'Withdrawn' || i.state === 'Rejected'), Waiting: rest.filter(i => i.state === 'Waiting') };
+        const groups = { all: rest, Placed: rest.filter(i => i.state === 'Placed'), Handled: rest.filter(i => i.state === 'Handled' || i.state === 'DecidedDirect'), closed: rest.filter(i => i.state === 'Withdrawn' || i.state === 'Rejected'), Waiting: rest.filter(i => i.state === 'Waiting') };
         const shown = groups[isFilter] || rest;
         h += `<div class="d-flex flex-wrap gap-2 align-items-center mb-2 sv-help"><span>${r.canPlace ? 'Placerade och behandlade' : 'Dina ärenden'}</span>
             <select id="isFilter" class="form-select form-select-sm" style="width:auto;">
                 <option value="all" ${isFilter === 'all' ? 'selected' : ''}>Alla (${rest.length})</option>
                 ${r.canPlace ? '' : `<option value="Waiting" ${isFilter === 'Waiting' ? 'selected' : ''}>Väntar (${groups.Waiting.length})</option>`}
                 <option value="Placed" ${isFilter === 'Placed' ? 'selected' : ''}>Placerade (${groups.Placed.length})</option>
-                <option value="Handled" ${isFilter === 'Handled' ? 'selected' : ''}>Behandlade (${groups.Handled.length})</option>
+                <option value="Handled" ${isFilter === 'Handled' ? 'selected' : ''}>Beslutade och behandlade (${groups.Handled.length})</option>
                 <option value="closed" ${isFilter === 'closed' ? 'selected' : ''}>Återkallade och avvisade (${groups.closed.length})</option></select></div>`;
         if (!shown.length) {
             h += `<div class="sv-card"><p class="sv-help mb-0">${r.canPlace ? 'Inga ärenden här.' : 'Du har inte anmält några ärenden. Välj <strong>Anmäl ett ärende</strong> under Åtgärder.'}</p></div>`;
         } else {
             h += '<div class="sv-card p-0"><div class="table-responsive"><table class="table sv-table align-middle mb-0"><thead><tr><th class="ps-3">Ärende</th><th>Läge</th><th class="text-end pe-3"></th></tr></thead><tbody>';
             shown.forEach(i => {
-                const where = i.placement ? `<div class="sv-help">${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</div>` : '';
+                const where = i.direct
+                    ? `<div class="sv-help">${esc(i.direct.outcome)} ${esc(svDate(i.direct.date))}${i.direct.reported
+                        ? ` · anmäls på ${esc(i.direct.reported.meetingTitle)} ${esc(svDate(i.direct.reported.meetingDate))}, ${esc(i.direct.reported.paragraph)}`
+                        : ' · anmäls på nästa möte när det läggs in'}</div>`
+                    : i.placement ? `<div class="sv-help">${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</div>` : '';
                 const items = [{ label: 'Visa ärendet', fn: () => issueDetail(i) }];
                 if (i.placement) items.push({ label: 'Öppna mötet', fn: () => go('mote', i.placement.meetingId, 'forbered') });
+                if (r.canPlace && i.state === 'Placed') items.push({ label: 'Besluta utan möte…', fn: () => decideIssueDialog(i) });
+                if (r.canPlace && i.direct && !(i.direct.reported && i.direct.reported.locked)) {
+                    items.push({ divider: true });
+                    items.push({ label: 'Ångra beslutet…', danger: true, fn: () => undoDecision(i) });
+                }
                 if (r.canPlace && i.state === 'Placed') {
                     items.push({ label: 'Flytta till ett annat möte…', fn: () => placeIssueDialog(i.id, 0) });
                     items.push({ label: 'Ta tillbaka till kön', fn: () => unplaceIssue(i) });
@@ -1348,6 +1372,54 @@
         body().innerHTML = h;
         $('isFilter').addEventListener('change', e => { isFilter = e.target.value; renderIssues(); });
         body().querySelectorAll('[data-place]').forEach(b => b.addEventListener('click', () => placeIssueDialog(parseInt(b.dataset.place, 10), 0)));
+        body().querySelectorAll('[data-decide]').forEach(b => b.addEventListener('click', () => {
+            const i = (isData.issues || []).find(x => x.id === parseInt(b.dataset.decide, 10)); if (i) decideIssueDialog(i);
+        }));
+    }
+
+    // Beslut utan möte: sekreteraren eller ordföranden registrerar beslutet och vilka ledamöter som stod bakom det.
+    // Beslutet anmäls på nästa möte under "Beslut fattade mellan möten", så att det hamnar i ett protokoll.
+    function decideIssueDialog(i) {
+        get('BoardWork', 'GetDeciderOptions', OWN()).then(r => {
+            if (!r.success) { failMsg(r); return; }
+            const members = r.members || [];
+            formModal({
+                title: 'Besluta utan möte', okLabel: 'Registrera beslutet', wide: false,
+                html: `<p class="mb-1"><strong>${esc(i.title)}</strong></p>
+                    <p class="sv-help">Från ${esc(issueSender(i))}</p>
+                    ${issueFiles(i.attachments, 'mb-3')}
+                    <span class="sv-label">Beslut</span>
+                    <div class="d-flex gap-3 mb-3">
+                        <div class="form-check"><input class="form-check-input" type="radio" name="dxOut" id="dxOutA" value="Bifall" checked><label class="form-check-label" for="dxOutA">Bifall</label></div>
+                        <div class="form-check"><input class="form-check-input" type="radio" name="dxOut" id="dxOutR" value="Avslag"><label class="form-check-label" for="dxOutR">Avslag</label></div></div>
+                    <label class="sv-label" for="dxText">Beslutet</label>
+                    <textarea id="dxText" class="form-control mb-3" rows="3" maxlength="4000" placeholder="Till exempel: Styrelsen ställer sig bakom att fältet skjuts på Skrea."></textarea>
+                    <span class="sv-label">Vilka ledamöter stod bakom beslutet?</span>
+                    <div class="mb-2">${members.map(m => `<div class="form-check"><input class="form-check-input" type="checkbox" id="dxM${m.memberId}" data-dx-member="${m.memberId}"${m.memberId === r.me ? ' checked' : ''}>
+                        <label class="form-check-label" for="dxM${m.memberId}">${esc(m.name)} <span class="sv-help">${esc(m.title)}</span></label></div>`).join('')
+                        || '<p class="sv-help">Styrelsen har inga ledamöter inlagda.</p>'}</div>
+                    <div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="dxNotify" checked><label class="form-check-label" for="dxNotify">Meddela ${esc(i.submittedBy || 'den som anmälde ärendet')} beslutet</label></div>
+                    <p class="sv-help mb-0">Beslutet anmäls på nästa styrelsemöte under <em>Beslut fattade mellan möten</em>, så att det kommer med i ett protokoll.</p>`,
+                onOk: () => {
+                    const ids = [...document.querySelectorAll('[data-dx-member]:checked')].map(x => x.dataset.dxMember);
+                    if (!ids.length) return Promise.resolve('Välj vilka ledamöter som stod bakom beslutet.');
+                    return post('BoardWork', 'DecideIssue', {
+                        issueId: i.id, outcome: document.querySelector('input[name="dxOut"]:checked').value,
+                        text: $('dxText').value, deciderIds: ids.join(','), notify: $('dxNotify').checked ? '1' : '0'
+                    }).then(x => {
+                        if (!x.success) return x.message || 'Beslutet kunde inte registreras.';
+                        showMsg('Beslutet är registrerat.' + (x.reported ? ` Det anmäls som <strong>${esc(x.reported.paragraph)}</strong> på ${esc(x.reported.meetingTitle)}.`
+                            : ' Det anmäls på nästa möte när ett sådant läggs in.') + (x.notified ? ' Den som anmälde ärendet har fått besked.' : ''), 'success', true);
+                        refreshCounts(); route();
+                        return true;
+                    });
+                }
+            });
+        });
+    }
+    async function undoDecision(i) {
+        if (!await svConfirm('Ångra beslutet?', `Beslutet om ${i.title} tas bort och ärendet väntar i kön igen. Anmälan på mötet tas också bort.`, 'Ångra beslutet', true)) return;
+        post('BoardWork', 'UndoIssueDecision', { issueId: i.id }).then(r => { if (r.success) { refreshCounts(); route(); } else failMsg(r); });
     }
 
     function issueDialog(issue, letter) {
@@ -1390,9 +1462,12 @@
     function issueDetail(i) {
         formModal({
             title: i.title, wide: true,
-            html: `<p class="mb-2">${pill(i.state, i.stateLabel)} <span class="sv-help ms-2">${esc(i.kindLabel)} · anmält av ${esc(i.submittedBy)} ${esc(svDate(i.submittedDate))}</span></p>
+            html: `<p class="mb-2">${pill(i.state, i.stateLabel)} <span class="sv-help ms-2">${esc(i.kindLabel)} · ${i.sourceKind === 'Planering' ? 'från ' + esc(issueSender(i)) : 'anmält av ' + esc(i.submittedBy)} ${esc(svDate(i.submittedDate))}</span></p>
                 ${i.body ? `<div class="mb-3" style="white-space:pre-wrap;">${esc(i.body)}</div>` : '<p class="sv-help">Inget underlag.</p>'}
-                ${i.placement ? `<p class="mb-1"><strong>Placering:</strong> ${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</p>` : ''}
+                ${issueFiles(i.attachments, 'mb-3')}
+                ${i.direct ? `<p class="mb-1"><strong>Beslutat utan möte ${esc(svDate(i.direct.date))}:</strong> ${esc(i.direct.outcome)}${i.direct.deciders ? ' (' + esc(i.direct.deciders) + ')' : ''}</p>
+                    ${i.direct.text ? `<p class="mb-1" style="white-space:pre-wrap;">${esc(i.direct.text)}</p>` : ''}` : ''}
+                ${i.placement ? `<p class="mb-1"><strong>${i.direct ? 'Anmäls på' : 'Placering'}:</strong> ${esc(i.placement.meetingTitle)} ${esc(svDate(i.placement.meetingDate))}, ${esc(i.placement.paragraph)}</p>` : ''}
                 ${i.placement && i.placement.decision ? `<p class="mb-1"><strong>Beslut:</strong> <span style="white-space:pre-wrap;">${esc(i.placement.decision)}</span></p>` : ''}
                 ${i.closedReason ? `<p class="mb-1"><strong>Skäl:</strong> ${esc(i.closedReason)}</p>` : ''}`
         });

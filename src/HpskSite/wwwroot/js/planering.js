@@ -1718,6 +1718,7 @@
         if (r.kind === 'Topic') { const m = MEET && MEET.meetings.find(x => x.id === r.meetingId); return `Att prata om${m ? ' på ' + m.title : ''}: ${t}`; }
         if (r.kind === 'Task') return `Uppgift: ${t}`;
         if (r.kind === 'Area') return `Område: ${t}`;
+        if (r.kind === 'Decision') return `Förslag: ${t}`;
         return t;
     }
     function gotoRef(code) {
@@ -1726,6 +1727,7 @@
         if (kind === 'Message') { go('meddelanden'); setTimeout(() => document.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: 'center' }), 60); return; }
         if (kind === 'Task') { const t = findTask(id); if (t) openThread(t); else go('uppgifter'); return; }
         if (kind === 'Area') go('uppgifter');
+        if (kind === 'Decision') { go('beslut'); setTimeout(() => document.querySelector(`[data-dec-id="${id}"]`)?.scrollIntoView({ block: 'center' }), 60); }
     }
 
     let docQuery = '', docCat = '';
@@ -1952,7 +1954,8 @@
             onOk: async () => {
                 const ids = [...chosen].filter(id => !already.has(id));
                 if (!ids.length) return 'Välj minst ett dokument.';
-                if (opts.onPick) { opts.onPick(ids); return true; }
+                // onPick som svarar false har själv öppnat nästa dialog i samma fönster — stäng det inte då.
+                if (opts.onPick) return opts.onPick(ids) === false ? false : true;
                 const r = await post('AttachDocuments', { documentIds: ids.join(','), kind: opts.attach.kind, targetId: opts.attach.id });
                 if (!r.success) return r.message;
                 await reloadDocs();
@@ -1967,11 +1970,13 @@
         const meetings = (MEET ? MEET.meetings : []).filter(m => m.status !== 'Cancelled');
         const tasks = (TASKS ? TASKS.tasks : []).filter(t => t.status !== 'Done');
         const areas = TASKS ? TASKS.areas || [] : [];
+        const decs = (DEC ? DEC.decisions : []).filter(x => x.canAttach);
         const opt = (k, id, label) => has.has(k + ':' + id) ? '' : `<option value="${k}:${id}">${esc(label)}</option>`;
         const groups = [
             meetings.length && `<optgroup label="Möten">${meetings.map(m => opt('Meeting', m.id, m.title + (m.startsAt ? ' · ' + fmtDay(m.startsAt) : ''))).join('')}</optgroup>`,
             tasks.length && `<optgroup label="Uppgifter">${tasks.map(t => opt('Task', t.id, t.title)).join('')}</optgroup>`,
             areas.length && `<optgroup label="Områden">${areas.map(a => opt('Area', a.id, a.name)).join('')}</optgroup>`,
+            decs.length && `<optgroup label="Förslag">${decs.map(x => opt('Decision', x.id, x.title)).join('')}</optgroup>`,
         ].filter(Boolean).join('');
         formModal({
             title: 'Bifoga dokumentet', okLabel: 'Bifoga', wide: false,
@@ -2754,47 +2759,63 @@
         location.href = '/tavlingsplanering';
     }
 
-    // ================================================================ Förslag och beslut (P3)
-    // Ett förslag läggs fram, de som deltar svarar Vi kan / Vi kan inte, och beslutet registreras här —
-    // som arbetsgruppens beslut eller som en styrelses. Ett förslag kan skickas till styrelsen i en klubb
-    // eller krets som någon i planeringen företräder; styrelsens läge läses ur deras ärendekö.
+    // ================================================================ Förslag och beslut (P3, omgjort 2026-10-24)
+    // Den som lägger fram ett förslag väljer vem som beslutar: GRUPPEN (de som deltar svarar Ja eller Nej, och den
+    // som kan ändra planeringen registrerar beslutet) eller EN STYRELSE i en klubb eller krets som någon här
+    // företräder (förslaget läggs i styrelsens ärendekö med sina bilagor; gruppen svarar inte, utan skriver i
+    // meddelandena). Aldrig båda. Styrelsens läge läses ur deras ärendekö.
     async function reloadDecisions() { const r = await get('Decisions'); if (r.success) DEC = r; }
     function findDecision(id) { return DEC.decisions.find(d => d.id === id); }
+    const isBoardDec = d => d.deciderKind === 'Board';
 
     function decisionAnswers(d) {
-        const can = d.responses.filter(r => r.answer === 'Can'), cannot = d.responses.filter(r => r.answer === 'Cannot');
+        if (isBoardDec(d)) return '';
+        const yes = d.responses.filter(r => r.answer === 'Yes'), no = d.responses.filter(r => r.answer === 'No');
         const who = r => esc(r.name) + (r.represents ? ` <span class="pl-help">(${esc(r.represents)})</span>` : '')
             + (r.beforeEdit ? ' <span class="pl-help small">· svarade före ändringen</span>' : '')
             + (r.comment ? `<div class="pl-help small ms-3" style="white-space:pre-wrap;">${esc(r.comment)}</div>` : '');
         const list = (rows, label, icon) => rows.length
             ? `<div class="mb-1"><i class="bi ${icon} me-1" aria-hidden="true"></i><b>${label} (${rows.length})</b><ul class="mb-1 ps-4">${rows.map(r => `<li>${who(r)}</li>`).join('')}</ul></div>` : '';
-        return list(can, 'Vi kan', 'bi-check-circle text-success') + list(cannot, 'Vi kan inte', 'bi-x-circle text-danger')
+        return list(yes, 'Ja', 'bi-check-circle text-success') + list(no, 'Nej', 'bi-x-circle text-danger')
             + (d.waiting && d.waiting.length ? `<div class="pl-help small">Väntar på svar från ${esc(d.waiting.join(', '))}.</div>` : '')
             + (!d.responses.length && !(d.waiting || []).length ? '<div class="pl-help small">Inga svar ännu.</div>' : '');
     }
 
     function boardBlock(d) {
         const b = d.board; if (!b) return '';
-        const tone = b.state === 'handled' ? 'success' : b.state === 'rejected' || b.state === 'gone' || b.state === 'withdrawn' ? 'secondary' : 'info';
-        return `<div class="alert alert-${tone} py-2 mb-2"><div><i class="bi bi-people me-1" aria-hidden="true"></i><b>Styrelsen i ${esc(b.org)}</b>
-            <span class="pl-help small">· skickat ${esc(fmtShort(b.sentAt))}${b.sentBy ? ' av ' + esc(b.sentBy) : ''}</span></div>
-            <div>${esc(b.label)}</div>${b.decision ? `<div class="mt-1"><b>Styrelsens beslut:</b> <span style="white-space:pre-wrap;">${esc(b.decision)}</span></div>` : ''}</div>`;
+        const tone = b.state === 'decided' || b.state === 'handled' ? 'success'
+            : b.state === 'unsent' ? 'warning' : b.state === 'rejected' || b.state === 'gone' || b.state === 'withdrawn' ? 'secondary' : 'info';
+        const sent = b.sentAt ? ` <span class="pl-help small">· skickat ${esc(fmtShort(b.sentAt))}${b.sentBy ? ' av ' + esc(b.sentBy) : ''}</span>` : '';
+        const send = b.state === 'unsent' && d.canSendToBoard
+            ? `<div class="mt-2"><button class="btn btn-sm btn-primary" data-dec-send="${d.id}"><i class="bi bi-send me-1"></i>Skicka till styrelsen</button></div>` : '';
+        const decision = b.state === 'decided'
+            ? `<div class="mt-1"><b>${esc(b.outcome || '')}</b>${b.decision ? ` — <span style="white-space:pre-wrap;">${esc(b.decision)}</span>` : ''}</div>`
+            : b.decision ? `<div class="mt-1"><b>Styrelsens beslut:</b> <span style="white-space:pre-wrap;">${esc(b.decision)}</span></div>` : '';
+        return `<div class="alert alert-${tone} py-2 mb-2"><div><i class="bi bi-people me-1" aria-hidden="true"></i><b>Styrelsen i ${esc(b.org)}</b>${sent}</div>
+            <div>${esc(b.label)}</div>${decision}${send}</div>`;
+    }
+
+    function decisionState(d) {
+        if (d.status === 'Decided') return `<span class="pl-state ${d.outcome === 'Rejected' ? 'off' : 'ok'}">${esc(d.outcomeLabel || 'Avgjort')}</span>`;
+        if (d.status === 'Withdrawn') return '<span class="pl-state off">Tillbakadraget</span>';
+        if (isBoardDec(d)) return d.board && d.board.state === 'unsent' ? '<span class="pl-state wait">Inte skickat</span>' : '<span class="pl-state blue">Hos styrelsen</span>';
+        return '<span class="pl-state blue">Öppet</span>';
     }
 
     function decisionCard(d) {
-        const open = d.status === 'Open';
+        const board = isBoardDec(d);
+        const resend = board && d.canSendToBoard && d.board && d.board.state !== 'unsent';
         const menu = rowMenu([
             d.canEdit && { label: 'Ändra förslaget…', fn: () => openDecisionEdit(d) },
-            d.canSendToBoard && { label: d.board ? 'Skicka till en styrelse igen…' : 'Skicka till en styrelse…', fn: () => openSendToBoard(d) },
+            d.canAttach && canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Decision', id: d.id } }) },
+            resend && { label: 'Skicka till styrelsen igen', fn: () => sendDecision(d) },
             d.canDecide && { label: 'Registrera beslutet…', fn: () => openDecide(d) },
             d.canReopen && { label: 'Ångra beslutet', fn: () => reopenDecision(d) },
             d.canWithdraw && { divider: true },
             d.canWithdraw && { label: 'Dra tillbaka förslaget…', danger: true, fn: () => withdrawDecision(d) },
         ]);
-        const state = open ? '<span class="pl-state blue">Öppet</span>'
-            : d.status === 'Decided' ? `<span class="pl-state ${d.outcome === 'Rejected' ? 'off' : 'ok'}">${esc(d.outcomeLabel)}</span>`
-            : '<span class="pl-state off">Tillbakadraget</span>';
-        const decided = d.status === 'Decided' ? `<div class="mb-2"><b>${esc(d.outcomeLabel)}</b> — ${d.decidedByKind === 'Board' ? 'beslutat av ' + esc(d.decidedBoardName) : 'arbetsgruppens beslut'}
+        const who = board ? `Styrelsen i ${esc(d.board ? d.board.org : '')} beslutar` : 'Gruppen beslutar';
+        const decided = !board && d.status === 'Decided' ? `<div class="mb-2"><b>${esc(d.outcomeLabel)}</b> — gruppens beslut
             <span class="pl-help small">· ${esc(fmtShort(d.decidedAt))}${d.decidedBy ? ', registrerat av ' + esc(d.decidedBy) : ''}</span>
             ${d.decisionNote ? `<div style="white-space:pre-wrap;">${esc(d.decisionNote)}</div>` : ''}</div>` : '';
         let answer = '';
@@ -2804,15 +2825,18 @@
                 ${m && m.beforeEdit ? '<div class="alert alert-warning py-1 px-2 small mb-2">Förslaget ändrades efter att du svarade. Svara gärna igen.</div>' : ''}
                 <input type="text" class="form-control form-control-sm mb-2" id="decC${d.id}" maxlength="1000" placeholder="Kommentar (valfri)" value="${esc(m ? m.comment || '' : '')}" aria-label="Kommentar till ditt svar">
                 <div class="d-flex gap-2 flex-wrap">
-                    <button class="btn btn-sm ${m && m.answer === 'Can' ? 'btn-success' : 'btn-outline-success'}" data-dec-answer="${d.id}" data-answer="Can"><i class="bi bi-check-lg me-1"></i>Vi kan</button>
-                    <button class="btn btn-sm ${m && m.answer === 'Cannot' ? 'btn-danger' : 'btn-outline-danger'}" data-dec-answer="${d.id}" data-answer="Cannot"><i class="bi bi-x-lg me-1"></i>Vi kan inte</button>
-                    ${m ? `<span class="pl-help small align-self-center">Du har svarat ${m.answer === 'Can' ? 'Vi kan' : 'Vi kan inte'}. Tryck igen för att ändra.</span>` : ''}
+                    <button class="btn btn-sm ${m && m.answer === 'Yes' ? 'btn-success' : 'btn-outline-success'}" data-dec-answer="${d.id}" data-answer="Yes"><i class="bi bi-check-lg me-1"></i>Ja</button>
+                    <button class="btn btn-sm ${m && m.answer === 'No' ? 'btn-danger' : 'btn-outline-danger'}" data-dec-answer="${d.id}" data-answer="No"><i class="bi bi-x-lg me-1"></i>Nej</button>
+                    ${m ? `<span class="pl-help small align-self-center">Du har svarat ${m.answer === 'No' ? 'Nej' : 'Ja'}. Tryck igen för att ändra.</span>` : ''}
                 </div></div>`;
+        } else if (board && d.status === 'Open') {
+            answer = '<div class="pl-help small border-top pt-2 mt-2">Styrelsen beslutar. Vill du säga något om förslaget skriver du det under Meddelanden.</div>';
         }
         return `<div class="pl-card" data-dec-id="${d.id}">
             <div class="d-flex justify-content-between gap-2 align-items-start"><div><h2 class="mb-1">${esc(d.title)}</h2>
-                <div class="pl-help small">${state} Föreslaget av ${esc(d.proposedBy)} ${esc(fmtShort(d.proposedAt))}${d.editedAt ? ' · ändrat ' + esc(fmtShort(d.editedAt)) : ''}</div></div>${menu}</div>
+                <div class="pl-help small">${decisionState(d)} ${who} · föreslaget av ${esc(d.proposedBy)} ${esc(fmtShort(d.proposedAt))}${d.editedAt ? ' · ändrat ' + esc(fmtShort(d.editedAt)) : ''}</div></div>${menu}</div>
             ${d.body ? `<div class="mt-2 mb-2" style="white-space:pre-wrap;">${esc(d.body)}</div>` : ''}
+            ${docChips('Decision', d.id)}
             ${decided}${boardBlock(d)}
             <div class="mt-2">${decisionAnswers(d)}</div>${answer}</div>`;
     }
@@ -2822,8 +2846,8 @@
         setActions([DEC.canPropose && { label: 'Nytt förslag…', icon: 'bi-lightbulb', fn: () => openDecisionEdit(null) }]);
         const all = DEC.decisions;
         const open = all.filter(d => d.status === 'Open'), decided = all.filter(d => d.status === 'Decided'), withdrawn = all.filter(d => d.status === 'Withdrawn');
-        const html = [`<p class="pl-help">Lägg fram ett förslag. De som deltar svarar <i>Vi kan</i> eller <i>Vi kan inte</i>, och beslutet registreras här —
-            som arbetsgruppens beslut, eller som ett beslut av en styrelse. Ett förslag kan skickas till styrelsen i en klubb eller krets som någon i planeringen företräder.</p>`];
+        const html = [`<p class="pl-help">Lägg fram ett förslag och välj vem som beslutar: <b>ni i planeringen</b> (alla som deltar svarar Ja eller Nej)
+            eller <b>styrelsen</b> i en klubb eller krets som någon här företräder. Dokument kan bifogas och följer med till styrelsen.</p>`];
         if (!all.length) {
             html.push(`<div class="pl-card"><p class="mb-2"><b>Inga förslag ännu.</b></p>
                 <p class="mb-${DEC.canPropose ? '3' : '0'}">Till exempel: "Varbergs PK bemannar station 3–5" eller "Vi använder Skrea skjutbana för fältet".</p>
@@ -2836,6 +2860,11 @@
         $('plBody').innerHTML = html.join('');
     }
     document.addEventListener('click', e => { if (e.target.closest('[data-dec-new]')) { e.preventDefault(); openDecisionEdit(null); } });
+    document.addEventListener('click', e => {
+        const s = e.target.closest('[data-dec-send]'); if (!s) return;
+        e.preventDefault();
+        const d = findDecision(parseInt(s.dataset.decSend, 10)); if (d) sendDecision(d);
+    });
     document.addEventListener('click', async e => {
         const b = e.target.closest('[data-dec-answer]'); if (!b) return;
         e.preventDefault();
@@ -2850,22 +2879,106 @@
         finally { b.disabled = false; }
     });
 
-    function openDecisionEdit(d) {
-        const answered = d ? d.responses.length : 0;
+    // Nytt förslag: rubrik, bakgrund, vem som beslutar och bilagor. Bilagorna väljs i dokumentväljaren, som
+    // öppnas i samma dialogfönster — utkastet (draft) bär det som redan skrivits tillbaka hit.
+    function openDecisionEdit(d, draft) {
+        if (d) return openDecisionChange(d);
+        draft = draft || { title: '', body: '', decider: 'Group', target: 0, docIds: [] };
+        const targets = DEC.boardTargets || [];
+        const canBoard = DEC.canSendToBoard && targets.length > 0;
+        const docs = draft.docIds.map(id => DOCS && DOCS.documents.find(x => x.id === id)).filter(Boolean);
+        const read = body => ({
+            title: body.querySelector('#deTitle').value, body: body.querySelector('#deBody').value,
+            decider: canBoard && body.querySelector('#deByBoard').checked ? 'Board' : 'Group',
+            target: canBoard ? parseInt(body.querySelector('#deTarget').value, 10) || 0 : 0, docIds: draft.docIds.slice(),
+        });
         formModal({
-            title: d ? 'Ändra förslaget' : 'Nytt förslag', okLabel: d ? 'Spara' : 'Lägg fram förslaget', wide: false,
+            title: 'Nytt förslag', okLabel: 'Lägg fram förslaget', wide: false,
             html: `<label class="form-label" for="deTitle">Förslaget</label>
-                <input id="deTitle" class="form-control mb-1" maxlength="300" value="${esc(d ? d.title : '')}" placeholder="Till exempel: Varbergs PK bemannar station 3–5">
-                <div class="pl-help small mb-3">En mening som går att svara Vi kan eller Vi kan inte på.</div>
+                <input id="deTitle" class="form-control mb-1" maxlength="300" value="${esc(draft.title)}" placeholder="Till exempel: Varbergs PK bemannar station 3–5">
+                <div class="pl-help small mb-3">En mening som går att svara Ja eller Nej på.</div>
                 <label class="form-label" for="deBody">Bakgrund (valfri)</label>
-                <textarea id="deBody" class="form-control" rows="5" maxlength="4000">${esc(d ? d.body || '' : '')}</textarea>
-                ${answered ? `<div class="alert alert-warning small mt-3 mb-0">${answered === 1 ? 'En har' : answered + ' har'} redan svarat. Svaren står kvar men märks som givna före ändringen.</div>`
-                    : '<p class="pl-help small mt-3 mb-0">Gruppen ser förslaget i meddelandena och under Förslag och beslut.</p>'}`,
+                <textarea id="deBody" class="form-control mb-3" rows="4" maxlength="4000">${esc(draft.body)}</textarea>
+                <div class="fw-semibold mb-1">Vem beslutar?</div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="deBy" id="deByGroup" value="Group"${draft.decider !== 'Board' ? ' checked' : ''}>
+                    <label class="form-check-label" for="deByGroup">Vi i planeringen <span class="pl-help small">— alla som deltar svarar Ja eller Nej</span></label></div>
+                ${canBoard ? `<div class="form-check"><input class="form-check-input" type="radio" name="deBy" id="deByBoard" value="Board"${draft.decider === 'Board' ? ' checked' : ''}>
+                    <label class="form-check-label" for="deByBoard">En styrelse <span class="pl-help small">— förslaget skickas till styrelsen, gruppen svarar inte</span></label></div>
+                    <div id="deBoardBox" class="ms-4 mt-1${draft.decider === 'Board' ? '' : ' d-none'}">
+                        <select id="deTarget" class="form-select" aria-label="Vilken styrelse">${targets.map((t, i) => `<option value="${i}"${i === draft.target ? ' selected' : ''}>Styrelsen i ${esc(t.name)}</option>`).join('')}</select>
+                        <div class="pl-help small mt-1">Klubbarna och kretsarna som någon i planeringen företräder. Sekreteraren och ordföranden får ett mejl;
+                            styrelsen beslutar direkt eller tar upp det på ett möte.</div></div>`
+                    : `<p class="pl-help small mb-0">${DEC.canSendToBoard ? 'Ingen i planeringen företräder en klubb eller krets än, så förslaget kan inte skickas till en styrelse.'
+                        : 'Den som kan ändra planeringen kan också lägga fram förslag som en styrelse beslutar om.'}</p>`}
+                <div class="fw-semibold mt-3 mb-1">Bilagor</div>
+                <div id="deDocs">${docs.length ? docs.map(x => `<div class="d-flex align-items-center gap-2"><i class="bi ${docIcon(x)} text-secondary" aria-hidden="true"></i>${esc(x.title)}
+                    <button type="button" class="btn btn-link btn-sm text-danger p-0 ms-auto" data-de-undoc="${x.id}" aria-label="Ta bort ${esc(x.title)} ur bilagorna">Ta bort</button></div>`).join('')
+                    : '<div class="pl-help small">Inga bilagor.</div>'}</div>
+                ${canAddDocs() ? '<button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="deAddDocs"><i class="bi bi-paperclip me-1" aria-hidden="true"></i>Välj eller lägg till dokument…</button>' : ''}`,
+            onOpen: body => {
+                body.querySelector('#deTitle').focus();
+                body.querySelectorAll('input[name="deBy"]').forEach(r => r.addEventListener('change', () =>
+                    body.querySelector('#deBoardBox')?.classList.toggle('d-none', !body.querySelector('#deByBoard')?.checked)));
+                body.querySelector('#deAddDocs')?.addEventListener('click', () => {
+                    const cur = read(body);
+                    pickDocuments({ preselected: cur.docIds, onPick: ids => { openDecisionEdit(null, Object.assign(cur, { docIds: ids })); return false; } });
+                });
+                body.addEventListener('click', e => {
+                    const u = e.target.closest('[data-de-undoc]'); if (!u) return;
+                    const cur = read(body);
+                    cur.docIds = cur.docIds.filter(id => id !== parseInt(u.dataset.deUndoc, 10));
+                    openDecisionEdit(null, cur);
+                });
+            },
+            onOk: async body => {
+                const p = read(body);
+                if (!p.title.trim()) return 'Skriv vad förslaget gäller.';
+                const t = p.decider === 'Board' ? targets[p.target] : null;
+                if (p.decider === 'Board' && !t) return 'Välj en styrelse.';
+                const r = await post('CreateDecision', { title: p.title.trim(), body: p.body, decider: p.decider,
+                    ownerType: t ? t.ownerType : '', ownerId: t ? t.ownerId : '' });
+                if (!r.success) return r.message || 'Det gick inte att lägga fram förslaget.';
+                let note = '';
+                if (p.docIds.length) {
+                    const a = await post('AttachDocuments', { documentIds: p.docIds.join(','), kind: 'Decision', targetId: r.decisionId });
+                    if (!a.success) note = ' Bilagorna kunde inte bifogas: ' + esc(a.message || '') + '.';
+                }
+                if (p.decider === 'Board') {
+                    const s = await post('SendDecisionToBoard', { decisionId: r.decisionId });
+                    await reloadDecisions(); await reloadDocs(); await reloadMessages(); go('beslut');
+                    if (!s.success) { showMsg('Förslaget är sparat men kunde inte skickas: ' + esc(s.message || '') + ' Tryck Skicka till styrelsen på förslaget.' + note, 'warning'); return true; }
+                    showMsg(sentMessage(s) + note, s.notified && !note && !(s.skipped || []).length ? 'success' : 'warning');
+                    return true;
+                }
+                await reloadDecisions(); await reloadDocs(); await reloadMessages(); go('beslut');
+                if (note) showMsg('Förslaget är framlagt.' + note, 'warning');
+                return true;
+            }
+        });
+    }
+    function sentMessage(s) {
+        return `Skickat till styrelsen i ${esc(s.org)}` + (s.attachments ? ` med ${s.attachments === 1 ? 'en bilaga' : s.attachments + ' bilagor'}` : '') + '.'
+            + ((s.skipped || []).length ? ` Följande kunde inte följa med: ${esc(s.skipped.join(', '))}.` : '')
+            + (s.notified ? '' : ' Ingen i styrelsen kunde nås med e-post — hör av dig till dem.');
+    }
+
+    // Ändra ett befintligt förslag: rubrik och bakgrund. Vem som beslutar ändras inte — dra tillbaka och lägg fram igen.
+    function openDecisionChange(d) {
+        const answered = d.responses.length;
+        formModal({
+            title: 'Ändra förslaget', okLabel: 'Spara', wide: false,
+            html: `<label class="form-label" for="deTitle">Förslaget</label>
+                <input id="deTitle" class="form-control mb-3" maxlength="300" value="${esc(d.title)}">
+                <label class="form-label" for="deBody">Bakgrund (valfri)</label>
+                <textarea id="deBody" class="form-control" rows="5" maxlength="4000">${esc(d.body || '')}</textarea>
+                ${answered ? `<div class="alert alert-warning small mt-3 mb-0">${answered === 1 ? 'En har' : answered + ' har'} redan svarat. Svaren står kvar men märks som givna före ändringen.</div>` : ''}
+                <p class="pl-help small mt-3 mb-0">${isBoardDec(d) ? 'Styrelsen beslutar om förslaget.' : 'Gruppen beslutar om förslaget.'}
+                    Vill du ändra det, dra tillbaka förslaget och lägg fram det igen.</p>`,
             onOpen: body => body.querySelector('#deTitle').focus(),
             onOk: async body => {
                 const p = { title: body.querySelector('#deTitle').value.trim(), body: body.querySelector('#deBody').value };
                 if (!p.title) return 'Skriv vad förslaget gäller.';
-                const r = d ? await post('UpdateDecision', Object.assign({ decisionId: d.id }, p)) : await post('CreateDecision', p);
+                const r = await post('UpdateDecision', Object.assign({ decisionId: d.id }, p));
                 if (!r.success) return r.message || 'Det gick inte att spara.';
                 await reloadDecisions(); await reloadMessages(); go('beslut');
                 return true;
@@ -2873,55 +2986,30 @@
         });
     }
 
-    function openSendToBoard(d) {
-        const targets = DEC.boardTargets || [];
-        formModal({
-            title: 'Skicka till en styrelse', okLabel: 'Skicka', wide: false,
-            html: `<p class="mb-2"><b>${esc(d.title)}</b></p>
-                <label class="form-label" for="sbTarget">Styrelsen i</label>
-                <select id="sbTarget" class="form-select mb-1">${targets.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('')}</select>
-                <div class="pl-help small mb-3">Klubbarna och kretsarna som någon i planeringen företräder.</div>
-                <label class="form-label" for="sbKind">Vad vill ni att styrelsen gör?</label>
-                <select id="sbKind" class="form-select mb-3"><option value="Beslut">Fatta ett beslut</option><option value="Information">Ta del av det (information)</option><option value="Diskussion">Diskutera det</option></select>
-                <p class="pl-help small mb-0">Förslaget läggs i styrelsens ärendekö, med bakgrunden och svaren hittills. Sekreteraren och ordföranden får ett mejl.
-                    Du får besked när ärendet placerats på ett möte och när protokollet är justerat — och läget syns här.</p>`,
-            onOk: async body => {
-                const t = targets[parseInt(body.querySelector('#sbTarget').value, 10)];
-                if (!t) return 'Välj en styrelse.';
-                const r = await post('SendDecisionToBoard', { decisionId: d.id, ownerType: t.ownerType, ownerId: t.ownerId, kind: body.querySelector('#sbKind').value });
-                if (!r.success) return r.message || 'Det gick inte att skicka.';
-                await reloadDecisions(); await reloadMessages(); render(view);
-                showMsg(`Skickat till styrelsen i ${esc(r.org)}.` + (r.notified ? '' : ' Ingen i styrelsen kunde nås med e-post — hör av dig till dem.'), r.notified ? 'success' : 'warning');
-                return true;
-            }
-        });
+    async function sendDecision(d) {
+        const org = d.board ? d.board.org : '';
+        if (!await plConfirm('Skicka till styrelsen?', `"${d.title}" läggs i ärendekön hos styrelsen i ${org}, med bilagorna. Sekreteraren och ordföranden får ett mejl.`, 'Skicka')) return;
+        const s = await post('SendDecisionToBoard', { decisionId: d.id });
+        if (!s.success) { failMsg(s); return; }
+        await reloadDecisions(); await reloadMessages(); render(view);
+        showMsg(sentMessage(s), s.notified && !(s.skipped || []).length ? 'success' : 'warning');
     }
 
+    // Gruppens beslut. Ett förslag till en styrelse registreras inte här — styrelsens beslut syns av sig själv.
     function openDecide(d) {
-        const targets = DEC.boardTargets || [];
-        const b = d.board, handled = b && b.state === 'handled';
+        const yes = d.responses.filter(r => r.answer === 'Yes').length, no = d.responses.filter(r => r.answer === 'No').length;
         formModal({
             title: 'Registrera beslutet', okLabel: 'Registrera', wide: false,
-            html: `<p class="mb-2"><b>${esc(d.title)}</b></p>
+            html: `<p class="mb-1"><b>${esc(d.title)}</b></p>
+                <p class="pl-help small mb-3">Svaren: ${yes} Ja, ${no} Nej${(d.waiting || []).length ? `, ${d.waiting.length} har inte svarat` : ''}.</p>
                 <div class="mb-3"><div class="form-check"><input class="form-check-input" type="radio" name="dcOut" id="dcOutA" value="Approved" checked><label class="form-check-label" for="dcOutA">Beslutat</label></div>
                     <div class="form-check"><input class="form-check-input" type="radio" name="dcOut" id="dcOutR" value="Rejected"><label class="form-check-label" for="dcOutR">Avslaget</label></div></div>
-                <div class="fw-semibold mb-1">Vem beslutade?</div>
-                <div class="mb-2"><div class="form-check"><input class="form-check-input" type="radio" name="dcBy" id="dcByG" value="Group"${handled ? '' : ' checked'}><label class="form-check-label" for="dcByG">Arbetsgruppen (planeringen)</label></div>
-                    <div class="form-check"><input class="form-check-input" type="radio" name="dcBy" id="dcByB" value="Board"${handled ? ' checked' : ''}><label class="form-check-label" for="dcByB">En styrelse</label></div></div>
-                <div id="dcBoardBox" class="mb-3 ms-4${handled ? '' : ' d-none'}">
-                    <input id="dcBoard" class="form-control" list="dcBoardList" maxlength="300" placeholder="Till exempel: Styrelsen i Varbergs PK" value="${esc(b ? 'Styrelsen i ' + b.org : '')}">
-                    <datalist id="dcBoardList">${targets.map(t => `<option value="${esc('Styrelsen i ' + t.name)}"></option>`).join('')}</datalist></div>
                 <label class="form-label" for="dcNote">Beslutet (valfritt)</label>
-                <textarea id="dcNote" class="form-control" rows="4" maxlength="4000">${esc(handled && b.decision ? b.decision : '')}</textarea>
+                <textarea id="dcNote" class="form-control" rows="4" maxlength="4000"></textarea>
                 <p class="pl-help small mt-2 mb-0">Gruppen ser beslutet här och i meddelandena. Ett beslut kan ångras.</p>`,
-            onOpen: body => body.querySelectorAll('input[name="dcBy"]').forEach(r => r.addEventListener('change', () =>
-                body.querySelector('#dcBoardBox').classList.toggle('d-none', !body.querySelector('#dcByB').checked))),
             onOk: async body => {
-                const maker = body.querySelector('input[name="dcBy"]:checked').value;
-                const boardName = body.querySelector('#dcBoard').value.trim();
-                if (maker === 'Board' && !boardName) return 'Skriv vilken styrelse som beslutade.';
                 const r = await post('DecideDecision', { decisionId: d.id, outcome: body.querySelector('input[name="dcOut"]:checked').value,
-                    maker, boardName, note: body.querySelector('#dcNote').value });
+                    note: body.querySelector('#dcNote').value });
                 if (!r.success) return r.message || 'Det gick inte att registrera beslutet.';
                 await reloadDecisions(); await reloadMessages(); render(view);
                 return true;
@@ -2936,7 +3024,7 @@
         await reloadDecisions(); await reloadMessages(); render(view);
     }
     async function withdrawDecision(d) {
-        if (!await plConfirm('Dra tillbaka förslaget?', `"${d.title}" står kvar under Tillbakadragna förslag, men går inte längre att svara på.`, 'Dra tillbaka', true)) return;
+        if (!await plConfirm('Dra tillbaka förslaget?', `"${d.title}" står kvar under Tillbakadragna förslag, men går inte längre att ${isBoardDec(d) ? 'skicka' : 'svara på'}.`, 'Dra tillbaka', true)) return;
         const r = await post('WithdrawDecision', { decisionId: d.id });
         if (!r.success) { failMsg(r); return; }
         await reloadDecisions(); await reloadMessages(); render(view);

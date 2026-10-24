@@ -162,6 +162,26 @@ namespace HpskSite.Services
                 BoardLink(baseUrl, i.OwnerType, i.OwnerId, "arenden"), "Visa ärendet", _reply.ForMember(byMemberId)) > 0;
         }
 
+        /// <summary>Beslut utan möte: den som anmälde ärendet får beslutet direkt (spärren sattes i DecideDirectly).</summary>
+        public async Task<bool> DirectDecisionAsync(BoardIssue i, int byMemberId, string baseUrl)
+        {
+            var decision = BoardIssueRules.DirectReportText(i.DirectOutcome ?? "", i.DirectDecidedDate ?? DateTime.Now, i.DirectDeciders, i.DirectDecision);
+            if (i.SubmittedByMemberId != byMemberId)
+                await Push(new[] { i.SubmittedByMemberId }, "Beslut i ditt ärende", $"{i.Title}: {i.DirectOutcome}",
+                    BoardPath(i.OwnerType, i.OwnerId, "arenden"), $"board-issue-{i.Id}");
+            var (name, email) = _work.MemberContact(i.SubmittedByMemberId);
+            if (email == null || i.SubmittedByMemberId == byMemberId) return false;
+            var (org, _) = _work.OwnerContact(i.OwnerType, i.OwnerId);
+            var p = new List<string>
+            {
+                $"Styrelsen i {H(org)} har beslutat i ditt ärende <strong>{H(i.Title)}</strong> utan möte.",
+                $"<strong>Beslut:</strong> {H(decision).Replace("\n", "<br>")}",
+                "Beslutet anmäls på styrelsens nästa möte."
+            };
+            return await SendAll(new[] { (name, email) }, $"Beslut i ditt ärende: {i.Title}", p,
+                BoardLink(baseUrl, i.OwnerType, i.OwnerId, "arenden"), "Visa ärendet", _reply.ForMember(byMemberId)) > 0;
+        }
+
         // ---- Motioner --------------------------------------------------------------------------
 
         /// <summary>Kvitto till motionären och besked till sekreteraren/ordföranden.</summary>

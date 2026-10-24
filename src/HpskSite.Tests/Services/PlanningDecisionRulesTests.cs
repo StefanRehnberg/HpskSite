@@ -17,11 +17,13 @@ namespace HpskSite.Tests.Services
             RemovedAt = removed ? new DateTime(2026, 10, 1) : null,
         };
         private static PlanningCaller C(PlanningMemberRow? p, bool link = false) => new(p, link);
-        private static PlanningDecisionRow D(int proposedBy, string status = PlanningDecisionStatus.Open, DateTime? edited = null) => new()
+        private static PlanningDecisionRow D(int proposedBy, string status = PlanningDecisionStatus.Open, DateTime? edited = null,
+            string decider = PlanningDecisionMaker.Group) => new()
         {
             Id = 3, PlanningId = 1, Title = "Varbergs PK bemannar station 3–5", ProposedBy = proposedBy, Status = status, EditedAt = edited,
+            DeciderKind = decider,
         };
-        private static PlanningDecisionResponseRow R(int pid, DateTime at, string answer = PlanningDecisionAnswer.Can) => new()
+        private static PlanningDecisionResponseRow R(int pid, DateTime at, string answer = PlanningDecisionAnswer.Yes) => new()
         {
             DecisionId = 3, PlanningId = 1, ParticipantId = pid, Answer = answer, AnsweredAt = at,
         };
@@ -74,25 +76,46 @@ namespace HpskSite.Tests.Services
                 P(1, PlanningAccessLevel.Owner), P(2, PlanningAccessLevel.Participant), P(3, PlanningAccessLevel.Follower),
                 P(4, PlanningAccessLevel.Editor, removed: true), P(5, PlanningAccessLevel.Participant),
             };
-            var waiting = PlanningDecisionRules.Waiting(people, new[] { R(2, DateTime.Now) }).Select(p => p.Id);
+            var waiting = PlanningDecisionRules.Waiting(D(1), people, new[] { R(2, DateTime.Now) }).Select(p => p.Id);
             waiting.Should().BeEquivalentTo(new[] { 1, 5 });
         }
 
         [Fact]
-        public void Forslaget_skickas_inte_igen_medan_det_ligger_hos_styrelsen()
+        public void Ett_forslag_till_en_styrelse_vantar_inte_pa_gruppen_och_gruppen_svarar_inte()
         {
-            PlanningDecisionRules.SendRefusal(D(1), atBoard: false).Should().BeNull();
-            PlanningDecisionRules.SendRefusal(D(1), atBoard: true).Should().Contain("redan hos styrelsen");
-            PlanningDecisionRules.SendRefusal(D(1, PlanningDecisionStatus.Decided), atBoard: false).Should().Contain("avgjort");
+            var people = new List<PlanningMemberRow> { P(1, PlanningAccessLevel.Owner), P(2, PlanningAccessLevel.Participant) };
+            var board = D(1, decider: PlanningDecisionMaker.Board);
+            PlanningDecisionRules.Waiting(board, people, Array.Empty<PlanningDecisionResponseRow>()).Should().BeEmpty();
+            PlanningDecisionRules.RespondRefusal(board).Should().Contain("styrelse");
+            PlanningDecisionRules.RespondRefusal(D(1)).Should().BeNull();
+            PlanningDecisionRules.RespondRefusal(D(1, PlanningDecisionStatus.Decided)).Should().Contain("avgjort");
+        }
+
+        [Fact]
+        public void Bara_ett_forslag_till_en_styrelse_skickas_och_inte_igen_medan_det_ligger_dar()
+        {
+            var board = D(1, decider: PlanningDecisionMaker.Board);
+            PlanningDecisionRules.SendRefusal(board, atBoard: false).Should().BeNull();
+            PlanningDecisionRules.SendRefusal(board, atBoard: true).Should().Contain("redan hos styrelsen");
+            PlanningDecisionRules.SendRefusal(D(1, PlanningDecisionStatus.Decided, decider: PlanningDecisionMaker.Board), atBoard: false).Should().Contain("avgjort");
+            PlanningDecisionRules.SendRefusal(D(1), atBoard: false).Should().Contain("gruppen");
         }
 
         [Theory]
-        [InlineData("can", PlanningDecisionAnswer.Can)]
-        [InlineData("Cannot", PlanningDecisionAnswer.Cannot)]
+        [InlineData("yes", PlanningDecisionAnswer.Yes)]
+        [InlineData("No", PlanningDecisionAnswer.No)]
+        [InlineData("Can", null)]
         [InlineData("kanske", null)]
         [InlineData(null, null)]
-        public void Svaret_ar_bara_Vi_kan_eller_Vi_kan_inte(string? input, string? expected) =>
+        public void Svaret_ar_bara_Ja_eller_Nej(string? input, string? expected) =>
             PlanningDecisionAnswer.Normalize(input).Should().Be(expected);
+
+        [Fact]
+        public void Svarens_etiketter_ar_Ja_och_Nej()
+        {
+            PlanningDecisionAnswer.Label(PlanningDecisionAnswer.Yes).Should().Be("Ja");
+            PlanningDecisionAnswer.Label(PlanningDecisionAnswer.No).Should().Be("Nej");
+        }
 
         [Fact]
         public void Rubriken_kravs_och_har_ett_tak()

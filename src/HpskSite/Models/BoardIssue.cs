@@ -42,6 +42,49 @@ namespace HpskSite.Models
         /// <summary>När den som anmälde fick besked om beslutet. Spärren mot ett andra besked.</summary>
         public DateTime? DecisionNotifiedDate { get; set; }
         public bool IsActive { get; set; } = true;
+
+        // ---- Beslut utan möte (2026-10-24) ----
+        // Sekreteraren eller ordföranden registrerar beslutet och vilka ledamöter som stod bakom det. Det går
+        // inte att härleda ur en dagordning och LAGRAS därför. Det vinner över placeringen: en punkt på ett
+        // möte är då anmälan av beslutet ("Beslut fattade mellan möten"), inte behandlingen.
+        /// <summary><see cref="BoardDirectOutcome"/>: Bifall / Avslag. null = inget beslut utan möte.</summary>
+        public string? DirectOutcome { get; set; }
+        public string? DirectDecision { get; set; }
+        /// <summary>Namnen på ledamöterna som stod bakom beslutet, som de hette då.</summary>
+        public string? DirectDeciders { get; set; }
+        public string? DirectDeciderIds { get; set; }
+        public int? DirectDecidedBy { get; set; }
+        public DateTime? DirectDecidedDate { get; set; }
+
+        [Ignore] public bool IsDirectlyDecided => !string.IsNullOrEmpty(DirectOutcome);
+    }
+
+    public static class BoardDirectOutcome
+    {
+        public const string Approved = "Bifall";
+        public const string Rejected = "Avslag";
+        public static string? Normalize(string? o) =>
+            string.Equals(o, Approved, StringComparison.OrdinalIgnoreCase) ? Approved
+            : string.Equals(o, Rejected, StringComparison.OrdinalIgnoreCase) ? Rejected : null;
+    }
+
+    /// <summary>
+    /// En bilaga på ett ärende (2026-10-24) — en fil i dokumentarkivets lagring eller en länk. Förslag från en
+    /// tävlingsplanering för med sina bilagor; filerna KOPIERAS hit, eftersom styrelsen inte är med i planeringen.
+    /// </summary>
+    [TableName("BoardIssueAttachments")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class BoardIssueAttachment
+    {
+        public int Id { get; set; }
+        public int IssueId { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string? StoredFileName { get; set; }
+        public string? Url { get; set; }
+        public long? FileSize { get; set; }
+        public int UploadedByMemberId { get; set; }
+        public DateTime UploadedDate { get; set; }
+        public bool IsActive { get; set; } = true;
     }
 
     public static class BoardIssueKinds
@@ -90,7 +133,9 @@ namespace HpskSite.Models
         /// <summary>Underpunkt på ett möte vars protokoll är justerat.</summary>
         Handled,
         Withdrawn,
-        Rejected
+        Rejected,
+        /// <summary>Beslutat utan möte (sekreteraren/ordföranden registrerade beslutet).</summary>
+        DecidedDirect
     }
 
     /// <summary>
@@ -102,8 +147,10 @@ namespace HpskSite.Models
         /// Läget, härlett. <paramref name="placedMeetingStatus"/> är status på mötet där ärendets
         /// aktiva punkt ligger, eller null om det inte ligger på något aktivt möte.
         /// </summary>
-        public static BoardIssueState StateOf(string? closedStatus, string? placedMeetingStatus)
+        public static BoardIssueState StateOf(string? closedStatus, string? placedMeetingStatus, bool directlyDecided = false)
         {
+            // Ett beslut utan möte vinner över allt: en punkt på ett möte är då bara anmälan av beslutet.
+            if (directlyDecided) return BoardIssueState.DecidedDirect;
             // En placerad punkt vinner över en stängning: har ärendet behandlats står det kvar som
             // behandlat, även om någon senare försöker återkalla det.
             if (placedMeetingStatus != null)
@@ -123,8 +170,29 @@ namespace HpskSite.Models
             BoardIssueState.Handled => "Behandlad",
             BoardIssueState.Withdrawn => "Återkallad",
             BoardIssueState.Rejected => "Avvisad",
+            BoardIssueState.DecidedDirect => "Beslutat utan möte",
             _ => ""
         };
+
+        /// <summary>Rubriken på den punkt där beslut utan möte anmäls på nästa möte.</summary>
+        public const string BetweenMeetingsHeading = "Beslut fattade mellan möten";
+
+        /// <summary>
+        /// Anteckningen på anmälningspunkten: "Bifall. Beslutat 24 oktober 2026 av Anna A. och Erik B. Text…".
+        /// </summary>
+        public static string DirectReportText(string outcome, DateTime date, string? deciders, string? text)
+        {
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            // Ett namn kan sluta på punkt ("Erik B."); meningen får aldrig två.
+            var who = string.IsNullOrWhiteSpace(deciders) ? "" : " av " + deciders.Trim().TrimEnd('.');
+            var s = $"{outcome}. Beslutat {date.ToString("d MMMM yyyy", sv)}{who}.";
+            return string.IsNullOrWhiteSpace(text) ? s : s + "\n" + text.Trim();
+        }
+
+        /// <summary>"Anna A., Erik B. och Lisa S." — namnen som en mening.</summary>
+        public static string JoinNames(IReadOnlyList<string> names) =>
+            names.Count == 0 ? "" : names.Count == 1 ? names[0]
+            : string.Join(", ", names.Take(names.Count - 1)) + " och " + names[^1];
 
         /// <summary>
         /// Underpunktens bokstav: 0 → "a", 25 → "z", 26 → "aa". En dagordning med fler än 26

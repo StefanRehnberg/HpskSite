@@ -143,6 +143,21 @@ namespace HpskSite.Controllers
             stateLabel = BoardIssueRules.StateLabel(v.State),
             closedReason = v.Issue.ClosedReason,
             closedDate = v.Issue.ClosedDate.HasValue ? D(v.Issue.ClosedDate.Value) : null,
+            // Från en tävlingsplanering: planeringens namn är avsändaren ("SM 2028"), personen skickade.
+            sourceName = v.SourceName,
+            direct = v.Issue.IsDirectlyDecided ? new
+            {
+                outcome = v.Issue.DirectOutcome,
+                text = v.Issue.DirectDecision,
+                deciders = v.Issue.DirectDeciders,
+                date = v.Issue.DirectDecidedDate.HasValue ? D(v.Issue.DirectDecidedDate.Value) : null,
+                reported = v.Placement == null ? null : new { v.Placement.MeetingTitle, v.Placement.Paragraph, meetingDate = D(v.Placement.MeetingDate), locked = v.Placement.MeetingStatus is "VantarJustering" or "Justerat" }
+            } : null,
+            attachments = v.Attachments.Select(a => new
+            {
+                a.Id, a.FileName, size = a.FileSize, isLink = a.StoredFileName == null,
+                url = a.StoredFileName == null ? a.Url : "/umbraco/surface/BoardWork/IssueAttachment?id=" + a.Id
+            }),
             placement = v.Placement == null ? null : new
             {
                 v.Placement.MeetingId, v.Placement.MeetingTitle, v.Placement.Paragraph,
@@ -283,8 +298,77 @@ namespace HpskSite.Controllers
         {
             var (i, err) = await LoadIssueAsync(issueId); if (err != null) return err;
             if (!await _access.CanPlaceAsync(i!.OwnerType, i.OwnerId)) return Denied();
+            if (i.IsDirectlyDecided) return Json(new { success = false, message = "Ärendet är beslutat utan möte; punkten är anmälan av beslutet. Ångra beslutet först." });
             var r = _work.Unplace("IssueId", issueId);
             return Json(new { success = r.Ok, message = r.Message });
+        }
+
+        // ---- Beslut utan möte (2026-10-24) -----------------------------------------------------
+
+        /// <summary>Styrelsens ledamöter att välja bland: "Vilka stod bakom beslutet?"</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetDeciderOptions(int ownerType, int ownerId)
+        {
+            if (!await _access.CanPlaceAsync(ownerType, ownerId)) return Denied();
+            var me = await _access.CurrentMemberIdAsync();
+            var members = _roles.GetBoardMembers(ownerType, ownerId, boardOnly: true)
+                .GroupBy(r => r.MemberId).Select(g => new { memberId = g.Key, name = g.First().MemberName, title = string.Join(", ", g.Select(r => r.DisplayTitle).Distinct()) })
+                .OrderBy(x => x.name, StringComparer.Create(System.Globalization.CultureInfo.GetCultureInfo("sv-SE"), true)).ToList();
+            return Json(new { success = true, me, members });
+        }
+
+        /// <summary>
+        /// Beslut utan möte: sekreteraren eller ordföranden (den som placerar) registrerar beslutet och vilka
+        /// ledamöter som stod bakom det. Beslutet anmäls på nästa möte under "Beslut fattade mellan möten".
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DecideIssue(int issueId, string? outcome, string? text, string? deciderIds, string? notify)
+        {
+            var (i, err) = await LoadIssueAsync(issueId); if (err != null) return err;
+            if (!await _access.CanPlaceAsync(i!.OwnerType, i.OwnerId)) return Denied();
+            var board = _roles.GetBoardMembers(i.OwnerType, i.OwnerId, boardOnly: true)
+                .GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.First().MemberName);
+            var ids = (deciderIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var n) ? n : 0).Where(n => n > 0).Distinct().ToList();
+            if (ids.Any(id => !board.ContainsKey(id)))
+                return Json(new { success = false, message = "Välj bland styrelsens ledamöter." });
+            var me = await _access.CurrentMemberIdAsync();
+            var r = _work.DecideDirectly(issueId, outcome, text, ids.Select(id => (id, board[id])).ToList(), me);
+            if (!r.Ok) return Json(new { success = false, message = r.Message });
+            var issue = _work.GetIssue(issueId)!;
+            var placement = _work.GetIssuePlacement(issueId);
+            bool notified = Flag(notify ?? "1") && await _notify.DirectDecisionAsync(issue, me, BaseUrl);
+            return Json(new
+            {
+                success = true, notified,
+                reported = placement == null ? null : new { placement.MeetingTitle, placement.Paragraph, meetingDate = D(placement.MeetingDate) }
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UndoIssueDecision(int issueId)
+        {
+            var (i, err) = await LoadIssueAsync(issueId); if (err != null) return err;
+            if (!await _access.CanPlaceAsync(i!.OwnerType, i.OwnerId)) return Denied();
+            var r = _work.UndoDirectDecision(issueId);
+            return Json(new { success = r.Ok, message = r.Message });
+        }
+
+        /// <summary>Ett ärendes bilaga: samma läsrätt som ärendet (styrelsens tillgång).</summary>
+        [HttpGet]
+        public async Task<IActionResult> IssueAttachment(int id)
+        {
+            var a = _work.GetIssueAttachment(id);
+            var i = a == null ? null : _work.GetIssue(a.IssueId);
+            if (i == null || a!.StoredFileName == null) return NotFound();
+            if (await _access.CurrentMemberIdAsync() <= 0 || !await _access.CanAccessBoardWorkAsync(i.OwnerType, i.OwnerId)) return StatusCode(403);
+            var stream = await _documents.OpenReadAsync(a.StoredFileName);
+            if (stream == null) return NotFound();
+            var ct = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
+                .TryGetContentType(a.FileName, out var t) ? t : "application/octet-stream";
+            return File(stream, ct, a.FileName, enableRangeProcessing: true);
         }
 
         // =====================================================================

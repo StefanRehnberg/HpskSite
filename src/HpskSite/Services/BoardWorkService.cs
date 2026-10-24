@@ -334,12 +334,41 @@ namespace HpskSite.Services
             public BoardIssueState State { get; set; }
             public Placement? Placement { get; set; }
             public string? WishMeetingLabel { get; set; }
+            /// <summary>Planeringens namn när ärendet kommer från en tävlingsplanering ("SM 2028").</summary>
+            public string? SourceName { get; set; }
+            public List<BoardIssueAttachment> Attachments { get; set; } = new();
+        }
+
+        private sealed class SourceNameRow { public int Id { get; set; } public string Name { get; set; } = ""; }
+
+        /// <summary>Planeringens namn för ärenden ur en tävlingsplanering (SourceRefId = förslagets id).</summary>
+        private Dictionary<int, string> PlanningSourceNames(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, IEnumerable<BoardIssue> issues)
+        {
+            var ids = issues.Where(i => i.SourceKind == BoardIssueSources.Planning && i.SourceRefId > 0)
+                .Select(i => i.SourceRefId!.Value).Distinct().ToList();
+            var result = new Dictionary<int, string>();
+            if (ids.Count == 0) return result;
+            try
+            {
+                foreach (var chunk in ids.Chunk(1000))
+                    foreach (var r in db.Fetch<SourceNameRow>(
+                        "SELECT d.Id, p.Name FROM PlanningDecision d JOIN Planning p ON p.Id = d.PlanningId WHERE d.Id IN (@0)", chunk))
+                        result[r.Id] = r.Name;
+            }
+            catch (Exception ex)
+            {
+                // Planeringens tabeller kan saknas i en databas som inte har tävlingsplaneringen.
+                _logger.LogWarning(ex, "Planeringarnas namn kunde inte läsas för ärendekön.");
+            }
+            return result;
         }
 
         public List<IssueView> GetIssues(int ownerType, int ownerId, int? onlySubmittedBy = null)
         {
             List<BoardIssue> issues;
             List<BoardMeeting> meetings;
+            Dictionary<int, string> sourceNames;
+            Dictionary<int, List<BoardIssueAttachment>> attachments;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
@@ -349,6 +378,12 @@ namespace HpskSite.Services
                     : db.Fetch<BoardIssue>("SELECT * FROM BoardIssues WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 ORDER BY SubmittedDate DESC",
                         ownerType, ownerId);
                 meetings = db.Fetch<BoardMeeting>("SELECT * FROM BoardMeetings WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
+                sourceNames = PlanningSourceNames(db, issues);
+                attachments = issues.Count == 0 ? new()
+                    : db.Fetch<BoardIssueAttachment>(
+                        "SELECT a.* FROM BoardIssueAttachments a JOIN BoardIssues i ON i.Id = a.IssueId " +
+                        "WHERE a.IsActive = 1 AND i.OwnerType = @0 AND i.OwnerId = @1 ORDER BY a.UploadedDate, a.Id", ownerType, ownerId)
+                      .GroupBy(a => a.IssueId).ToDictionary(g => g.Key, g => g.ToList());
             }
             var placements = GetPlacements("IssueId", issues.Select(i => i.Id));
             var names = ResolveNames(issues.Select(i => i.SubmittedByMemberId));
@@ -364,11 +399,172 @@ namespace HpskSite.Services
                 {
                     Issue = i,
                     SubmittedByName = names.GetValueOrDefault(i.SubmittedByMemberId, ""),
-                    State = BoardIssueRules.StateOf(i.ClosedStatus, p?.MeetingStatus),
+                    State = BoardIssueRules.StateOf(i.ClosedStatus, p?.MeetingStatus, i.IsDirectlyDecided),
                     Placement = p,
-                    WishMeetingLabel = wish
+                    WishMeetingLabel = wish,
+                    SourceName = i.SourceRefId.HasValue ? sourceNames.GetValueOrDefault(i.SourceRefId.Value) : null,
+                    Attachments = attachments.GetValueOrDefault(i.Id) ?? new List<BoardIssueAttachment>(),
                 };
             }).ToList();
+        }
+
+        /// <summary>Planeringens namn för ett ärende ur en tävlingsplanering, annars null.</summary>
+        public string? PlanningSourceName(BoardIssue issue)
+        {
+            if (issue.SourceKind != BoardIssueSources.Planning || !(issue.SourceRefId > 0)) return null;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return PlanningSourceNames(scope.Database, new[] { issue }).GetValueOrDefault(issue.SourceRefId!.Value);
+        }
+
+        // =====================================================================
+        //  Beslut utan möte
+        // =====================================================================
+
+        /// <summary>
+        /// Registrerar ett beslut utan möte. Bara ett ärende som väntar (eller ligger på ett möte som inte är
+        /// låst — det flyttas då till anmälningspunkten). Anroparen prövar behörigheten (den som placerar).
+        /// </summary>
+        public (bool Ok, string? Message) DecideDirectly(int issueId, string? outcome, string? text,
+            IReadOnlyList<(int MemberId, string Name)> deciders, int byMemberId)
+        {
+            var o = BoardDirectOutcome.Normalize(outcome);
+            if (o == null) return (false, "Välj bifall eller avslag.");
+            if (deciders.Count == 0) return (false, "Välj vilka ledamöter som stod bakom beslutet.");
+            var placement = GetIssuePlacement(issueId);
+            if (placement != null && placement.MeetingStatus is "VantarJustering" or "Justerat")
+                return (false, "Ärendet ligger på ett möte vars protokoll är låst. Beslutet står i protokollet.");
+            int ownerType, ownerId;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var db = scope.Database;
+                var i = db.SingleOrDefault<BoardIssue>("SELECT * FROM BoardIssues WITH (UPDLOCK) WHERE Id = @0", issueId);
+                if (i == null || !i.IsActive) return (false, "Ärendet hittades inte.");
+                if (i.ClosedStatus != null) return (false, "Ärendet är stängt.");
+                if (i.IsDirectlyDecided) return (false, "Ärendet är redan beslutat.");
+                i.DirectOutcome = o;
+                i.DirectDecision = string.IsNullOrWhiteSpace(text) ? null : Trunc(text.Trim(), 4000);
+                i.DirectDeciders = Trunc(BoardIssueRules.JoinNames(deciders.Select(d => d.Name).ToList()), 1000);
+                i.DirectDeciderIds = string.Join(",", deciders.Select(d => d.MemberId));
+                i.DirectDecidedBy = byMemberId;
+                i.DirectDecidedDate = DateTime.Now;
+                // Beskedet går nu (BoardWorkNotifier.DirectDecisionAsync), inte när anmälan justeras.
+                i.DecisionNotifiedDate = DateTime.Now;
+                db.Update(i);
+                ownerType = i.OwnerType; ownerId = i.OwnerId;
+            }
+            // En punkt på ett olåst möte blir anmälningspunkten (flyttas dit nedan).
+            if (placement != null) Unplace("IssueId", issueId);
+            ReportDirectDecisions(ownerType, ownerId);
+            return (true, null);
+        }
+
+        /// <summary>Ångrar ett beslut utan möte — bara så länge anmälan inte står i ett låst protokoll.</summary>
+        public (bool Ok, string? Message) UndoDirectDecision(int issueId)
+        {
+            var placement = GetIssuePlacement(issueId);
+            if (placement != null && placement.MeetingStatus is "VantarJustering" or "Justerat")
+                return (false, "Beslutet är anmält i ett låst protokoll och kan inte ångras här.");
+            if (placement != null) Unplace("IssueId", issueId);
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var i = db.SingleOrDefaultById<BoardIssue>(issueId);
+            if (i == null || !i.IsActive || !i.IsDirectlyDecided) return (false, "Ärendet har inget beslut att ångra.");
+            i.DirectOutcome = null; i.DirectDecision = null; i.DirectDeciders = null; i.DirectDeciderIds = null;
+            i.DirectDecidedBy = null; i.DirectDecidedDate = null; i.DecisionNotifiedDate = null;
+            db.Update(i);
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Lägger varje beslut utan möte som ännu inte är anmält som underpunkt till "Beslut fattade mellan
+        /// möten" på nästa kommande, olåsta möte (punkten skapas om den saknas). Körs när ett beslut registreras
+        /// och när ett möte skapas. Inget kommande möte = beslutet väntar tills ett skapas.
+        /// </summary>
+        public int ReportDirectDecisions(int ownerType, int ownerId)
+        {
+            List<BoardIssue> pending;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                pending = scope.Database.Fetch<BoardIssue>(
+                    "SELECT i.* FROM BoardIssues i WHERE i.OwnerType = @0 AND i.OwnerId = @1 AND i.IsActive = 1 AND i.DirectOutcome IS NOT NULL " +
+                    "AND NOT EXISTS (SELECT 1 FROM BoardMeetingAgendaItems a JOIN BoardMeetings m ON m.Id = a.MeetingId " +
+                    "                WHERE a.IssueId = i.Id AND a.IsActive = 1 AND m.IsActive = 1) ORDER BY i.DirectDecidedDate",
+                    ownerType, ownerId);
+            }
+            if (pending.Count == 0) return 0;
+            var next = GetPlaceableMeetings(ownerType, ownerId).FirstOrDefault();
+            if (next.Meeting == null) return 0;
+
+            int parentId = EnsureBetweenMeetingsItem(next.Meeting.Id);
+            int n = 0;
+            foreach (var i in pending)
+            {
+                var r = PlaceOnMeeting("IssueId", i.Id, i.Title, "note", next.Meeting.Id, parentId);
+                if (!r.Ok) { _logger.LogWarning("Ärende {Id}: beslutet kunde inte anmälas på möte {Meeting}: {Msg}", i.Id, next.Meeting.Id, r.Message); continue; }
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var item = scope.Database.SingleOrDefaultById<BoardMeetingAgendaItem>(r.AgendaItemId);
+                if (item != null)
+                {
+                    item.Discussion = BoardIssueRules.DirectReportText(i.DirectOutcome!, i.DirectDecidedDate ?? DateTime.Now, i.DirectDeciders, i.DirectDecision);
+                    scope.Database.Update(item);
+                }
+                n++;
+            }
+            return n;
+        }
+
+        /// <summary>Huvudpunkten "Beslut fattade mellan möten" på mötet — skapas före Övriga frågor/avslutningen om den saknas.</summary>
+        private int EnsureBetweenMeetingsItem(int meetingId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var tops = db.Fetch<BoardMeetingAgendaItem>(
+                "SELECT * FROM BoardMeetingAgendaItems WHERE MeetingId = @0 AND IsActive = 1 AND ParentItemId IS NULL ORDER BY SortOrder, Id", meetingId);
+            var existing = tops.FirstOrDefault(t => t.Heading.Equals(BoardIssueRules.BetweenMeetingsHeading, StringComparison.OrdinalIgnoreCase));
+            if (existing != null) return existing.Id;
+            int insertAt = tops.Count;
+            for (int k = 0; k < tops.Count; k++)
+                if (tops[k].Heading.Contains("Övriga", StringComparison.OrdinalIgnoreCase) || tops[k].Heading.Contains("avslut", StringComparison.OrdinalIgnoreCase))
+                { insertAt = k; break; }
+            var item = new BoardMeetingAgendaItem
+            {
+                MeetingId = meetingId, SortOrder = insertAt, Heading = BoardIssueRules.BetweenMeetingsHeading,
+                ItemType = "note", ElectionCount = 1, ElectionSource = "attendees", IsActive = true
+            };
+            db.Insert(item);
+            tops.Insert(insertAt, item);
+            for (int k = 0; k < tops.Count; k++)
+                if (tops[k].SortOrder != k) { tops[k].SortOrder = k; db.Update(tops[k]); }
+            return item.Id;
+        }
+
+        // ---- Ärendets bilagor ----------------------------------------------------------------
+
+        public BoardIssueAttachment? GetIssueAttachment(int id)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var a = scope.Database.SingleOrDefaultById<BoardIssueAttachment>(id);
+            return a != null && a.IsActive ? a : null;
+        }
+
+        public List<BoardIssueAttachment> GetIssueAttachments(int issueId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<BoardIssueAttachment>(
+                "SELECT * FROM BoardIssueAttachments WHERE IsActive = 1 AND IssueId = @0 ORDER BY UploadedDate, Id", issueId);
+        }
+
+        public BoardIssueAttachment AddIssueAttachment(int issueId, string fileName, string? storedFileName, string? url, long? size, int byMemberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var a = new BoardIssueAttachment
+            {
+                IssueId = issueId, FileName = Trunc(fileName, 260), StoredFileName = storedFileName,
+                Url = url == null ? null : Trunc(url, 1000), FileSize = size,
+                UploadedByMemberId = byMemberId, UploadedDate = DateTime.Now, IsActive = true
+            };
+            scope.Database.Insert(a);
+            return a;
         }
 
         /// <summary>
@@ -709,7 +905,7 @@ namespace HpskSite.Services
             foreach (var a in agenda.Where(a => a.IssueId.HasValue))
             {
                 var i = db.SingleOrDefaultById<BoardIssue>(a.IssueId!.Value);
-                if (i == null || !i.IsActive || i.DecisionNotifiedDate.HasValue) continue;
+                if (i == null || !i.IsActive || i.DecisionNotifiedDate.HasValue || i.IsDirectlyDecided) continue;
                 i.DecisionNotifiedDate = DateTime.Now;
                 db.Update(i);
                 issues.Add((i, labels.GetValueOrDefault(a.Id, ""), a.Decision));
@@ -814,11 +1010,13 @@ namespace HpskSite.Services
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var missing = new List<string>();
-            foreach (var t in new[] { "BoardIssues", "BoardMotions", "BoardMotionSupport", "BoardMotionAttachments" })
+            foreach (var t in new[] { "BoardIssues", "BoardMotions", "BoardMotionSupport", "BoardMotionAttachments", "BoardIssueAttachments" })
                 if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0)
                     missing.Add(t);
             foreach (var (table, col) in new[] { ("BoardMeetingAgendaItems", "ParentItemId"), ("BoardMeetingAgendaItems", "IssueId"),
-                                                 ("BoardMeetingAgendaItems", "MotionId"), ("BoardMeetings", "MotionDeadline") })
+                                                 ("BoardMeetingAgendaItems", "MotionId"), ("BoardMeetings", "MotionDeadline"),
+                                                 // Beslut utan möte (add-direct-decision-and-attachments-to-board-issues.sql).
+                                                 ("BoardIssues", "DirectOutcome"), ("BoardIssues", "DirectDecidedDate") })
                 if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH(@0, @1) IS NULL THEN 0 ELSE 1 END", "dbo." + table, col) == 0)
                     missing.Add($"{table}.{col}");
             return missing;

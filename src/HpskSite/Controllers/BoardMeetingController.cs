@@ -185,7 +185,14 @@ namespace HpskSite.Controllers
                         issue = iss == null ? null : new
                         {
                             iss.Id, iss.Body, kindLabel = BoardIssueKinds.Label(iss.Kind), iss.SourceKind,
-                            submittedBy = issueSubmitters.GetValueOrDefault(iss.SubmittedByMemberId, "")
+                            submittedBy = issueSubmitters.GetValueOrDefault(iss.SubmittedByMemberId, ""),
+                            sourceName = _work.PlanningSourceName(iss),
+                            direct = iss.IsDirectlyDecided,
+                            attachments = _work.GetIssueAttachments(iss.Id).Select(f => new
+                            {
+                                f.Id, f.FileName, isLink = f.StoredFileName == null,
+                                url = f.StoredFileName == null ? f.Url : "/umbraco/surface/BoardWork/IssueAttachment?id=" + f.Id
+                            })
                         },
                         motion = mo == null ? null : new
                         {
@@ -244,6 +251,10 @@ namespace HpskSite.Controllers
                 var meId = await GetCurrentMemberId();
                 var meeting = _meetingService.CreateMeeting(ownerType, ownerId, meetingType,
                     title ?? "", date.Value, location, meId);
+
+                // Beslut fattade utan möte som ännu inte är anmälda hamnar på det nya mötet (om det är nästa).
+                try { _work.ReportDirectDecisions(ownerType, ownerId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Beslut utan möte kunde inte anmälas på möte {Id}.", meeting.Id); }
 
                 return Json(new { success = true, message = "Möte skapat", data = new { meeting.Id } });
             }

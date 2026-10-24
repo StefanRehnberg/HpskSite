@@ -6,17 +6,22 @@ using NPoco;
 namespace HpskSite.Models.Planning
 {
     /// <summary>
-    /// Förslag och beslut (P3 steg B, 2026-10-23). Ett FÖRSLAG läggs fram i planeringen, deltagarna svarar
-    /// <i>Vi kan</i> eller <i>Vi kan inte</i> med en kommentar, och beslutet registreras på förslaget — som
-    /// arbetsgruppens beslut eller som beslutat av en styrelse. Ett förslag kan skickas som ärende till
-    /// styrelsen i en klubb eller krets som någon i planeringen företräder (samma kö som styrelsens egna ärenden).
+    /// Förslag och beslut (P3 steg B 2026-10-23, omgjort 2026-10-24). Ett FÖRSLAG läggs fram i planeringen och
+    /// den som lägger fram det väljer <b>vem som beslutar</b> (<see cref="DeciderKind"/>):
+    /// <list type="bullet">
+    /// <item><b>Gruppen</b> — de som deltar svarar <i>Ja</i> eller <i>Nej</i> med en kommentar, och den som kan
+    /// ändra planeringen registrerar beslutet.</item>
+    /// <item><b>En styrelse</b> — förslaget skickas som ärende till styrelsen i en klubb eller krets som någon i
+    /// planeringen företräder. Gruppen svarar INTE (beslutet är styrelsens); den som vill säga något skriver i
+    /// meddelandena. Styrelsens beslut — utan möte eller på ett möte — läses ur ärendekön.</item>
+    /// </list>
+    /// Aldrig båda (Stefans beslut 2026-10-24).
     ///
     /// <para><b>⚠️ Svaren raderas inte när förslaget ändras.</b> Den som svarade före en ändring märks ut
-    /// (<see cref="PlanningDecisionRules.AnsweredBeforeEdit"/>) — att tyst kasta ett svar är värre än att visa
-    /// att det gavs på en äldre text.</para>
+    /// (<see cref="PlanningDecisionRules.AnsweredBeforeEdit"/>).</para>
     ///
     /// <para><b>⚠️ Styrelsens läge lagras inte här.</b> Ärendets placering och styrelsens beslut läses ur
-    /// styrelsens ärendekö vid varje läsning (som ärendet självt gör). Det som lagras är vart och när det skickades.</para>
+    /// styrelsens ärendekö vid varje läsning. Det som lagras är vart och när det skickades.</para>
     /// </summary>
     [TableName("PlanningDecision")]
     [PrimaryKey("Id", AutoIncrement = true)]
@@ -43,8 +48,11 @@ namespace HpskSite.Models.Planning
         public int? SentToBoardBy { get; set; }
         public DateTime UpdatedAt { get; set; }
         public DateTime? DeletedAt { get; set; }
+        /// <summary><see cref="PlanningDecisionMaker"/>: Group (gruppen svarar Ja/Nej) eller Board (en styrelse beslutar).</summary>
+        public string DeciderKind { get; set; } = PlanningDecisionMaker.Group;
 
         [Ignore] public bool IsOpen => Status == PlanningDecisionStatus.Open;
+        [Ignore] public bool ForBoard => DeciderKind == PlanningDecisionMaker.Board;
     }
 
     [TableName("PlanningDecisionResponse")]
@@ -55,7 +63,7 @@ namespace HpskSite.Models.Planning
         public int DecisionId { get; set; }
         public int PlanningId { get; set; }
         public int ParticipantId { get; set; }
-        public string Answer { get; set; } = PlanningDecisionAnswer.Can;
+        public string Answer { get; set; } = PlanningDecisionAnswer.Yes;
         public string? Comment { get; set; }
         public DateTime AnsweredAt { get; set; }
         public bool ViaEmail { get; set; }
@@ -68,14 +76,15 @@ namespace HpskSite.Models.Planning
         public const string Withdrawn = "Withdrawn";
     }
 
+    /// <summary>Svaren: Ja och Nej (2026-10-24; hette "Vi kan / Vi kan inte", som passade bara vissa förslag).</summary>
     public static class PlanningDecisionAnswer
     {
-        public const string Can = "Can";
-        public const string Cannot = "Cannot";
+        public const string Yes = "Yes";
+        public const string No = "No";
         public static string? Normalize(string? a) =>
-            string.Equals(a, Can, StringComparison.OrdinalIgnoreCase) ? Can
-            : string.Equals(a, Cannot, StringComparison.OrdinalIgnoreCase) ? Cannot : null;
-        public static string Label(string? a) => a == Cannot ? "Vi kan inte" : "Vi kan";
+            string.Equals(a, Yes, StringComparison.OrdinalIgnoreCase) ? Yes
+            : string.Equals(a, No, StringComparison.OrdinalIgnoreCase) ? No : null;
+        public static string Label(string? a) => a == No ? "Nej" : "Ja";
     }
 
     public static class PlanningDecisionOutcome
@@ -90,9 +99,9 @@ namespace HpskSite.Models.Planning
 
     public static class PlanningDecisionMaker
     {
-        /// <summary>Arbetsgruppen (planeringen) beslutade själv.</summary>
+        /// <summary>Arbetsgruppen (planeringen) beslutar: de som deltar svarar Ja/Nej.</summary>
         public const string Group = "Group";
-        /// <summary>En styrelse beslutade (namnet i <see cref="PlanningDecisionRow.DecidedBoardName"/>).</summary>
+        /// <summary>En styrelse beslutar (förslaget ligger i deras ärendekö).</summary>
         public const string Board = "Board";
         public static string? Normalize(string? k) =>
             string.Equals(k, Group, StringComparison.OrdinalIgnoreCase) ? Group
@@ -118,13 +127,22 @@ namespace HpskSite.Models.Planning
         public static bool AnsweredBeforeEdit(PlanningDecisionRow d, PlanningDecisionResponseRow r) =>
             d.EditedAt.HasValue && r.AnsweredAt < d.EditedAt.Value;
 
+        /// <summary>Får gruppen svara på förslaget? Bara ett öppet förslag som gruppen själv beslutar om.</summary>
+        public static string? RespondRefusal(PlanningDecisionRow d)
+        {
+            if (d.ForBoard) return "Det här förslaget beslutas av en styrelse. Skriv i meddelandena om du vill säga något.";
+            if (!d.IsOpen) return "Förslaget är redan avgjort.";
+            return null;
+        }
+
         /// <summary>
-        /// Får förslaget skickas till en styrelse nu? Bara ett öppet förslag, och inte en gång till medan
-        /// ett tidigare ärende ligger i styrelsens kö eller på ett möte som inte är justerat
-        /// (<paramref name="atBoard"/>). Avvisat, återkallat eller behandlat ärende = får skickas igen.
+        /// Får förslaget skickas till en styrelse nu? Bara ett öppet förslag som en styrelse beslutar om, och
+        /// inte en gång till medan ett tidigare ärende ligger hos styrelsen (<paramref name="atBoard"/>).
+        /// Avvisat, återkallat eller borttaget ärende = får skickas igen.
         /// </summary>
         public static string? SendRefusal(PlanningDecisionRow d, bool atBoard)
         {
+            if (!d.ForBoard) return "Förslaget beslutas av gruppen, inte av en styrelse.";
             if (!d.IsOpen) return "Förslaget är redan avgjort.";
             if (atBoard) return "Förslaget ligger redan hos styrelsen. Vänta på deras besked.";
             return null;
@@ -132,11 +150,12 @@ namespace HpskSite.Models.Planning
 
         /// <summary>
         /// Vilka som ännu inte svarat: de som deltar och uppåt (inte de som följer) och som inte har ett svar.
-        /// Samma krets som kallas till mötena.
+        /// Ett förslag till en styrelse väntar inte på någon i gruppen.
         /// </summary>
-        public static List<PlanningMemberRow> Waiting(IEnumerable<PlanningMemberRow> participants,
+        public static List<PlanningMemberRow> Waiting(PlanningDecisionRow d, IEnumerable<PlanningMemberRow> participants,
             IEnumerable<PlanningDecisionResponseRow> responses)
         {
+            if (d.ForBoard || !d.IsOpen) return new List<PlanningMemberRow>();
             var answered = new HashSet<int>(responses.Select(r => r.ParticipantId));
             return participants
                 .Where(p => p.IsActive && PlanningAccessLevel.Rank(p.Access) >= PlanningAccessLevel.Rank(PlanningAccessLevel.Participant)

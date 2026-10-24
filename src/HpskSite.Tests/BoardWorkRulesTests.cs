@@ -79,6 +79,27 @@ namespace HpskSite.Tests
             BoardIssueRules.StateOf(BoardIssueClosed.Withdrawn, "Justerat").Should().Be(BoardIssueState.Handled);
         }
 
+        [Fact]
+        public void Ett_beslut_utan_mote_vinner_over_placeringen_som_da_ar_anmalan()
+        {
+            BoardIssueRules.StateOf(null, null, directlyDecided: true).Should().Be(BoardIssueState.DecidedDirect);
+            BoardIssueRules.StateOf(null, "Planerat", directlyDecided: true).Should().Be(BoardIssueState.DecidedDirect);
+            BoardIssueRules.StateOf(null, "Justerat", directlyDecided: true).Should().Be(BoardIssueState.DecidedDirect);
+            BoardIssueRules.StateLabel(BoardIssueState.DecidedDirect).Should().Be("Beslutat utan möte");
+        }
+
+        [Fact]
+        public void Anmalan_av_beslutet_namnger_utfall_dag_och_ledamoter()
+        {
+            var text = BoardIssueRules.DirectReportText("Bifall", new DateTime(2026, 10, 24), "Anna A. och Erik B.", "Fältet skjuts på Skrea.");
+            text.Should().Be("Bifall. Beslutat 24 oktober 2026 av Anna A. och Erik B.\nFältet skjuts på Skrea.");
+            BoardIssueRules.DirectReportText("Avslag", new DateTime(2026, 10, 24), null, null).Should().Be("Avslag. Beslutat 24 oktober 2026.");
+            BoardIssueRules.JoinNames(new[] { "Anna" }).Should().Be("Anna");
+            BoardIssueRules.JoinNames(new[] { "Anna", "Erik", "Lisa" }).Should().Be("Anna, Erik och Lisa");
+            BoardDirectOutcome.Normalize("bifall").Should().Be(BoardDirectOutcome.Approved);
+            BoardDirectOutcome.Normalize("kanske").Should().BeNull();
+        }
+
         [Theory]
         [InlineData("Planerat", true, true)]
         [InlineData("Genomfört", true, true)]

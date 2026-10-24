@@ -39,7 +39,7 @@ namespace HpskSite.Services.Planning
             if (participantId <= 0) return 0;
             using var s = _scopes.CreateScope(autoComplete: true);
             return s.Database.ExecuteScalar<int>(
-                @"SELECT COUNT(*) FROM PlanningDecision d WHERE d.PlanningId = @0 AND d.DeletedAt IS NULL AND d.Status = N'Open'
+                @"SELECT COUNT(*) FROM PlanningDecision d WHERE d.PlanningId = @0 AND d.DeletedAt IS NULL AND d.Status = N'Open' AND d.DeciderKind = N'Group'
                   AND NOT EXISTS (SELECT 1 FROM PlanningDecisionResponse r WHERE r.DecisionId = d.Id AND r.ParticipantId = @1)",
                 planningId, participantId);
         }
@@ -48,10 +48,15 @@ namespace HpskSite.Services.Planning
             db.SingleOrDefault<PlanningDecisionRow>(
                 "SELECT * FROM PlanningDecision WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", decisionId, planningId);
 
-        public (int DecisionId, string? Error) CreateDecision(int planningId, int byParticipantId, string? title, string? body)
+        /// <summary>
+        /// Lägger fram ett förslag. <paramref name="deciderKind"/> = Group (gruppen svarar) eller Board (en styrelse
+        /// beslutar; anroparen skickar det sedan med <see cref="MarkDecisionSentToBoard"/>).
+        /// </summary>
+        public (int DecisionId, string? Error) CreateDecision(int planningId, int byParticipantId, string? title, string? body, string? deciderKind = null)
         {
             var err = PlanningDecisionRules.ValidateTitle(title);
             if (err != null) return (0, err);
+            var kind = PlanningDecisionMaker.Normalize(deciderKind) ?? PlanningDecisionMaker.Group;
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
@@ -59,9 +64,12 @@ namespace HpskSite.Services.Planning
             {
                 PlanningId = planningId, Title = title!.Trim(), Body = Clean(body, PlanningDecisionRules.MaxBody),
                 ProposedBy = byParticipantId, ProposedAt = now, Status = PlanningDecisionStatus.Open, UpdatedAt = now,
+                DeciderKind = kind,
             };
             db.Insert(d);
-            InsertSystem(db, planningId, "decision-new", $"Nytt förslag: {d.Title}. Svara under Förslag och beslut.", byParticipantId, null, ("decision", d.Id), now);
+            // Ett förslag till en styrelse får sin systemrad när det skickas (MarkDecisionSentToBoard).
+            if (kind == PlanningDecisionMaker.Group)
+                InsertSystem(db, planningId, "decision-new", $"Nytt förslag: {d.Title}. Svara Ja eller Nej under Förslag och beslut.", byParticipantId, null, ("decision", d.Id), now);
             Bump(db, planningId);
             return (d.Id, null);
         }
@@ -93,13 +101,13 @@ namespace HpskSite.Services.Planning
         public string? RespondToDecision(int planningId, int decisionId, int participantId, string? answer, string? comment, bool viaEmail)
         {
             var a = PlanningDecisionAnswer.Normalize(answer);
-            if (a == null) return "Välj Vi kan eller Vi kan inte.";
+            if (a == null) return "Välj Ja eller Nej.";
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var d = LockDecision(db, planningId, decisionId);
             if (d == null) return "Förslaget finns inte.";
-            if (!d.IsOpen) return "Förslaget är redan avgjort.";
+            if (PlanningDecisionRules.RespondRefusal(d) is { } refused) return refused;
             var r = db.SingleOrDefault<PlanningDecisionResponseRow>(
                 "SELECT * FROM PlanningDecisionResponse WITH (UPDLOCK, HOLDLOCK) WHERE DecisionId = @0 AND ParticipantId = @1", decisionId, participantId);
             var c = Clean(comment, PlanningDecisionRules.MaxComment);
@@ -118,21 +126,22 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        /// <summary>Registrerar beslutet: arbetsgruppens, eller en namngiven styrelses.</summary>
-        public string? DecideDecision(int planningId, int decisionId, int byParticipantId, string? outcome, string? maker,
-            string? boardName, string? note)
+        /// <summary>
+        /// Registrerar gruppens beslut. Ett förslag till en styrelse registreras inte här — styrelsens beslut läses
+        /// ur deras ärendekö.
+        /// </summary>
+        public string? DecideDecision(int planningId, int decisionId, int byParticipantId, string? outcome, string? note)
         {
             var o = PlanningDecisionOutcome.Normalize(outcome);
             if (o == null) return "Välj om förslaget blev beslutat eller avslaget.";
-            var k = PlanningDecisionMaker.Normalize(maker);
-            if (k == null) return "Välj vem som fattade beslutet.";
-            var bn = Clean(boardName, 300);
-            if (k == PlanningDecisionMaker.Board && bn == null) return "Skriv vilken styrelse som beslutade.";
+            const string k = PlanningDecisionMaker.Group;
+            string? bn = null;
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var d = LockDecision(db, planningId, decisionId);
             if (d == null) return "Förslaget finns inte.";
+            if (d.ForBoard) return "Förslaget beslutas av styrelsen. Deras beslut syns här när det är fattat.";
             if (!d.IsOpen) return "Förslaget är redan avgjort.";
             d.Status = PlanningDecisionStatus.Decided; d.Outcome = o; d.DecidedByKind = k;
             d.DecidedBoardName = k == PlanningDecisionMaker.Board ? bn : null;
@@ -177,6 +186,14 @@ namespace HpskSite.Services.Planning
             InsertSystem(db, planningId, "decision-withdrawn", $"{d.Title}: förslaget är tillbakadraget.", byParticipantId, null, ("decision", d.Id), now);
             Bump(db, planningId);
             return null;
+        }
+
+        /// <summary>Styrelsen ett förslag till en styrelse ska till — sparas när förslaget läggs fram, före utskicket.</summary>
+        public void SetDecisionBoardTarget(int planningId, int decisionId, int ownerType, int ownerId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE PlanningDecision SET BoardOwnerType = @2, BoardOwnerId = @3 WHERE Id = @0 AND PlanningId = @1",
+                decisionId, planningId, ownerType, ownerId);
         }
 
         /// <summary>Förslaget har lagts i styrelsens ärendekö: vart, när och av vem.</summary>

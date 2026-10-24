@@ -12579,6 +12579,31 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   väntar / på dagordningen / behandlat (+ styrelsens beslut) / avvisat. Medan ärendet ligger hos styrelsen får
   förslaget inte ändras, dras tillbaka eller skickas igen (`IsAtBoard`). Varje händelse ger en systemrad.
   Svit `tavlingsplanering-p3-verify.mjs` 63/63 (A/B: målföreningens prövning + dubbelutskicket → 5 röda).
+  - ⚠️⚠️ **OMGJORT 2026-10-24 (Stefans genomgång) — läs det här, inte stycket ovan, om svar och styrelser:**
+    - **Beslutsfattaren väljs när förslaget läggs fram** (`PlanningDecision.DeciderKind`): **Group** (de som deltar
+      svarar **Ja/Nej**, `Yes`/`No`; Kan ändra registrerar gruppens beslut) ELLER **Board** (styrelsen i en klubb/krets
+      som någon företräder; målet sparas vid skapandet i `BoardOwnerType/Id`). **Aldrig båda:** ett styrelseförslag
+      tar inga svar (`RespondRefusal`), väntar inte på någon (`Waiting(d, …)`), räknas inte i rälsens siffra, och
+      gruppen registrerar inte dess beslut. Bara Kan ändra (inloggad) lägger fram ett styrelseförslag.
+    - **Bilagor**: `PlanningDocTarget.Decision` (CHECK-regeln vidgad). `SendDecisionToBoard(decisionId)` KOPIERAR
+      filerna till dokumentarkivets lagring (`BoardIssueAttachments`, högst 10; länkar som `Url`) — styrelsen är inte
+      med i planeringen. Dialogen Nytt förslag väljer bilagor via `pickDocuments({onPick})`; ⚠️ `onPick` som öppnar
+      nästa dialog i samma fönster svarar `false`, annars stängs det.
+    - **Styrelsen kan besluta utan möte** (`BoardWork/DecideIssue`, den som placerar: sekreterare/ordförande/admin):
+      utfall Bifall/Avslag, text och vilka ledamöter som stod bakom (bara styrelsens). LAGRAS på ärendet
+      (`BoardIssues.Direct*`) och vinner över placeringen (`StateOf(…, directlyDecided)` → `DecidedDirect`).
+      **Anmäls på nästa olåsta möte** som underpunkt till *Beslut fattade mellan möten* (`ReportDirectDecisions`,
+      punkten skapas före Övriga frågor), och när ett nytt möte skapas om inget fanns. Den som anmälde får beskedet
+      direkt (`DirectDecisionAsync`); `DecisionNotifiedDate` sätts så att justeringen inte skickar ett andra.
+      Ångras med `UndoIssueDecision` så länge anmälan inte står i ett låst protokoll.
+    - **Avsändaren** i styrelsens kö är planeringens namn (`IssueView.SourceName`, "SM 2028 (skickat av …)").
+    - Planeringens kort visar styrelsens läge: inte skickat / hos styrelsen / beslutat utan möte / behandlat; ett
+      styrelseförslag blir Avgjort när styrelsen beslutat (härlett, lagras inte).
+    - Migreringar: `create-planning-decisions.sql` (P3b, rättar dev) och `add-direct-decision-and-attachments-to-board-issues.sql`
+      (P3f, FÖRE deploy — NPoco skriver kolumnerna vid varje uppdatering av ett ärende). Svit p3 169/169 (A/B: läget,
+      svarsspärren och kopian av bilagorna → 8 röda). ⚠️ Sviten gömmer klubb 2604:s riktiga årsmöte en stund för att pröva
+      "inget kommande möte" och ställer tillbaka det i `finally`; varje `waitForResponse` har `.catch` — ett ofångat
+      avvisat löfte dödar node innan `finally` hinner köras.
 - **P3 steg C, kopiera planeringen och lämna över (2026-10-23):** `PlanningService.Copy.cs` / `PlanningController.Copy.cs`
   (`CopyPlanning`, `HandOver`), regler i `PlanningCopyRules`. Bara den sammankallande. EN transaktion (yttre scope;
   `Create` och `AddParticipant` ansluter). Följer med: delar, områden (ansvarig bara som fritt namn), uppgifter och

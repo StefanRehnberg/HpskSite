@@ -658,7 +658,9 @@ namespace HpskSite.Models.Planning
         public const string Topic = "Topic";
         public const string Task = "Task";
         public const string Area = "Area";
-        public static readonly string[] All = { Message, Meeting, Topic, Task, Area };
+        /// <summary>Ett förslag under Förslag och beslut (2026-10-24). Följer med som bilaga när det skickas till en styrelse.</summary>
+        public const string Decision = "Decision";
+        public static readonly string[] All = { Message, Meeting, Topic, Task, Area, Decision };
         public static string? Normalize(string? kind)
         {
             var k = kind?.Trim();

@@ -277,6 +277,9 @@ namespace HpskSite.Services.Planning
                     PlanningDocTarget.Area => db.Fetch<TargetRow>(
                         @"SELECT Id, Name AS Title, NULL AS At, NULL AS MeetingId, CASE WHEN DeletedAt IS NULL THEN 0 ELSE 1 END AS Gone
                           FROM PlanningArea WHERE PlanningId = @0 AND Id IN (@1)", planningId, ids),
+                    PlanningDocTarget.Decision => db.Fetch<TargetRow>(
+                        @"SELECT Id, Title, ProposedAt AS At, NULL AS MeetingId, CASE WHEN DeletedAt IS NULL THEN 0 ELSE 1 END AS Gone
+                          FROM PlanningDecision WHERE PlanningId = @0 AND Id IN (@1)", planningId, ids),
                     _ => new List<TargetRow>(),
                 };
                 foreach (var r in rows)
@@ -311,6 +314,7 @@ namespace HpskSite.Services.Planning
                 PlanningDocTarget.Topic => "PlanningMeetingTopic",
                 PlanningDocTarget.Task => "PlanningTask",
                 PlanningDocTarget.Area => "PlanningArea",
+                PlanningDocTarget.Decision => "PlanningDecision",
                 _ => null,
             };
             if (table == null) return false;
