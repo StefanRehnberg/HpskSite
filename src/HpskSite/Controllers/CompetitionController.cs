@@ -295,39 +295,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Authorization check: can current user register this target member?
-                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                    bool canRegisterTargetMember = false;
-
-                    if (isSiteAdmin)
-                    {
-                        // Site admin can register anyone
-                        canRegisterTargetMember = true;
-                    }
-                    else
-                    {
-                        // Competition manager can register anyone for their managed competition
-                        bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
-                        if (isCompetitionManager)
-                        {
-                            canRegisterTargetMember = true;
-                        }
-                        else
-                        {
-                            // Club admin or skjutledare can register members from their clubs
-                            var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
-                            if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
-                            {
-                                canRegisterTargetMember = await _authorizationService.IsClubAdminForClub(targetClubId)
-                                                       || await _authorizationService.IsSkjutledareForClub(targetClubId);
-                            }
-                        }
-
-                        // Users can register themselves
-                        if (targetMember.Id == currentMemberData.Id)
-                        {
-                            canRegisterTargetMember = true;
-                        }
-                    }
+                    bool canRegisterTargetMember = await MayRegisterOnBehalfOfAsync(targetMember, currentMemberData.Id, competitionId);
 
                     if (!canRegisterTargetMember)
                     {
@@ -1396,7 +1364,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetMemberDetails(int memberId)
+        public async Task<IActionResult> GetMemberDetails(int memberId, int? competitionId = null)
         {
             try
             {
@@ -1419,25 +1387,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                // Check authorization - Site admin or club admin for target member's club
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                bool canAccess = false;
-
-                if (isSiteAdmin)
-                {
-                    canAccess = true;
-                }
-                else
-                {
-                    // Club admin or skjutledare can access members from their clubs
-                    var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
-                    if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int clubId))
-                    {
-                        canAccess = await _authorizationService.IsClubAdminForClub(clubId);
-                        if (!canAccess)
-                            canAccess = await _authorizationService.IsSkjutledareForClub(clubId);
-                    }
-                }
+                bool canAccess = await MayRegisterOnBehalfOfAsync(targetMember, currentMemberData.Id, competitionId ?? 0);
 
                 if (!canAccess)
                 {
@@ -1468,6 +1418,35 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = "Error loading member details: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Får den inloggade anmäla <paramref name="target"/> till tävlingen? EN regel för väljaren
+        /// (<see cref="GetMemberDetails"/>) och anmälan (<see cref="RegisterForCompetition"/>), och den
+        /// måste släppa igenom allt <see cref="GetClubMembers"/> listar.
+        ///
+        /// <para>⚠️ Klubbvägen prövar ALLA skyttens klubbar, inte bara <c>primaryClubId</c>. Klubblistan
+        /// kommer ur <c>ClubMembership</c>, där även extraklubbarna står — med bara huvudklubben här
+        /// listades en extramedlem men gick inte att välja ("Failed to load member details",
+        /// Tomelilla PK 2026-10-24).</para>
+        /// </summary>
+        private async Task<bool> MayRegisterOnBehalfOfAsync(IMember target, int currentMemberId, int competitionId)
+        {
+            if (target.Id == currentMemberId) return true;
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+
+            if (competitionId > 0
+                && (await _authorizationService.IsCompetitionManager(competitionId)
+                    || await _authorizationService.IsRegionHostAdminAsync(competitionId)))
+                return true;
+
+            foreach (var clubId in _memberClubService.GetAllClubIds(target))
+            {
+                if (await _authorizationService.IsClubAdminForClub(clubId)
+                    || await _authorizationService.IsSkjutledareForClub(clubId))
+                    return true;
+            }
+            return false;
         }
 
         #endregion
@@ -2253,10 +2232,10 @@ namespace HpskSite.Controllers
                             }
                             else
                             {
-                                var targetMemberClubId = targetMember.GetValue<string>("primaryClubId");
-                                if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
+                                // Alla skyttens klubbar, inte bara huvudklubben — se MayRegisterOnBehalfOfAsync.
+                                foreach (var targetClubId in _memberClubService.GetAllClubIds(targetMember))
                                 {
-                                    canViewMember = await _authorizationService.IsClubAdminForClub(targetClubId);
+                                    if (await _authorizationService.IsClubAdminForClub(targetClubId)) { canViewMember = true; break; }
                                 }
                             }
                         }
