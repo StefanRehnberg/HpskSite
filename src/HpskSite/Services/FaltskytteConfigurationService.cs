@@ -405,7 +405,8 @@ namespace HpskSite.Services
                 return (false, "Konfigurationen är godkänd och kan inte ändras. Begär ändring först.", null);
             }
             // Omgång 3 (K9): förut vann den som sparade sist — en annan banläggares stationer försvann utan ett ord.
-            if (blobChanges && !string.IsNullOrWhiteSpace(request.ExpectedVersion) && request.ExpectedVersion != VersionOf(config))
+            var stale = !string.IsNullOrWhiteSpace(request.ExpectedVersion) && request.ExpectedVersion != VersionOf(config);
+            if (blobChanges && stale)
             {
                 return (false, "Konfigurationen har ändrats av någon annan sedan du öppnade den. Ladda om sidan — dina senaste ändringar är inte sparade.", null);
             }
@@ -437,7 +438,10 @@ namespace HpskSite.Services
             await db.UpdateAsync(config);
             // Versionen läses ur databasen: datetime-kolumnen avrundar, så minnets värde stämmer inte med nästa läsning.
             var stored = await db.ExecuteScalarAsync<DateTime>("SELECT ModifiedDate FROM FaltskytteConfiguration WHERE Id = @0", config.Id);
-            return (true, null, stored.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Planeringstestet k2 (fynd 2): en sparning som inte ändrar stationerna (uppgifterna, eller "Spara allt" utan
+            // ändring) från en flik med en GAMMAL version får ingen ny version — annars tog fliken den och nästa sparning
+            // skrev över någon annans ändring (en station som flyttats till en annan förening).
+            return (true, null, stale ? null : stored.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         private static string VersionOf(FaltskytteConfiguration c) => c.ModifiedDate.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);

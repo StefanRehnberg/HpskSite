@@ -290,8 +290,9 @@ namespace HpskSite.Controllers
                         return No("Välj en klubb eller krets som någon i planeringen företräder, eller skriv värden som text.");
                     if (hostType == Models.DocumentOwnerType.Club) club = hostId; else region = hostId;
                 }
-                // P4: stationerna skickas av områdesdialogen; tomt fält = inga stationer.
-                extra = new PlanningService.AreaDetails(description, club, region, hostText, stations ?? "");
+                // Stationerna väljs under rälsens Stationerna (2026-10-24) och områdesdialogen skickar dem inte längre:
+                // utelämnat = rör inte (förut blev det "" och tömde föreningens stationer — planeringstestet k2, fynd 1).
+                extra = new PlanningService.AreaDetails(description, club, region, hostText, stations);
             }
             var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId, extra);
             return r.Error == null ? Ok(new { success = true, areaId = r.AreaId }) : No(r.Error);

@@ -677,6 +677,9 @@ async function fkEditorSaveMeta() {
     if (!fkEditorConfig) return;
     var body = {
         id: fkEditorConfig.id,
+        // Versionen sidan känner till: har stationerna ändrats av någon annan lämnar servern ingen ny version, så att
+        // nästa sparning av stationerna stoppas i stället för att skriva över (planeringstestet k2, fynd 2).
+        expectedVersion: window._faltCfgVersion || null,
         name: document.getElementById('fkEditorName').value || '',
         description: document.getElementById('fkEditorDesc').value || '',
         visibility: document.getElementById('fkEditorVis').value,
