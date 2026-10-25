@@ -43,6 +43,14 @@ namespace HpskSite.Tests
             => FreeWindowRules.Windows(new[] { Iv(8, 12), Iv(13, 20) }, Lor).Select(w => w.Length).Should().Contain(TimeSpan.FromHours(1));
 
         [Fact]
+        public void Precis_en_timme_sist_pa_dagen_raknas_ocksa()
+            => W(Iv(8, 19)).Should().Equal("07:00-08:00", "19:00-20:00");
+
+        [Fact]
+        public void Ett_pass_inuti_ett_langre_flyttar_inte_tillbaka_slutet()
+            => W(Iv(8, 16), Iv(9, 10)).Should().Equal("07:00-08:00", "16:00-20:00");
+
+        [Fact]
         public void Heldag_tar_funktionarsdagen_08_17_men_inte_morgon_och_kvall()
         {
             var heldag = StaffInterval.From(Lor, null, null)!.Value;
