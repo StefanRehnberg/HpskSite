@@ -269,6 +269,40 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Arrangörens behörighet i en tävling: som <see cref="HasCompetitionStaffAccessAsync"/> men UTAN bemanningens
+        /// "Ge behörighet" (<see cref="HasRosterAppAccess"/>) — sajtadmin, tävlingens egen ledning (<c>competitionManagers</c>),
+        /// värdklubbens admin och skjutledare, värdkretsens admin.
+        /// <para>Expertgruppen K1 / Stefan B2 (2026-10-25): den som fått behörighet i tävlingen genom bemanningen (kassan,
+        /// sekretariatet) använder tävlingshanteringen — men blir inte "Kan ändra" i planeringen och får inte ändra dess
+        /// bemanning (då kunde hen dela ut behörighet vidare). Planeringens "tillgång via kopplingen" prövas här.</para>
+        /// </summary>
+        public async Task<bool> HasCompetitionOrganiserAccessAsync(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0) return false;
+                var currentMember = await CurrentMemberAsync();
+                if (currentMember == null) return false;
+                if (await IsCurrentUserAdminAsync()) return true;
+                var competition = ReadCompetition(competitionId, CompetitionRead.Published);
+                if (competition == null) return false;
+                var member = _memberService.GetByEmail(currentMember.Email);
+                if (member != null && competition.ManagerIds.Contains(member.Id)) return true;
+                var clubId = competition.ClubId;
+                if (clubId > 0)
+                {
+                    if (await IsClubAdminForClub(clubId)) return true;
+                    if (await IsSkjutledareForClub(clubId)) return true;
+                }
+                return await IsRegionHostAdminAsync(clubId, competition.RegionalFederation);
+            }
+            catch (Exception gateEx)
+            {
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "HasCompetitionOrganiserAccessAsync", competitionId);
+            }
+        }
+
+        /// <summary>
         /// Convenience overload for callers that only have the competition id. Resolves the competition
         /// from the published cache (competitions are always published) and defers to the two-argument
         /// overload.

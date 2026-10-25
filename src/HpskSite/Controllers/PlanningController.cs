@@ -160,15 +160,17 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Tillgång via kopplingen (Stefan 2026-10-23): den som har tillgång till den kopplade tävlingen
+        /// Tillgång via kopplingen (Stefan 2026-10-23): den som är ARRANGÖR för den kopplade tävlingen
         /// (tävlingsledning, klubbadmin, skjutledare, kretsadmin, sajtadmin) är Kan ändra utan inbjudan. En rad
         /// som bara fanns genom tävlingen tas bort när behörigheten är borta.
+        /// <para>Expertgruppen K1 / Stefan B2 (2026-10-25): INTE den som fått behörighet i tävlingen genom bemanningen
+        /// (kassan, sekretariatet) — förut blev hen Kan ändra i hela planeringen och kunde dela ut behörighet vidare.</para>
         /// </summary>
         private async Task<PlanningMemberRow?> ApplyCompetitionAccessAsync(int planningId, int memberId, PlanningMemberRow? participant)
         {
             if (participant is { IsActive: true } && !participant.ViaCompetition) return participant;
             var link = _planning.LinkFor(planningId);
-            var hasAccess = link != null && await _auth.HasCompetitionStaffAccessAsync(link.TargetId);
+            var hasAccess = link != null && await _auth.HasCompetitionOrganiserAccessAsync(link.TargetId);
             if (participant is { IsActive: true })
             {
                 if (hasAccess) return participant;

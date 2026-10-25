@@ -259,6 +259,24 @@ namespace HpskSite.Services.Planning
                 "SELECT * FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1", planningId, memberId);
         }
 
+        /// <summary>
+        /// Stefan B1/B2: får medlemmen ändra bemanningen i planeringen? Egen rad, eller huvudplaneringens
+        /// Sammankallande/Kan ändra — se <see cref="PlanningAccess.CanEditStaffingIn"/>.
+        /// </summary>
+        public bool CanEditStaffingIn(int planningId, int memberId)
+        {
+            if (memberId <= 0) return false;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            if (p == null) return false;
+            var own = db.SingleOrDefault<PlanningMemberRow>("SELECT * FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1", planningId, memberId);
+            var root = p.ParentPlanningId > 0
+                ? db.SingleOrDefault<PlanningMemberRow>("SELECT * FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1", p.ParentPlanningId, memberId)
+                : null;
+            return PlanningAccess.CanEditStaffingIn(own, root);
+        }
+
         public sealed record AddResult(int ParticipantId, bool Created, bool Reactivated, string? Error);
 
         /// <summary>

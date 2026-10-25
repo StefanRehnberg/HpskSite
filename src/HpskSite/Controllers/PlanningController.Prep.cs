@@ -64,7 +64,8 @@ namespace HpskSite.Controllers
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
-            if (!await _auth.HasCompetitionStaffAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
+            // K1/B2: arrangören — inte den som fått behörighet i tävlingen genom bemanningen.
+            if (!await _auth.HasCompetitionOrganiserAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
             var comp = _competitions.GetSaved(competitionId);
             if (comp == null) return No("Tävlingen finns inte.");
             var p = _planning.ForCompetition(competitionId);
@@ -106,7 +107,8 @@ namespace HpskSite.Controllers
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
-            if (!await _auth.HasCompetitionStaffAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
+            // K1/B2: arrangören — inte den som fått behörighet i tävlingen genom bemanningen.
+            if (!await _auth.HasCompetitionOrganiserAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
             var comp = _competitions.GetSaved(competitionId);
             if (comp == null) return No("Tävlingen finns inte.");
             var member = _memberService.GetById(me);

@@ -4,6 +4,7 @@ using HpskSite.Services;
 using HpskSite.Services.Notifications;
 using HpskSite.Services.Staffing;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
@@ -479,7 +480,7 @@ namespace HpskSite.Controllers
             if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            var owner = await DayOfRowOwnerAsync(_staffing.OwnerOf(request.Id));
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             _staffing.SetCheckedIn(request.Id, owner, request.CheckedIn);
@@ -1789,19 +1790,38 @@ namespace HpskSite.Controllers
             if (pid > 0) return await RowOwnerAsync(_owners.ForPlanning(pid));
             if (competitionId <= 0) return null;
             if (!await HasCompetitionAccessAsync(competitionId)) return null;
-            return _owners.ForCompetition(competitionId);
+            var owner = _owners.ForCompetition(competitionId);
+            // Expertgruppen K1 / Stefan B2: tävlingens personal LÄSER bemanningen via tävlingen, men en planerad
+            // tävlings bemanning ÄNDRAS bara av den som får ändra i planeringen (annars kunde den som fått behörighet
+            // genom bemanningen — kassan, sekretariatet — ändra den och dela ut behörighet vidare). En tävling utan
+            // planering (prod i dag) är oförändrad.
+            if (owner.HasPlanning && !HttpMethods.IsGet(Request.Method) && !await CanEditPlanningStaffAsync(owner.PlanningId))
+                return null;
+            return owner;
         }
 
         /// <summary>
         /// Prövningen för en befintlig rad: radens EGEN ägare avgör, aldrig ett id i anropet — så ett id ur en
-        /// annan planering eller tävling ger ingen behörighet.
+        /// annan planering eller tävling ger ingen behörighet. En rad i en planering prövas BARA på planeringens regel
+        /// (Stefan B1/B2) — tävlingsbehörigheten ger ingen rätt att ändra planeringens bemanning.
         /// </summary>
         private async Task<StaffOwner?> RowOwnerAsync(StaffOwner? owner)
         {
             if (owner == null) return null;
+            if (owner.HasPlanning) return await CanEditPlanningStaffAsync(owner.PlanningId) ? owner : null;
             if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return owner;
-            if (owner.HasPlanning && await CanEditPlanningStaffAsync(owner.PlanningId)) return owner;
             return null;
+        }
+
+        /// <summary>
+        /// Tävlingsdagen (upprop/incheckning på Funktionärer-fliken): tävlingens personal bockar av funktionärerna
+        /// även när bemanningen hör till en planering — det är driften, inte planeringen (B2 gäller ändringar i den).
+        /// </summary>
+        private async Task<StaffOwner?> DayOfRowOwnerAsync(StaffOwner? owner)
+        {
+            if (owner == null) return null;
+            if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return owner;
+            return await RowOwnerAsync(owner);
         }
 
         /// <summary>
@@ -1821,10 +1841,7 @@ namespace HpskSite.Controllers
         private async Task<bool> CanEditPlanningStaffAsync(int planningId)
         {
             var viewer = await ResolveViewerAsync();
-            if (viewer == null) return false;
-            var row = _planning.ParticipantForMember(planningId, viewer.Id);
-            var caller = new HpskSite.Services.Planning.PlanningCaller(row is { IsActive: true } ? row : null, false);
-            return HpskSite.Services.Planning.PlanningAccess.CanEditStaffing(caller);
+            return viewer != null && _planning.CanEditStaffingIn(planningId, viewer.Id);
         }
     }
 }

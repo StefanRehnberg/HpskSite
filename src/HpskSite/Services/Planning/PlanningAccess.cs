@@ -84,10 +84,21 @@ namespace HpskSite.Services.Planning
 
         /// <summary>
         /// P2b: planeringens bemanning (roller, dagar, pass, personer). Kan ändra och Sammankallande — samma
-        /// som planeringen i övrigt. Den som har tillgång till den kopplade tävlingen prövas av
-        /// StaffingController för sig ("via kopplingen").
+        /// som planeringen i övrigt.
         /// </summary>
         public static bool CanEditStaffing(PlanningCaller c) => CanEditPlanning(c);
+
+        /// <summary>
+        /// Stefan B1 (2026-10-25, Expertgruppen K2): vem som får ändra bemanningen i en planering — den som får ändra
+        /// i planeringen själv (<paramref name="own"/>: Kan ändra eller Sammankallande, aktiv), ELLER Sammankallande/Kan
+        /// ändra i huvudplaneringen (<paramref name="root"/>: aktiv, inte en rad som bara kom via tävlingen). Härleds vid
+        /// varje anrop — förut krävdes en egen rad i delen, som B4 bara lade in när delen skapades eller öppnades, så en
+        /// sammankallande som tillkom senare var utelåst. Den som fått behörighet i tävlingen genom bemanningen räknas
+        /// INTE (B2). <paramref name="root"/> är null för en huvudplanering (eller en planering utan familj).
+        /// </summary>
+        public static bool CanEditStaffingIn(PlanningMemberRow? own, PlanningMemberRow? root) =>
+            (own is { IsActive: true } && CanEditStaffing(new PlanningCaller(own, false)))
+            || PlanningFamily.ReadsSubViaParent(root);
 
         /// <summary>Arkivering, borttagning. Bara Sammankallande.</summary>
         public static bool CanManagePlanning(PlanningCaller c) =>

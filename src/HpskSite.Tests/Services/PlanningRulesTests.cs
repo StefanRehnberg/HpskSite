@@ -104,6 +104,28 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
+        public void Staffing_in_a_planning_is_edited_by_its_own_editors_or_the_parents_owner_and_editors()
+        {
+            // Stefan B1/B2 (2026-10-25, Expertgruppen K1/K2): härlett vid varje anrop.
+            // Egen rad: Kan ändra och Sammankallande, inte Deltar/Följer, inte borttagen.
+            PlanningAccess.CanEditStaffingIn(P(1, PlanningAccessLevel.Editor), null).Should().BeTrue();
+            PlanningAccess.CanEditStaffingIn(P(1, PlanningAccessLevel.Owner), null).Should().BeTrue();
+            PlanningAccess.CanEditStaffingIn(P(1, PlanningAccessLevel.Participant), null).Should().BeFalse();
+            PlanningAccess.CanEditStaffingIn(P(1, PlanningAccessLevel.Editor, removed: true), null).Should().BeFalse();
+            PlanningAccess.CanEditStaffingIn(null, null).Should().BeFalse();
+            // Huvudplaneringen (B1): Sammankallande och Kan ändra skriver i delen utan egen rad där (K2: förut utelåst).
+            PlanningAccess.CanEditStaffingIn(null, P(2, PlanningAccessLevel.Owner)).Should().BeTrue();
+            PlanningAccess.CanEditStaffingIn(null, P(2, PlanningAccessLevel.Editor)).Should().BeTrue();
+            PlanningAccess.CanEditStaffingIn(P(1, PlanningAccessLevel.Participant), P(2, PlanningAccessLevel.Editor)).Should().BeTrue();
+            // …men inte Deltar där, inte en borttagen, och inte en rad som bara kom via tävlingen (B2).
+            PlanningAccess.CanEditStaffingIn(null, P(2, PlanningAccessLevel.Participant)).Should().BeFalse();
+            PlanningAccess.CanEditStaffingIn(null, P(2, PlanningAccessLevel.Owner, removed: true)).Should().BeFalse();
+            var via = P(2, PlanningAccessLevel.Editor);
+            via.ViaCompetition = true;
+            PlanningAccess.CanEditStaffingIn(null, via).Should().BeFalse();
+        }
+
+        [Fact]
         public void Follower_reads_everything_but_does_not_write_or_vote()
         {
             var c = C(P(1, PlanningAccessLevel.Follower));
