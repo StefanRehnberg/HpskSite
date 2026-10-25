@@ -16,12 +16,18 @@
     <div class="list-group list-group-flush">
         @foreach (var p in Model)
         {
-            <a class="list-group-item list-group-item-action py-3" href="/tavlingsplanering/@p.PlanningId#vy=@(p.VotesOwed > 0 ? "moten" : p.Unread > 0 ? "meddelanden" : "moten")">
+            @* Planeringstestet k2: kortet ledde till Meddelanden även när det var uppgiften som väntade — nu till Översikt
+               (Nästa steg samlar allt) utom när en tid ska besvaras. Kortet visas också för en egen öppen uppgift. *@
+            <a class="list-group-item list-group-item-action py-3" href="/tavlingsplanering/@p.PlanningId#vy=@(p.VotesOwed > 0 ? "moten" : "oversikt")">
                 <div class="fw-semibold">@p.Name</div>
                 <div class="small">
                     @if (p.VotesOwed > 0)
                     {
                         <span class="badge bg-warning text-dark me-1">Svara på tiderna</span>
+                    }
+                    @if (p.OpenTasks > 0)
+                    {
+                        <span class="badge bg-primary-subtle text-primary-emphasis me-1">@(p.OpenTasks == 1 ? "Du har en uppgift" : $"Du har {p.OpenTasks} uppgifter")</span>
                     }
                     @if (p.Unread > 0)
                     {

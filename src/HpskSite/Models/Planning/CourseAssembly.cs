@@ -179,7 +179,12 @@ namespace HpskSite.Models.Planning
             return null;
         }
 
-        /// <summary>Stationsnumren som har innehåll i någon vapengrupp (det som är byggt).</summary>
+        /// <summary>
+        /// Stationsnumren som har innehåll i någon vapengrupp (det som är utformat). Samma regel som konfiguratorns
+        /// <c>faltCfgStationHasContent</c>: ett namn, en målgrupp med bild eller beskrivning, eller en figur med mål, bild
+        /// eller måltavla. Planeringstestet k2: "5 av 8 byggda" när bara en station hade innehåll — konfiguratorn sparar
+        /// alla stationer med standardvärden.
+        /// </summary>
         public static SortedSet<int> BuiltStations(string? blob)
         {
             var o = Parse(blob);
@@ -189,9 +194,18 @@ namespace HpskSite.Models.Planning
                 foreach (var st in Stations(o, wc))
                 {
                     var n = StationNumber(st);
-                    if (n > 0) set.Add(n);
+                    if (n > 0 && HasContent(st)) set.Add(n);
                 }
             return set;
+        }
+
+        private static bool HasContent(JObject st)
+        {
+            static bool Has(JToken? t) => t != null && t.Type != JTokenType.Null && !string.IsNullOrWhiteSpace(t.ToString());
+            if (Has(st["name"])) return true;
+            return ((st["targetGroups"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>()).Any(tg =>
+                Has(tg["imageUrl"]) || Has(tg["description"])
+                || ((tg["figures"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>()).Any(f => Has(f["targetName"]) || Has(f["imageUrl"]) || Has(f["targetId"])));
         }
 
         // ---------------------------------------------------------------- hjälpare

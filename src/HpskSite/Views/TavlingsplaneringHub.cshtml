@@ -74,23 +74,24 @@
                     ⚠️ Ingen fråga om vilket SLAGS planering (Stefan 2026-10-22): valet ändrade ingenting —
                     alla planeringar fungerar likadant. Lägg inte tillbaka det förrän ett slag faktiskt styr något.
                 *@
+                @* Planeringstestet k2: grenfrågan stod efter datumen och skymdes av kalendern — ingen valde gren, och
+                   Stationerna syntes inte. Den står nu direkt efter namnet. *@
+                <div class="mb-3"><label class="form-label" for="plhDisc">Vilken gren gäller planeringen?</label>
+                    <select id="plhDisc" class="form-select" style="max-width:320px">
+                        <option value="">Flera grenar, eller vet inte än</option>
+                        @foreach (var d in HpskSite.Models.CompetitionTypes.All)
+                        {
+                            <option value="@d.Id">@d.Name</option>
+                        }
+                    </select>
+                    <div class="plh-help small mt-1">Välj Fältskytte om tävlingen har stationer — då får ni en egen del för stationerna, och bemanningen föreslår rätt roller. Gäller planeringen flera grenar, till exempel en SM-vecka, delar du upp den senare.</div>
+                </div>
                 <div class="plh-help small mb-3">Det går bra att börja långt innan tävlingen finns — även när ni ännu inte vet var eller när.</div>
                 <div class="row g-2 mb-3">
                     <div class="col-12"><label class="form-label" for="plhTarget">Ungefär när och var (valfritt)</label>
                         <input id="plhTarget" class="form-control" maxlength="200" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
                     <div class="col-sm-6"><label class="form-label" for="plhStart">Första dagen, om den är bestämd</label><input id="plhStart" class="form-control" placeholder="åååå-mm-dd"></div>
                     <div class="col-sm-6"><label class="form-label" for="plhEnd">Sista dagen</label><input id="plhEnd" class="form-control" placeholder="åååå-mm-dd"></div>
-                </div>
-                @* Omgång 2 steg 4: grenen väljs här (valfri) och styr vilka roller bemanningen föreslår. *@
-                <div class="mb-3"><label class="form-label" for="plhDisc">Gäller planeringen en gren? (valfritt)</label>
-                    <select id="plhDisc" class="form-select" style="max-width:320px">
-                        <option value="">Ingen gren — eller flera</option>
-                        @foreach (var d in HpskSite.Models.CompetitionTypes.All)
-                        {
-                            <option value="@d.Id">@d.Name</option>
-                        }
-                    </select>
-                    <div class="plh-help small mt-1">Välj grenen om det är en tävling i en gren — då föreslår bemanningen rätt roller, till exempel stationschef i fältskytte. En SM-vecka med flera grenar delar du i stället upp i områden.</div>
                 </div>
                 @*
                     ⚠️ Planeringsgruppen är sin egen enhet (Stefan 2026-10-23): den som är inbjuden är med, ingen

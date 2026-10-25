@@ -69,6 +69,10 @@ namespace HpskSite.Services.Staffing
 
             var discipline = _owners.Discipline(owner);
             var catalog = _roles.For(owner, discipline);
+            // Planeringstestet k2 (S2 fynd 2): behovet "per station" (stationschef, stationsmarkörer) räknades inte, så
+            // rollen fanns varken på /bemanna, i Hitta funktionärer eller i relämejlet. Nu: summan över stationerna.
+            var stationNeeds = needs.Where(n => string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase)).ToList();
+            var stations = stationNeeds.Count > 0 ? _pass.FamilyAreaStations(owner) : new List<int>();
             var result = new List<NeedDayView>();
             foreach (var (date, kind, label) in days.OrderBy(d => d.Date))
             {
@@ -82,6 +86,10 @@ namespace HpskSite.Services.Staffing
                 foreach (var role in catalog)
                 {
                     var n = CrewNeedRules.ForDay(needs, CrewNeedScope.All, role.Key, date);
+                    if (stationNeeds.Any(r => string.Equals(r.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)))
+                        n += stations.Count > 0
+                            ? stations.Sum(st => CrewNeedRules.For(stationNeeds, CrewNeedScope.Station, role.Key, date, st.ToString(CultureInfo.InvariantCulture), null))
+                            : CrewNeedRules.ForDay(stationNeeds, CrewNeedScope.Station, role.Key, date);
                     if (n <= 0) continue;
                     assigned.TryGetValue((role.Key.ToLowerInvariant(), date), out var have);
                     view.Roles.Add(new NeedRoleView { RoleKey = role.Key, RoleName = role.DisplayName, Needed = n, Missing = Math.Max(0, n - have) });

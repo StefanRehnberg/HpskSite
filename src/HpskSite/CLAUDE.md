@@ -12866,6 +12866,26 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     - `GET Stations` bär `areas` (med `part` inkl. `state`), `stationCount` och per station `built` (i helheten ELLER i
       en del, `CourseAssembly.BuiltStations`) och `url` (`StationUrlsAsync`).
     - Svit `tavlingsplanering-stationer-verify.mjs` (ersätter banan-sviten); p4 och o3 läser vyn.
+  - **Planeringstestet körning 2 (2026-10-25, `notes/planeringstest/`, granskning `expertgrupp-resultat-k2-2026-10-25.md`):**
+    - ⚠️ `SaveArea` med `details=1` utan `stations` = RÖR INTE (förut `?? ""` som tömde föreningens stationer).
+    - ⚠️ `UpdateWithVersionAsync` ger ingen ny version till en INAKTUELL flik (`ExpectedVersion` ≠ nuvarande) även när
+      stationerna inte ändras — annars tog fliken versionen och skrev över en flyttad station. Editorns uppgiftssparning
+      skickar `expectedVersion`.
+    - `ApproveAsync` prövar `PartsBlockerAsync` (helheten kunde godkännas förbi delarna).
+    - **Grenen:** frågan står direkt efter namnet i *Ny planering*; `stationsWanted` = områden med stationer, fältgren,
+      eller INGEN gren och Kan ändra; `SeedTemplate` sätter planeringens gren när den saknas och mallen har EN gren.
+    - **Läget:** "Utforma … utformade" — `CourseAssembly.BuiltStations` kräver innehåll (namn, målgrupp med bild/beskrivning,
+      figur med mål/bild/tavla — samma som konfiguratorns `faltCfgStationHasContent`).
+    - **Kom igång** står kvar för den sammankallande tills inbjudan, mötet och första meddelandet finns (bockas av);
+      Nästa steg tom = "Inget att svara på just nu"; Översikt ritas om när `#plFormModal` stängs.
+    - **Startsidans kort** (`HomeCards`): också en egen öppen uppgift (`MyPlanning.OpenTasks`), länken till Översikt;
+      `Unread` räknar bara `Kind='Message'`.
+    - **Bemanningen:** `StaffHelpService.NeedDays` summerar behov per station (`FamilyAreaStations`); avböjda räknas inte i
+      rutnätets `Filled`/`FilledByDay`/`PassCover` men står kvar i rutan.
+    - `Decisions.canPropose` är falskt via länken; `LinkableCompetitions` tar med kretsar den som frågar administrerar
+      (inte sajtadmin); gästlänken vid godkännande bär `PublicBase`.
+    - Svit `tavlingsplanering-k2-verify.mjs` (grenen, Kom igång, startsidans kort). Kvar och väntar på Stefan: avisering
+      av kommentar/Klar att pröva/förslag, den drabbade vid flytt, delens mottagare, skift, rollkatalogen enligt SHB.
   - **⚠️⚠️ Bemanning per station och pass — TIDEN ÄR SANNINGEN (3.2):**
     - **`StaffTimeCoverage.Peak`** (rena funktioner) är ENDA räkningen av "hur många är på plats": flest SAMTIDIGT, inte
       antalet uppdrag (tio markörer i två skift om fem = fem). Utan tid = hela dagen; ett uppdrag i ett pass har passets

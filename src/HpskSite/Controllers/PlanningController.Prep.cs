@@ -180,6 +180,11 @@ namespace HpskSite.Controllers
                     var code = node?.ContentType.Alias == "regionalPage" ? node.Value<string>("regionCode") : null;
                     if (!string.IsNullOrWhiteSpace(code)) regions[code.Trim()] = t.Name;
                 }
+            // Planeringstestet k2 (S3, K6): en kretsadmin såg inte kretsens tävling om ingen i planeringen uttryckligen
+            // *företrädde* kretsen. Kretsarna den som frågar administrerar räknas också (inte sajtadmin — det vore alla).
+            if (!await _auth.IsCurrentUserAdminAsync())
+                foreach (var code in await _auth.GetManagedRegions())
+                    if (!string.IsNullOrWhiteSpace(code)) regions.TryAdd(code.Trim(), code.Trim());
             var series = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.ICompetitionSeriesStore>();
             var seriesHost = new Dictionary<int, (int Club, string Region)>();
             (int Club, string Region) HostOf(CompetitionInfo c)
@@ -353,6 +358,11 @@ namespace HpskSite.Controllers
             // Omgång 3 (K10): flera grenar på en gång ("Precision,Faltskytte"); en kopplad tävling bestämmer sin egen.
             var discs = comp != null ? new[] { comp.TypeId } : (discipline ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
+            // Planeringstestet k2: mallens gren blev aldrig planeringens — Stationerna och bemanningens roller följer grenen.
+            // En planering utan gren och en mall med EN gren: då är det den grenen.
+            if (comp == null && string.IsNullOrWhiteSpace(x.Planning.DisciplineKey) && discs.Length == 1
+                && HpskSite.Models.CompetitionTypes.All.Any(t => t.Id == discs[0]))
+                _planning.SetDisciplineKey(id, discs[0], x.MemberId);
             return Ok(new { success = true, areas, tasks });
         }
 

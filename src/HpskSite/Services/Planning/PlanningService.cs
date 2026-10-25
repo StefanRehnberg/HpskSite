@@ -678,7 +678,9 @@ namespace HpskSite.Services.Planning
                        pm.Id AS ParticipantId, pm.Access,
                        (SELECT COUNT(*) FROM PlanningMessage m
                          WHERE m.PlanningId = p.Id AND m.DeletedAt IS NULL AND m.Id > ISNULL(r.LastReadMessageId, 0)
-                           AND ISNULL(m.ParticipantId, 0) <> pm.Id) AS Unread,
+                           AND m.Kind = N'Message' AND ISNULL(m.ParticipantId, 0) <> pm.Id) AS Unread,
+                       (SELECT COUNT(*) FROM PlanningTask t
+                         WHERE t.PlanningId = p.Id AND t.DeletedAt IS NULL AND t.AssigneeParticipantId = pm.Id AND t.Status <> N'Done') AS OpenTasks,
                        CASE WHEN pm.Access = N'Follower' THEN 0 ELSE
                        (SELECT COUNT(*) FROM PlanningMeeting mt
                          WHERE mt.PlanningId = p.Id AND mt.DeletedAt IS NULL AND mt.Status = N'Proposed'
@@ -699,21 +701,25 @@ namespace HpskSite.Services.Planning
                         "SELECT TOP 1 Title FROM PlanningMeeting WHERE PlanningId = @0 AND DeletedAt IS NULL AND Status = N'Scheduled' AND StartsAt = @1",
                         r.PlanningId, r.NextMeetingAt.Value);
                 list.Add(new MyPlanning(r.PlanningId, r.Name, r.Status, r.Kind, r.TargetText, r.TargetStart, r.ParticipantId,
-                    r.Access, r.Unread, r.VotesOwed, r.NextMeetingAt, nextTitle, r.LastActivityAt));
+                    r.Access, r.Unread, r.VotesOwed, r.NextMeetingAt, nextTitle, r.LastActivityAt, r.OpenTasks));
             }
             return list.OrderBy(p => p.Status == "Archived").ThenByDescending(p => p.LastActivityAt ?? DateTime.MinValue).ToList();
         }
 
-        /// <summary>Startsidans kort: aktiva planeringar där något väntar på medlemmen, eller ett möte inom en vecka.</summary>
+        /// <summary>
+        /// Startsidans kort: aktiva planeringar där något väntar på medlemmen — olästa meddelanden, en tid att svara på,
+        /// ett möte inom en vecka, eller en egen öppen uppgift (planeringstestet k2, S4 T4-6b: kortet försvann när inget
+        /// var oläst, och den som hade en uppgift hittade inte tillbaka). Bara riktiga meddelanden räknas som olästa.
+        /// </summary>
         public List<MyPlanning> HomeCards(int memberId) =>
             memberId <= 0 ? new List<MyPlanning>() : ForMember(memberId)
-                .Where(p => p.Status == "Active" && (p.Unread > 0 || p.VotesOwed > 0
+                .Where(p => p.Status == "Active" && (p.Unread > 0 || p.VotesOwed > 0 || p.OpenTasks > 0
                     || (p.NextMeetingAt.HasValue && p.NextMeetingAt.Value <= Now.AddDays(7))))
                 .Take(5).ToList();
 
         public sealed record MyPlanning(int PlanningId, string Name, string Status, string Kind, string? TargetText,
             DateTime? TargetStart, int ParticipantId, string Access, int Unread, int VotesOwed, DateTime? NextMeetingAt,
-            string? NextMeetingTitle, DateTime? LastActivityAt);
+            string? NextMeetingTitle, DateTime? LastActivityAt, int OpenTasks = 0);
 
         private sealed class MyPlanningRaw
         {
@@ -727,6 +733,7 @@ namespace HpskSite.Services.Planning
             public string Access { get; set; } = "";
             public int Unread { get; set; }
             public int VotesOwed { get; set; }
+            public int OpenTasks { get; set; }
             public DateTime? NextMeetingAt { get; set; }
             public DateTime? LastActivityAt { get; set; }
         }

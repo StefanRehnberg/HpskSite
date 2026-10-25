@@ -108,7 +108,9 @@ namespace HpskSite.Controllers
             return Json(new
             {
                 success = true,
-                canPropose = PlanningAccess.CanProposeDecision(c),
+                // Planeringstestet k2 (S3 fynd 4): via mejllänken erbjöds Nytt förslag men CreateDecision vägrar länken
+                // ("Planeringen finns inte") — samma linje som K5: länken lägger inte fram förslag.
+                canPropose = PlanningAccess.CanProposeDecision(c) && !c.ViaLink,
                 canDecide,
                 canSendToBoard = canSend && targets.Count > 0,
                 boardTargets = targets.Select(tg => new { ownerType = tg.Item1, ownerId = tg.Item2, name = tg.Item3 }),

@@ -117,9 +117,19 @@ namespace HpskSite.Tests.Models
         [Fact]
         public void Built_stations_are_the_numbers_with_content_in_any_weapon_class()
         {
-            CourseAssembly.BuiltStations(Cfg(Wc("A", St(2, 9)) + "," + Wc("C", St(1, 9), St(2, 9)), "\"_stationCount\":6"))
+            var named = ",\"name\":\"Älgen\"";
+            CourseAssembly.BuiltStations(Cfg(Wc("A", St(2, 9, named)) + "," + Wc("C", St(1, 9, named), St(2, 9)), "\"_stationCount\":6"))
                 .Should().Equal(1, 2);
             CourseAssembly.BuiltStations(null).Should().BeEmpty();
+        }
+
+        [Fact]
+        public void A_station_with_only_the_configurators_defaults_is_not_built()
+        {
+            // Planeringstestet k2: "5 av 8 byggda" — konfiguratorn sparar varje station med en tom figur.
+            var empty = ",\"targetGroups\":[{\"group\":1,\"figures\":[{\"figureNumber\":1,\"behavior\":\"Fast\"}]}]";
+            var withTarget = ",\"targetGroups\":[{\"group\":1,\"figures\":[{\"figureNumber\":1,\"targetName\":\"C 1/4\"}]}]";
+            CourseAssembly.BuiltStations(Cfg(Wc("C", St(1, 30, empty), St(2, 30, withTarget)))).Should().Equal(2);
         }
 
         // ---------------------------------------------------------------- en förening byter stationer (Stationerna-vyn)

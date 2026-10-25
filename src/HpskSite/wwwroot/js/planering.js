@@ -497,18 +497,25 @@
                 ${m.onlineUrl ? `<a class="btn btn-outline-primary" href="${esc(m.onlineUrl)}" target="_blank" rel="noopener">Gå med</a>` : ''}
                 <a class="btn btn-outline-primary" href="#vy=mote&id=${m.id}" data-pl-open-meeting="${m.id}">Visa</a></div>`);
         }
-        html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
+        // Planeringstestet k2 (S4 T4-8): "Inget väntar på dig" lovade för mycket när Kjell inte hade gjort något än.
+        html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget att svara på just nu.</p>'}</div>`);
         html.push(familyCompetitionsCardHtml());
         html.push(subPlanningsCardHtml());
         html.push('<div id="plStationsSum"></div>');
 
-        // Kom igång — för en ny planering
-        if (p.me.isParticipant && p.participants.length <= 1 && (!MEET || MEET.meetings.length === 0)) {
-            html.push(`<div class="pl-card"><h2>Kom igång</h2>
+        // Kom igång — står kvar för den sammankallande tills de tre stegen är gjorda, och bockar av dem (k2: den försvann
+        // vid första inbjudan, och Kjell visste inte vad han skulle göra sedan).
+        const kgInvited = p.participants.length > 1;
+        const kgMeeting = !!(MEET && MEET.meetings.length);
+        const kgMessage = !!(MSG && MSG.messages.some(m => m.kind === 'Message' && !m.deleted));
+        const kgShow = p.me.isParticipant && (p.participants.length <= 1 && !kgMeeting || p.me.canManage && !(kgInvited && kgMeeting && kgMessage));
+        if (kgShow) {
+            const kg = (done, html) => `<li class="mb-2">${done ? '<span class="text-success me-1" aria-label="Gjort">✓</span><span class="pl-help">' + html + '</span>' : html}</li>`;
+            html.push(`<div class="pl-card" id="plGetStarted"><h2>Kom igång</h2>
                 <ol class="mb-0">
-                    <li class="mb-2">${p.me.canInvite ? '<button class="btn btn-link p-0 align-baseline" data-pl-invite="1">Bjud in</button> de som ska vara med' : 'Be den som skapade planeringen bjuda in de andra'} — sök på namnet bland alla medlemmar. Ingen behöver känna till någons e-postadress.</li>
-                    <li class="mb-2"><button class="btn btn-link p-0 align-baseline" data-pl-newmeet="1">Föreslå ett möte</button> med några tider — alla svarar vilka som passar, direkt ur mejlet.</li>
-                    <li>Skriv det första meddelandet under <a href="#vy=meddelanden" data-pl-go="meddelanden">Meddelanden</a>. Alla får ett mejl på kvällen med det som är nytt.</li>
+                    ${kg(kgInvited, `${p.me.canInvite ? '<button class="btn btn-link p-0 align-baseline" data-pl-invite="1">Bjud in</button> de som ska vara med' : 'Be den som skapade planeringen bjuda in de andra'} — sök på namnet bland alla medlemmar. Ingen behöver känna till någons e-postadress.`)}
+                    ${kg(kgMeeting, '<button class="btn btn-link p-0 align-baseline" data-pl-newmeet="1">Föreslå ett möte</button> med några tider — alla svarar vilka som passar, direkt ur mejlet.')}
+                    ${kg(kgMessage, 'Skriv det första meddelandet under <a href="#vy=meddelanden" data-pl-go="meddelanden">Meddelanden</a>. Alla får ett mejl på kvällen med det som är nytt.')}
                 </ol></div>`);
         }
         // Milstolparna: de viktiga datumen, först de som är kvar.
@@ -540,6 +547,9 @@
         e.preventDefault(); goMeeting(parseInt(b.dataset.plMeet, 10));
     });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-invite]')) { e.preventDefault(); openInvite(); } });
+    // Planeringstestet k2 (S1, S2, S4): "Med i planeringen (1)" stod kvar efter inbjudan — Översikt ritas om när en dialog
+    // stängs, så att listan, Kom igång och Nästa steg stämmer.
+    $('plFormModal')?.addEventListener('hidden.bs.modal', () => { if (view === 'oversikt' && S && !RAIL_ONLY) render('oversikt'); });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-newmeet]')) { e.preventDefault(); openNewMeeting(); } });
 
     // ================================================================ Tävlingen (omgång 2)
@@ -3581,7 +3591,10 @@
     const FALT_KEYS = ['Faltskytte', 'MagnumFalt'];
     function stationsWanted(s) {
         s = s || S;
-        return (s.areas || []).some(a => a.stations) || FALT_KEYS.includes(s.planning.disciplineKey);
+        // Planeringstestet k2 (alla tre fältscenarier, H3/H4): utan gren fanns ingen väg till stationerna — en SM-vecka
+        // har ingen gren alls. Den som kan ändra ser platsen även utan gren; den tomma vyn frågar om det är fältskytte.
+        return (s.areas || []).some(a => a.stations) || FALT_KEYS.includes(s.planning.disciplineKey)
+            || (!s.planning.disciplineKey && s.me.canEdit);
     }
     let ST = null;
     const ST_STATUS = { Draft: ['Utkast', 'draft'], PendingApproval: ['Väntar på godkännande', 'draft'], Approved: ['Godkänd', 'live'] };
@@ -3650,6 +3663,7 @@
             <p class="mb-0">${r.wholeElsewhere ? `Stationerna skapas i huvudplaneringen och gäller hela familjen. ${esc(r.wholeElsewhere)}`
                 : 'Den som kan ändra planeringen skapar stationerna här.'} Sedan väljer varje förening sina stationer och bygger dem.</p></div>`;
         return `<div class="pl-card" id="plStEmpty"><h2>Skapa stationerna</h2>
+            ${!S.planning.disciplineKey ? '<p class="mb-2"><b>Stationerna behövs i fältskytte.</b> Har tävlingen stationer — en fälttävling, eller fältet i en SM-vecka — börjar ni här. Annars kan du lämna den här delen.</p>' : ''}
             <p>Börja med hur många stationer tävlingen har. Sedan lägger du till föreningarna och väljer vilka stationer var och en bygger.
                 ${r.competition && r.competition.falt ? `Stationerna börjar som en kopia av tävlingens fältkonfiguration (${esc(r.competition.name)}).` : ''}</p>
             <div class="d-flex flex-wrap gap-2 align-items-end"><div><label class="form-label" for="plStCount">Antal stationer</label>
@@ -3676,7 +3690,7 @@
             <span class="n">${i + 1} · ${esc(label)}</span><b>${big}</b><span class="small">${small}</span>${extra || ''}</div>`;
         const s1 = step(0, 'Fördela', `${assigned} av ${total} stationer`,
             unassigned.length ? `Utan förening: ${esc(unassigned.join(', '))}` : 'har en förening');
-        const s2 = step(1, 'Bygg', `${built} av ${total} byggda`,
+        const s2 = step(1, 'Utforma', `${built} av ${total} utformade`,
             parts.length ? `${approved} av ${parts.length} ${parts.length === 1 ? 'del' : 'delar'} godkända` : 'Ingen förening har en egen del än');
         const s3 = step(2, 'Sätt ihop och godkänn', c.assembledAt ? `Ihopsatta ${esc(c.assembledAt)}` : 'Inte ihopsatta än',
             pending ? `${pending} ${pending === 1 ? 'del har' : 'delar har'} ändrats eller är nya`
@@ -3712,7 +3726,7 @@
                 own && { label: 'Ta bort föreningen', danger: true, fn: () => deleteArea(own) },
             ]) : rowMenu([
                 a.part && a.part.canView && { label: 'Öppna delen', fn: () => { location.href = a.part.url; } },
-                { label: a.planningId === (S.planning.parent && S.planning.parent.id) ? 'Öppna huvudplaneringen' : 'Öppna delplaneringen', fn: () => { location.href = '/tavlingsplanering/' + a.planningId + '#vy=stationer'; } },
+                a.planningId !== ID && { label: a.planningId === (S.planning.parent && S.planning.parent.id) ? 'Öppna huvudplaneringen' : 'Öppna delplaneringen', fn: () => { location.href = '/tavlingsplanering/' + a.planningId + '#vy=stationer'; } },
             ]);
             return `<tr data-st-area="${a.id}">
                 <td><b>${esc(a.host || a.name)}</b>${a.host && a.host !== a.name ? `<div class="pl-help small">${esc(a.name)}</div>` : ''}
@@ -3736,7 +3750,7 @@
         const body = rows.map(s => {
             const a = s.areaId ? byArea.get(s.areaId) : null;
             const where = a && a.part ? 'Föreningens del' : 'Helheten';
-            const builtHtml = s.built ? esc(where) : stMiss('Inte byggd');
+            const builtHtml = s.built ? esc(where) : stMiss('Inte utformad');
             const chiefHtml = s.chiefs.length ? esc(s.chiefs.join(', ')) : stMiss('Saknas');
             const menu = rowMenu([
                 s.url && { label: 'Öppna stationen i konfiguratorn', fn: () => { location.href = s.url; } },
@@ -3753,9 +3767,9 @@
                 <td class="text-end">${menu}</td></tr>`;
         }).join('');
         return `<div class="pl-card p-0" id="plStRows"><div class="pl-cardh px-3 pt-3 d-block"><h2>Stationerna</h2>
-                <p class="pl-help small mb-2">En rad per station: vem som har den, var den byggs, stationschefen ur bemanningen och de öppna uppgifterna.</p></div>
+                <p class="pl-help small mb-2">En rad per station: vem som har den, var den utformas, stationschefen ur bemanningen och de öppna uppgifterna.</p></div>
             <div class="table-responsive"><table class="table align-middle mb-0">
-            <thead><tr><th class="ps-3">Station</th><th>Förening</th><th class="d-none d-md-table-cell">Byggs i</th><th class="d-none d-md-table-cell">Stationschef</th>
+            <thead><tr><th class="ps-3">Station</th><th>Förening</th><th class="d-none d-md-table-cell">Utformas i</th><th class="d-none d-md-table-cell">Stationschef</th>
                 <th class="d-none d-md-table-cell">Uppgifter</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
     }
 
@@ -3934,7 +3948,7 @@
             const total = r.stationCount || rows.length, built = rows.filter(s => s.built).length;
             const parts = (r.areas || []).filter(a => a.part), approved = parts.filter(a => a.part.status === 'Approved').length;
             const noHost = rows.filter(s => !s.areaId).length, noChief = rows.filter(s => !s.chiefs.length).length;
-            text = `${built} av ${total} byggda` + (parts.length ? ` · ${approved} av ${parts.length} ${parts.length === 1 ? 'del' : 'delar'} godkända` : '')
+            text = `${built} av ${total} utformade` + (parts.length ? ` · ${approved} av ${parts.length} ${parts.length === 1 ? 'del' : 'delar'} godkända` : '')
                 + (noHost ? ` · ${stMiss(noHost === 1 ? 'en utan förening' : noHost + ' utan förening')}` : '')
                 + (noChief ? ` · ${stMiss(noChief === 1 ? 'en saknar stationschef' : noChief + ' saknar stationschef')}` : '');
         }
