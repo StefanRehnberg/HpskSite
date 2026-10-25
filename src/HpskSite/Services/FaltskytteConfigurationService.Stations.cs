@@ -7,7 +7,7 @@ namespace HpskSite.Services
 {
     /// <summary>
     /// Stefan 2026-10-25: en planerings stationer är EN fältkonfiguration ("en konfiguration, ansvar per station").
-    /// Varje station kan ha en ansvarig (planeringens område med stationer: en person, en klubb eller en krets); den
+    /// Varje station kan ha en ansvarig (PlanningStationResponsible: en person, en klubb, en krets eller ett namn); den
     /// ansvarige ändrar bara sina stationer och sparar dem en och en (<see cref="UpdateStationsAsync"/> — flera kan arbeta
     /// samtidigt utan att skriva över varandra). Banläggaren godkänner station för station, och helheten först när alla
     /// är godkända (<see cref="StationBlob.WholeBlocker"/>).
@@ -35,16 +35,21 @@ namespace HpskSite.Services
             await db.ExecuteAsync("UPDATE FaltskytteConfiguration SET ProjectId = @1 WHERE Id = @0 AND ProjectId IS NULL", configId, projectId);
         }
 
-        /// <summary>Planeringen vars stationer konfigurationen är (länken utan område), eller null.</summary>
+        /// <summary>Planeringen vars stationer konfigurationen är, eller null.</summary>
         public async Task<int?> CoursePlanningIdAsync(int configId)
         {
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
                 return await db.FirstOrDefaultAsync<int?>(
-                    "SELECT TOP 1 l.PlanningId FROM PlanningLink l JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL WHERE l.TargetKind = N'faltconfig' AND l.TargetId = @0 AND l.AreaId IS NULL", configId);
+                    "SELECT TOP 1 l.PlanningId FROM PlanningLink l JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL WHERE l.TargetKind = N'faltconfig' AND l.TargetId = @0", configId);
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                // Tyst null här gjorde konfigurationen till "inte en planerings stationer" — den ansvarige blev utelåst.
+                _logger.LogWarning(ex, "Fältkonfiguration {Id}: planeringens koppling kunde inte läsas.", configId);
+                return null;
+            }
         }
 
         public async Task<StationRights> StationRightsAsync(FaltskytteConfiguration config, int? memberId)

@@ -96,7 +96,9 @@ namespace HpskSite.Services.Planning
             var now = Now;
             try
             {
-                using var s = _scopes.CreateScope(autoComplete: true);
+                // INTE autoComplete: det committar även när något kastar, och då blev en halv planering kvar (planeringen
+                // och kopplingen utan förberedelserna) som catch-grenen sedan svarade som "fanns redan".
+                using var s = _scopes.CreateScope();
                 var db = s.Database;
                 // Lås kopplingarna för tävlingen: två samtidiga startar ska inte båda skapa en planering.
                 if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'competition' AND TargetId = @0",
@@ -130,6 +132,7 @@ namespace HpskSite.Services.Planning
                 var imported = import == null ? 0 : ImportWorkBreakdown(db, p.Id, i.CompetitionId, me.Id, import, now);
                 if (imported > 0)
                     InsertSystem(db, p.Id, "prep-imported", $"Tävlingens förberedelser flyttades in: {imported} uppgifter.", null, null, null, now);
+                s.Complete();
                 return new CreateForCompetitionResult(p.Id, true, imported, null);
             }
             catch (Exception ex) when (IsUniqueViolation(ex))
@@ -688,6 +691,22 @@ namespace HpskSite.Services.Planning
                 return r.Id;
             }
 
+            // De gamla förberedelserna tillät två områden med samma namn; planeringen gör det inte (UX_PlanningArea_Name).
+            // Båda följer med — den andra får "(2)" — eftersom de kan ha olika ansvariga.
+            var takenNames = db.Fetch<string>("SELECT Name FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            string FreeAreaName(string name)
+            {
+                var candidate = name;
+                for (var n = 2; takenNames.Contains(candidate); n++)
+                {
+                    var suffix = $" ({n})";
+                    candidate = (name.Length + suffix.Length > MaxAreaName ? name[..(MaxAreaName - suffix.Length)] : name) + suffix;
+                }
+                takenNames.Add(candidate);
+                return candidate;
+            }
+
             var areaMap = new Dictionary<int, int>();
             foreach (var a in areas)
             {
@@ -696,7 +715,7 @@ namespace HpskSite.Services.Planning
                 if (doneArea.Contains(a.Id)) continue;
                 var row = new PlanningAreaRow
                 {
-                    PlanningId = planningId, Name = Clean(a.Name, MaxAreaName) ?? "Område", SortOrder = a.SortOrder,
+                    PlanningId = planningId, Name = FreeAreaName(Clean(a.Name, MaxAreaName) ?? "Område"), SortOrder = a.SortOrder,
                     ResponsibleParticipantId = a.ResponsibleMemberId > 0 ? Participant(a.ResponsibleMemberId.Value) : null,
                     ResponsibleName = a.ResponsibleMemberId > 0 ? null : Clean(a.ResponsibleName, 200),
                     CreatedAt = SwedishTime(a.CreatedDate, now), CreatedBy = 0, ImportedFromWorkAreaId = a.Id,
