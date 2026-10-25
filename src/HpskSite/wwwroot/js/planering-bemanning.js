@@ -863,7 +863,7 @@ window.PlaneringBemanning = (function () {
                 <th scope="col">Person</th><th scope="col" class="d-none d-md-table-cell">Uppdrag</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th>
             </tr></thead><tbody>${rows}</tbody></table></div>`
             + (list.length > slice.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-plb-more>Visa ${Math.min(60, list.length - slice.length)} till (${list.length - slice.length} kvar)</button>` : '')
-            + (B.byOrg ? '<p class="pl-help small mt-2 mb-0">Föreningen är den som personen ställer upp för — förvalt huvudklubben. Underlaget när ett överskott delas mellan föreningarna.</p>' : '');
+            + (B.byOrg ? '<p class="pl-help small mt-2 mb-0">Föreningen är den som personen ställer upp för — förvalt huvudklubben.</p>' : '');
     }
 
     // ---- en person ----
@@ -1002,7 +1002,7 @@ window.PlaneringBemanning = (function () {
                 ? `<label class="visually-hidden" for="plbRep">Förening</label><select class="form-select" id="plbRep" style="max-width:420px">
                     <option value=""${p.representsIsDefault || !p.representsId ? ' selected' : ''}>${p.memberId ? 'Huvudklubben' + (p.representsIsDefault && p.representsName ? ' (' + esc(p.representsName) + ')' : '') : 'Ingen förening'}</option>
                     ${reps.map(c => { const v = c.type + ':' + c.id; return `<option value="${esc(v)}"${!p.representsIsDefault && v === repVal ? ' selected' : ''}>${esc(c.name)}${c.type === 'region' ? ' (krets)' : ''}</option>`; }).join('')}
-                  </select><div class="pl-help small mt-1">Gäller alla hens uppdrag. Underlaget när ett överskott delas mellan föreningarna som bemannade tävlingen.</div>`
+                  </select><div class="pl-help small mt-1">Gäller alla hens uppdrag.</div>`
                 : `<p class="pl-help mb-0">${p.representsName ? esc(p.representsName) : 'Ingen förening känd. Koppla personen till en medlem, så kan du välja.'}</p>`) + '</div>';
         }
 

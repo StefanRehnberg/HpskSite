@@ -25,7 +25,7 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void Parts_has_reads_the_comma_list_without_regard_to_case_or_spaces()
         {
-            PlanningParts.Has("beslut, overskott", PlanningParts.Surplus).Should().BeTrue();
+            PlanningParts.Has("overskott, beslut", PlanningParts.Decisions).Should().BeTrue();
             PlanningParts.Has("BESLUT", PlanningParts.Decisions).Should().BeTrue();
             PlanningParts.Has(null, PlanningParts.Decisions).Should().BeFalse();
             PlanningParts.Has("beslutx", PlanningParts.Decisions).Should().BeFalse();
@@ -34,11 +34,12 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void Parts_with_adds_once_removes_and_drops_unknown_parts()
         {
-            PlanningParts.With(null, PlanningParts.Surplus, true).Should().Be("overskott");
-            PlanningParts.With("overskott", PlanningParts.Decisions, true).Should().Be("beslut,overskott");
-            PlanningParts.With("beslut,overskott", PlanningParts.Decisions, true).Should().Be("beslut,overskott");
-            PlanningParts.With("beslut,overskott", PlanningParts.Decisions, false).Should().Be("overskott");
-            PlanningParts.With("skräp,beslut", PlanningParts.Surplus, false).Should().Be("beslut");
+            PlanningParts.With(null, PlanningParts.Decisions, true).Should().Be("beslut");
+            PlanningParts.With("beslut", PlanningParts.Decisions, true).Should().Be("beslut");
+            PlanningParts.With("beslut", PlanningParts.Decisions, false).Should().Be("");
+            // Överskottet är borttaget (2026-10-25): ett gammalt värde släpps vid nästa ändring.
+            PlanningParts.With("overskott", PlanningParts.Decisions, true).Should().Be("beslut");
+            PlanningParts.With("skräp,beslut", "overskott", false).Should().Be("beslut");
         }
 
         // ---------------------------------------------------------------- gästens dokument (K5)

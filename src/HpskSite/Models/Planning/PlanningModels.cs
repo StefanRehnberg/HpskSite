@@ -19,8 +19,9 @@ namespace HpskSite.Models.Planning
     public static class PlanningParts
     {
         public const string Decisions = "beslut";
-        public const string Surplus = "overskott";
-        public static readonly string[] All = { Decisions, Surplus };
+        // Överskottet ("overskott") borttaget 2026-10-25 (Stefan: hör till ekonomidelen). Ett gammalt värde i Parts släpps
+        // av With vid nästa ändring.
+        public static readonly string[] All = { Decisions };
 
         public static bool Has(string? parts, string part) =>
             (parts ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(part, StringComparer.OrdinalIgnoreCase);

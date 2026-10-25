@@ -12793,6 +12793,12 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     - **Prodkollen** `Migrations/check-prod-planning-family-after-deploy-2026-10-25.sql` (P5 i körordningen).
     - Sviten fick avsnitt H: N1 (ingångarna räknas per vy), N3 (rättighetsmatrisen ur EN tabell, A/B med B som
       sammankallande → exakt en cell), N5, N7 (kortets överkant på dator och telefon), N8 (med A/B) och B3.
+  - **Paraplyet och Överskottet (Stefan 2026-10-25 kväll):** en huvudplanering med delplaneringar (`isUmbrella`:
+    `planning.family` finns och ingen `parent`) har ingen *Tävlingen* i rälsen och ingen tävlingsrad i Nästa steg —
+    tävlingarna ligger i delarna — utom när den själv har en tävling/ansökan (`hasOwnCompetition`). **Överskottet är
+    BORTTAGET** ur planeringen (vyn, `PlanningController.Surplus`, `PlanningService.Surplus`, `PlanningSurplus`-modellen
+    och -tabellen, delen `overskott`; P1 = 24 tabeller/25 FK, bevisad på en tom databas). Allt äldre nedan om
+    Överskottet / `PlanningSurplusRules` / B10 är historik. Ekonomidelen kan ta det senare.
   - **Rälsen grupperad (Stefan 2026-10-25):** Översikt · *Samarbete* (Meddelanden, Möten, Förslag och beslut, Deltagare) ·
     *Arbetet* (Uppgifter, Dokument) · *Tävlingen* (Tävlingen, Stationerna, Bemanning, Dagsprogram) · Inställningar.
     `VIEWS[].group`; `renderRail` ritar `.pl-railgrp`/`.pl-railh`/`.pl-railitems` (telefon: en rad per grupp, rubriken i

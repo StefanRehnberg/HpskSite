@@ -40,14 +40,11 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        /// <summary>Har planeringen förslag och beslut, eller ett sparat överskott? (Visas då oavsett <see cref="PlanningRow.Parts"/>.)</summary>
-        public (bool Decisions, bool Surplus) PartsWithContent(int planningId)
+        /// <summary>Har planeringen förslag och beslut? (Visas då oavsett <see cref="PlanningRow.Parts"/>.)</summary>
+        public bool DecisionsHaveContent(int planningId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            var db = s.Database;
-            var dec = db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningDecision WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId) > 0;
-            var sur = db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningSurplus WHERE PlanningId = @0", planningId) > 0;
-            return (dec, sur);
+            return s.Database.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningDecision WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId) > 0;
         }
 
         /// <summary>Markerar att planeringens roller i bemanningen är valda (rutnätet visar då hela katalogen).</summary>

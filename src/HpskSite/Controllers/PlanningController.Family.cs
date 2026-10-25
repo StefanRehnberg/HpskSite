@@ -213,17 +213,12 @@ namespace HpskSite.Controllers
         /// </summary>
         private object PartsJson(PlanningRow p)
         {
-            var (dec, sur) = _planning.PartsWithContent(p.Id);
+            var dec = _planning.DecisionsHaveContent(p.Id);
             var decOn = PlanningParts.Has(p.Parts, PlanningParts.Decisions);
-            var surOn = PlanningParts.Has(p.Parts, PlanningParts.Surplus);
-            return new
-            {
-                decisions = dec || decOn, decisionsOn = decOn, decisionsHasContent = dec,
-                surplus = sur || surOn, surplusOn = surOn, surplusHasContent = sur,
-            };
+            return new { decisions = dec || decOn, decisionsOn = decOn, decisionsHasContent = dec };
         }
 
-        /// <summary>Slår på eller av en del (Förslag och beslut, Överskottet). Den som kan ändra planeringen.</summary>
+        /// <summary>Slår på eller av en del (Förslag och beslut). Den som kan ändra planeringen.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetPart(int id, string part, string? on)

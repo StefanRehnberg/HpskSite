@@ -21,7 +21,7 @@ namespace HpskSite.Services.Planning
         {
             "StaffAssignment", "StaffAvailability", "StaffDay", "StaffPass", "StaffCrewNeed", "StaffHelpSlot", "StaffHelpSignup",
             "StaffingSourceScope", "StaffRequestLog",
-            "PlanningSurplus", "PlanningDecisionResponse", "PlanningDecision",
+            "PlanningDecisionResponse", "PlanningDecision",
             "PlanningDocumentRef", "PlanningDocument", "PlanningDocumentCategory",
             "PlanningTaskEvent", "PlanningTask",
             // Meddelandena före områdena: FK_PlanningMessage_Area (2026-10-25) pekar på området.
