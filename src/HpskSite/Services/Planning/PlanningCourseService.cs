@@ -36,10 +36,14 @@ namespace HpskSite.Services.Planning
         public static bool IsFalt(string? type) =>
             HpskSite.Models.Staffing.FunctionaryRoles.FaltFamily.Contains(type ?? "", StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Familjens fälttävling (planeringens koppling, annars huvudplaneringens), eller null.</summary>
+        /// <summary>
+        /// Stationernas fälttävling: stationsplaneringens koppling (Fält-delplaneringen i en SM-vecka), annars planeringens
+        /// egen, annars huvudplaneringens — eller null.
+        /// </summary>
         public HpskSite.Models.Competitions.CompetitionInfo? FaltCompetition(int planningId)
         {
-            var link = _planning.LinkFor(planningId);
+            var owner = _planning.StationOwnerId(planningId);
+            var link = (owner > 0 ? _planning.LinkFor(owner) : null) ?? _planning.LinkFor(planningId);
             if (link == null)
             {
                 var root = _planning.FamilyRootId(planningId);
@@ -77,7 +81,7 @@ namespace HpskSite.Services.Planning
         {
             var existing = await CourseConfigAsync(p.Id);
             if (existing != null) return (existing, null);
-            var root = _planning.Get(_planning.FamilyRootId(p.Id)) ?? p;
+            var root = _planning.Get(_planning.StationOwnerId(p.Id)) ?? p;
             var comp = FaltCompetition(p.Id);
             string? source = null;
             var attached = FaltskytteAttachedConfigState.AttachedId(comp?.StationConfig);
@@ -98,7 +102,7 @@ namespace HpskSite.Services.Planning
             var (ok, msg, created) = await _configs.CreateAsync(new CreateFaltskytteConfigurationRequest
             {
                 Name = name.Length > 200 ? name[..200] : name,
-                Description = $"Tävlingens stationer i planeringen {root.Name}. Föreningarnas delar läggs ihop hit med Sätt ihop stationerna.",
+                Description = $"Tävlingens stationer i planeringen {root.Name}. Är stationerna uppdelade läggs delarna ihop hit med Sätt ihop stationerna.",
                 Visibility = "Private",
                 JsonBlob = blob.ToString(Newtonsoft.Json.Formatting.None),
             }, memberId);
@@ -203,7 +207,7 @@ namespace HpskSite.Services.Planning
             var (course, err) = await CreateCourseAsync(p, memberId, count);
             if (course == null) return err;
             var areaMax = _planning.MaxAreaStation(p.Id);
-            if (areaMax > count) return $"Station {areaMax} hör till en förening. Släpp den först under Föreningarna.";
+            if (areaMax > count) return $"Station {areaMax} görs av någon i uppdelningen. Släpp den först under Vem gör vilka stationer.";
             var built = CourseAssembly.BuiltStations(course.JsonBlob);
             if (built.Count > 0 && built.Max > count) return $"Station {built.Max} är byggd. Ta bort den i konfiguratorn först.";
             var comp = FaltCompetition(p.Id);

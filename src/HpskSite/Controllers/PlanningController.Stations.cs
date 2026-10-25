@@ -36,12 +36,31 @@ namespace HpskSite.Controllers
             return owner.Id == viewer.ParentPlanningId ? "Huvudplaneringen: " + owner.Name : "Delplanering: " + owner.Name;
         }
 
-        /// <summary>Det som gäller hela familjens stationer görs i huvudplaneringen (F4). Null = här går det.</summary>
+        /// <summary>
+        /// Stefan 2026-10-25: stationerna har EN plats (<see cref="PlanningService.StationOwnerId"/>) — det som gäller hela
+        /// stationsuppsättningen görs där. Null = här går det.
+        /// </summary>
         private string? WholeStationsElsewhere(PlanningRow p)
         {
-            if (!(p.ParentPlanningId > 0)) return null;
-            var root = _planning.Get(p.ParentPlanningId!.Value);
-            return $"Det görs i huvudplaneringen{(root == null ? "" : " " + root.Name)} — stationerna gäller hela familjen.";
+            var ownerId = _planning.StationOwnerId(p.Id);
+            if (ownerId == 0 || ownerId == p.Id) return null;
+            var owner = _planning.Get(ownerId);
+            return $"Stationerna sköts i {(owner?.ParentPlanningId > 0 ? "delplaneringen" : "huvudplaneringen")}{(owner == null ? "" : " " + owner.Name)}.";
+        }
+
+        /// <summary>Stationernas planering, för sidan: id, namn och om det är den här.</summary>
+        private object StationsOwnerJson(PlanningRow p)
+        {
+            var ownerId = _planning.StationOwnerId(p.Id);
+            var owner = ownerId > 0 && ownerId != p.Id ? _planning.Get(ownerId) : null;
+            return new
+            {
+                here = ownerId == p.Id,
+                id = ownerId,
+                name = owner?.Name,
+                isSub = owner?.ParentPlanningId > 0,
+                url = owner == null ? null : $"/tavlingsplanering/{owner.Id}#vy=stationer",
+            };
         }
 
         private static bool IsFalt(string? type) =>

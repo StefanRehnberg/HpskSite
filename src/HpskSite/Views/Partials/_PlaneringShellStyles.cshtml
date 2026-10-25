@@ -143,6 +143,8 @@
     /* Stationerna: läget i fyra steg, och rutnätet där en förening väljer sina stationer */
     .pl-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; }
     @@media (max-width: 991px) { .pl-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .pl-steps.pl-steps-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @@media (max-width: 767px) { .pl-steps.pl-steps-3 { grid-template-columns: minmax(0, 1fr); } }
     @@media (max-width: 480px) { .pl-steps { grid-template-columns: minmax(0, 1fr); } }
     .pl-step { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .6rem .75rem; display: grid; gap: .2rem; align-content: start; }
     .pl-step .n { font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; color: var(--bs-secondary-color); }

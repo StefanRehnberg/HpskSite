@@ -147,20 +147,48 @@ namespace HpskSite.Services.Planning
             return p == null ? 0 : p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
         }
 
-        /// <summary>Banans konfiguration: länken utan område på familjens huvudplanering, eller null.</summary>
-        public int? CourseConfigId(int planningId)
+        /// <summary>
+        /// Stefan 2026-10-25 ("vilken gäller?"): stationerna har EN plats — den planering i familjen som är fältskytte.
+        /// Planeringen själv om den har fältgren; annars familjens enda fältplanering (en SM-veckas Fält-delplanering);
+        /// annars huvudplaneringen (en planering utan gren). 0 = finns inte.
+        /// </summary>
+        public int StationOwnerId(int planningId)
         {
-            var root = FamilyRootId(planningId);
-            if (root == 0) return null;
             using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.FirstOrDefault<int?>($@"SELECT TOP 1 TargetId FROM PlanningLink
-                WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId IS NULL ORDER BY Id", root);
+            var p = s.Database.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            if (p == null) return 0;
+            static bool Falt(PlanningRow r) => HpskSite.Models.Staffing.FunctionaryRoles.FaltFamily.Contains(r.DisciplineKey ?? "", StringComparer.OrdinalIgnoreCase);
+            var family = StationFamily(s.Database, planningId);
+            var rootId = p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
+            // En fälttävling vars klubbar fått var sin delplanering: huvudplaneringen äger stationerna.
+            if (family.FirstOrDefault(f => f.Id == rootId) is { } root && Falt(root)) return root.Id;
+            // En vecka utan gren: fältets delplanering (planeringen själv om den är fält, annars familjens enda).
+            if (Falt(p)) return p.Id;
+            var falt = family.Where(Falt).ToList();
+            if (falt.Count == 1) return falt[0].Id;
+            return rootId;
         }
 
-        /// <summary>Kopplar banans konfiguration till familjens huvudplanering. Vägrar en andra.</summary>
+        /// <summary>
+        /// Stationernas konfiguration: länken utan område på stationernas planering (<see cref="StationOwnerId"/>). Stationer
+        /// som skapats på huvudplaneringen innan en Fält-delplanering fanns följer med dit (betan, 2026-10-24).
+        /// </summary>
+        public int? CourseConfigId(int planningId)
+        {
+            var owner = StationOwnerId(planningId);
+            if (owner == 0) return null;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var family = StationFamily(s.Database, planningId).Select(f => f.Id).ToList();
+            var links = s.Database.Fetch<PlanningLinkRow>($@"SELECT * FROM PlanningLink
+                WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND AreaId IS NULL AND PlanningId IN ({string.Join(",", family.DefaultIfEmpty(owner))}) ORDER BY Id");
+            return (links.FirstOrDefault(l => l.PlanningId == owner) ?? links.FirstOrDefault())?.TargetId;
+        }
+
+        /// <summary>Kopplar stationernas konfiguration till stationernas planering. Vägrar en andra i familjen.</summary>
         public string? LinkCourseConfig(int planningId, int configId, int byMemberId)
         {
-            var root = FamilyRootId(planningId);
+            if (CourseConfigId(planningId) is > 0) return "Planeringen har redan sina stationer.";
+            var root = StationOwnerId(planningId);
             if (root == 0) return "Planeringen finns inte.";
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
@@ -215,7 +243,7 @@ namespace HpskSite.Services.Planning
             var areas = db.Fetch<PlanningAreaRow>($@"SELECT * FROM PlanningArea WITH (UPDLOCK, HOLDLOCK)
                 WHERE PlanningId IN ({string.Join(",", names.Keys)}) AND DeletedAt IS NULL");
             var area = areas.FirstOrDefault(a => a.Id == areaId && a.PlanningId == planningId);
-            if (area == null) return new AssignResult("Föreningen finns inte i planeringen.", new());
+            if (area == null) return new AssignResult("Den som ska göra stationerna finns inte i planeringen.", new());
             foreach (var other in areas.Where(a => a.Id != areaId && a.PlanningId != planningId && a.Stations != null))
             {
                 var hit = PlanningStations.Parse(other.Stations).Stations.Intersect(wanted).OrderBy(n => n).FirstOrDefault();

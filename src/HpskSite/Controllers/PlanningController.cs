@@ -387,6 +387,8 @@ namespace HpskSite.Controllers
                     subPlannings = SubPlanningsJson(x.Planning, c, x.MemberId),
                     // Omgång 3: familjens tävlingar och "Bemannar för".
                     family = FamilyJson(x.Planning),
+                    // Stefan 2026-10-25: stationernas ENDA plats i familjen (rälsen visar Stationerna bara där).
+                    stationsOwner = StationsOwnerJson(x.Planning),
                     // Omgång 3 steg 10 (progressivt avslöjande): delar som visas först när de har innehåll eller slagits på.
                     parts = PartsJson(x.Planning),
                 },
