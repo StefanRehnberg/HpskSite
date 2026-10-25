@@ -1200,7 +1200,7 @@ namespace HpskSite.Controllers
         /// nobody: the same person could be booked on two posts at the same hour with no warning at all.
         /// </summary>
         private static string PersonKeyOf(StaffAssignmentView a)
-            => a.MemberId is int m && m > 0 ? "m:" + m : "n:" + (a.DisplayName ?? "").Trim().ToLowerInvariant();
+            => StaffPersonKey.For(a.MemberId, a.DisplayName);
 
         /// <summary>Parses the "13:00–16:00" shape BuildShiftLabel emits. Anything else → null.</summary>
         private static (TimeSpan start, TimeSpan end)? ParseShiftRange(string? label)

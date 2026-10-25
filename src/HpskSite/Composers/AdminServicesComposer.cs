@@ -441,6 +441,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffPassService>();
             // Omgång 3 steg 9: funktionärernas tävlingsavsikter och krockarna över hela familjen (veckan).
             builder.Services.AddScoped<HpskSite.Services.Staffing.ShootIntentService>();
+            // Steg 3: personens vecka över familjen (PersonWeek).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.FamilyWeekService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
             // THE PEOPLE LAYER: one row per human across roster + sign-ups + availability + prep ownership.

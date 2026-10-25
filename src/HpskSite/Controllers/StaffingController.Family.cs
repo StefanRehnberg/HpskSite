@@ -73,6 +73,170 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ------------------------------------------------------------------ steg 3: personens vecka
+
+        private static object WeekItemJson(PersonWeekItem i) => new
+        {
+            sourceKey = i.Entry.SourceKey,
+            kind = i.Entry.Kind.ToString(),
+            label = i.Entry.Label,
+            time = i.Entry.Interval is { } iv ? (iv.AllDay ? "hela dagen" : $"{iv.Start:HH\\:mm}–{iv.End:HH\\:mm}") : null,
+            place = i.Entry.Place,
+            planningId = i.Entry.PlanningId,
+            endsNextDay = i.EndsNextDay,
+            hasClash = i.HasClash,
+            clashes = i.Clashes.Select(c => new { with = c.WithLabel, kind = c.Kind.ToString(), hard = c.IsHard }),
+        };
+
+        private static object WeekDayJson(PersonWeekDay d) => new
+        {
+            date = d.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            label = d.Date.ToString("dddd d MMM", CultureInfo.GetCultureInfo("sv-SE")),
+            items = d.Items.Select(WeekItemJson),
+            carriedIn = d.CarriedIn.Select(e => new { label = e.Label, time = e.Interval is { } iv ? $"{iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : null }),
+        };
+
+        /// <summary>Huvudplaneringens ägare för anropet, eller null (med svaret som ska ges). Bara huvudplaneringens redaktörer.</summary>
+        private async Task<(StaffOwner? Root, IActionResult? Error)> FamilyRootAsync(int competitionId)
+        {
+            var owner = await OwnerAsync(competitionId);
+            if (owner is not { HasPlanning: true }) return (null, Json(new { success = false, message = "Ingen behörighet" }));
+            var root = _owners.Planning(owner.PlanningId);
+            if (root == null || root.ParentPlanningId > 0)
+                return (null, Json(new { success = false, message = "Veckan visas i huvudplaneringen." }));
+            return (owner, null);
+        }
+
+        /// <summary>Steg 3: alla personer i familjen, med uppdrag och krockar (utan egna starter — de läses per person).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetFamilyWeek(int competitionId)
+        {
+            var (root, err) = await FamilyRootAsync(competitionId);
+            if (root == null) return err!;
+            try
+            {
+                var people = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId);
+                return Json(new
+                {
+                    success = true,
+                    people = people.Select(p => new
+                    {
+                        key = p.Key, name = p.Name, memberId = p.MemberId, isExternal = p.IsExternal,
+                        assignments = p.Assignments, clashes = p.Clashes, warnings = p.Warnings,
+                        days = p.Days.Select(d => new { date = d.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), label = d.Date.ToString("ddd d MMM", CultureInfo.GetCultureInfo("sv-SE")), count = d.Items.Count }),
+                    }),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetFamilyWeek failed for planning {Planning}", root.PlanningId);
+                return Json(new { success = false, message = "Kunde inte läsa veckan." });
+            }
+        }
+
+        /// <summary>Steg 3: en persons vecka dag för dag, med egna starter, krockar, platsbyten och förslag på vem hen kan vara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetFamilyPersonWeek(int competitionId, string personKey)
+        {
+            var (root, err) = await FamilyRootAsync(competitionId);
+            if (root == null) return err!;
+            if (string.IsNullOrWhiteSpace(personKey)) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            try
+            {
+                var p = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, personKey).FirstOrDefault();
+                if (p == null) return Json(new { success = false, message = "Personen har inget uppdrag i veckan." });
+                object? match = null;
+                if (p.IsExternal)
+                {
+                    var owners = new List<StaffOwner>();
+                    foreach (var row in _planning.Family(root.PlanningId))
+                        if (_owners.ForPlanning(row.Id) is { } o) owners.Add(o);
+                    var m = _match.Suggest(owners).FirstOrDefault(x => x.Key == personKey);
+                    if (m != null) match = new
+                    {
+                        confident = m.Confident, looksLikeTwoPeople = m.LooksLikeTwoPeople,
+                        candidates = m.Candidates.Select(c => new { memberId = c.MemberId, name = c.Name, clubName = c.ClubName, reason = c.Reason }),
+                        inPlan = m.InPlan.Select(x => new { name = x.Name, memberId = x.MemberId, rowCount = x.RowCount, reason = x.Reason }),
+                    };
+                }
+                return Json(new
+                {
+                    success = true, key = p.Key, name = p.Name, memberId = p.MemberId, isExternal = p.IsExternal,
+                    assignments = p.Assignments, clashes = p.Clashes, warnings = p.Warnings,
+                    days = p.Days.Select(WeekDayJson), match,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetFamilyPersonWeek failed for planning {Planning}", root.PlanningId);
+                return Json(new { success = false, message = "Kunde inte läsa personens vecka." });
+            }
+        }
+
+        /// <summary>
+        /// Steg 3: koppla en person (eller byt namn) i HELA familjen — samma person kan stå i flera delar. Varje del som
+        /// läsaren får ändra tas; resten rörs inte och räknas i svaret.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyFamilyPersonIdentity([FromBody] PersonActionRequest request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            if (request.MemberId <= 0 && string.IsNullOrWhiteSpace(request.NewName))
+                return Json(new { success = false, message = "Inget att ändra." });
+            var (root, err) = await FamilyRootAsync(request.CompetitionId);
+            if (root == null) return err!;
+            var viewer = await ResolveViewerAsync();
+            try
+            {
+                int affected = 0, skipped = 0; string? last = null;
+                foreach (var row in _planning.Family(root.PlanningId))
+                {
+                    var owner = _owners.ForPlanning(row.Id);
+                    if (owner == null) continue;
+                    if (viewer == null || !_planning.CanEditStaffingIn(row.Id, viewer.Id)) { skipped++; continue; }
+                    var r = _staffing.ApplyPersonIdentity(request, owner);
+                    if (r.Success) affected += r.Affected; else if (r.Message != null && !r.Message.StartsWith("Hittade inga")) last = r.Message;
+                }
+                return affected > 0 ? Json(new { success = true, affected, skipped }) : Json(new { success = false, message = last ?? "Hittade inga uppdrag för personen." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ApplyFamilyPersonIdentity failed for planning {Planning}", root.PlanningId);
+                return Json(new { success = false, message = "Kunde inte spara ändringen." });
+            }
+        }
+
+        /// <summary>Steg 3: ångra en koppling i hela familjen — det som skrevs över får sitt ursprungliga namn tillbaka.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UndoFamilyPersonIdentity([FromBody] PersonActionRequest request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.PersonKey))
+                return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var (root, err) = await FamilyRootAsync(request.CompetitionId);
+            if (root == null) return err!;
+            var viewer = await ResolveViewerAsync();
+            try
+            {
+                var affected = 0;
+                foreach (var row in _planning.Family(root.PlanningId))
+                {
+                    var owner = _owners.ForPlanning(row.Id);
+                    if (owner == null || viewer == null || !_planning.CanEditStaffingIn(row.Id, viewer.Id)) continue;
+                    var r = _staffing.UndoPersonIdentity(owner, request.PersonKey);
+                    if (r.Success) affected += r.Affected;
+                }
+                return affected > 0 ? Json(new { success = true, affected }) : Json(new { success = false, message = "Det finns inget tidigare namn att gå tillbaka till." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: UndoFamilyPersonIdentity failed for planning {Planning}", root.PlanningId);
+                return Json(new { success = false, message = "Kunde inte ångra." });
+            }
+        }
+
         /// <summary>
         /// Steg 2 (Stefan B13): "Flytta raden till en annan del…". Radens id består. Rätten prövas i BÅDA delarna
         /// (<c>CanEditStaffingIn</c>), delarna ska höra till samma familj (B14: aldrig över familjegränsen) och rollen ska

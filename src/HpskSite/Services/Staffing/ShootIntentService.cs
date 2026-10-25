@@ -96,7 +96,7 @@ namespace HpskSite.Services.Staffing
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var existing = db.Fetch<PlanningShootIntent>("SELECT * FROM PlanningShootIntent WHERE RootPlanningId = @0", root)
-                .Where(i => i.PersonKey == (memberId is int m ? "m:" + m : "n:" + name.ToLowerInvariant())).ToList();
+                .Where(i => i.PersonKey == StaffPersonKey.For(memberId, name)).ToList();
             foreach (var e in existing.Where(e => !list.Any(p => p.TargetPlanningId == e.TargetPlanningId)))
                 db.Execute("DELETE FROM PlanningShootIntent WHERE Id = @0", e.Id);
             foreach (var (target, classesRaw) in list)
@@ -155,7 +155,7 @@ namespace HpskSite.Services.Staffing
                     : pass != null ? StaffTimeCoverage.ParseRange(string.IsNullOrEmpty(pass.StartTime) || string.IsNullOrEmpty(pass.EndTime) ? null : pass.StartTime + "-" + pass.EndTime)
                     : null;
                 var time = span is { } sp ? $" {sp.Item1:hh\\:mm}–{sp.Item2:hh\\:mm}" : " hela dagen";
-                var key = a.MemberId is int m && m > 0 ? "m:" + m : "n:" + a.DisplayName.Trim().ToLowerInvariant();
+                var key = StaffPersonKey.For(a.MemberId, a.DisplayName);
                 slots.Add(new FamilyClashRules.Slot(key, a.DisplayName, pid, date.Value, span,
                     $"{RoleNameFor(pid)(a.RoleKey)}{time} ({names.GetValueOrDefault(pid, "")})"));
             }

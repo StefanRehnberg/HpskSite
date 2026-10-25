@@ -38,19 +38,29 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Every distinct free-text person on the competition, with the members they might be.</summary>
-        public List<PersonMatchRow> Suggest(StaffOwner owner, int maxCandidates = 4)
+        public List<PersonMatchRow> Suggest(StaffOwner owner, int maxCandidates = 4) => Suggest(new[] { owner }, maxCandidates);
+
+        /// <summary>
+        /// Steg 3: hela familjens planeringar på en gång — samma person kan stå som "Kalle A" i Fält och "Karl Andersson" i
+        /// Precision, och dubbletten syns bara när allas rader läses tillsammans. Alla ägare ska vara planeringar.
+        /// </summary>
+        public List<PersonMatchRow> Suggest(IReadOnlyList<StaffOwner> owners, int maxCandidates = 4)
         {
             var result = new List<PersonMatchRow>();
+            if (owners.Count == 0) return result;
+            // En ägare: som förut. Flera (familjen): alla deras rader, via planeringens id.
+            var single = owners.Count == 1;
+            var where = single ? StaffOwner.Where(0) : "PlanningId IN (" + string.Join(",", owners.Where(o => o.HasPlanning).Select(o => o.PlanningId).DefaultIfEmpty(-1)) + ")";
+            var args = single ? new object[] { owners[0].P, owners[0].C } : Array.Empty<object>();
             List<StaffAssignment> rows;
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                rows = scope.Database.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId IS NULL", owner.P, owner.C);
+                rows = scope.Database.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + where + " AND MemberId IS NULL", args);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "PersonMatch: read failed for {Owner}", owner.MemoKey);
+                _logger.LogWarning(ex, "PersonMatch: read failed for {Owner}", owners[0].MemoKey);
                 return result;
             }
             if (rows.Count == 0) return result;
@@ -64,8 +74,7 @@ namespace HpskSite.Services.Staffing
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                everyone = scope.Database.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+                everyone = scope.Database.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + where, args);
             }
             catch { everyone = rows; }
 

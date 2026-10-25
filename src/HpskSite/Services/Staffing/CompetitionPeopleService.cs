@@ -56,7 +56,7 @@ namespace HpskSite.Services.Staffing
         /// <summary>Stable cross-store identity. Members key on id; free-text helpers on their name, so the
         /// same typed-in helper doesn't split into two people.</summary>
         public static string KeyFor(int? memberId, string? displayName) =>
-            memberId is > 0 ? $"m:{memberId}" : $"n:{(displayName ?? "").Trim().ToLowerInvariant()}";
+            StaffPersonKey.For(memberId, displayName);
 
         public CompetitionPeopleResponse Build(StaffOwner owner, string? discipline, bool canEdit,
             bool includePrep = true)

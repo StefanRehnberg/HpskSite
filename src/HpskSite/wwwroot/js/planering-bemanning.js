@@ -99,8 +99,8 @@ window.PlaneringBemanning = (function () {
 
     // ---------------------------------------------------------------- adressen
     function hp() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
-    function part() { const d = hp().get('del'); return d === 'personer' || d === 'hitta' ? d : 'rutnat'; }
-    function personKeyParam() { return part() === 'personer' ? (hp().get('person') || '') : ''; }
+    function part() { const d = hp().get('del'); return d === 'personer' || d === 'hitta' || (d === 'veckan' && family()) ? d : 'rutnat'; }
+    function personKeyParam() { return part() === 'personer' || part() === 'veckan' ? (hp().get('person') || '') : ''; }
     function nav(del, person) {
         let h = '#vy=bemanning';
         if (del && del !== 'rutnat') h += '&del=' + del;
@@ -130,6 +130,7 @@ window.PlaneringBemanning = (function () {
         try {
             if (p === 'rutnat') { await loadGrid(); if (seq !== B.seq) return; drawGrid(); }
             else if (p === 'personer') { await loadPeople(); if (seq !== B.seq) return; pk ? drawPerson(pk) : drawPeople(); }
+            else if (p === 'veckan') { await (pk ? drawWeekPerson(pk, seq) : drawWeek(seq)); }
             else { await loadPeople(); if (seq !== B.seq) return; await drawFind(seq); }
         } catch (e) {
             if (seq !== B.seq) return;
@@ -139,7 +140,8 @@ window.PlaneringBemanning = (function () {
     }
     function switchHtml(p) {
         const b = (k, l) => `<button type="button" class="btn ${p === k ? 'btn-primary' : 'btn-outline-primary'}" data-plb-part="${k}" aria-pressed="${p === k}">${l}</button>`;
-        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
+        // Steg 3: i en huvudplanering med delar visar "Veckan" varje persons dag för dag över alla delar.
+        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${family() ? b('veckan', 'Veckan') : ''}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
     }
 
     // Omgång 2 steg 4: grenen väljs när planeringen skapas och styr bara vilka roller som föreslås — därför står den här,
@@ -1738,6 +1740,115 @@ window.PlaneringBemanning = (function () {
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
 
+    // ================================================================ Veckan (steg 3)
+    // Personens vecka över familjen: en rad per människa, och per människa dag för dag alla uppdrag i alla delar, egna
+    // starter och avsikter, med krockar och för korta platsbyten. Valideringsytan — rutnätet är författarytan, så här
+    // ändras inget utom vem personen är (kopplingen gäller hela familjen).
+    const WEEK_ICON = { Assignment: 'bi-person-badge', Start: 'bi-bullseye', Intent: 'bi-flag' };
+    const CLASH_TEXT = { Overlap: ['text-bg-danger', 'krockar med'], TightTravel: ['text-bg-warning', 'kort tid att ta sig till/från'], Intent: ['text-bg-light border', 'tänker tävla samma dag:'] };
+    async function drawWeek(seq) {
+        const d = await sget('GetFamilyWeek');
+        if (seq !== B.seq) return;
+        if (!d.success) throw new Error(d.message || 'Veckan kunde inte läsas.');
+        B.week = d.people || [];
+        paintWeek();
+    }
+    function weekRows() {
+        const q = (B.wq || '').trim().toLowerCase();
+        const list = (B.week || []).filter(p => !q || p.name.toLowerCase().indexOf(q) >= 0);
+        if (!list.length) return `<p class="plb-dim p-3 mb-0">${(B.week || []).length ? 'Ingen heter så.' : 'Ingen har något uppdrag i veckan än.'}</p>`;
+        return `<div class="list-group list-group-flush">${list.map(p => `<button type="button" class="list-group-item list-group-item-action d-flex flex-wrap gap-2 align-items-baseline" data-plbw-person="${esc(p.key)}">
+            <span class="fw-semibold${p.isExternal ? ' text-warning-emphasis' : ''}">${esc(p.name)}</span>
+            ${p.clashes ? `<span class="badge text-bg-danger fw-normal">${p.clashes} ${p.clashes === 1 ? 'krock' : 'krockar'}</span>` : ''}
+            ${p.warnings ? `<span class="badge text-bg-warning fw-normal">${p.warnings} ${p.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''}
+            <span class="plb-dim small ms-auto">${p.assignments} ${p.assignments === 1 ? 'uppdrag' : 'uppdrag'} · ${esc((p.days || []).map(d => d.label).join(', '))}</span></button>`).join('')}</div>`;
+    }
+    function paintWeek() {
+        const list = B.week || [], hard = list.filter(p => p.clashes > 0).length;
+        A.setHead('Bemanning', `${list.length} ${list.length === 1 ? 'person' : 'personer'}` + (hard ? ` · <span class="text-danger fw-semibold">${hard} med krock</span>` : ''));
+        A.setActions([]);
+        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. Egna starter räknas först när du öppnar personen.</p>
+            <label class="visually-hidden" for="plbwQ">Sök person</label>
+            <input type="search" class="form-control mb-2" id="plbwQ" placeholder="Sök person" autocomplete="off" value="${esc(B.wq || '')}">
+            <div class="border rounded" id="plbwRows">${weekRows()}</div>`;
+        $('plbwQ').addEventListener('input', e => { B.wq = e.target.value; $('plbwRows').innerHTML = weekRows(); });
+    }
+    function weekItemHtml(i) {
+        const clashes = (i.clashes || []).map(c => { const t = CLASH_TEXT[c.kind] || ['text-bg-light border', c.kind]; return `<div class="small mt-1"><span class="badge ${t[0]} fw-normal">${esc(t[1])}</span> ${esc(c.with)}</div>`; }).join('');
+        return `<li class="d-flex gap-2 py-2 border-bottom plbw-item" data-kind="${esc(i.kind)}"><i class="bi ${WEEK_ICON[i.kind] || 'bi-dot'} mt-1 ${i.hasClash ? 'text-danger' : 'text-body-secondary'}" aria-hidden="true"></i>
+            <div class="min-w-0"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}</div>
+            ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div></li>`;
+    }
+    async function drawWeekPerson(key, seq) {
+        const d = await sget('GetFamilyPersonWeek', { personKey: key });
+        if (seq !== B.seq) return;
+        const back = '<button type="button" class="btn btn-link p-0 mb-2" data-plbw-back><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Alla personer</button>';
+        if (!d.success) { A.setHead('Bemanning', ''); A.setActions([]); area().innerHTML = back + `<div class="pl-card"><p class="mb-0">${esc(d.message || 'Personen kunde inte läsas.')}</p></div>`; return; }
+        B.wp = d;
+        A.setHead(d.name, `${d.assignments} ${d.assignments === 1 ? 'uppdrag' : 'uppdrag'}`
+            + (d.clashes ? ` · <span class="text-danger fw-semibold">${d.clashes} ${d.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
+            + (d.warnings ? ` · <span class="text-warning-emphasis fw-semibold">${d.warnings} ${d.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''));
+        A.setActions([d.isExternal ? { label: 'Koppla till en medlem…', icon: 'bi-link-45deg', fn: () => openWeekLink(d, null) } : { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoWeekLink(d) }]);
+        let h = back;
+        const m = d.match;
+        if (d.isExternal && m && !m.looksLikeTwoPeople && ((m.candidates || []).length || (m.inPlan || []).length)) {
+            h += `<div class="pl-next warn" id="plbwMatch"><div class="t"><b>Är det här någon du känner igen?</b> ${esc(d.name)} saknar konto. Kopplingen gäller alla uppdrag i hela veckan.</div>
+                <div class="d-flex flex-wrap gap-1 mt-1">${(m.candidates || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-primary" data-plbw-cand="${i}">Koppla till ${esc(c.name)}${c.clubName ? ' · ' + esc(c.clubName) : ''}</button>`).join('')}
+                ${(m.inPlan || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-secondary" data-plbw-inplan="${i}">Samma person som ${esc(c.name)}</button>`).join('')}</div></div>`;
+        } else if (d.isExternal) h += `<p class="pl-help small"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${esc(d.name)} saknar konto på pistol.nu — inget eget schema och inga påminnelser förrän hen är kopplad.</p>`;
+        h += (d.days || []).map(day => `<div class="pl-card plbw-day" data-date="${esc(day.date)}"><h2 class="h6 mb-1">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}</h2>
+            ${(day.carriedIn || []).map(c => `<div class="plb-dim small"><i class="bi bi-moon me-1" aria-hidden="true"></i>Från kvällen före: ${esc(c.label)}</div>`).join('')}
+            <ul class="list-unstyled mb-0">${(day.items || []).map(weekItemHtml).join('')}</ul></div>`).join('');
+        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Uppdragen ändras i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
+        area().innerHTML = h;
+    }
+    async function applyWeekLink(d, body, goKey) {
+        const r = await spost('ApplyFamilyPersonIdentity', Object.assign({ personKey: d.key }, body));
+        if (!r.success) return r.message || 'Det gick inte att koppla.';
+        A.showMsg('Klart — ' + r.affected + (r.affected === 1 ? ' uppdrag' : ' uppdrag') + ' i veckan uppdaterade.' + (r.skipped ? ' ' + r.skipped + ' del' + (r.skipped === 1 ? '' : 'ar') + ' fick du inte ändra och rördes inte.' : ''), 'success');
+        nav('veckan', goKey);
+        return true;
+    }
+    function openWeekLink(d) {
+        let picked = null;
+        A.formModal({
+            title: 'Koppla ' + d.name + ' till en medlem', okLabel: 'Koppla', wide: false,
+            html: `<label class="form-label" for="plbLinkQ">Sök medlem</label><input type="search" class="form-control" id="plbLinkQ" autocomplete="off" value="${esc(d.name)}">
+                <div class="list-group mt-1 d-none" id="plbLinkRes"></div><div class="mt-2" id="plbLinkPicked"></div>
+                <p class="pl-help small mt-2 mb-0">Alla ${d.assignments} uppdrag i hela veckan kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
+            onOpen: b => {
+                const i = b.querySelector('#plbLinkQ'); i.focus(); i.dispatchEvent(new Event('input'));
+                wireMemberSearch(b, '#plbLinkQ', '#plbLinkRes', m => { picked = m; b.querySelector('#plbLinkPicked').innerHTML = `Vald: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
+            },
+            onOk: async () => picked ? applyWeekLink(d, { memberId: picked.memberId }, 'm:' + picked.memberId) : 'Välj en medlem i listan.'
+        });
+    }
+    async function undoWeekLink(d) {
+        try {
+            const r = await spost('UndoFamilyPersonIdentity', { personKey: d.key });
+            if (!r.success) { A.failMsg(r, 'Det gick inte att ångra.'); return; }
+            A.showMsg('Personen har sitt gamla namn igen.');
+            nav('veckan');
+        } catch (e) { A.showMsg(esc(e.message), 'danger'); }
+    }
+    document.addEventListener('click', async e => {
+        if (!A || !A.isActive() || part() !== 'veckan') return;
+        const t = e.target.closest('[data-plbw-person],[data-plbw-back],[data-plbw-cand],[data-plbw-inplan]');
+        if (!t || !$('plBody').contains(t)) return;
+        e.preventDefault();
+        if (t.dataset.plbwPerson) nav('veckan', t.dataset.plbwPerson);
+        else if (t.hasAttribute('data-plbw-back')) nav('veckan');
+        else if (t.dataset.plbwCand != null && B.wp) {
+            const c = ((B.wp.match || {}).candidates || [])[parseInt(t.dataset.plbwCand, 10)]; if (!c) return;
+            const res = await applyWeekLink(B.wp, { memberId: c.memberId }, 'm:' + c.memberId);
+            if (typeof res === 'string') A.showMsg(esc(res), 'danger');
+        } else if (t.dataset.plbwInplan != null && B.wp) {
+            const c = ((B.wp.match || {}).inPlan || [])[parseInt(t.dataset.plbwInplan, 10)]; if (!c) return;
+            const res = await applyWeekLink(B.wp, c.memberId > 0 ? { memberId: c.memberId } : { newName: c.name }, c.memberId > 0 ? 'm:' + c.memberId : 'n:' + c.name.trim().toLowerCase());
+            if (typeof res === 'string') A.showMsg(esc(res), 'danger');
+        }
+    });
+
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
@@ -1746,7 +1857,7 @@ window.PlaneringBemanning = (function () {
         e.preventDefault();
         if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
-        else if (t.dataset.plbPerson) { closeEditor(); nav('personer', t.dataset.plbPerson); }
+        else if (t.dataset.plbPerson) { closeEditor(); nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
         else if (t.hasAttribute('data-plb-add')) openEditor(t);
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));
@@ -1768,6 +1879,7 @@ window.PlaneringBemanning = (function () {
         try {
             if (p === 'rutnat') { await loadGrid(); drawGrid(); }
             else if (p === 'personer') { await loadPeople(); B.grid = null; pk ? drawPerson(pk) : drawPeopleKeepFilter(); }
+            else if (p === 'veckan') await draw();
             else { await loadPeople(); await drawFind(B.seq); }
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }

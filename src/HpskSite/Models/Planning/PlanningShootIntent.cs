@@ -28,7 +28,7 @@ namespace HpskSite.Models.Planning
 
         /// <summary>Samma personnyckel som bemanningen: "m:{id}" eller "n:{namn i gemener}".</summary>
         [Ignore]
-        public string PersonKey => MemberId is int m && m > 0 ? "m:" + m : "n:" + (DisplayName ?? "").Trim().ToLowerInvariant();
+        public string PersonKey => HpskSite.Models.Staffing.StaffPersonKey.For(MemberId, DisplayName);
     }
 
     public static class ShootIntentSource

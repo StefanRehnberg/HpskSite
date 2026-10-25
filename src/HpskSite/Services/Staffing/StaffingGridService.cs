@@ -102,7 +102,7 @@ namespace HpskSite.Services.Staffing
         }
 
         private static string PersonKeyOf(StaffAssignmentView a)
-            => a.MemberId is int m && m > 0 ? "m:" + m : "n:" + (a.DisplayName ?? "").Trim().ToLowerInvariant();
+            => StaffPersonKey.For(a.MemberId, a.DisplayName);
 
 
         // ======================= Bemanning grid (roll × dag) =======================
