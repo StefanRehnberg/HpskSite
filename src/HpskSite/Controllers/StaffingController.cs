@@ -1865,12 +1865,12 @@ namespace HpskSite.Controllers
         private async Task<string?> AdminGrantRefusalAsync(StaffOwner owner)
         {
             if (!owner.HasPlanning) return null;
-            if (!owner.HasCompetition)
-                return _staffing.CarriesFamilyGrant(owner) && !await IsRootConvenerAsync(owner.PlanningId)
-                    ? "Det gemensammas behörighet ges av huvudplaneringens sammankallande." : null;
-            if (_planning.LinkFor(owner.PlanningId)?.TargetId != owner.Comp && !await _auth.HasCompetitionOrganiserAccessAsync(owner.Comp))
-                return "Behörighet i den här tävlingen ges av arrangören. Planeringen är inte själv kopplad till den.";
-            return null;
+            // Faktan hämtas bara när den behövs (varje fråga kostar en databasläsning); själva regeln är ren och enhetstestad.
+            var carries = !owner.HasCompetition && _staffing.CarriesFamilyGrant(owner);
+            var convener = carries && await IsRootConvenerAsync(owner.PlanningId);
+            var ownLink = owner.HasCompetition && _planning.LinkFor(owner.PlanningId)?.TargetId == owner.Comp;
+            var organiser = owner.HasCompetition && !ownLink && await _auth.HasCompetitionOrganiserAccessAsync(owner.Comp);
+            return StaffAdminGrantRules.Refusal(true, owner.HasCompetition, carries, convener, ownLink, organiser);
         }
 
         private async Task<bool> IsRootConvenerAsync(int planningId)

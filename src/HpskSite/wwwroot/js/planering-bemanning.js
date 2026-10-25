@@ -1095,7 +1095,10 @@ window.PlaneringBemanning = (function () {
             h += `<div class="pl-card"><h2>Behörighet</h2>` + (p.memberId
                 ? `<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" id="plbAccess"${p.hasAdminAccess ? ' checked' : ''}>
                     <label class="form-check-label" for="plbAccess">${linked() ? 'Får hantera tävlingen i pistol.nu' : 'Får hantera alla veckans tävlingar i pistol.nu'}</label>
-                    <div class="pl-help small">Anmälningar, startlistor, resultat och funktionärssidorna. Gör inte personen till tävlingsledare. Gäller alla hens uppdrag.</div></div>`
+                    <div class="pl-help small">${linked()
+                        ? 'Anmälningar, startlistor, resultat och funktionärssidorna. Gör inte personen till tävlingsledare. Gäller alla hens uppdrag.'
+                            + (family() ? ' Huvudplaneringen har en egen tävling: behörigheten gäller bara den, inte delarnas tävlingar.' : '')
+                        : 'Anmälningar, startlistor och funktionärssidorna i <b>varje tävling i veckan</b> — men inte ekonomin och inte att ändra själva tävlingen. Ge bara till någon du litar på. Bara huvudplaneringens sammankallande kan ge den.'}</div></div>`
                 : '<p class="pl-help mb-0">Behörigheten ges till en inloggning — koppla personen till en medlem först.</p>') + '</div>';
         }
 
@@ -1125,6 +1128,22 @@ window.PlaneringBemanning = (function () {
         loadShootCard(p);
         const acc = $('plbAccess');
         if (acc) acc.addEventListener('change', async () => {
+            // Steg 4–6 UX: en kraftig behörighet ska inte slås på med ett klick — i huvudplaneringen frågar vi först.
+            if (acc.checked && !linked() && family()) {
+                acc.checked = false;
+                A.formModal({
+                    title: 'Ge behörighet i alla veckans tävlingar?', okLabel: 'Ge behörighet', wide: false,
+                    html: `<p>${esc(first(p.displayName))} får tävlingshanteringen — anmälningar, startlistor och funktionärer — i <b>varje tävling i veckan</b>, också de som andra klubbar ansvarar för.</p>
+                        <p class="pl-help small mb-0">Ekonomin och att ändra själva tävlingen ingår inte. Behörigheten upphör för en tävling när delen kopplas loss.</p>`,
+                    onOk: async () => {
+                        const g = await spost('SetPersonAdminAccess', { personKey: p.key, grant: true });
+                        if (!g.success) return g.message || 'Behörigheten kunde inte ges.';
+                        await loadPeople(); drawPerson(p.key);
+                        return true;
+                    }
+                });
+                return;
+            }
             acc.disabled = true;
             try {
                 const r = await spost('SetPersonAdminAccess', { personKey: p.key, grant: acc.checked });
@@ -1310,6 +1329,8 @@ window.PlaneringBemanning = (function () {
         const r = await sget('GetReplacementCandidates', { assignmentId: a.id }).catch(() => null);
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte leta efter någon.'), 'danger'); return; }
         const list = r.candidates || [];
+        const allBusy = list.length > 0 && list.every(c => c.free === false);
+        let confirmedBusy = null;   // en upptagen person kräver ett andra klick — en varning, inget stopp
         const badge = c => c.free === true ? '<span class="badge text-bg-success fw-normal">Ledig</span>'
             : c.free === false ? '<span class="badge text-bg-warning fw-normal">Upptagen</span>'
             : '<span class="badge text-bg-secondary fw-normal">Tiden är inte satt</span>';
@@ -1317,17 +1338,24 @@ window.PlaneringBemanning = (function () {
                 <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="plbRepl" value="${c.memberId}">
                 <span><b>${esc(c.name)}</b> ${badge(c)}${c.roleMatch ? ' <span class="badge text-bg-light border fw-normal">Har anmält sig som ' + esc(r.target.role) + '</span>' : ''}
                 ${c.free === false && c.busyWith ? `<span class="d-block small text-warning-emphasis">${esc(c.busyWith)}</span>` : ''}
+                ${c.phone ? `<a class="d-block small" href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : ''}
                 ${c.comment ? `<span class="d-block plb-dim small">${esc(c.comment)}</span>` : ''}</span></label>`).join('')
             : '';
         A.formModal({
             title: 'Hitta ersättare', okLabel: 'Lämna över', wide: false,
             html: `<p class="pl-help mb-2">${esc(r.target.holder)} har ${esc(r.target.role)} ${esc(r.target.when)}. Här är de som anmält sig till dagen.</p>`
+                + (allBusy ? '<p class="small text-warning-emphasis mb-2"><b>Ingen ledig just nu.</b> Alla som anmält sig till dagen är upptagna den tiden. Du kan välja någon ändå, eller skicka en förfrågan under Hitta funktionärer.</p>' : '')
                 + (list.length ? `<div class="list-group" role="radiogroup" aria-label="Möjliga ersättare">${rows}</div>
-                    <div class="pl-help small mt-2">Den som tar över får besked och står som Inbjuden tills hen svarat. ${esc(r.target.holder)} står kvar i historiken.</div>`
+                    <div class="pl-help small mt-2">Den som tar över får besked och står som <b>Inbjuden</b> tills hen svarat. ${esc(r.target.holder)} får också besked om att hen inte ska komma.${r.target.hadAccess ? ' <b>Behörigheten i uppdraget följer inte med</b> — den nya personen får den inte, så ge den på nytt om den behövs.' : ''}</div>`
                     : `<p class="mb-0">Ingen har anmält sig till den dagen ännu. Skicka en förfrågan under Hitta funktionärer, eller sök en medlem under Ändra uppdraget.</p>`),
             onOk: async b => {
                 const sel = b.querySelector('input[name="plbRepl"]:checked');
                 if (!sel) return list.length ? 'Välj vem som tar över.' : 'Det finns ingen att lämna över till.';
+                const chosen = list.find(c => String(c.memberId) === sel.value);
+                if (chosen && chosen.free === false && confirmedBusy !== sel.value) {
+                    confirmedBusy = sel.value;
+                    return `${chosen.name} är upptagen${chosen.busyWith ? ' (' + chosen.busyWith + ')' : ''} den tiden. Tryck Lämna över igen om du vill lämna över ändå.`;
+                }
                 const d = await spost('ReplaceAssignmentHolder', { id: a.id, memberId: +sel.value });
                 if (!d.success) return d.message || 'Uppdraget kunde inte lämnas över.';
                 if (after) await after(); else { await loadPeople(); drawPerson(p.key); }
@@ -1812,7 +1840,7 @@ window.PlaneringBemanning = (function () {
         // Steg 6b: ett uppdrag (sourceKey "a{id}") kan lämnas över — det är där man ser att någon hoppat av.
         const rid = i.kind === 'Assignment' && /^a\d+$/.test(i.sourceKey || '') ? i.sourceKey.slice(1) : '';
         return `<li class="d-flex gap-2 py-2 border-bottom plbw-item" data-kind="${esc(i.kind)}"><i class="bi ${WEEK_ICON[i.kind] || 'bi-dot'} mt-1 ${i.hasClash ? 'text-danger' : 'text-body-secondary'}" aria-hidden="true"></i>
-            <div class="min-w-0 flex-grow-1"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}</div>
+            <div class="min-w-0 flex-grow-1"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}${i.kind === 'Assignment' && i.status === 'Invited' ? ' <span class="badge text-bg-info fw-normal">Väntar på svar</span>' : ''}</div>
             ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div>
             ${rid ? `<button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 align-self-start" data-plbw-repl="${rid}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hitta ersättare</button>` : ''}</li>`;
     }

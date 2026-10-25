@@ -79,6 +79,7 @@ namespace HpskSite.Controllers
         {
             sourceKey = i.Entry.SourceKey,
             kind = i.Entry.Kind.ToString(),
+            status = i.Entry.Status,
             label = i.Entry.Label,
             time = i.Entry.Interval is { } iv ? (iv.AllDay ? "hela dagen" : $"{iv.Start:HH\\:mm}–{iv.End:HH\\:mm}") : null,
             place = i.Entry.Place,
@@ -336,7 +337,7 @@ namespace HpskSite.Controllers
                 return Json(new
                 {
                     success = true,
-                    target = new { id = t.AssignmentId, holder = t.HolderName, hasHolder = t.HolderMemberId is > 0, role = t.RoleName, when = t.When },
+                    target = new { id = t.AssignmentId, holder = t.HolderName, hasHolder = t.HolderMemberId is > 0, role = t.RoleName, when = t.When, hadAccess = t.HadAccess },
                     candidates = list.Select(c => new { memberId = c.MemberId, name = c.Name, roleMatch = c.RoleMatch, free = c.Free, busyWith = c.BusyWith, comment = c.Comment, phone = c.Phone }),
                 });
             }

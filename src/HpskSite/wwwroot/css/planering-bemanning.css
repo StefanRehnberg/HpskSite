@@ -81,3 +81,9 @@
 @media print {
     .plb-switch, .plb-add, .plb-mini, .plb-grip { display: none !important; }
 }
+
+/* Steg 4-6 UX: chattknappen ligger fast i hogerkanten pa telefon och tackte tider i personens vecka och i fonsterkortet. */
+@media (max-width: 575.98px) {
+    .plbw-item, .plbw-win { padding-right: 3.25rem; }
+    #plbwShoot > .mb-2 { padding-right: 3.25rem; }
+}

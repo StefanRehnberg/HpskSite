@@ -38,7 +38,8 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Uppdraget som ska lämnas över: vad det är och när. Null Date = uppdraget har ingen dag än.</summary>
-        public sealed record Target(int AssignmentId, int? HolderMemberId, string HolderName, string RoleKey, string RoleName, DateTime? Date, StaffInterval? Interval, string When);
+        public sealed record Target(int AssignmentId, int? HolderMemberId, string HolderName, string RoleKey, string RoleName, DateTime? Date, StaffInterval? Interval, string When,
+            bool HadAccess = false);
 
         /// <summary>
         /// <paramref name="canSeePart"/>: får den som frågar läsa bemanningen i den delen? Vid "Upptagen" visas annars bara "uppdrag i
@@ -70,7 +71,7 @@ namespace HpskSite.Services.Staffing
             var sv = CultureInfo.GetCultureInfo("sv-SE");
             var dayText = date!.Value.ToString("dddd d MMMM", sv);
             var when = interval is { AllDay: false } iv ? $"{dayText} {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : $"{dayText} hela dagen";
-            var target = new Target(a.Id, a.MemberId, a.DisplayName, a.RoleKey, roleName, date, interval, when);
+            var target = new Target(a.Id, a.MemberId, a.DisplayName, a.RoleKey, roleName, date, interval, when, a.HasAdminAccess);
             var rootId = _planning.Family(a.PlanningId.Value)[0].Id;
 
             // Poolen: en person kan ha en anmälan per del — pröva alla hens val.

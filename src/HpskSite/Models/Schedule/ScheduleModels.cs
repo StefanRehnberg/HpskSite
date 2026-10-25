@@ -60,6 +60,9 @@ namespace HpskSite.Models.Schedule
         /// <summary>Veckan (steg 4): en gul varning som inte är en krock — trångt mellan två platser, eller en avsikt att tävla samma dag.</summary>
         public string? WarningText { get; set; }
 
+        /// <summary>Veckan: uppdragets id (StaffAssignment.Id) när raden är ett uppdrag — för "Jag kan inte". 0 för starter och avsikter.</summary>
+        public int AssignmentId { get; set; }
+
         /// <summary>Tie-break within a day when StartsAt is null. Minutes-since-midnight when known.</summary>
         public int SortHint { get; set; }
 
@@ -160,6 +163,11 @@ namespace HpskSite.Models.Schedule
         /// </summary>
         public int PlanningId { get; set; }
         public bool IsWeek => PlanningId > 0;
+        /// <summary>Veckan: tävlingarna raderna hör till — så att startsidan kan visa ETT kort för familjen i stället för ett per tävling.</summary>
+        public HashSet<int> CompetitionIds { get; set; } = new();
+        /// <summary>Veckan: den som bemannar (huvudplaneringens sammankallande). Fylls bara när veckan har krockar — det är då man behöver ringa.</summary>
+        public string? ContactName { get; set; }
+        public string? ContactPhone { get; set; }
         /// <summary>Frågesträngen till <c>/mitt-schema</c> och kalenderfilen: <c>p=</c> för en vecka, <c>c=</c> för en tävling.</summary>
         public string ScheduleQuery => IsWeek ? $"p={PlanningId}" : $"c={CompetitionId}";
         public string CompName { get; set; } = "";

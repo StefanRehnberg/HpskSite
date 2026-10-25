@@ -71,6 +71,31 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Heldag_i_gemensamt_mot_SAMMA_roll_med_tider_i_en_del_ar_ingen_krock()
+        {
+            // Sekretariatet finns både i Gemensamt och per del (B8) — samma jobb skrivet två gånger, inte en dubbelbokning.
+            var w = Week(Asg("a1", Lor, null, null, "Sekretariat", "Gemensamt", planning: 1), Asg("a2", Lor, 8, 10, "Sekretariat", "Fält", planning: 11));
+            w.ConflictCount.Should().Be(0);
+            w.Days.Single().Items.Should().OnlyContain(i => string.IsNullOrEmpty(i.WarningText));
+        }
+
+        [Fact]
+        public void Samma_roll_jamfors_utan_hansyn_till_versaler_och_blanksteg()
+            => Week(Asg("a1", Lor, null, null, " sekretariat ", "Gemensamt", planning: 1), Asg("a2", Lor, 8, 10, "Sekretariat", "Fält", planning: 11)).ConflictCount.Should().Be(0);
+
+        [Fact]
+        public void Heldag_mot_en_ANNAN_roll_krockar_fortfarande()
+            => Week(Asg("a1", Lor, null, null, "Kassa", "Gemensamt", planning: 1), Asg("a2", Lor, 8, 10, "Sekretariat", "Fält", planning: 11)).ConflictCount.Should().Be(2);
+
+        [Fact]
+        public void Tva_tidsatta_pass_med_samma_roll_som_overlappar_krockar_fortfarande()
+            => Week(Asg("a1", Lor, 8, 12, "Markör", "Fält"), Asg("a2", Lor, 10, 14, "Markör", "Precision", planning: 11)).ConflictCount.Should().Be(2);
+
+        [Fact]
+        public void Tva_heldagar_med_samma_roll_i_olika_delar_krockar_fortfarande()
+            => Week(Asg("a1", Lor, null, null, "Sekretariat", "Fält"), Asg("a2", Lor, null, null, "Sekretariat", "Precision", planning: 11)).ConflictCount.Should().Be(2);
+
+        [Fact]
         public void Tight_forflyttning_ar_en_varning_och_ingen_krock()
         {
             var w = Week(Asg("a1", Lor, 8, 12, "Skjutledare", "Fält", "Skogsbanan"),
@@ -78,7 +103,7 @@ namespace HpskSite.Tests
                              "25-metersbanan", "Markör (Precision)", 11, null, "Markör", "Precision", "Accepted"));
             w.ConflictCount.Should().Be(0);
             w.Days.Single().Items.Should().OnlyContain(i => !string.IsNullOrEmpty(i.WarningText));
-            w.Days.Single().Items.First().WarningText.Should().Contain("kort tid mellan platserna");
+            w.Days.Single().Items.First().WarningText.Should().Contain("bara 10 min mellan platserna");
         }
 
         [Fact]

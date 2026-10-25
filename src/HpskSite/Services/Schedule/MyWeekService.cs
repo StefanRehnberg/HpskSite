@@ -24,13 +24,41 @@ namespace HpskSite.Services.Schedule
         private readonly IScopeProvider _scopes;
         private readonly PlanningService _planning;
         private readonly FamilyWeekService _week;
+        private readonly Umbraco.Cms.Core.Services.IMemberService _members;
         private readonly ILogger<MyWeekService> _logger;
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
-        public MyWeekService(IScopeProvider scopes, PlanningService planning, FamilyWeekService week, ILogger<MyWeekService> logger)
+        public MyWeekService(IScopeProvider scopes, PlanningService planning, FamilyWeekService week, Umbraco.Cms.Core.Services.IMemberService members,
+            ILogger<MyWeekService> logger)
         {
-            _scopes = scopes; _planning = planning; _week = week; _logger = logger;
+            _scopes = scopes; _planning = planning; _week = week; _members = members; _logger = logger;
+        }
+
+        /// <summary>
+        /// Huvudplaneringens sammankallande (den som skapade den först) — den man ringer när något krockar, och den veckomejlets svar går till.
+        /// Null när ingen kan läsas. Ett fel loggas på Debug och ger null: kontaktuppgiften är en hjälp, aldrig ett villkor.
+        /// </summary>
+        public DigestContact? ContactFor(int rootId)
+        {
+            try
+            {
+                int? memberId;
+                using (var s = _scopes.CreateScope(autoComplete: true))
+                    memberId = s.Database.ExecuteScalar<int?>(
+                        "SELECT TOP 1 MemberId FROM PlanningMember WHERE PlanningId = @0 AND Access = @1 AND RemovedAt IS NULL AND ViaCompetition = 0 AND MemberId > 0 ORDER BY Id",
+                        rootId, HpskSite.Models.Planning.PlanningAccessLevel.Owner);
+                if (memberId is not > 0) return null;
+                var m = _members.GetById(memberId.Value);
+                if (m == null) return null;
+                var phone = m.HasProperty("phoneNumber") ? m.GetValue<string>("phoneNumber") : null;
+                return new DigestContact(m.Name ?? "", string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(), string.IsNullOrWhiteSpace(m.Email) ? null : m.Email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "MyWeekService: kontaktpersonen för planering {Root} gick inte att läsa.", rootId);
+                return null;
+            }
         }
 
         /// <summary>
@@ -46,20 +74,25 @@ namespace HpskSite.Services.Schedule
         /// Huvudplaneringarna där medlemmen har ett uppdrag och veckan tillför något (<see cref="WeekFamilySql"/>). Avböjda
         /// uppdrag räknas inte. En fråga.
         /// </summary>
-        public List<int> RootsFor(int memberId)
+        public List<int> RootsFor(int memberId, DateTime? from = null, DateTime? to = null)
         {
             if (memberId <= 0) return new();
             try
             {
                 using var s = _scopes.CreateScope(autoComplete: true);
+                // Med ett fönster byggs bara familjer där personen har ett uppdrag i fönstret — annars byggdes varje familj hen
+                // någonsin haft ett uppdrag i om vid varje startsidesvisning (steg 4–6 C6). Dagen räknas som överallt annars.
                 return s.Database.Fetch<int>(@"
                     SELECT DISTINCT p.FamilyRootId
                       FROM StaffAssignment sa
                       JOIN Planning p ON p.Id = sa.PlanningId AND p.DeletedAt IS NULL
+                      LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                      WHERE sa.MemberId = @0 AND sa.PlanningId IS NOT NULL
                        AND (sa.Status IS NULL OR sa.Status <> @1)
+                       AND (@2 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) >= @2)
+                       AND (@3 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) <= @3)
                        AND " + WeekFamilySql,
-                    memberId, StaffAssignmentStatus.Declined);
+                    memberId, StaffAssignmentStatus.Declined, from?.Date, to?.Date);
             }
             catch (Exception ex)
             {
@@ -91,12 +124,14 @@ namespace HpskSite.Services.Schedule
             var me = _week.Build(rootId, StaffPersonKey.For(memberId, null)).FirstOrDefault();
             if (me == null) return null;
             var s = ToSchedule(rootId, family[0].Name, me.Days, from, to, DateTime.Now);
-            return s.HasAny ? s : null;
+            if (!s.HasAny) return null;
+            if (s.ConflictCount > 0 && ContactFor(rootId) is { } c) { s.ContactName = c.Name; s.ContactPhone = c.Phone; }   // ringer man först när något krockar
+            return s;
         }
 
         /// <summary>Alla medlemmens veckor i fönstret, tidigast först.</summary>
         public List<MySchedule> ForMember(int memberId, DateTime from, DateTime to) =>
-            RootsFor(memberId)
+            RootsFor(memberId, from, to)
                 .Select(r => Get(memberId, r, from, to))
                 .Where(s => s != null)
                 .Select(s => s!)
@@ -125,7 +160,11 @@ namespace HpskSite.Services.Schedule
                     Date = d.Date.Date,
                     IsToday = d.Date.Date == now.Date,
                 };
-                foreach (var it in d.Items) day.Items.Add(ToItem(it, day));
+                foreach (var it in d.Items)
+                {
+                    day.Items.Add(ToItem(it, day));
+                    if (it.Entry.CompetitionId is > 0) s.CompetitionIds.Add(it.Entry.CompetitionId.Value);
+                }
                 s.Days.Add(day);
             }
             if (s.Days.Count > 0)
@@ -179,10 +218,13 @@ namespace HpskSite.Services.Schedule
                 LinkText = linkText,
                 Icon = e.Kind switch { PersonWeekKind.Assignment => "bi-person-badge", PersonWeekKind.Start => "bi-bullseye", _ => "bi-flag" },
                 SourceKey = e.Kind == PersonWeekKind.Assignment && e.SourceKey.StartsWith('a') ? "uppdrag-" + e.SourceKey[1..] : e.SourceKey,
+                AssignmentId = isAssignment && e.SourceKey.StartsWith('a') && int.TryParse(e.SourceKey.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var aid) ? aid : 0,
             };
             foreach (var c in it.Clashes.Where(c => c.IsHard)) item.ConflictsWith.Add(c.WithLabel);
             var warn = it.Clashes.Where(c => !c.IsHard)
-                .Select(c => c.Kind == ClashKind.TightTravel ? $"kort tid mellan platserna till {c.WithLabel}" : $"samma dag som {c.WithLabel}")
+                .Select(c => c.Kind == ClashKind.TightTravel
+                    ? $"{(c.GapMinutes is { } g ? $"bara {g} min mellan platserna" : "kort tid mellan platserna")} till {c.WithLabel}"
+                    : $"samma dag som {c.WithLabel}")
                 .ToList();
             if (warn.Count > 0) item.WarningText = string.Join("; ", warn);
             return item;

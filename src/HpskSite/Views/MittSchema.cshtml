@@ -1,6 +1,7 @@
 @using System.Globalization
 @using HpskSite.Models.Schedule
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = ViewData["Title"]?.ToString() ?? "Mitt schema";
@@ -66,7 +67,27 @@
             </p>
         }
 
-        @await Html.PartialAsync("_MittSchema", single)
+        @await Html.PartialAsync("_MittSchema", single, new ViewDataDictionary(ViewData) { ["AllowDecline"] = single.IsWeek })
+
+        @if (single.IsWeek)
+        {
+            @* Steg 4–6 K5: "Jag kan inte" — statusen blir Avböjd och den som bemannar får besked (push och mejl) med en knapp till Hitta ersättare. *@
+            <script>
+            document.addEventListener('click', async function (e) {
+                var b = e.target.closest && e.target.closest('[data-decline]'); if (!b) return;
+                if (!confirm('Säger du att du inte kan komma? Den som bemannar får besked och letar efter någon annan.')) return;
+                b.disabled = true;
+                try {
+                    var r = await fetch('/mina-uppdrag/respond', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': '@Antiforgery.GetAndStoreTokens(Context).RequestToken' },
+                        body: JSON.stringify({ assignmentId: parseInt(b.getAttribute('data-decline'), 10), status: 'Declined' }) });
+                    var d = await r.json();
+                    if (d.success) { location.reload(); return; }
+                    alert(d.message || 'Det gick inte att spara.');
+                } catch (err) { alert('Nätverksfel — försök igen.'); }
+                b.disabled = false;
+            });
+            </script>
+        }
 
         @* Notiser BELOW the timeline: the page is called Mitt schema, so the schedule is what the
            member came for and it leads. Same partial as the competition page's right-column card.
@@ -113,6 +134,7 @@
                     <a href="/mitt-schema?p=@w.PlanningId" class="small text-decoration-none">Hela veckan →</a>
                 </div>
                 <div class="card-body">
+                    <p class="text-muted small mb-2">Alla dina uppdrag i veckan, över alla delar. Tävlingarnas kort längre ner visar också startlista och program.</p>
                     @{
                         var wvd = new ViewDataDictionary(ViewData) { ["Compact"] = true, ["MaxRows"] = 6 };
                     }

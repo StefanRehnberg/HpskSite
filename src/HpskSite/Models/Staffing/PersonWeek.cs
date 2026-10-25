@@ -33,7 +33,8 @@ namespace HpskSite.Models.Staffing
         string? Part = null,
         string? Status = null);
 
-    public sealed record PersonWeekClash(string WithSourceKey, string WithLabel, ClashKind Kind)
+    /// <param name="GapMinutes">Vid <see cref="ClashKind.TightTravel"/>: minuterna mellan passen — så att "kort tid mellan platserna" kan säga hur kort.</param>
+    public sealed record PersonWeekClash(string WithSourceKey, string WithLabel, ClashKind Kind, int? GapMinutes = null)
     {
         /// <summary>Bara en överlappning är en krock; trång förflyttning och avsikt är varningar.</summary>
         public bool IsHard => Kind == ClashKind.Overlap;
@@ -91,8 +92,9 @@ namespace HpskSite.Models.Staffing
                     var b = inRange[j];
                     var kind = Compare(a, b, starts, travelMargin);
                     if (kind == ClashKind.None) continue;
-                    clashes[i].Add(new PersonWeekClash(b.SourceKey, b.Label, kind));
-                    clashes[j].Add(new PersonWeekClash(a.SourceKey, a.Label, kind));
+                    int? gap = kind == ClashKind.TightTravel && a.Interval is { } x && b.Interval is { } y ? (int)Math.Round(x.GapTo(y).TotalMinutes) : null;
+                    clashes[i].Add(new PersonWeekClash(b.SourceKey, b.Label, kind, gap));
+                    clashes[j].Add(new PersonWeekClash(a.SourceKey, a.Label, kind, gap));
                 }
 
             // Index, inte radens värde: två rader utan nyckel kan vara lika och ska ändå vara två.
@@ -113,6 +115,9 @@ namespace HpskSite.Models.Staffing
                 .ToList();
         }
 
+        private static bool SameRole(PersonWeekEntry a, PersonWeekEntry b) =>
+            !string.IsNullOrWhiteSpace(a.Title) && string.Equals(a.Title.Trim(), b.Title?.Trim(), StringComparison.OrdinalIgnoreCase);
+
         private static ClashKind Compare(PersonWeekEntry a, PersonWeekEntry b, List<PersonWeekEntry> starts, TimeSpan? margin)
         {
             var aIntent = a.Kind == PersonWeekKind.Intent;
@@ -132,6 +137,11 @@ namespace HpskSite.Models.Staffing
             if (a.Interval is not { } ia || b.Interval is not { } ib) return ClashKind.None;
             // Bara intilliggande dagar kan mötas (midnatt); längre isär är det aldrig en krock.
             if (Math.Abs((a.Date - b.Date).TotalDays) > 1) return ClashKind.None;
+            // Steg 4–6 (planerare, UX): sekretariat, kassa och tävlingsledning finns både i Gemensamt och per del (B8). Heldag i det
+            // gemensamma mot SAMMA roll med tider i en del är samma jobb skrivet två gånger — inte en dubbelbokning. Räknades det som krock
+            // fick varje funktionär en röd ruta från dag ett, och efter tre dagar läste ingen den. Olika roller krockar som förut.
+            if (a.Kind == PersonWeekKind.Assignment && b.Kind == PersonWeekKind.Assignment && ia.AllDay != ib.AllDay && SameRole(a, b))
+                return ClashKind.None;
             return StaffInterval.Between(ia, a.Place, ib, b.Place, margin);
         }
     }

@@ -41,8 +41,9 @@
                     <div id="beShootList"></div>
                 </div>
                 <div class="mb-2 mt-3">
-                    <label class="form-label fw-semibold">Kommentar (valfritt)</label>
-                    <textarea class="form-control" id="beComment" rows="3" placeholder="t.ex. Jag kan hjälpa i kansliet men inte stå i markeringsgraven. Kan köra material på fredagen."></textarea>
+                    <label class="form-label fw-semibold" for="beComment">Kommentar till arrangören (valfritt)</label>
+                    <textarea class="form-control" id="beComment" rows="3" maxlength="500" placeholder="t.ex. Jag kan hjälpa i kansliet men inte stå i markeringsgraven. Kan köra material på fredagen."></textarea>
+                    <div class="form-text d-none" id="beCommentNote">Kommentaren följer med din anmälan i alla delar du kryssat i.</div>
                 </div>
                 <button type="button" class="btn btn-primary" id="beSaveBtn" onclick="beSave()"><i class="bi bi-check-lg me-1"></i>Spara min anmälan</button>
                 <span class="ms-2 small text-success" id="beSaved" style="display:none"><i class="bi bi-check-circle me-1"></i>Sparat</span>
@@ -121,6 +122,7 @@
                     }
                 } catch (e) { parts = null; }
             }
+            q('beCommentNote').classList.toggle('d-none', !parts);
             shootTargets = d.shootTargets || null;
             shootPicked = {};
             (d.myShootIntents || []).forEach(function (i) { shootPicked[i.targetPlanningId] = i.classes || ''; });
@@ -156,7 +158,8 @@
     // Ett val: kryssruta + (när ikryssat) tider. Index in i items — aldrig text i ett attribut.
     function choiceHtml(item, labelHtml, subHtml) {
         var i = items.push(item) - 1, on = isOn(item.key);
-        return '<div class="border rounded p-2 mb-2' + (on ? ' border-primary' : '') + '">'
+        // pe-5 på telefon: chattknappen ligger fast i högerkanten och täckte tiderna (steg 4–6 UX).
+        return '<div class="border rounded p-2 pe-5 pe-sm-2 mb-2' + (on ? ' border-primary' : '') + '">'
             + '<div class="form-check">'
             + '<input class="form-check-input be-choice" type="checkbox" id="beC' + i + '" data-i="' + i + '" ' + (on ? 'checked' : '') + '>'
             + '<label class="form-check-label" for="beC' + i + '">' + labelHtml + '</label>'
@@ -345,7 +348,7 @@
             d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots, shootIntents: shootIntents });
         }
         btn.disabled = false;
-        if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 2500); }
+        if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; s.className = 'ms-2 small text-success fw-semibold'; setTimeout(function () { s.style.display = 'none'; }, 8000); }
         else alert(d.message || 'Kunde inte spara.');
     };
 

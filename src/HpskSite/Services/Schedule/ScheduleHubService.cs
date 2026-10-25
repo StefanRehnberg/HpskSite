@@ -78,10 +78,15 @@ namespace HpskSite.Services.Schedule
                     s.ShownCompetitionIds.Add(compId);
                 }
 
-                // Steg 4: veckan över en planeringsfamilj (flera delar, eller det gemensamma utan tävling) — ett kort per
-                // familj utöver tävlingskorten. Tävlingens id läggs medvetet inte i ShownCompetitionIds: uppdragskortet ska
-                // fortsätta visa en obesvarad inbjudan.
-                foreach (var w in _week.ForMember(memberId, today, today.AddDays(WindowDays)))
+                // Steg 4: veckan över en planeringsfamilj (flera delar, eller det gemensamma utan tävling) — ETT kort per familj.
+                // Tävlingskorten för tävlingar som veckan redan visar tas bort här (steg 4–6, planerare och UX: samma uppdrag stod
+                // förut i tre kort för en person), och tävlingarna släpps ur ShownCompetitionIds så att uppdragskortet visar en
+                // obesvarad inbjudan som förut. Mitt schema visar fortfarande tävlingskorten (med startlistor och program).
+                var weeks = _week.ForMember(memberId, today, today.AddDays(WindowDays));
+                var covered = weeks.SelectMany(w => w.CompetitionIds).ToHashSet();
+                s.Items.RemoveAll(i => i.PlanningId == 0 && covered.Contains(i.CompetitionId));
+                s.ShownCompetitionIds.ExceptWith(covered);
+                foreach (var w in weeks)
                 {
                     var preview = BuildPreview(w);
                     var first = w.CompDate?.Date;

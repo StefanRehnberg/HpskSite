@@ -97,27 +97,7 @@ namespace HpskSite.Services.Schedule
         }
 
         /// <summary>Huvudplaneringens sammankallande (den som skapade den först) — den man ringer, och som svaret går till.</summary>
-        public DigestContact? Contact(int rootId)
-        {
-            try
-            {
-                int? memberId;
-                using (var s = _scopes.CreateScope(autoComplete: true))
-                    memberId = s.Database.ExecuteScalar<int?>(
-                        "SELECT TOP 1 MemberId FROM PlanningMember WHERE PlanningId = @0 AND Access = @1 AND RemovedAt IS NULL AND ViaCompetition = 0 AND MemberId > 0 ORDER BY Id",
-                        rootId, HpskSite.Models.Planning.PlanningAccessLevel.Owner);
-                if (memberId is not > 0) return null;
-                var m = _members.GetById(memberId.Value);
-                if (m == null) return null;
-                var phone = m.HasProperty("phoneNumber") ? m.GetValue<string>("phoneNumber") : null;
-                return new DigestContact(m.Name ?? "", string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(), string.IsNullOrWhiteSpace(m.Email) ? null : m.Email);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Veckomejlet: kontaktpersonen för planering {Root} gick inte att läsa.", rootId);
-                return null;
-            }
-        }
+        public DigestContact? Contact(int rootId) => _week.ContactFor(rootId);
 
         public Task<bool> SendAsync(string toEmail, string subject, string html, MailReplyTo replyTo) => _mailer.SendAsync(toEmail, subject, html, replyTo);
 

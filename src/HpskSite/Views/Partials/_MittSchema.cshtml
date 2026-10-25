@@ -16,6 +16,7 @@
     var sv = CultureInfo.GetCultureInfo("sv-SE");
     var compact = ViewData["Compact"] as bool? ?? false;
     var maxRows = ViewData["MaxRows"] as int? ?? int.MaxValue;
+    var allowDecline = ViewData["AllowDecline"] as bool? ?? false;
     var shown = 0;
 }
 
@@ -24,8 +25,21 @@
     <div class="alert alert-warning d-flex align-items-start gap-2 py-2 mb-3">
         <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
         <div>
-            <strong>@Model.ConflictCount @(Model.ConflictCount == 1 ? "krock" : "krockar") i ditt schema.</strong>
-            Två saker ligger på samma tid — hör av dig till tävlingsledningen så de kan flytta något.
+            <strong>@Model.ConflictCount @(Model.ConflictCount == 1 ? "krock" : "krockar") i @(Model.IsWeek ? "din vecka" : "ditt schema").</strong>
+            Raderna märkta <span class="badge bg-warning text-dark">Krock</span> ligger på samma tid som något annat.
+            @if (!string.IsNullOrWhiteSpace(Model.ContactName))
+            {
+                <text>Ring <strong>@Model.ContactName</strong></text>
+                @if (!string.IsNullOrWhiteSpace(Model.ContactPhone))
+                {
+                    <text> <a href="tel:@Model.ContactPhone">@Model.ContactPhone</a></text>
+                }
+                <text> så flyttas något.</text>
+            }
+            else
+            {
+                <text>Hör av dig till @(Model.IsWeek ? "den som bemannar" : "tävlingsledningen") så kan något flyttas.</text>
+            }
         </div>
     </div>
 }
@@ -102,7 +116,8 @@ else
             {
                 if (shown >= maxRows) { break; }
                 shown++;
-                <div class="list-group-item px-0 @(item.IsPast ? "opacity-50" : "")">
+                @* pe-5 på telefon: chattknappen ligger fast i högerkanten och täckte tider och krockrader (steg 4–6 UX). *@
+                <div class="list-group-item px-0 pe-5 pe-sm-0 @(item.IsPast ? "opacity-50" : "")">
                     <div class="d-flex gap-3">
                         <div class="text-nowrap fw-semibold flex-shrink-0" style="min-width:5.5rem;">
                             <i class="bi @item.IconClass me-1 @item.AccentClass"></i>@item.TimeLabel
@@ -120,7 +135,7 @@ else
                                 }
                                 @if (item.NeedsResponse)
                                 {
-                                    <span class="badge bg-warning text-dark ms-1">Svara</span>
+                                    <span class="badge bg-info text-dark ms-1">Svara</span>
                                 }
                                 @if (item.HasConflict)
                                 {
@@ -148,6 +163,11 @@ else
                             @if (!compact && !string.IsNullOrWhiteSpace(item.Link))
                             {
                                 <a href="@item.Link" class="small text-decoration-none d-print-none">@(item.LinkText ?? "Öppna") →</a>
+                            }
+                            @* Steg 4–6 K5: "Jag kan inte" når den som bemannar (veckosidan). *@
+                            @if (allowDecline && item.AssignmentId > 0 && item.Status != "Declined")
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger ms-2 d-print-none" data-decline="@item.AssignmentId">Jag kan inte</button>
                             }
                         </div>
                         @* The kind used to live here, hidden below 576px. It is a badge next to the title now. *@
