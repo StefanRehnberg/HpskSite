@@ -114,6 +114,9 @@ namespace HpskSite.Models.Staffing
         public string? Note { get; set; }
         /// <summary>Omgång 3 (3.2): passet uppdraget ligger i, om det ligger i ett.</summary>
         public int? PassId { get; set; }
+        /// <summary>Expertgruppen K6: planeringen raden ägs av. Klienten skickar den med varje ändring av raden —
+        /// i familjens rutnät är det inte sidans egen planering.</summary>
+        public int PlanningId { get; set; }
     }
 
     /// <summary>Omgång 3 (3.2): ett pass i en ruta — hur många som är där samtidigt under passet, mot behovet.</summary>
@@ -148,6 +151,8 @@ namespace HpskSite.Models.Staffing
     /// <summary>A row: one role (optionally narrowed to one scope, e.g. "Skjutledare · Bana 3").</summary>
     public class GridRow
     {
+        /// <summary>Expertgruppen K6: planeringen raden (rollen) hör till.</summary>
+        public int PlanningId { get; set; }
         public string RoleKey { get; set; } = "";
         public string RoleName { get; set; } = "";
         public string? ScopeType { get; set; }
@@ -260,6 +265,36 @@ namespace HpskSite.Models.Staffing
         public bool RoleChoicePending { get; set; }
         /// <summary>Grenens inbyggda roller för "Välj roller" (bara för en planering).</summary>
         public List<GridRoleChoice> RoleChoices { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Steg 2: en del av familjens rutnät — en planerings egen <see cref="GridResponse"/>, oförändrad (varje dels grupp är
+    /// exakt dagens rutnät för delen). Huvudplaneringen är det gemensamma.
+    /// </summary>
+    public class FamilyGridPart
+    {
+        public int PlanningId { get; set; }
+        public string Name { get; set; } = "";
+        /// <summary>Huvudplaneringen: det som gäller hela veckan.</summary>
+        public bool IsShared { get; set; }
+        /// <summary>Vem som sköter delen ("Hallands krets"), eller null.</summary>
+        public string? HostLabel { get; set; }
+        /// <summary>Delens egna dagar (kolumnnycklar). Övriga dagar i familjens axel är gråa i delen.</summary>
+        public List<string> DayKeys { get; set; } = new();
+        public GridResponse Grid { get; set; } = new();
+    }
+
+    public class FamilyGridResponse
+    {
+        public bool Success { get; set; } = true;
+        public string? Message { get; set; }
+        /// <summary>Familjens dagaxel: unionen av delarnas dagar, i datumordning.</summary>
+        public List<GridColumn> Columns { get; set; } = new();
+        /// <summary>Gemensamt först, sedan delarna efter namn. Bara de delar läsaren får ändra bemanningen i.</summary>
+        public List<FamilyGridPart> Parts { get; set; } = new();
+        /// <summary>Delar läsaren inte får ändra — nämns, men visas inte.</summary>
+        public int HiddenParts { get; set; }
+        public List<GridClash> FamilyClashes { get; set; } = new();
     }
 
     public class GridRoleChoice

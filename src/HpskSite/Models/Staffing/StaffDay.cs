@@ -101,6 +101,14 @@ namespace HpskSite.Models.Staffing
         public string? Date { get; set; }   // "yyyy-MM-dd"
     }
 
+    /// <summary>Steg 2 (B13): flytta ett uppdrag till en annan del i familjen. Raden behåller sitt id, sin dag och sin tid.</summary>
+    public class MoveAssignmentToPlanningRequest
+    {
+        public int Id { get; set; }
+        public int CompetitionId { get; set; }
+        public int TargetPlanningId { get; set; }
+    }
+
     // --- person identity: one human, many rows -----------------------------------------------------
 
     /// <summary>A free-text name on the roster, and the members it might be.</summary>

@@ -72,6 +72,12 @@
 
 .plb-org th { background: var(--bs-tertiary-bg); }
 
+/* Familjens rutnät (steg 2): en rubrikrad per del; texten står kvar i bild när rutnätet rullas i sidled. */
+.plb-grid .plb-parthead th { background: var(--bs-tertiary-bg); border-top: 2px solid var(--bs-border-color); font-weight: 400; padding: .4rem .5rem; }
+.plb-grid .plb-parthead th > div { position: sticky; left: .5rem; width: min(100%, calc(100vw - 3.5rem)); }
+/* Grå dag: delen har ingen planerad dag här. */
+.plb-grid td.plb-offday { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(var(--bs-secondary-rgb), .08) 6px 7px); text-align: center; vertical-align: middle; }
+
 @media print {
     .plb-switch, .plb-add, .plb-mini, .plb-grip { display: none !important; }
 }

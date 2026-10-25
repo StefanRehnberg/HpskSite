@@ -36,18 +36,60 @@ window.PlaneringBemanning = (function () {
         return '/umbraco/surface/Staffing/' + action + '?' + new URLSearchParams(Object.assign({ planningId: A.ID, competitionId: 0 }, qs || {})).toString();
     }
     function sget(action, qs) { return A.req(url(action, qs), { headers: { Accept: 'application/json' } }); }
-    function spost(action, body) {
-        return A.req(url(action), {
+    // Steg 2 (K6): en ändring av en rad går till RADENS planering. I familjens rutnät är den inte sidans egen —
+    // varje rad och post bär sitt planningId, och servern prövar rätten i just den delen.
+    function spost(action, body, pid) {
+        return A.req(url(action, pid ? { planningId: pid } : null), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': A.token() },
             body: JSON.stringify(Object.assign({ competitionId: 0 }, body || {}))
         });
     }
-    async function loadGrid() { const d = await sget('GetGrid'); if (!d.success) throw new Error(d.message || 'Rutnätet kunde inte läsas.'); B.grid = d; }
+    // Familjens rutnät (steg 2): en huvudplanering med delplaneringar visar det gemensamma och varje del i EN tabell.
+    // Servern ger varje dels egna, oförändrade rutnät; här läggs de ihop till samma form som ett enskilt rutnät
+    // (columns = familjens dagar, rows = alla delars rader i delordning), så ritningen är densamma.
+    const family = () => !!(A && A.S() && A.S().planning && (A.S().planning.subPlannings || []).length);
+    function familyGrid(f) {
+        const g = { family: true, columns: f.columns || [], rows: [], parts: [], hiddenParts: f.hiddenParts || 0, familyClashes: f.familyClashes || [],
+            clashes: [], volunteers: [], unreachable: [], totalAssigned: 0, externalCount: 0, roleChoices: [], roleChoicePending: false };
+        (f.parts || []).forEach((p, pi) => {
+            const pg = p.grid || {};
+            g.parts.push({ planningId: p.planningId, name: p.name, isShared: !!p.isShared, hostLabel: p.hostLabel, dayKeys: p.dayKeys || [],
+                columns: pg.columns || [], hasUndated: (pg.columns || []).some(c => !c.key), pending: !!pg.roleChoicePending, rows: (pg.rows || []).length });
+            if (p.isShared) { g.roleChoices = pg.roleChoices || []; g.roleChoicePending = !!pg.roleChoicePending; }
+            g.totalAssigned += pg.totalAssigned || 0;
+            g.externalCount += pg.externalCount || 0;
+            (pg.unreachable || []).forEach(n => { if (g.unreachable.indexOf(n) < 0) g.unreachable.push(n); });
+            g.volunteers = g.volunteers.concat(pg.volunteers || []);
+            g.clashes = g.clashes.concat(pg.clashes || []);
+            (pg.rows || []).forEach(r => { r.partIndex = pi; r.planningId = r.planningId || p.planningId; g.rows.push(r); });
+        });
+        return g;
+    }
+    async function fetchGrid() {
+        if (family()) {
+            const f = await sget('GetFamilyGrid');
+            if (!f.success) throw new Error(f.message || 'Rutnätet kunde inte läsas.');
+            return familyGrid(f);
+        }
+        const d = await sget('GetGrid');
+        if (!d.success) throw new Error(d.message || 'Rutnätet kunde inte läsas.');
+        return d;
+    }
+    async function loadGrid() { B.grid = await fetchGrid(); }
+    // Delens egna kolumner (med pass och dag-id) — familjens axel har dem inte; dagar ändras i delen.
+    const partOf = row => (B.grid.parts || [])[row.partIndex] || null;
+    const colsFor = row => (B.grid.family && row && partOf(row)) ? partOf(row).columns : (B.grid.columns || []);
     async function loadPeople() { const d = await sget('GetPeople'); if (!d.success) throw new Error(d.message || 'Personerna kunde inte läsas.'); B.people = d.people || []; B.meta = d; }
     async function loadRoles() { const d = await sget('GetRoles'); if (!d.success) throw new Error(d.message || 'Rollerna kunde inte läsas.'); B.roles = d.roles || []; }
     async function ensureGrid() { if (!B.grid) await loadGrid(); }
     async function ensureRoles() { if (!B.roles) await loadRoles(); }
+    // Rollerna i en bestämd del (familjens rutnät) — hämtas direkt, aldrig ur sidans egen cache.
+    async function rolesIn(pid) {
+        const d = await sget('GetRoles', { planningId: pid });
+        if (!d.success) throw new Error(d.message || 'Rollerna kunde inte läsas.');
+        return d.roles || [];
+    }
     async function fullAssignment(id) {
         const d = await sget('GetRoster');
         if (!d.success) throw new Error(d.message || 'Uppdraget kunde inte läsas.');
@@ -204,7 +246,7 @@ window.PlaneringBemanning = (function () {
         const g = B.grid, cols = g.columns || [];
         A.setHead('Bemanning', gridSummary());
         A.setActions([
-            { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: openNewRole },
+            { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: () => openNewRole() },
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { divider: true },
@@ -253,7 +295,8 @@ window.PlaneringBemanning = (function () {
         cols.forEach((c, ci) => {
             if (!showCol(c)) return;
             const prep = c.kind && c.kind !== 'Tavlingsdag';
-            const menu = c.key ? A.rowMenu([
+            // Familjens axel är unionen av delarnas dagar; en dag ändras i sin del, inte här.
+            const menu = c.key && !g.family ? A.rowMenu([
                 { label: 'Ändra dagen…', fn: () => openDay(c) },
                 cols.filter(x => x.key).length > 1 && { label: 'Kopiera dagens bemanning…', fn: () => openCopyDay(c) },
                 { divider: true },
@@ -264,18 +307,24 @@ window.PlaneringBemanning = (function () {
                 ${c.dayLabel ? `<div class="plb-daylabel">${esc(c.dayLabel)}</div>` : ''}${c.timeLabel ? `<div class="plb-dim">${esc(c.timeLabel)}</div>` : ''}</div>${menu}</div></th>`;
         });
 
-        const rows = (g.rows || []).map((row, ri) => {
+        const rowHtml = (row, ri) => {
+            const part = g.family ? partOf(row) : null;
             const menu = A.rowMenu([
                 { label: 'Antal per dag…', fn: () => openNeed(row) },
                 { label: 'Byt namn…', fn: () => openRenameRole(row) },
                 { divider: true },
                 { label: 'Ta bort raden…', danger: true, fn: () => deleteRole(row) },
             ]);
-            let h = `<tr draggable="true" data-role="${esc(row.roleKey)}"><th class="plb-rolecol" scope="row"><div class="plb-rolehead">
+            let h = `<tr draggable="true" data-role="${esc(row.roleKey)}" data-pid="${row.planningId || 0}"><th class="plb-rolecol" scope="row"><div class="plb-rolehead">
                 <div class="plb-roletitle"><button type="button" class="plb-grip" title="Dra för att flytta raden, eller använd piltangenterna" aria-label="Flytta ${esc(row.roleName)}"><i class="bi bi-grip-vertical" aria-hidden="true"></i></button>
                 <div class="min-w-0"><span class="plb-rolename">${esc(row.roleName)}</span>${row.scopeLabel ? `<div class="plb-dim">${esc(row.scopeLabel)}</div>` : ''}</div></div>${menu}</div></th>`;
             cols.forEach((c, ci) => {
                 if (!showCol(c)) return;
+                // Grå dag: delen har ingen planerad dag här (familjens axel är unionen). Dagen läggs till under delens meny.
+                if (part && (c.key ? part.dayKeys.indexOf(c.key) < 0 : !part.hasUndated) && !((row.cells && row.cells[c.key]) || []).length) {
+                    h += `<td class="plb-cell plb-offday" title="${esc(part.name)} har ingen planerad dag ${esc(c.label)}" aria-label="Ingen planerad dag i ${esc(part.name)}"><span class="plb-dim" aria-hidden="true">–</span></td>`;
+                    return;
+                }
                 const entries = (row.cells && row.cells[c.key]) || [];
                 const need = needFor(row, c.key);
                 const filled = filledFor(row, c.key);
@@ -304,14 +353,36 @@ window.PlaneringBemanning = (function () {
                 h += `<td class="${cls}">${entries.map(entryHtml).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button></td>`;
             });
             return h + '</tr>';
-        }).join('');
+        };
+        // Familjens rutnät: en rubrikrad per del (det gemensamma först), delens rader under. Radens index ri är
+        // fortfarande platsen i den platta listan — det är det knapparna bär.
+        const partHeader = p => {
+            const menu = A.rowMenu([
+                { label: 'Lägg till en roll…', fn: () => openNewRole(p.planningId) },
+                { label: 'Lägg till en dag…', fn: () => openDay(null, p.planningId) },
+            ]);
+            return `<tr class="plb-parthead" data-part="${p.planningId}"><th colspan="${shownCount + 1}" scope="colgroup"><div class="d-flex justify-content-between align-items-center gap-2">
+                <div class="min-w-0"><span class="fw-semibold">${p.isShared ? 'Gemensamt — hela veckan' : esc(p.name)}</span>
+                ${p.hostLabel ? `<span class="plb-dim small ms-2">sköts av ${esc(p.hostLabel)}</span>` : ''}
+                ${p.pending && !p.isShared ? '<span class="plb-dim small ms-2">visar bara roller med folk — rollerna väljs i delen</span>' : ''}</div>${menu}</div></th></tr>`;
+        };
+        let rows;
+        if (g.family) {
+            const flat = (g.rows || []).map((r, ri) => [r, ri]);
+            rows = (g.parts || []).map((p, pi) => {
+                const mine = flat.filter(([r]) => r.partIndex === pi);
+                return partHeader(p) + (mine.length ? mine.map(([r, ri]) => rowHtml(r, ri)).join('')
+                    : `<tr><td class="plb-dim small p-2" colspan="${shownCount + 1}">Inga roller än i ${p.isShared ? 'det gemensamma' : esc(p.name)}.</td></tr>`);
+            }).join('');
+        } else rows = (g.rows || []).map(rowHtml).join('');
+        const hiddenNote = g.hiddenParts ? `<p class="pl-help small mt-2 mb-0"><i class="bi bi-eye-slash me-1" aria-hidden="true"></i>${g.hiddenParts} ${g.hiddenParts === 1 ? 'del visas inte' : 'delar visas inte'} — du får inte ändra bemanningen i ${g.hiddenParts === 1 ? 'den' : 'dem'}.</p>` : '';
 
         area().innerHTML = notes
             + `<div class="plb-wrap border rounded"><table class="table table-sm mb-0 plb-grid" id="plbGrid"><thead><tr>${head}</tr></thead>
                 <tbody id="plbGridBody">${rows || `<tr><td class="plb-dim p-3" colspan="${shownCount + 1}">Inga roller än. Skriv den första nedan.</td></tr>`}</tbody>
-                <tfoot><tr><td class="plb-rolecol"><label class="visually-hidden" for="plbNewRole">Ny roll</label><input type="text" class="form-control form-control-sm" id="plbNewRole" placeholder="+ Ny roll — skriv namnet" autocomplete="off"></td>
-                <td class="plb-dim small" colspan="${Math.max(1, shownCount)}">Skriv vad <em>ni</em> kallar funktionen och tryck Enter.</td></tr></tfoot></table></div>
-            <p class="pl-help small mt-2 mb-0">Klicka på <b>lägg till</b> i en ruta för att sätta in en person. Utan tid gäller uppdraget hela dagen. Gulmarkerade namn saknar konto på pistol.nu.</p>`;
+                ${g.family ? '' : `<tfoot><tr><td class="plb-rolecol"><label class="visually-hidden" for="plbNewRole">Ny roll</label><input type="text" class="form-control form-control-sm" id="plbNewRole" placeholder="+ Ny roll — skriv namnet" autocomplete="off"></td>
+                <td class="plb-dim small" colspan="${Math.max(1, shownCount)}">Skriv vad <em>ni</em> kallar funktionen och tryck Enter.</td></tr></tfoot>`}</table></div>
+            <p class="pl-help small mt-2 mb-0">Klicka på <b>lägg till</b> i en ruta för att sätta in en person. Utan tid gäller uppdraget hela dagen. Gulmarkerade namn saknar konto på pistol.nu.${g.family ? ' Varje del har sin egen rubrik; en grå ruta betyder att delen inte har den dagen planerad.' : ''}</p>${hiddenNote}`;
         const t = $('plbGrid');
         // Rollkolumnen är smalare på telefon (se css) — samma mått här, annars rullar rutnätet i onödan.
         if (t) t.style.minWidth = phone ? '' : (260 + Math.max(1, shownCount) * 215) + 'px';
@@ -399,7 +470,8 @@ window.PlaneringBemanning = (function () {
         if (!row || !col) return;
         const ed = ensureEditor();
         B.editing = { row, col, memberId: 0, list: [] };
-        $('plbEdHead').textContent = row.roleName + ' · ' + (col.key ? col.label : 'Utan dag');
+        const pt = B.grid.family ? partOf(row) : null;
+        $('plbEdHead').textContent = (pt ? (pt.isShared ? 'Gemensamt' : pt.name) + ' · ' : '') + row.roleName + ' · ' + (col.key ? col.label : 'Utan dag');
         $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = ''; $('plbEdErr').textContent = '';
         hideSuggest();
         ed.style.display = 'block';
@@ -448,7 +520,7 @@ window.PlaneringBemanning = (function () {
         };
         $('plbEdSave').disabled = true;
         try {
-            const d = await spost('SaveAssignment', payload);
+            const d = await spost('SaveAssignment', payload, ed.row.planningId);
             if (!d.success && d.duplicate && !ed.allowDup) {
                 ed.allowDup = true;
                 err.textContent = (d.message || 'Personen har redan det här uppdraget.') + ' Tryck Enter igen för att lägga till ändå.';
@@ -458,10 +530,10 @@ window.PlaneringBemanning = (function () {
             ed.allowDup = false; ed.memberId = 0;
             $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = '';
             await loadGrid();
-            const keep = { roleKey: ed.row.roleKey, scopeKey: ed.row.scopeKey || '', colKey: ed.col.key };
+            const keep = { roleKey: ed.row.roleKey, scopeKey: ed.row.scopeKey || '', colKey: ed.col.key, pid: ed.row.planningId };
             drawGrid();
             // Rutan står kvar öppen för nästa namn — det är hela poängen med ett rutnät.
-            const ri = (B.grid.rows || []).findIndex(r => r.roleKey === keep.roleKey && (r.scopeKey || '') === keep.scopeKey);
+            const ri = (B.grid.rows || []).findIndex(r => r.roleKey === keep.roleKey && (r.scopeKey || '') === keep.scopeKey && r.planningId === keep.pid);
             const ci = (B.grid.columns || []).findIndex(c => c.key === keep.colKey);
             const btn = document.querySelector(`[data-plb-add="${ri}"][data-col="${ci}"]`);
             if (btn) openEditor(btn);
@@ -481,10 +553,14 @@ window.PlaneringBemanning = (function () {
     });
 
     // ---- radernas ordning: dra, eller piltangenterna på greppet ----
-    let dragRole = null, pendingFocus = null;
-    function roleOrder() {
+    let dragRole = null, dragPid = '0', pendingFocus = null;
+    // Ordningen gäller en del i taget (familjens rutnät): raderna dras bara inom sin egen del.
+    function roleOrder(pid) {
         const out = [];
-        document.querySelectorAll('#plbGridBody tr[data-role]').forEach(r => { if (out[out.length - 1] !== r.dataset.role) out.push(r.dataset.role); });
+        document.querySelectorAll('#plbGridBody tr[data-role]').forEach(r => {
+            if (String(r.dataset.pid || 0) !== String(pid || 0)) return;
+            if (out[out.length - 1] !== r.dataset.role) out.push(r.dataset.role);
+        });
         return out;
     }
     function wireRowOrder() {
@@ -492,7 +568,7 @@ window.PlaneringBemanning = (function () {
         const clear = () => body.querySelectorAll('tr').forEach(r => r.classList.remove('plb-dragging', 'plb-dropbefore', 'plb-dropafter'));
         body.addEventListener('dragstart', e => {
             const tr = e.target.closest && e.target.closest('tr[data-role]'); if (!tr) return;
-            dragRole = tr.dataset.role; tr.classList.add('plb-dragging');
+            dragRole = tr.dataset.role; dragPid = tr.dataset.pid || '0'; tr.classList.add('plb-dragging');
             try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragRole); } catch (x) { }
         });
         body.addEventListener('dragend', () => { dragRole = null; clear(); });
@@ -501,7 +577,7 @@ window.PlaneringBemanning = (function () {
             e.preventDefault();
             const tr = e.target.closest && e.target.closest('tr[data-role]');
             body.querySelectorAll('tr').forEach(r => r.classList.remove('plb-dropbefore', 'plb-dropafter'));
-            if (!tr || tr.dataset.role === dragRole) return;
+            if (!tr || tr.dataset.role === dragRole || (tr.dataset.pid || '0') !== dragPid) return;
             const b = tr.getBoundingClientRect();
             tr.classList.add(e.clientY < b.top + b.height / 2 ? 'plb-dropbefore' : 'plb-dropafter');
         });
@@ -509,28 +585,29 @@ window.PlaneringBemanning = (function () {
             if (!dragRole) return;
             e.preventDefault();
             const tr = e.target.closest && e.target.closest('tr[data-role]');
-            if (!tr || tr.dataset.role === dragRole) return;
+            if (!tr || tr.dataset.role === dragRole || (tr.dataset.pid || '0') !== dragPid) return;
             const b = tr.getBoundingClientRect(), before = e.clientY < b.top + b.height / 2;
-            const keys = roleOrder().filter(k => k !== dragRole), at = keys.indexOf(tr.dataset.role);
+            const keys = roleOrder(dragPid).filter(k => k !== dragRole), at = keys.indexOf(tr.dataset.role);
             if (at < 0) return;
             keys.splice(before ? at : at + 1, 0, dragRole);
-            saveOrder(keys);
+            saveOrder(keys, parseInt(dragPid, 10) || 0);
         });
         body.addEventListener('keydown', e => {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
             const grip = e.target.closest && e.target.closest('.plb-grip'); if (!grip) return;
             const tr = grip.closest('tr[data-role]'); if (!tr) return;
             e.preventDefault();
-            const keys = roleOrder(), i = keys.indexOf(tr.dataset.role), j = e.key === 'ArrowUp' ? i - 1 : i + 1;
+            const pid = tr.dataset.pid || '0';
+            const keys = roleOrder(pid), i = keys.indexOf(tr.dataset.role), j = e.key === 'ArrowUp' ? i - 1 : i + 1;
             if (i < 0 || j < 0 || j >= keys.length) return;
             keys.splice(j, 0, keys.splice(i, 1)[0]);
             pendingFocus = tr.dataset.role;
-            saveOrder(keys);
+            saveOrder(keys, parseInt(pid, 10) || 0);
         });
     }
-    async function saveOrder(keys) {
+    async function saveOrder(keys, pid) {
         try {
-            const r = await spost('ReorderRoles', { roleKeys: keys });
+            const r = await spost('ReorderRoles', { roleKeys: keys }, pid);
             if (!r.success) { A.failMsg(r, 'Ordningen kunde inte sparas.'); return; }
             await loadGrid(); drawGrid();
             if (pendingFocus) {
@@ -552,17 +629,24 @@ window.PlaneringBemanning = (function () {
             const nr = $('plbNewRole'); if (nr) nr.focus();
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
-    function openNewRole() {
+    // I familjens rutnät hör en ny roll till en del: den som anges, annars väljs den i dialogen.
+    function partPick(pid, id) {
+        if (!B.grid.family || pid) return '';
+        return `<div class="mb-3"><label class="form-label" for="${id}">I vilken del?</label><select class="form-select" id="${id}">${(B.grid.parts || []).map(p =>
+            `<option value="${p.planningId}">${p.isShared ? 'Gemensamt — hela veckan' : esc(p.name)}</option>`).join('')}</select></div>`;
+    }
+    const pickedPart = (b, pid, id) => pid || (b.querySelector('#' + id) ? parseInt(b.querySelector('#' + id).value, 10) || 0 : 0);
+    function openNewRole(pid) {
         A.formModal({
             title: 'Lägg till en roll', okLabel: 'Lägg till', wide: false,
-            html: `<label class="form-label" for="plbRoleName">Vad kallar ni funktionen?</label>
+            html: `${partPick(pid, 'plbRolePart')}<label class="form-label" for="plbRoleName">Vad kallar ni funktionen?</label>
                 <input type="text" class="form-control" id="plbRoleName" maxlength="100" autocomplete="off" placeholder="t.ex. Markör, Kassa, Banbyggare">
                 <div class="pl-help small mt-1">Rollen blir en rad i rutnätet.</div>`,
             onOpen: b => b.querySelector('#plbRoleName').focus(),
             onOk: async b => {
                 const v = b.querySelector('#plbRoleName').value.trim();
                 if (!v) return 'Skriv rollens namn.';
-                const d = await spost('SaveRole', { displayName: v });
+                const d = await spost('SaveRole', { displayName: v }, pickedPart(b, pid, 'plbRolePart'));
                 if (!d.success) return d.message || 'Rollen kunde inte skapas.';
                 B.roles = null; await loadGrid(); drawGrid();
                 return true;
@@ -570,8 +654,9 @@ window.PlaneringBemanning = (function () {
         });
     }
     async function openRenameRole(row) {
-        try { await ensureRoles(); } catch (e) { A.showMsg(esc(e.message), 'danger'); return; }
-        const role = (B.roles || []).find(r => r.key === row.roleKey) || {};
+        let roleList;
+        try { roleList = B.grid.family ? await rolesIn(row.planningId) : (await ensureRoles(), B.roles || []); } catch (e) { A.showMsg(esc(e.message), 'danger'); return; }
+        const role = roleList.find(r => r.key === row.roleKey) || {};
         A.formModal({
             title: 'Byt namn på rollen', okLabel: 'Spara', wide: false,
             html: `<label class="form-label" for="plbRoleName">Vad kallar ni funktionen?</label>
@@ -586,7 +671,7 @@ window.PlaneringBemanning = (function () {
                     roleKey: row.roleKey, displayName: v, pluralName: role.plural || null,
                     defaultScopeType: role.defaultScopeType || null, supportsTargetRange: !!role.supportsTargetRange,
                     supportsFunctionTitle: !!role.supportsFunctionTitle, description: role.description || null
-                });
+                }, row.planningId);
                 if (!d.success) return d.message || 'Namnet kunde inte sparas.';
                 B.roles = null; await loadGrid(); drawGrid();
                 return true;
@@ -595,11 +680,11 @@ window.PlaneringBemanning = (function () {
     }
     async function deleteRole(row) {
         try {
-            let d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: false });
+            let d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: false }, row.planningId);
             if (!d.success && d.requiresConfirm) {
                 const n = d.inUse || 0;
                 if (!await A.plConfirm('Ta bort raden ' + row.roleName + '?', n + (n === 1 ? ' person har' : ' personer har') + ' uppdrag på raden och förlorar dem.', 'Ta bort raden', true)) return;
-                d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: true });
+                d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: true }, row.planningId);
             }
             if (!d.success) { A.failMsg(d, 'Raden kunde inte tas bort.'); return; }
             B.roles = null; await loadGrid(); drawGrid();
@@ -608,7 +693,7 @@ window.PlaneringBemanning = (function () {
 
     // ---- behovet per roll och dag ----
     function openNeed(row) {
-        const days = (B.grid.columns || []).filter(c => c.key);
+        const days = colsFor(row).filter(c => c.key);
         const kinds = [...new Set(days.map(c => c.kind).filter(Boolean))];
         const word = { Tavlingsdag: 'tävlingsdagar', Forberedelse: 'förberedelsedagar', Efterarbete: 'dagar med efterarbete' };
         // Omgång 3 (3.2): en stationsrad gäller varje station — eller bara den här. Dagar med flera pass får ett antal per pass.
@@ -660,7 +745,7 @@ window.PlaneringBemanning = (function () {
                 if (bad) return 'Ange ett antal mellan 0 och 999 för varje dag.';
                 const scopeSel = b.querySelector('#plbNeedScope');
                 const d = await spost('SetRoleNeeds', { roleKey: row.roleKey, all, days: list, passes,
-                    scopeKind: station ? 'Station' : 'All', scopeKey: scopeSel ? scopeSel.value : '' });
+                    scopeKind: station ? 'Station' : 'All', scopeKey: scopeSel ? scopeSel.value : '' }, row.planningId);
                 if (!d.success) return d.message || 'Behovet kunde inte sparas.';
                 await loadGrid(); drawGrid();
                 return true;
@@ -669,11 +754,11 @@ window.PlaneringBemanning = (function () {
     }
 
     // ---- dagarna ----
-    function openDay(col) {
+    function openDay(col, pid) {
         const kind = (col && col.kind) || 'Tavlingsdag';
         A.formModal({
             title: col ? 'Ändra dagen' : 'Lägg till en dag', okLabel: col ? 'Spara' : 'Lägg till', wide: false,
-            html: `<div class="mb-3"><label class="form-label" for="plbDayDate">Datum</label>
+            html: `${partPick(pid, 'plbDayPart')}<div class="mb-3"><label class="form-label" for="plbDayDate">Datum</label>
                     <input type="text" class="form-control" id="plbDayDate" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" value="${col ? esc(col.key) : ''}"${col ? ' disabled' : ''}>
                     ${col ? '<div class="pl-help small mt-1">Datumet går inte att ändra. Flytta uppdragen till en ny dag i stället.</div>' : ''}</div>
                 <div class="mb-3"><label class="form-label" for="plbDayLabel">Vad kallar ni dagen? <span class="plb-dim">(valfritt)</span></label>
@@ -687,7 +772,7 @@ window.PlaneringBemanning = (function () {
                 const date = col ? col.key : b.querySelector('#plbDayDate').value.trim();
                 if (!date) return 'Välj ett datum.';
                 const k = (b.querySelector('input[name="plbDayKind"]:checked') || {}).value || 'Tavlingsdag';
-                const d = await spost('SaveDay', { id: col ? (col.dayId || 0) : 0, date, label: b.querySelector('#plbDayLabel').value.trim(), kind: k });
+                const d = await spost('SaveDay', { id: col ? (col.dayId || 0) : 0, date, label: b.querySelector('#plbDayLabel').value.trim(), kind: k }, pickedPart(b, pid, 'plbDayPart'));
                 if (!d.success) return d.message || 'Dagen kunde inte sparas.';
                 await loadGrid(); drawGrid();
                 return true;
@@ -706,8 +791,8 @@ window.PlaneringBemanning = (function () {
             await loadGrid(); drawGrid();
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
-    function dayOptions(selected, exclude, withNone) {
-        const days = (B.grid.columns || []).filter(c => c.key && c.key !== exclude);
+    function dayOptions(selected, exclude, withNone, row) {
+        const days = colsFor(row).filter(c => c.key && c.key !== exclude);
         return (withNone ? `<option value="">Utan dag</option>` : '')
             + days.map(c => `<option value="${esc(c.key)}"${c.key === selected ? ' selected' : ''}>${esc(c.label)}${c.dayLabel ? ' — ' + esc(c.dayLabel) : ''}</option>`).join('');
     }
@@ -729,15 +814,31 @@ window.PlaneringBemanning = (function () {
     }
     async function moveEntry(id) {
         const f = findEntry(id); if (!f) return;
+        // Familjens rutnät (B13): "Flytta raden till en annan del…" — uppdraget behåller sitt id, sin dag och sin tid.
+        const fam = !!B.grid.family;
+        const partSel = fam ? `<div class="mb-3"><label class="form-label" for="plbMovePart">Till vilken del?</label><select class="form-select" id="plbMovePart">${(B.grid.parts || []).map(p =>
+            `<option value="${p.planningId}"${p.planningId === f.row.planningId ? ' selected' : ''}>${p.isShared ? 'Gemensamt — hela veckan' : esc(p.name)}${p.planningId === f.row.planningId ? ' (nu)' : ''}</option>`).join('')}</select></div>` : '';
         A.formModal({
             title: 'Flytta ' + f.entry.displayName, okLabel: 'Flytta', wide: false,
-            html: `<label class="form-label" for="plbMoveTo">Till vilken dag?</label><select class="form-select" id="plbMoveTo">${dayOptions('', f.dateKey, false)}</select>
-                <p class="pl-help small mt-2 mb-0">Rollen och klockslagen följer med.</p>`,
+            html: `${partSel}<label class="form-label" for="plbMoveTo">${fam ? 'Till vilken dag? ' : 'Till vilken dag?'}${fam ? '<span class="plb-dim">(valfritt)</span>' : ''}</label>
+                <select class="form-select" id="plbMoveTo">${fam ? '<option value="">Samma dag</option>' : ''}${dayOptions('', f.dateKey, false, f.row)}</select>
+                <p class="pl-help small mt-2 mb-0">Rollen och klockslagen följer med.${fam ? ' Byter du del måste rollen finnas där.' : ''}</p>`,
             onOk: async b => {
                 const to = b.querySelector('#plbMoveTo').value;
-                if (!to) return 'Välj en dag.';
-                const d = await spost('MoveAssignmentToDay', { id, date: to });
-                if (!d.success) return d.message || 'Det gick inte att flytta.';
+                const part = fam ? parseInt(b.querySelector('#plbMovePart').value, 10) || 0 : 0;
+                const newPart = fam && part && part !== f.row.planningId;
+                if (!to && !newPart) return fam ? 'Välj en annan del eller en annan dag.' : 'Välj en dag.';
+                let pid = f.row.planningId;
+                if (newPart) {
+                    const m = await spost('MoveAssignmentToPlanning', { id, targetPlanningId: part }, pid);
+                    if (!m.success) return m.message || 'Det gick inte att flytta.';
+                    pid = part;
+                    if (m.accessEnded) A.showMsg('Behörigheten i tävlingen upphörde för ' + esc(f.entry.displayName) + ' — den gällde den förra delens tävling.', 'warning');
+                }
+                if (to) {
+                    const d = await spost('MoveAssignmentToDay', { id, date: to }, pid);
+                    if (!d.success) { await refreshPart(); return d.message || 'Uppdraget flyttades, men inte till den dagen.'; }
+                }
                 await refreshPart();
                 return true;
             }
@@ -747,7 +848,7 @@ window.PlaneringBemanning = (function () {
         const f = findEntry(id); if (!f) return;
         if (!await A.plConfirm('Ta bort ' + f.entry.displayName + '?', f.entry.displayName + ' tas bort från ' + f.row.roleName + ' ' + dayLabel(f.dateKey) + '.', 'Ta bort', true)) return;
         try {
-            const d = await spost('DeleteAssignment', { id });
+            const d = await spost('DeleteAssignment', { id }, f.row.planningId);
             if (!d.success) { A.failMsg(d, 'Det gick inte att ta bort.'); return; }
             await loadGrid(); drawGrid();
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
@@ -1690,8 +1791,8 @@ window.PlaneringBemanning = (function () {
         try {
             const p = part();
             if (p === 'rutnat') {
-                const d = await sget('GetGrid');
-                if (d.success && JSON.stringify(d) !== JSON.stringify(B.grid)) { B.grid = d; drawGrid(); }
+                const d = await fetchGrid();
+                if (JSON.stringify(d) !== JSON.stringify(B.grid)) { B.grid = d; drawGrid(); }
             } else if (p === 'personer') {
                 const d = await sget('GetPeople');
                 if (d.success && JSON.stringify(d.people) !== JSON.stringify(B.people)) {

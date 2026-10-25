@@ -27,7 +27,7 @@ namespace HpskSite.Controllers
     /// controllers (site admin / competition manager / club admin / skjutledare, + regional admin for
     /// region-hosted comps). See Documentation/COMPETITION_STAFFING_SYSTEM.md.
     /// </summary>
-    public class StaffingController : SurfaceController
+    public partial class StaffingController : SurfaceController
     {
         /// <summary>Svaret när ett id utifrån pekar på en rad (eller ett område, en uppgift, ett pass) i en
         /// annan tävling än den anropet gäller. Behörigheten prövas bara för anropets tävling.</summary>

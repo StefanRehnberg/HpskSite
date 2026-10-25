@@ -579,6 +579,47 @@ namespace HpskSite.Services.Staffing
             return (true, null);
         }
 
+        /// <summary>
+        /// Steg 2 (Stefan B13, "Flytta raden till en annan del…"): ett uppdrag byter del och behåller sitt id, sin roll, sin
+        /// dag och sin tid — ett nytt id vore en annan rad för svarslänkar, påminnelser och kalenderfiler. Anroparen har
+        /// prövat rätten i bägge delarna, att de hör till samma familj och att rollen finns i målet.
+        /// <list type="bullet">
+        /// <item>Passet hör till delen: raden släpper det och behåller dagen (<c>DayDate</c> ur passet när raden saknar egen
+        /// dag eller tid) — en dag, aldrig en gissad klocka.</item>
+        /// <item>Byter raden tävling upphör behörigheten i tävlingen (B7): den gällde tävlingen raden hade.</item>
+        /// <item>Samma person med samma roll, plats och pass i målet (unikt villkor) → ett nej, ingenting skrivs.</item>
+        /// </list>
+        /// </summary>
+        public (bool Ok, string? Message, bool RevokedAccess) MoveToPlanning(int assignmentId, StaffOwner from, StaffOwner to)
+        {
+            if (!from.HasPlanning || !to.HasPlanning) return (false, "Uppdraget kan bara flyttas mellan planeringar.", false);
+            if (from.PlanningId == to.PlanningId) return (true, null, false);
+            using var scope = _scopeProvider.CreateScope(autoComplete: false);
+            var db = scope.Database;
+            var a = db.SingleOrDefault<StaffAssignment>(
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, from.P, from.C);
+            if (a == null) return (false, "Uppdraget hittades inte.", false);
+
+            DateTime? dayFromPass = null;
+            if (a.PassId is int pid)
+                dayFromPass = db.ExecuteScalar<DateTime?>("SELECT PassDate FROM StaffPass WHERE Id = @0", pid);
+            var dayDate = a.StartsAt == null ? (a.DayDate ?? dayFromPass) : null;
+
+            var revoke = a.HasAdminAccess && from.CompetitionIdOrNull != to.CompetitionIdOrNull;
+            try
+            {
+                db.Execute(@"UPDATE StaffAssignment SET PlanningId = @0, CompetitionId = @1, PassId = NULL, DayDate = @2,
+                        HasAdminAccess = CASE WHEN @3 = 1 THEN 0 ELSE HasAdminAccess END, ModifiedDate = @4 WHERE Id = @5",
+                    to.PlanningId, to.CompetitionIdOrNull, dayDate, revoke ? 1 : 0, DateTime.UtcNow, assignmentId);
+                scope.Complete();
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return (false, "Samma person har redan det uppdraget i den delen.", false);
+            }
+            return (true, null, revoke);
+        }
+
         // ---- person-level writes: one human, every row -------------------------------------------
 
         /// <summary>

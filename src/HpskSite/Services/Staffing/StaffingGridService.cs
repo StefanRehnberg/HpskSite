@@ -241,6 +241,7 @@ namespace HpskSite.Services.Staffing
                     var needKey = needKind == CrewNeedScope.Station ? scopeKey : null;
                     var row = new GridRow
                     {
+                        PlanningId = owner.PlanningId,
                         RoleKey = role.Key,
                         RoleName = role.DisplayName,
                         ScopeType = scopeType,
@@ -285,6 +286,7 @@ namespace HpskSite.Services.Staffing
                             ReadOnly = a.ReadOnly,
                             Note = a.Note,
                             PassId = a.PassId,
+                            PlanningId = owner.PlanningId,
                         });
                         // Planeringstestet k2 (S2-F7-1): den som tackat nej står kvar i rutan men bemannar inget — som
                         // hjälpsidan (StaffHelpService), annars sa rutnätet "2/3" medan /bemanna sökte en till.
