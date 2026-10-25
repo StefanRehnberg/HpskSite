@@ -1088,11 +1088,12 @@ window.PlaneringBemanning = (function () {
             : '<p class="pl-help mb-0">Inga uppdrag än.</p>';
         h += '</div>';
 
-        // Behörighet — bara när planeringen är kopplad till en tävling (det finns annars ingen tävling att hantera).
-        if (linked() && !p.readOnly) {
+        // Behörighet — när planeringen är kopplad till en tävling, eller är en huvudplanering med delar (steg 5: gäller då alla
+        // veckans tävlingar). Annars finns ingen tävling att hantera.
+        if ((linked() || family()) && !p.readOnly) {
             h += `<div class="pl-card"><h2>Behörighet</h2>` + (p.memberId
                 ? `<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" id="plbAccess"${p.hasAdminAccess ? ' checked' : ''}>
-                    <label class="form-check-label" for="plbAccess">Får hantera tävlingen i pistol.nu</label>
+                    <label class="form-check-label" for="plbAccess">${linked() ? 'Får hantera tävlingen i pistol.nu' : 'Får hantera alla veckans tävlingar i pistol.nu'}</label>
                     <div class="pl-help small">Anmälningar, startlistor, resultat och funktionärssidorna. Gör inte personen till tävlingsledare. Gäller alla hens uppdrag.</div></div>`
                 : '<p class="pl-help mb-0">Behörigheten ges till en inloggning — koppla personen till en medlem först.</p>') + '</div>';
         }

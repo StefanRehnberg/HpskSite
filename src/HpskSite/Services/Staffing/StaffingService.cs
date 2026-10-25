@@ -75,6 +75,31 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
+        /// Steg 5 (B3): <b>det gemensammas behörighet</b>. Ett uppdrag med "Ge behörighet" i en huvudplanering utan egen tävling
+        /// (<c>CompetitionId IS NULL</c>, planeringen är sin familjs rot) gäller varje tävling som är kopplad till en <i>del</i> i
+        /// familjen. Parametrar: <c>@0</c> = tävlingen, <c>@1</c> = medlemmen.
+        ///
+        /// <para><b>Härledd, inte speglad:</b> inga rader skapas i delarnas tävlingar, så Koppla loss eller en borttagen del
+        /// släcker behörigheten för just den tävlingen utan städning, och ingenting syns som Tävlingsansvarig (B5 —
+        /// <see cref="SyncCompetitionManagers"/> läser bara tävlingens egna rader). Kopplingen är själva godkännandet:
+        /// den kräver redan redigerarrätt i tävlingen (<c>PlanningController.LinkCompetition</c>). En ensam planering och en
+        /// tävling utanför familjen berörs inte.</para>
+        /// </summary>
+        public const string FamilyGrantSql = @"EXISTS (
+            SELECT 1 FROM StaffAssignment sa
+              JOIN Planning r ON r.Id = sa.PlanningId AND r.DeletedAt IS NULL AND r.Id = r.FamilyRootId
+             WHERE sa.MemberId = @1 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL
+               AND EXISTS (SELECT 1 FROM Planning f
+                             JOIN PlanningLink l ON l.PlanningId = f.Id AND l.TargetKind = N'competition' AND l.TargetId = @0
+                            WHERE f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL))";
+
+        /// <summary>Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.</summary>
+        private static bool CarriesFamilyGrant(NPoco.IDatabase db, StaffOwner owner) =>
+            owner.HasPlanning && !owner.HasCompetition
+            && db.ExecuteScalar<int>(@"SELECT COUNT(1) FROM Planning r JOIN Planning f ON f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL
+                                       WHERE r.Id = @0 AND r.Id = r.FamilyRootId AND r.DeletedAt IS NULL", owner.PlanningId) > 0;
+
+        /// <summary>
         /// True when this member holds at least one roster row on this competition that was granted app
         /// access ("Ge behörighet att hantera tävlingen"). Role-agnostic on purpose: sekretariat, kassa,
         /// stationschef and tävlingsledning all reach the same management page, so the grant is a property
@@ -89,9 +114,12 @@ namespace HpskSite.Services.Staffing
             try
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                return scope.Database.ExecuteScalar<int>(
-                    "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1 AND HasAdminAccess = 1",
-                    competitionId, memberId) > 0;
+                if (scope.Database.ExecuteScalar<int>(
+                        "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1 AND HasAdminAccess = 1",
+                        competitionId, memberId) > 0) return true;
+                // Steg 5 (B3): det gemensammas behörighet gäller alla veckans tävlingar. Frågan körs bara när den första sagt nej
+                // och börjar i IX_StaffAssignment_MemberId — personer utan behörighet i en familj betalar ett indexuppslag.
+                return scope.Database.ExecuteScalar<int>("SELECT CASE WHEN " + FamilyGrantSql + " THEN 1 ELSE 0 END", competitionId, memberId) > 0;
             }
             catch (Exception ex)
             {
@@ -309,7 +337,8 @@ namespace HpskSite.Services.Staffing
                 // page as the tävlingsledare). It does require a linked member, though — access is granted
                 // to a pistol.nu login, so a free-text helper row can never carry it.
                 // ...och ges bara när planeringen är kopplad till en tävling (det finns ingen tävling att hantera annars).
-                row.HasAdminAccess = req.HasAdminAccess && row.MemberId is > 0 && owner.HasCompetition;
+                // Steg 5: ...eller när planeringen är en huvudplanering med delar — då gäller den veckans alla tävlingar (FamilyGrantSql).
+                row.HasAdminAccess = req.HasAdminAccess && row.MemberId is > 0 && (owner.HasCompetition || CarriesFamilyGrant(db, owner));
                 row.Status = NormalizeStatus(req.Status);
                 row.Note = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim();
                 row.ModifiedDate = now;
@@ -744,7 +773,7 @@ namespace HpskSite.Services.Staffing
             if (rows.Count == 0)
                 return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
             // P2b, Stefans svar 2: behörigheten gäller den tävling planeringen är kopplad till.
-            if (grant && !owner.HasCompetition)
+            if (grant && !owner.HasCompetition && !CarriesFamilyGrant(db, owner))
                 return new PersonActionResult
                 {
                     Success = false,
