@@ -182,6 +182,17 @@ namespace HpskSite.Controllers
 
         private IActionResult Missing() => Json(new { success = false, missing = true, message = "Planeringen finns inte, eller så är du inte med i den." });
         private IActionResult No(string message) => Json(new { success = false, message });
+
+        /// <summary>
+        /// Expertgruppen N5: en uppgift som inte finns här — har den flyttat med sitt område till en annan planering i
+        /// familjen säger svaret vart (den som hade sidan öppen under flytten får ett begripligt besked).
+        /// </summary>
+        private IActionResult TaskGone(int planningId, int taskId)
+        {
+            var moved = _planning.TaskMovedTo(planningId, taskId);
+            return moved == null ? No("Uppgiften finns inte.")
+                : Json(new { success = false, movedTo = moved.Id, message = $"Uppgiften har flyttats till {moved.Name}. Läs om sidan, eller öppna den där." });
+        }
         private IActionResult Ok(object? extra = null) => Json(extra ?? new { success = true });
 
         private static string DT(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd HH:mm", Inv) : "";

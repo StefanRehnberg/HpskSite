@@ -453,42 +453,84 @@ namespace HpskSite.Services.Planning
         /// </summary>
         /// <summary>En rad i mallens förhandsvisning. <see cref="Key"/> = "område:uppgift" (index i mallen) — samma mall
         /// (storlek och grenar) ger samma nycklar, så valet i steg 2 pekar ut exakt de uppgifter som visades.</summary>
+        /// <see cref="PlanningId"/> = planeringen uppgiften läggs i; <see cref="SubName"/> = delplaneringens namn när det
+        /// inte är planeringen man står i (N8), annars null.
         internal sealed record TemplatePlanItem(string Key, string Area, bool AreaExists, string Title, string? Description,
-            DateTime? Due, int? DaysBefore, bool Milestone, bool Exists);
+            DateTime? Due, int? DaysBefore, bool Milestone, bool Exists, int PlanningId, string? SubName);
+
+        /// <summary>
+        /// Expertgruppen N8: dit en grens områden går när mallen har flera grenar — huvudplaneringens delplanering med
+        /// grenen, om det finns EN sådan och den som fyller i leder eller kan ändra den. <see cref="ParticipantId"/> = hens
+        /// rad där (skaparen av uppgifterna). Grenar utan en sådan delplanering stannar i planeringen, med grenens namn.
+        /// </summary>
+        private sealed record TemplateSub(int Id, string Name, DateTime? Start, int ParticipantId);
+
+        private sealed class TemplateSubRow
+        {
+            public int Id { get; set; }
+            public string Name { get; set; } = "";
+            public string? DisciplineKey { get; set; }
+            public DateTime? TargetStart { get; set; }
+            public int ParticipantId { get; set; }
+        }
+
+        private static Dictionary<string, TemplateSub> TemplateSubs(NPoco.IDatabase db, int planningId, int memberId)
+        {
+            if (memberId <= 0) return new(StringComparer.OrdinalIgnoreCase);
+            // ⚠️ Frågan börjar med SELECT (NPoco).
+            var rows = db.Fetch<TemplateSubRow>(@"SELECT c.Id, c.Name, c.DisciplineKey, c.TargetStart, m.Id AS ParticipantId
+                  FROM Planning c
+                  JOIN PlanningMember m ON m.PlanningId = c.Id AND m.MemberId = @1 AND m.RemovedAt IS NULL AND m.Access IN (@2, @3)
+                 WHERE c.ParentPlanningId = @0 AND c.DeletedAt IS NULL AND c.DisciplineKey IS NOT NULL",
+                planningId, memberId, PlanningAccessLevel.Owner, PlanningAccessLevel.Editor);
+            // Två delplaneringar med samma gren: oklart vilken — då stannar grenen i planeringen.
+            return rows.GroupBy(r => r.DisciplineKey!, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() == 1)
+                .ToDictionary(g => g.Key, g => { var r = g.First(); return new TemplateSub(r.Id, r.Name, r.TargetStart, r.ParticipantId); },
+                    StringComparer.OrdinalIgnoreCase);
+        }
 
         /// <summary>
         /// Vad mallen skulle lägga in, utan att skriva något. EN regel med <see cref="SeedTemplate"/> (som läser samma
         /// plan), så listan i steg 2 och det som läggs in kan inte skilja sig åt. <see cref="TemplatePlanItem.Exists"/> =
-        /// uppgiften finns redan i området och läggs inte in igen.
+        /// uppgiften finns redan i området och läggs inte in igen. <paramref name="memberId"/> = den som fyller i (N8:
+        /// vilka delplaneringar hen kan lägga grenens områden i).
         /// </summary>
-        internal List<TemplatePlanItem> PlanTemplate(int planningId, List<PrepArea> template, DateTime? anchor)
+        internal List<TemplatePlanItem> PlanTemplate(int planningId, List<PrepArea> template, DateTime? anchor, int memberId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            return PlanTemplate(s.Database, planningId, template, anchor);
+            return PlanTemplate(s.Database, planningId, template, anchor, TemplateSubs(s.Database, planningId, memberId));
         }
 
-        private static List<TemplatePlanItem> PlanTemplate(NPoco.IDatabase db, int planningId, List<PrepArea> template, DateTime? anchor)
+        private static List<TemplatePlanItem> PlanTemplate(NPoco.IDatabase db, int planningId, List<PrepArea> template, DateTime? anchor,
+            Dictionary<string, TemplateSub> subs)
         {
-            var areaIds = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId)
-                .GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var areaIdsByPlanning = new Dictionary<int, Dictionary<string, int>>();
+            Dictionary<string, int> AreaIds(int pid) => areaIdsByPlanning.TryGetValue(pid, out var d) ? d
+                : areaIdsByPlanning[pid] = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL", pid)
+                    .GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
             var list = new List<TemplatePlanItem>();
             for (var ai = 0; ai < template.Count; ai++)
             {
                 var def = template[ai];
+                // N8: grenens område i grenens delplanering, med sitt vanliga namn och delplaneringens första dag.
+                var sub = def.Discipline != null && subs.TryGetValue(def.Discipline, out var sb) ? sb : null;
+                var pid = sub?.Id ?? planningId;
+                var areaName = sub != null ? def.BaseName ?? def.Area : def.Area;
+                var at = sub?.Start ?? anchor;
                 // Omgång 3 (K10): ett område som redan finns får mallens uppgifter som saknas där (en andra gren, eller en
                 // större mall) — förut hoppades hela området över och den andra grenens uppgifter kom aldrig in.
-                var existed = areaIds.TryGetValue(def.Area, out var areaId);
+                var existed = AreaIds(pid).TryGetValue(areaName, out var areaId);
                 var have = existed
-                    ? db.Fetch<string>("SELECT Title FROM PlanningTask WHERE PlanningId = @0 AND AreaId = @1", planningId, areaId).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    ? db.Fetch<string>("SELECT Title FROM PlanningTask WHERE PlanningId = @0 AND AreaId = @1", pid, areaId).ToHashSet(StringComparer.OrdinalIgnoreCase)
                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 for (var ii = 0; ii < def.Items.Count; ii++)
                 {
                     var item = def.Items[ii];
-                    var title = item.TitleFromAnchor != null && anchor.HasValue ? item.TitleFromAnchor(anchor.Value.Date) : item.Title;
-                    var due = item.DueFromAnchor != null && anchor.HasValue ? item.DueFromAnchor(anchor.Value.Date)
-                        : PlanningTaskRules.DueFromDaysBefore(item.DaysBeforeComp, anchor);
-                    list.Add(new TemplatePlanItem($"{ai}:{ii}", def.Area, existed, title, item.Description, due, item.DaysBeforeComp,
-                        item.Milestone, have.Contains(title) || have.Contains(item.Title)));
+                    var title = item.TitleFromAnchor != null && at.HasValue ? item.TitleFromAnchor(at.Value.Date) : item.Title;
+                    var due = item.DueFromAnchor != null && at.HasValue ? item.DueFromAnchor(at.Value.Date)
+                        : PlanningTaskRules.DueFromDaysBefore(item.DaysBeforeComp, at);
+                    list.Add(new TemplatePlanItem($"{ai}:{ii}", areaName, existed, title, item.Description, due, item.DaysBeforeComp,
+                        item.Milestone, have.Contains(title) || have.Contains(item.Title), pid, sub?.Name));
                 }
             }
             return list;
@@ -499,40 +541,57 @@ namespace HpskSite.Services.Planning
         /// <see cref="PlanTemplate"/>); null = alla. Ett område skapas bara när minst en av dess uppgifter läggs in —
         /// annars står tomma områden kvar efter de uppgifter användaren valde bort.
         /// </summary>
-        internal (int Areas, int Tasks) SeedTemplate(int planningId, List<PrepArea> template, DateTime? anchor, int byParticipantId, ISet<string>? keys = null)
+        /// <summary>Det mallen lade in. <see cref="InSubs"/> = delplaneringarna som fick uppgifter (N8), med antalet.</summary>
+        internal sealed record TemplateSeedResult(int Areas, int Tasks, List<(string Name, int Tasks)> InSubs);
+
+        internal TemplateSeedResult SeedTemplate(int planningId, List<PrepArea> template, DateTime? anchor, int byParticipantId, int memberId, ISet<string>? keys = null)
         {
             var now = Now;
-            using var s = _scopes.CreateScope(autoComplete: true);
+            // INTE autoComplete: mallen kan skriva i flera planeringar (N8) — allt eller inget.
+            using var s = _scopes.CreateScope();
             var db = s.Database;
-            var plan = PlanTemplate(db, planningId, template, anchor);
+            var subs = TemplateSubs(db, planningId, memberId);
+            var plan = PlanTemplate(db, planningId, template, anchor, subs);
+            var byPid = subs.Values.ToDictionary(x => x.Id, x => x.ParticipantId);
             int areas = 0, tasks = 0;
+            var touched = new Dictionary<int, (string Name, int Tasks)>();
             for (var ai = 0; ai < template.Count; ai++)
             {
                 var def = template[ai];
                 var chosen = plan.Where(p => p.Key.StartsWith(ai + ":", StringComparison.Ordinal) && !p.Exists
                     && (keys == null || keys.Contains(p.Key))).ToList();
                 if (chosen.Count == 0) continue;
+                var pid = chosen[0].PlanningId;
+                var who = byPid.TryGetValue(pid, out var sp) ? sp : byParticipantId;
+                var at = pid == planningId ? anchor : subs.Values.First(x => x.Id == pid).Start ?? anchor;
                 var existed = chosen[0].AreaExists;
-                var area = EnsureArea(db, planningId, def.Area, byParticipantId, now);
+                var area = EnsureArea(db, pid, chosen[0].Area, who, now);
                 if (!existed) areas++;
-                var sort = existed ? NextTaskSort(db, planningId, area.Id) : 0;
+                var sort = existed ? NextTaskSort(db, pid, area.Id) : 0;
                 foreach (var p in chosen)
                 {
                     var item = def.Items[int.Parse(p.Key[(p.Key.IndexOf(':') + 1)..])];
-                    var t = NewTask(planningId, area.Id, item.Title, item.Description, item.DaysBeforeComp, anchor, PlanningTaskSource.Template, null, ++sort, byParticipantId, now);
+                    var t = NewTask(pid, area.Id, item.Title, item.Description, item.DaysBeforeComp, at, PlanningTaskSource.Template, null, ++sort, who, now);
                     // P3: milstolparna, och förbundets frister ur tävlingens dag när den är känd.
                     t.IsMilestone = item.Milestone;
                     t.SendToForbundet = item.Milestone && item.ToForbundet;
-                    if (item.DueFromAnchor != null && anchor.HasValue) t.DueDate = item.DueFromAnchor(anchor.Value.Date);
+                    if (item.DueFromAnchor != null && at.HasValue) t.DueDate = item.DueFromAnchor(at.Value.Date);
                     // P4: titeln kan bero på dagen (SM-annonsens nummer i tidningen).
-                    if (item.TitleFromAnchor != null && anchor.HasValue) t.Title = item.TitleFromAnchor(anchor.Value.Date);
+                    if (item.TitleFromAnchor != null && at.HasValue) t.Title = item.TitleFromAnchor(at.Value.Date);
                     db.Insert(t);
-                    TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, "Från mallen.", null, false, now);
+                    TaskEvent(db, t, PlanningTaskEventKind.Created, who, null, t.Status, "Från mallen.", null, false, now);
                     tasks++;
+                    if (pid != planningId) touched[pid] = (p.SubName ?? "", (touched.TryGetValue(pid, out var c) ? c.Tasks : 0) + 1);
                 }
             }
             if (tasks > 0) Bump(db, planningId);
-            return (areas, tasks);
+            foreach (var pid in touched.Keys)
+            {
+                InsertSystem(db, pid, "template-from-parent", $"Mallen i huvudplaneringen lade in {touched[pid].Tasks} uppgifter här.", null, null, null, now);
+                Bump(db, pid);
+            }
+            s.Complete();
+            return new TemplateSeedResult(areas, tasks, touched.Values.OrderBy(v => v.Name).ToList());
         }
 
         public sealed record ChecklistTask(int ChecklistItemId, string Title, string? Description, int? DaysBefore);

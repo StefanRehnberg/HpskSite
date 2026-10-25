@@ -232,6 +232,15 @@ namespace HpskSite.Tests.Services
             PlanningNotifyRules.GetsDigest(mode).Should().Be(digest);
             PlanningNotifyRules.GetsHourlyPush(mode).Should().Be(hourly);
             PlanningNotifyRules.GetsMeetingMail(mode).Should().Be(meeting);
+            // Stefan 2026-10-25: det som gäller just mig (uppgifter, mitt områdes besked) följer samma regel som att nämnas.
+            PlanningNotifyRules.GetsDirectedMail(mode).Should().Be(mention);
+        }
+
+        [Fact]
+        public void Notify_help_says_what_is_mailed_directly()
+        {
+            foreach (var m in new[] { PlanningNotifyMode.Daily, PlanningNotifyMode.All, PlanningNotifyMode.Mentions })
+                PlanningNotifyMode.Help(m).Should().Contain("ditt område").And.Contain("uppgift du får");
         }
 
         [Fact]

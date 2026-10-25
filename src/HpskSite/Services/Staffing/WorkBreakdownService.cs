@@ -104,7 +104,12 @@ namespace HpskSite.Services.Staffing
     /// </summary>
     internal record PrepItem(string Title, int? DaysBeforeComp, string? Description = null, bool Milestone = false,
         bool ToForbundet = false, Func<DateTime, DateTime>? DueFromAnchor = null, Func<DateTime, string>? TitleFromAnchor = null);
-    internal record PrepArea(string Area, List<PrepItem> Items);
+    /// <summary>
+    /// Ett område i mallen. Med flera grenar (<see cref="PrepTemplates.ForMany"/>) bär grenens egna områden
+    /// <see cref="Discipline"/> och namnet utan grenen (<see cref="BaseName"/>) — Expertgruppen N8: har huvudplaneringen
+    /// en delplanering för grenen hamnar området där, med sitt vanliga namn.
+    /// </summary>
+    internal record PrepArea(string Area, List<PrepItem> Items, string? Discipline = null, string? BaseName = null);
 
     /// <summary>
     /// Built-in preparation templates (spec §5.1), keyed by DISCIPLINE (Fält / Springskytte / Precision)
@@ -142,7 +147,8 @@ namespace HpskSite.Services.Staffing
         /// <summary>
         /// Flera grenar på en gång (omgång 3, persona 3: en SM-vecka med fält och precision). De gemensamma områdena
         /// (kansliet, sekretariatet, förbundet …) kommer en gång, med uppgifterna sammanslagna; grenens egna områden får
-        /// grenens namn ("Materiel – Fält"), så att uppgifterna hamnar i grenens område.
+        /// grenens namn ("Materiel – Fält"), så att uppgifterna hamnar i grenens område — eller, när huvudplaneringen har en
+        /// delplanering för grenen, i delplaneringen med sitt vanliga namn (<c>PlanningService.PlanTemplate</c>, N8).
         /// </summary>
         public static List<PrepArea> ForMany(IEnumerable<string?> disciplines, string? size)
         {
@@ -152,9 +158,10 @@ namespace HpskSite.Services.Staffing
             foreach (var d in list)
                 foreach (var a in For(d, size))
                 {
-                    var name = Common.Contains(a.Area) ? a.Area : $"{a.Area} – {DisciplineLabel(d)}";
+                    var common = Common.Contains(a.Area);
+                    var name = common ? a.Area : $"{a.Area} – {DisciplineLabel(d)}";
                     var have = merged.FindIndex(m => string.Equals(m.Area, name, StringComparison.OrdinalIgnoreCase));
-                    if (have < 0) { merged.Add(new PrepArea(name, a.Items.ToList())); continue; }
+                    if (have < 0) { merged.Add(new PrepArea(name, a.Items.ToList(), common ? null : d, common ? null : a.Area)); continue; }
                     var items = merged[have].Items;
                     items.AddRange(a.Items.Where(i => !items.Any(x => string.Equals(x.Title, i.Title, StringComparison.OrdinalIgnoreCase))));
                 }

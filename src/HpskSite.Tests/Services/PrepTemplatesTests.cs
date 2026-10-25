@@ -104,5 +104,17 @@ namespace HpskSite.Tests.Services
         {
             PrepTemplates.ForMany(new[] { "Faltskytte" }, "krets").Should().NotContain(a => a.Area.Contains(" – "));
         }
+
+        [Fact]
+        public void Flera_grenar_grenens_omraden_bar_grenen_och_sitt_vanliga_namn_gemensamma_ingen_gren()
+        {
+            // Expertgruppen N8: grenens områden kan läggas i grenens delplanering, då med sitt vanliga namn.
+            var t = PrepTemplates.ForMany(new[] { "Precision", "Faltskytte" }, "sm");
+            var falt = t.Where(a => a.Discipline == "Faltskytte").ToList();
+            falt.Should().NotBeEmpty();
+            falt.Should().OnlyContain(a => a.BaseName != null && a.Area == a.BaseName + " – Fält");
+            t.Single(a => a.Area == "Förbundet").Discipline.Should().BeNull();
+            t.Where(a => a.Discipline == null).Should().OnlyContain(a => !a.Area.Contains(" – "));
+        }
     }
 }

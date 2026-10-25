@@ -413,7 +413,7 @@ namespace HpskSite.Services.Planning
             var task = _planning.GetTask(planningId, taskId);
             var who = _planning.Participant(planningId, assigneeParticipantId);
             if (p == null || task == null || who == null || !who.IsActive) return TaskMailOutcome.None;
-            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return TaskMailOutcome.None;
+            if (!PlanningNotifyRules.GetsDirectedMail(who.NotifyMode)) return TaskMailOutcome.None;
             var r = ResolveRecipient(who);
             if (r == null) return TaskMailOutcome.None;
             if (TaskMailSentToday(planningId, who.Id, taskId))
@@ -444,7 +444,7 @@ namespace HpskSite.Services.Planning
             var task = _planning.GetTask(planningId, taskId);
             var who = _planning.Participant(planningId, leadParticipantId);
             if (p == null || task == null || who == null || !who.IsActive) return false;
-            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            if (!PlanningNotifyRules.GetsDirectedMail(who.NotifyMode)) return false;
             var r = ResolveRecipient(who);
             if (r == null) return false;
             var help = status == PlanningTaskStatus.NeedsHelp;
@@ -566,7 +566,7 @@ namespace HpskSite.Services.Planning
 
                     var p = _planning.Get(g.Key.PlanningId);
                     var who = _planning.Participant(g.Key.PlanningId, g.Key.ParticipantId);
-                    if (p == null || p.DeletedAt != null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                    if (p == null || p.DeletedAt != null || who == null || !who.IsActive || !PlanningNotifyRules.GetsDirectedMail(who.NotifyMode)) continue;
                     var r = ResolveRecipient(who);
                     if (r == null) continue;
                     var taskIds = g.Select(q => q.RefId).ToHashSet();
@@ -603,7 +603,7 @@ namespace HpskSite.Services.Planning
             if (taskIds.Count == 1) return await TaskAssignedAsync(planningId, taskIds[0], assigneeParticipantId, by);
             var p = _planning.Get(planningId);
             var who = _planning.Participant(planningId, assigneeParticipantId);
-            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsDirectedMail(who.NotifyMode)) return false;
             var r = ResolveRecipient(who);
             if (r == null) return false;
             var tasks = _planning.Tasks(planningId).Where(t => taskIds.Contains(t.Id)).OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();
@@ -648,7 +648,7 @@ namespace HpskSite.Services.Planning
         {
             var p = _planning.Get(planningId);
             var who = _planning.Participant(planningId, participantId);
-            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsDirectedMail(who.NotifyMode)) return false;
             var r = ResolveRecipient(who);
             if (r == null) return false;
             var tasks = _planning.Tasks(planningId).Where(t => taskIds.Contains(t.Id)).OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();

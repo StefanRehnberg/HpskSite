@@ -325,7 +325,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
-            if (task == null) return No("Uppgiften finns inte.");
+            if (task == null) return TaskGone(id, taskId);
             if (!PlanningAccess.CanCommentOnTask(x.Caller, task)) return No("Bara den som deltar kommenterar.");
             var err = _planning.AddTaskComment(id, taskId, x.Caller.ParticipantId, text, x.Caller.ViaLink);
             return err == null ? Ok() : No(err);
@@ -346,13 +346,15 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Mallen fylls i av den som kan ändra planeringen.");
             var comp = LinkedCompetition(id);
-            var plan = _planning.PlanTemplate(id, PrepTemplates.ForMany(TemplateDisciplines(comp, discipline), size), AnchorFor(x.Planning, comp));
+            var plan = _planning.PlanTemplate(id, PrepTemplates.ForMany(TemplateDisciplines(comp, discipline), size), AnchorFor(x.Planning, comp), x.MemberId);
             return Ok(new
             {
                 success = true,
-                areas = plan.GroupBy(p => p.Area).Select(g => new
+                // N8: ett område per planering — grenens områden kan gå till grenens delplanering (subName).
+                areas = plan.GroupBy(p => (p.PlanningId, p.Area)).Select(g => new
                 {
-                    area = g.Key,
+                    area = g.Key.Area,
+                    subName = g.First().SubName,
                     exists = g.First().AreaExists,
                     items = g.Select(p => new
                     {
@@ -380,13 +382,13 @@ namespace HpskSite.Controllers
             var discs = TemplateDisciplines(comp, discipline);
             var keys = items == null ? null : items.Split(new[] { '\n', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
             if (keys != null && keys.Count == 0) return No("Välj minst en uppgift.");
-            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId, keys);
+            var r = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId, x.MemberId, keys);
             // Planeringstestet k2: mallens gren blev aldrig planeringens — Stationerna och bemanningens roller följer grenen.
             // En planering utan gren och en mall med EN gren: då är det den grenen.
             if (comp == null && string.IsNullOrWhiteSpace(x.Planning.DisciplineKey) && discs.Length == 1
                 && HpskSite.Models.CompetitionTypes.All.Any(t => t.Id == discs[0]))
                 _planning.SetDisciplineKey(id, discs[0], x.MemberId);
-            return Ok(new { success = true, areas, tasks });
+            return Ok(new { success = true, areas = r.Areas, tasks = r.Tasks, inSubs = r.InSubs.Select(v => new { name = v.Name, tasks = v.Tasks }) });
         }
 
         [HttpGet]

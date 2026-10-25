@@ -126,6 +126,19 @@ namespace HpskSite.Services.Planning
             return PlanningFamily.Rows(s.Database, planningId);
         }
 
+        /// <summary>
+        /// N5: planeringen i familjen där uppgiften nu ligger, när den inte ligger i <paramref name="planningId"/> (den har
+        /// flyttat med sitt område). Null när uppgiften inte finns i familjen, eller är borttagen.
+        /// </summary>
+        public PlanningRow? TaskMovedTo(int planningId, int taskId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.FirstOrDefault<PlanningRow>(@"SELECT f.* FROM PlanningTask t
+                  JOIN Planning f ON f.Id = t.PlanningId AND f.DeletedAt IS NULL
+                  JOIN Planning p ON p.Id = @0 AND p.FamilyRootId = f.FamilyRootId
+                 WHERE t.Id = @1 AND t.PlanningId <> @0 AND t.DeletedAt IS NULL", planningId, taskId);
+        }
+
         private sealed class FamilyLink { public int PlanningId { get; set; } public int TargetId { get; set; } }
 
         /// <summary>Familjens kopplingar, planering → tävling.</summary>

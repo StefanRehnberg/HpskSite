@@ -136,10 +136,14 @@ namespace HpskSite.Models.Planning
 
         public static string Help(string? v) => Normalize(v) switch
         {
-            All => "Notis i telefonen direkt när någon nämner dig, annars högst en gång i timmen — och ett mejl om dagen med det du inte läst.",
-            Mentions => "Bara när någon nämner dig: en notis och ett mejl direkt. Möten mejlas som vanligt.",
-            Off => "Inga notiser och inga mejl alls från planeringen, inte heller om möten.",
-            _ => "Ett mejl på kvällen med det som är nytt och som du inte läst. Mötesförfrågningar, bokade möten och när någon nämner dig mejlas direkt.",
+            // Stefan 2026-10-25: texten säger vad som mejlas direkt — det som gäller just dig (PlanningNotifyRules.GetsDirectedMail).
+            All => "Notis i telefonen direkt när någon nämner dig, annars högst en gång i timmen — och ett mejl om dagen med det du inte läst. "
+                + "Det som gäller just dig mejlas direkt: möten, en uppgift du får, och en uppgift i ditt område som behöver hjälp eller är klar att pröva.",
+            Mentions => "Bara det som gäller just dig: när någon nämner dig (en notis och ett mejl), möten, en uppgift du får, "
+                + "och en uppgift i ditt område som behöver hjälp eller är klar att pröva.",
+            Off => "Inga notiser och inga mejl alls från planeringen, inte heller om möten eller uppgifter.",
+            _ => "Ett mejl på kvällen med det som är nytt och som du inte läst. Det som gäller just dig mejlas direkt: möten, när någon nämner dig, "
+                + "en uppgift du får, och en uppgift i ditt område som behöver hjälp eller är klar att pröva.",
         };
     }
 

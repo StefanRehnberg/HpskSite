@@ -213,30 +213,33 @@
     const levelBadge = p => `<span class="badge rounded-pill ${LEVEL_BADGE[p.access] || 'text-bg-secondary'}">${esc(p.accessLabel || p.access)}</span>`;
     let pendingMentions = new Map(); // participantId -> name
 
+    // Stefan 2026-10-25: rälsen grupperas — Översikt, tre grupper, och Inställningar sist (med Dina notiser).
     const VIEWS = [
         { key: 'oversikt', label: 'Översikt' },
-        { key: 'meddelanden', label: 'Meddelanden', need: s => s.me.canReadMessages },
-        { key: 'moten', label: 'Möten' },
-        { key: 'uppgifter', label: 'Uppgifter' },
+        { key: 'meddelanden', label: 'Meddelanden', group: 'Samarbete', need: s => s.me.canReadMessages },
+        { key: 'moten', label: 'Möten', group: 'Samarbete' },
         // Omgång 3 steg 10: Förslag och beslut syns när det finns något, eller när delen slagits på under Åtgärder.
         // hashOk: en länk (#vy=beslut) öppnar delen även när rälsen döljer den — sidans läge kan vara äldre än förslaget.
-        { key: 'beslut', label: 'Förslag och beslut', need: s => !s.planning.parts || s.planning.parts.decisions, hashOk: true },
-        { key: 'dokument', label: 'Dokument' },
-        { key: 'deltagare', label: 'Deltagare' },
-        // Stationerna (Stefan 2026-10-24): fältskyttets stationer — föreningarna, delarna och helheten — på en egen plats.
-        { key: 'stationer', label: 'Stationerna', need: s => !TOKEN && stationsWanted(s) },
+        { key: 'beslut', label: 'Förslag och beslut', group: 'Samarbete', need: s => !s.planning.parts || s.planning.parts.decisions, hashOk: true },
+        { key: 'deltagare', label: 'Deltagare', group: 'Samarbete' },
+        { key: 'uppgifter', label: 'Uppgifter', group: 'Arbetet' },
+        { key: 'dokument', label: 'Dokument', group: 'Arbetet' },
         // Omgång 2: vägen till tävlingen — ansökan till kretsen, tävlingen som skapas, och kopplingen. Den som deltar
         // utan att kunna ändra ser den när det finns något att läsa.
-        { key: 'tavling', label: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || !!(s.planning.application && s.planning.application.id) || !!s.planning.competition) },
+        { key: 'tavling', label: 'Tävlingen', group: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || !!(s.planning.application && s.planning.application.id) || !!s.planning.competition) },
+        // Stationerna (Stefan 2026-10-24): fältskyttets stationer — föreningarna, delarna och helheten — på en egen plats.
+        { key: 'stationer', label: 'Stationerna', group: 'Tävlingen', need: s => !TOKEN && stationsWanted(s) },
         // Omgång 2 (2026-10-24): bemanningen är en del i planeringen, inte en egen sida (planering-bemanning.js).
         // Omgång 3 (K8): platsen syns för alla som är med — den som inte kan ändra får veta vem som sköter bemanningen
         // och sina egna uppdrag, i stället för att delen tyst saknas.
-        { key: 'bemanning', label: 'Bemanning', need: s => !TOKEN && (s.me.canEdit || s.me.isParticipant) },
+        { key: 'bemanning', label: 'Bemanning', group: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || s.me.isParticipant) },
         // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad.
-        { key: 'dagsprogram', label: 'Dagsprogram', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
-        { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
-        { key: 'installningar', label: 'Inställningar', need: s => s.me.canEdit },
+        { key: 'dagsprogram', label: 'Dagsprogram', group: 'Tävlingen', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
+        // Dina notiser ligger överst i Inställningar — alla som är med har den, den som kan ändra även planeringens.
+        { key: 'installningar', label: 'Inställningar', need: s => s.me.isParticipant || s.me.canEdit },
     ];
+    // Mejlens länk "Ändra hur du får notiser" (#vy=notiser) öppnar Inställningar vid Dina notiser.
+    const VIEW_ALIAS = { notiser: 'installningar' };
 
     function hashParams() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
     function hashView() { return hashParams().get('vy') || ''; }
@@ -275,6 +278,7 @@
         return MEET.meetings.filter(m => m.status === 'Proposed' && m.options.every(o => !o.mine)).length;
     }
 
+    let railHere = null;   // platsen rälsen senast ritades för (telefonens meny fälls ihop när den byts)
     function renderRail() {
         const s = S;
         $('plOrg').textContent = s.planning.name;
@@ -283,12 +287,40 @@
         const counts = { meddelanden: unreadCount(), moten: votesOwed(), uppgifter: myOpenTasks(), beslut: decisionsOwed(), deltagare: s.me.pendingRequests || 0 };
         const here = RAIL_ONLY || (view === 'mote' ? 'moten' : view);
         const base = RAIL_ONLY ? '/tavlingsplanering/' + ID : '';
-        $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v => v.href
+        const link = v => v.href
             // En egen sida (dagsprogrammet): en vanlig länk, i samma flik.
             ? `<a href="${esc(v.href(s))}" class="pl-nav${v.key === here ? ' on' : ''}">${esc(v.label)}</a>`
             : `<a href="${base}#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
-                + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
+                + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>';
+        // En grupp visas bara med det man har; utan något i den syns inte heller rubriken.
+        const shown = VIEWS.filter(v => !v.need || v.need(s));
+        const html = [];
+        shown.forEach((v, i) => {
+            if (!v.group) { html.push((v.key === 'installningar' && i > 0 ? '<div class="pl-railsep"></div>' : '') + link(v)); return; }
+            if (shown[i - 1] && shown[i - 1].group === v.group) return;
+            html.push(`<div class="pl-railgrp"><div class="pl-railh">${esc(v.group)}</div><div class="pl-railitems">${shown.filter(x => x.group === v.group).map(link).join('')}</div></div>`);
+        });
+        // Expertgruppen N7: på telefon tog rälsen hela första skärmen. Där fälls den ihop bakom en knapp som säger var man
+        // är och hur mycket som väntar; datorn visar den som förut (knappen döljs i CSS).
+        const cur = VIEWS.find(v => v.key === here);
+        const waiting = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
+        // Ett val fäller ihop menyn — men pollningens omritning (samma plats) låter en utfälld meny stå kvar.
+        const navEl = $('plRail').closest('.pl-rail');
+        if (railHere !== here) navEl?.classList.remove('open');
+        railHere = here;
+        const isOpen = !!navEl?.classList.contains('open');
+        $('plRail').innerHTML = `<button type="button" class="pl-railtoggle" data-rail-toggle aria-expanded="${isOpen}" aria-controls="plRailNav">
+                <span><i class="bi bi-list me-2" aria-hidden="true"></i>Meny · <b>${esc(cur ? cur.label : 'Översikt')}</b></span>
+                <span>${waiting ? `<span class="pl-count me-2" title="${waiting} väntar">${waiting}</span>` : ''}<i class="bi bi-chevron-down" aria-hidden="true"></i></span></button>
+            <div class="pl-railnav" id="plRailNav">${html.join('')}</div>`;
     }
+    document.addEventListener('click', e => {
+        const b = e.target.closest('[data-rail-toggle]'); if (!b) return;
+        const nav = b.closest('.pl-rail');
+        const open = !nav.classList.contains('open');
+        nav.classList.toggle('open', open);
+        b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
 
     // Omgång 3 steg 10 (progressivt avslöjande): Åtgärder slår på en del som inte visas än — och av igen så länge den är tom.
     function partActions() {
@@ -344,13 +376,14 @@
     function render(v) {
         if (!S) return;
         const allowed = VIEWS.filter(x => !x.href && (!x.need || x.need(S) || x.hashOk)).map(x => x.key).concat(['mote']);
+        v = VIEW_ALIAS[v] || v;
         view = allowed.includes(v) ? v : 'oversikt';
         if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
         if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
-           uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings,
+           uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, installningar: viewSettings,
            tavling: viewCompetition, stationer: viewStations,
            bemanning: () => S.me.canEdit ? window.PlaneringBemanning.render(STAFF_API) : viewStaffingInfo() })[view]();
     }
@@ -465,8 +498,9 @@
         }
         // Planeringstestet k2 (S4 T4-8): "Inget väntar på dig" lovade för mycket när Kjell inte hade gjort något än.
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget att svara på just nu.</p>'}</div>`);
-        html.push(familyCompetitionsCardHtml());
+        // N7: delplaneringarna före tävlingarna och veckoprogrammet, som kan bli långt — kortet ska synas utan att rulla.
         html.push(subPlanningsCardHtml());
+        html.push(familyCompetitionsCardHtml());
         html.push(parentDecisionsCardHtml());
         html.push('<div id="plStationsSum"></div>');
 
@@ -1959,7 +1993,8 @@
             ${[['Precision', 'Precision'], ['Milsnabb', 'Milsnabb'], ['Faltskytte', 'Fältskytte'], ['Springskytte', 'Springskytte']].map(([v, l]) =>
                 `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" data-tm-disc value="${v}" id="tmD${v}"${wantDisc(v) ? ' checked' : ''}>
                     <label class="form-check-label" for="tmD${v}">${l}</label></div>`).join('')}
-            <div class="pl-help small">Med flera grenar kommer de gemensamma områdena en gång, och grenens egna områden får grenens namn, till exempel <i>Materiel – Fält</i>.</div></div>`;
+            <div class="pl-help small">Med flera grenar kommer de gemensamma områdena en gång. Grenens egna områden hamnar i grenens delplanering om det finns en,
+                annars här med grenens namn, till exempel <i>Materiel – Fält</i>.</div></div>`;
         const sizes = [['klubb', 'Klubbtävling', 'Ingen ansökan.'],
             ['krets', 'Kretstävling', 'Ansökan till kretsstyrelsen.'],
             ['nationell', 'Nationell tävling', 'Ansökan via kretsen före 1 oktober året före; inbjudan till förbundet för kännedom.'],
@@ -1993,6 +2028,7 @@
                 <div class="form-check border-bottom pb-1 mb-1">
                     <input class="form-check-input" type="checkbox" id="tmA${ai}" data-tm-areabox="${ai}"${fresh.length ? ' checked' : ' disabled'}>
                     <label class="form-check-label fw-semibold" for="tmA${ai}">${esc(a.area)}</label>
+                    ${a.subName ? `<span class="badge text-bg-primary-subtle text-primary-emphasis border ms-1" data-tm-sub>i delplaneringen ${esc(a.subName)}</span>` : ''}
                     ${a.exists ? '<span class="badge text-bg-light border ms-1">finns redan</span>' : ''}
                 </div>
                 ${a.items.map(i => `<div class="form-check ms-3">
@@ -2047,7 +2083,8 @@
                 const r = await post('SeedTemplate', { size: choice.size, discipline: (choice.discs || []).join(','), items: keys.join('\n') });
                 if (!r.success) return r.message;
                 await reloadTasks(); rerender();
-                showMsg(r.tasks ? `${r.areas ? r.areas + ' nya områden och ' : ''}${r.tasks} uppgifter lades till.` : 'Ingenting lades till.', r.tasks ? 'success' : 'info');
+                const subs = (r.inSubs || []).map(x => `${x.tasks} i ${x.name}`).join(', ');
+                showMsg(r.tasks ? esc(`${r.areas ? r.areas + ' nya områden och ' : ''}${r.tasks} uppgifter lades till${subs ? ' — varav ' + subs : ''}.`) : 'Ingenting lades till.', r.tasks ? 'success' : 'info');
                 return true;
             }
         });
@@ -3169,24 +3206,24 @@
     }
     async function reloadPeople() { const s = await get('Get'); if (s.success) { S = s; version = s.version; } }
 
-    // ================================================================ Mina notiser
-    function viewNotify() {
-        setHead('Mina notiser', esc(S.planning.name));
-        setActions([]);
+    // ================================================================ Dina notiser (överst i Inställningar sedan 2026-10-25)
+    function notifyHtml() {
         const cur = S.me.notifyMode;
-        $('plBody').innerHTML = `<div class="pl-card"><h2>Hur vill du få veta vad som händer?</h2>
+        return `<div id="plNotifySec"><h2 class="h5 fw-bold mb-2">Dina notiser</h2><div class="pl-card" style="max-width:720px"><h2>Hur vill du få veta vad som händer?</h2>
             <p class="pl-help">Gäller bara den här planeringen. Du kan ändra när som helst.</p>
             ${S.notifyModes.map(n => `<label class="pl-radio"><input type="radio" name="plNotify" value="${n.value}" class="form-check-input me-2"${n.value === cur ? ' checked' : ''}>
                 <b>${esc(n.label)}</b>${n.value === 'Daily' ? ' <span class="pl-help small">(förval)</span>' : ''}<div class="pl-help small ms-4">${esc(n.help)}</div></label>`).join('')}
             <div id="plNotifySaved" class="pl-help small"></div></div>
-            ${S.me.icsUrl ? `<div class="pl-card"><h2>Mötena i din kalender</h2>
+            ${S.me.icsUrl ? `<div class="pl-card" style="max-width:720px"><h2>Mötena i din kalender</h2>
                 <p>Lägg planeringens bokade möten i din egen kalender (telefonen, Outlook, Google). Flyttas ett möte flyttas det i kalendern också.</p>
                 <a class="btn btn-outline-secondary" href="${esc(S.me.icsUrl)}"><i class="bi bi-calendar-plus me-1"></i>Lägg till kalendern</a>
                 <div class="mt-2"><label class="form-label small" for="plIcsUrl">Eller kopiera adressen och prenumerera på den i din kalender:</label>
                 <input id="plIcsUrl" class="form-control form-control-sm" readonly value="${esc(S.me.icsUrl)}"></div></div>` : ''}
-            ${!S.me.isGuest ? `<div class="pl-card"><h2>Notiser i telefonen</h2><p class="pl-help">Notiser i telefonen kräver att du slagit på notiser för pistol.nu på den telefon eller dator du vill få dem på.
+            ${!S.me.isGuest ? `<div class="pl-card" style="max-width:720px"><h2>Notiser i telefonen</h2><p class="pl-help">Notiser i telefonen kräver att du slagit på notiser för pistol.nu på den telefon eller dator du vill få dem på.
                 ${S.me.pushConfigured ? '' : 'Notiser i telefonen är inte påslagna på den här sajten ännu — du får mejl.'}</p>
-                <a class="btn btn-outline-primary" href="/user-profile-page#notiser"><i class="bi bi-bell me-1"></i>Slå på notiser på Min sida</a></div>` : ''}`;
+                <a class="btn btn-outline-primary" href="/user-profile-page#notiser"><i class="bi bi-bell me-1"></i>Slå på notiser på Min sida</a></div>` : ''}</div>`;
+    }
+    function bindNotify() {
         $('plBody').querySelectorAll('input[name="plNotify"]').forEach(r => r.addEventListener('change', async () => {
             const res = await post('SetMyNotify', { mode: r.value });
             if (!res.success) { failMsg(res); return; }
@@ -3206,7 +3243,13 @@
             { divider: true },
             { label: 'Ta bort planeringen…', icon: 'bi-trash', danger: true, fn: removePlanning },
         ] : []);
-        $('plBody').innerHTML = `<div class="pl-card" style="max-width:720px">
+        const mine = S.me.isParticipant ? notifyHtml() : '';
+        if (!S.me.canEdit) {
+            $('plBody').innerHTML = mine;
+            bindNotify();
+            return;
+        }
+        $('plBody').innerHTML = mine + `${mine ? '<h2 class="h5 fw-bold mb-2 mt-4">Planeringen</h2>' : ''}<div class="pl-card" style="max-width:720px">
             <div class="mb-3"><label class="form-label fw-semibold" for="stName">Namn</label><input id="stName" class="form-control" maxlength="200" value="${esc(p.name)}"></div>
             <div class="mb-3"><label class="form-label fw-semibold" for="stTarget">Ungefär när och var</label>
                 <input id="stTarget" class="form-control" maxlength="200" value="${esc(p.targetText || '')}" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
@@ -3234,6 +3277,7 @@
                 <p class="pl-help small">Gäller alla planeringar: dit går milstolpar som skickas till förbundet (till exempel inbjudan i tid till tidningen). Syns bara för sajtadministratörer.</p>
                 <div class="d-flex gap-2 flex-wrap"><input id="stForbundet" type="email" class="form-control" style="max-width:320px" maxlength="256" value="${esc((TASKS && TASKS.forbundetEmail) || '')}" placeholder="namn@pistolskytteforbundet.se">
                 <button class="btn btn-outline-primary" id="stForbundetSave">Spara adressen</button></div><span id="stForbundetSaved" class="pl-help small"></span></div>` : ''}`;
+        bindNotify();
         datePicker($('stStart')); datePicker($('stEnd'));
         $('stDoneMeet')?.addEventListener('change', async e => {
             const r = await post('SetDoneAtMeetingsOnly', { value: e.target.checked ? '1' : '0' });

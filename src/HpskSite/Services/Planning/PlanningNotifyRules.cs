@@ -33,6 +33,14 @@ namespace HpskSite.Services.Planning
 
         public static bool GetsMeetingMail(string? mode) => PlanningNotifyMode.Normalize(mode) != PlanningNotifyMode.Off;
 
+        /// <summary>
+        /// Stefan 2026-10-25 ("de ska följa relevant inställning"): det som gäller just mig — en uppgift jag får, mina
+        /// försenade uppgifter, och en uppgift i ett område jag ansvarar för som behöver hjälp eller är klar att pröva —
+        /// mejlas direkt i alla lägen utom Inga notiser, precis som när någon nämner mig. Inställningens text säger det
+        /// (<see cref="PlanningNotifyMode.Help"/>).
+        /// </summary>
+        public static bool GetsDirectedMail(string? mode) => MailOnMention(mode);
+
         public static bool GetsMeetingPush(string? mode) => PlanningNotifyMode.Normalize(mode) != PlanningNotifyMode.Off;
 
         /// <summary>Är det dags för kvällsmejlet? Från 18 och resten av dygnet.</summary>

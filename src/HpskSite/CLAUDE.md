@@ -12321,8 +12321,8 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 
 - **Ytorna:** Tävling → **Tävlingsplanering** (`/tavlingsplanering`, `TavlingsplaneringHub.cshtml`, "Mina
   planeringar" + Ny planering). En planering = `/tavlingsplanering/{id}` (`Planering.cshtml` +
-  `wwwroot/js/planering.js`, Ekonomins skal: Översikt · Meddelanden · Möten · Deltagare · Mina notiser ·
-  Inställningar, `#vy=`). Mejlens knappar → `/tavlingsplanering/svar?t=…&a=svara|rosta|oppna|notiser`
+  `wwwroot/js/planering.js`, Ekonomins skal — rälsen grupperad sedan 2026-10-25, se *Rälsen grupperad*; Mina notiser är
+  Inställningar → Dina notiser, `#vy=`). Mejlens knappar → `/tavlingsplanering/svar?t=…&a=svara|rosta|oppna|notiser`
   (samma sida i **länkläge**, varje anrop bär `t`). Kalender: `/tavlingsplanering/kalender.ics?t=`.
   Startsidan: kortet *Planeringar* (`_PlanningCard`, bara när något väntar). Mitt schema: *Planeringarnas
   möten* (`_PlanningMeetingsSchedule`, egen sektion — Mitt schema är i övrigt per tävling).
@@ -12354,7 +12354,7 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **Kontaktuppgifter** (radens Åtgärder, Stefan 2026-10-23): `ContactInfo` — bara den som är med (alla nivåer,
   även gäst via mejllänk), bara för en aktiv deltagare i SAMMA planering; medlem = kontots e-post + `phoneNumber`,
   gäst = inbjudningsadressen. Hämtas på begäran — `Get` och `SearchMembers` lämnar aldrig ut adresser.
-- *Mina notiser* länkar till `/user-profile-page#notiser` (Profil-fliken, nedrullad till Notiser-kortet).
+- *Dina notiser* (Inställningar) länkar till `/user-profile-page#notiser` (Profil-fliken, nedrullad till Notiser-kortet).
 - **Byt ut** (`ReplaceParticipant` → `PlanningService.ReplaceParticipant`, en transaktion): den nya (medlem
   eller gäst) får samma nivå och Företräder, den gamla lämnar, meddelandena står kvar, flödet får EN rad
   (`member-replaced`, "X ersatte Y (företräder Z)"). Bara Sammankallande, aldrig sig själv.
@@ -12771,6 +12771,34 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     — inget av det kördes någonsin i prod) + den bantade P3j. Dev konsoliderad med
     `consolidate-planning-final-form-dev-2026-10-25.sql`.
   - Svit `tavlingsplanering-dela-verify.mjs` omskriven (skapa, flytta åt båda hållen, B3/B4/B5 med A/B, ytan, telefon).
+  - **Resten av expertgruppens förslag (2026-10-25 kväll):**
+    - **N8, mallen och grenarna:** `PrepArea` bär `Discipline` + `BaseName` för grenens egna områden (`ForMany`).
+      `PlanningService.PlanTemplate`/`SeedTemplate` (`TemplateSubs`) lägger dem i huvudplaneringens delplanering med den
+      grenen — bara om det finns EXAKT EN sådan och den som fyller i är Owner/Editor där — med sitt vanliga namn, delens
+      första dag som ankare och hens rad där som skapare; systemrad `template-from-parent`. Annars stannar de med
+      "– Fält". Förhandsvisningen grupperar per (planering, område) och bär `subName`; svaret `inSubs`. `SeedTemplate`
+      har ett eget scope utan autoComplete (skriver i flera planeringar).
+    - **N5:** `TaskGone` i controllern (alla "Uppgiften finns inte") säger vart en flyttad uppgift tagit vägen
+      (`PlanningService.TaskMovedTo`, `movedTo` i svaret). Det finns inga länkar till en enskild uppgift.
+    - **N7:** kortet Delplaneringar står före Tävlingarna/veckoprogrammet på Översikt — ovanför vikningen på dator; på
+      telefon direkt efter *Nästa steg* (det som väntar på en står först, medvetet), och rälsen fälls ihop (nedan).
+    - **B3 veckoprogrammet** fanns redan: `FamilyJson` ger delplaneringen familjens `week` (testat i sviten).
+    - **Notiserna (Stefan: "de ska följa relevant inställning"):** `PlanningNotifyRules.GetsDirectedMail` (= samma
+      regel som att nämnas) styr uppgiftsmejlen (ny uppgift, samlad kö, försenade, områdets ansvarige); möten har kvar
+      `GetsMeetingMail`. `PlanningNotifyMode.Help` säger vad som mejlas direkt.
+    - **Prodkollen** `Migrations/check-prod-planning-family-after-deploy-2026-10-25.sql` (P5 i körordningen).
+    - Sviten fick avsnitt H: N1 (ingångarna räknas per vy), N3 (rättighetsmatrisen ur EN tabell, A/B med B som
+      sammankallande → exakt en cell), N5, N7 (kortets överkant på dator och telefon), N8 (med A/B) och B3.
+  - **Rälsen grupperad (Stefan 2026-10-25):** Översikt · *Samarbete* (Meddelanden, Möten, Förslag och beslut, Deltagare) ·
+    *Arbetet* (Uppgifter, Dokument) · *Tävlingen* (Tävlingen, Stationerna, Bemanning, Dagsprogram) · Inställningar.
+    `VIEWS[].group`; `renderRail` ritar `.pl-railgrp`/`.pl-railh`/`.pl-railitems` (telefon: en rad per grupp, rubriken i
+    egen kolumn). **Mina notiser är borta som plats** — *Dina notiser* står överst i Inställningar (`notifyHtml`/
+    `bindNotify`), som nu syns för alla som är med (`isParticipant || canEdit`); den som inte kan ändra ser bara
+    notiserna. `#vy=notiser` (mejlens länk) är ett alias (`VIEW_ALIAS`).
+    **Telefon (< 992 px, N7):** rälsen tog hela första skärmen (~550 px) — den fälls ihop bakom knappen
+    `[data-rail-toggle]` "Meny · {platsen}" med summan av väntande siffror; utfälld (`.pl-rail.open`) en rad per grupp.
+    `railHere`: ett platsbyte fäller ihop menyn, pollningens omritning (samma plats) gör det inte. ⚠️ Sviter i telefon-
+    bredd väntar på rälsens länkar med `{ state: 'attached' }` — de är dolda tills menyn fälls ut.
 - **P4 (2026-10-24), plan `notes/tavlingsplanering-p4-arbetsplan-2026-10-24.md`:**
   - **SM-annonsen** (fråga 17): `Models/Planning/NpIssues.cs` uppskattar Nationellt Pistolskyttes manusstopp (nr 1 fjärde
     måndagen i februari, nr 2 första i maj, nr 3 andra i augusti, nr 4 första i november; utgivning +42 dagar).

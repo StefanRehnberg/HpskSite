@@ -18,6 +18,11 @@
     .pl-page .pl-rail a.pl-back:hover { color: var(--bs-link-color); }
     .pl-page .pl-rail .pl-count { background: var(--bs-warning); color: #1b1206; font-size: .72rem; font-weight: 700;
         border-radius: 1rem; padding: .05rem .5rem; }
+    /* Rälsens grupper (Stefan 2026-10-25) — rubriken som klubbadminens .admin-rail-group. */
+    .pl-page .pl-rail .pl-railh { font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+        color: var(--bs-secondary-color); padding: 14px 12px 4px; }
+    .pl-page .pl-rail .pl-railsep { border-top: 1px solid var(--bs-border-color); margin: 10px 4px 6px; }
+    .pl-page .pl-rail .pl-railtoggle { display: none; }
     .pl-page .pl-main { flex: 1 1 auto; min-width: 0; font-size: 1.05rem; }
     .pl-page .pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .pl-page h1 { font-size: 1.7rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
@@ -28,6 +33,19 @@
         .pl-page .pl-rail .pl-org, .pl-page .pl-rail .pl-role, .pl-page .pl-rail .pl-back { width: 100%; }
         .pl-page .pl-rail a.pl-nav { border-left: 0; gap: .4rem; }
         .pl-page .pl-rail a.pl-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
+        /* Telefon (N7): rälsen fälls ihop bakom en knapp; utfälld en rad per grupp. */
+        .pl-page .pl-rail .pl-railtoggle { display: flex; width: 100%; justify-content: space-between; align-items: center;
+            padding: 10px 12px; border: 1px solid var(--bs-border-color); border-radius: 8px; background: var(--bs-body-bg);
+            color: var(--bs-body-color); font-size: 1.05rem; }
+        .pl-page .pl-rail .pl-railnav { display: none; width: 100%; }
+        .pl-page .pl-rail.open .pl-railnav { display: flex; flex-wrap: wrap; gap: .2rem; align-items: center; margin-top: .3rem; }
+        .pl-page .pl-rail .pl-role { padding-bottom: 4px; }
+        /* Utfälld: en rad per grupp — rubriken i en fast kolumn, länkarna bryts bredvid den. */
+        .pl-page .pl-rail .pl-railgrp { width: 100%; display: flex; align-items: flex-start; gap: .2rem;
+            border-top: 1px solid var(--bs-border-color); padding-top: .2rem; }
+        .pl-page .pl-rail .pl-railh { flex: 0 0 5.5rem; padding: .65rem .25rem 0; }
+        .pl-page .pl-rail .pl-railitems { display: flex; flex-wrap: wrap; gap: .2rem; min-width: 0; }
+        .pl-page .pl-rail .pl-railsep { width: 100%; margin: 0; }
         .pl-page .pl-main { width: 100%; }
     }
     .pl-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem;

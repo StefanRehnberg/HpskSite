@@ -130,7 +130,7 @@ namespace HpskSite.Controllers
         {
             var x = await ResolveAsync(id, t, allowParentReader: true);
             if (x == null) return Missing();
-            if (_planning.GetTask(id, taskId) == null) return No("Uppgiften finns inte.");
+            if (_planning.GetTask(id, taskId) == null) return TaskGone(id, taskId);
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
             var meetings = _planning.Meetings(id).ToDictionary(m => m.Id, m => m.Title);
             return Json(new
@@ -175,7 +175,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
-            if (task == null) return No("Uppgiften finns inte.");
+            if (task == null) return TaskGone(id, taskId);
             if (!PlanningAccess.CanEditTask(x.Caller, task, Lead(AreaLeads(id), task))) return No("Uppgiften ändras av den som lade till den, områdets ansvarige eller den som kan ändra planeringen.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost,
                 task.AssigneeName);
@@ -200,7 +200,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
-            if (task == null) return No("Uppgiften finns inte.");
+            if (task == null) return TaskGone(id, taskId);
             var lead = Lead(AreaLeads(id), task);
             if (!PlanningAccess.CanReportOnTask(x.Caller, task, lead)) return No("Det är den som har uppgiften, eller områdets ansvarige, som säger hur det går.");
             if (PlanningTaskStatus.Normalize(status) == PlanningTaskStatus.Done)
@@ -236,7 +236,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
-            if (task == null) return No("Uppgiften finns inte.");
+            if (task == null) return TaskGone(id, taskId);
             var m = meetingId > 0 ? _planning.Meeting(id, meetingId!.Value) : null;
             if (meetingId > 0 && m == null) return No("Mötet finns inte.");
             var atMeeting = PlanningTaskRules.MeetingIsCurrent(m, DateTime.Now);
@@ -262,7 +262,7 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
-            if (task == null) return No("Uppgiften finns inte.");
+            if (task == null) return TaskGone(id, taskId);
             if (!PlanningAccess.CanEditTask(x.Caller, task, Lead(AreaLeads(id), task))) return No("Uppgiften tas bort av den som lade till den, områdets ansvarige eller den som kan ändra planeringen.");
             var err = _planning.RemoveTask(id, taskId, x.Caller.ParticipantId);
             return err == null ? Ok() : No(err);
