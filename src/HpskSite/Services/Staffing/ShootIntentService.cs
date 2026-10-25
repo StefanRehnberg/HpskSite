@@ -38,8 +38,10 @@ namespace HpskSite.Services.Staffing
         public sealed record Target(int PlanningId, string Name, string PlanningName, int CompetitionId, DateTime? From, DateTime? To);
 
         /// <summary>
-        /// Veckans tävlingar. En planering i familjen är en tävling när den är kopplad till en, när den är en delplanering,
-        /// eller när den står ensam. En okopplad huvudplanering med delplaneringar är veckan själv — ingen tävling.
+        /// Veckans tävlingar. En planering i familjen är en tävling när den är kopplad till en, när den är en delplanering
+        /// MED EN GREN, eller när den står ensam. En okopplad huvudplanering med delplaneringar är veckan själv — ingen
+        /// tävling. Stefan 2026-10-25 (Expertgruppen): en delplanering utan gren och utan tävling är en del av arbetet
+        /// ("Servering", en förening som sköter något) — ingen tävling i veckoprogrammet.
         /// </summary>
         public List<Target> Targets(int planningId)
         {
@@ -53,6 +55,7 @@ namespace HpskSite.Services.Staffing
             {
                 var linked = links.TryGetValue(f.Id, out var cid);
                 if (f.Id == root.Id && hasChildren && !linked) continue;
+                if (f.Id != root.Id && !linked && string.IsNullOrWhiteSpace(f.DisciplineKey)) continue;
                 var comp = linked ? _competitions.GetSaved(cid) : null;
                 var from = comp?.CompetitionDate ?? f.TargetStart;
                 var to = comp?.CompetitionEndDate ?? f.TargetEnd ?? from;

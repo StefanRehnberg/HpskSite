@@ -4056,14 +4056,18 @@
     function familyCompetitionsCardHtml() {
         const f = S.planning.family;
         const comps = (f && f.competitions) || [], week = (f && f.week) || [];
-        if (!f || (!comps.length && !week.length)) return '';
+        // Stefan 2026-10-25: kortet stod tomt när familjen inte hade någon kopplad tävling och delarna saknade datum.
+        // Det visas bara när det finns en tävling eller ett veckoprogram att visa.
+        const program = f ? weekProgramHtml(week) : '';
+        if (!f || (!comps.length && !program)) return '';
+        if (!comps.length) return `<div class="pl-card" id="plFamilyComps"><h2 id="plWeekProgram">Veckoprogrammet</h2>${program.replace(/^<h3[^>]*>[^<]*<\/h3>/, '')}</div>`;
         const shooting = new Map(week.map(w => [w.planningId, w.intents || 0]));
         const list = comps.length ? `<ul class="list-unstyled mb-0">${comps.map(c => `<li class="py-1 d-flex flex-wrap gap-2 align-items-baseline">
                 ${c.url ? `<a href="${esc(c.url)}"><b>${esc(c.name)}</b></a>` : `<b>${esc(c.name)}</b>`}
                 ${c.date ? `<span class="pl-help small">${esc(fmtDay(c.date))}${c.endDate && c.endDate !== c.date ? '–' + esc(fmtDay(c.endDate)) : ''}</span>` : ''}
                 <span class="pl-help small">· ${esc(c.planningName)}</span>
                 ${shooting.get(c.planningId) ? `<span class="pl-help small">· ${shooting.get(c.planningId)} av funktionärerna tänker tävla</span>` : ''}</li>`).join('')}</ul>` : '';
-        return `<div class="pl-card" id="plFamilyComps"><h2>${comps.length === 1 ? 'Tävlingen' : 'Tävlingarna'}</h2>${list}${weekProgramHtml(week)}</div>`;
+        return `<div class="pl-card" id="plFamilyComps"><h2>${comps.length === 1 ? 'Tävlingen' : 'Tävlingarna'}</h2>${list}${program}</div>`;
     }
     // Omgång 3 steg 9: veckoprogrammet — dag för dag vilka av veckans tävlingar som pågår, och hur många av funktionärerna
     // som tänker tävla. Ett underlag för att lägga uppdragen när folk inte skjuter.

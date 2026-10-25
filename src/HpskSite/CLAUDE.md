@@ -12783,6 +12783,10 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     - **N7:** kortet Delplaneringar står före Tävlingarna/veckoprogrammet på Översikt — ovanför vikningen på dator; på
       telefon direkt efter *Nästa steg* (det som väntar på en står först, medvetet), och rälsen fälls ihop (nedan).
     - **B3 veckoprogrammet** fanns redan: `FamilyJson` ger delplaneringen familjens `week` (testat i sviten).
+    - **Veckans tävlingar** (`ShootIntentService.Targets`): en delplanering är en tävling bara med en gren eller en
+      kopplad tävling — en del utan gren ("Servering") är arbete (Stefan 2026-10-25, efter ett tomt kort). Kortet
+      `#plFamilyComps` visas bara med en tävling (rubrik Tävlingen/Tävlingarna) eller ett daterat veckoprogram
+      (rubrik Veckoprogrammet) — aldrig tomt.
     - **Notiserna (Stefan: "de ska följa relevant inställning"):** `PlanningNotifyRules.GetsDirectedMail` (= samma
       regel som att nämnas) styr uppgiftsmejlen (ny uppgift, samlad kö, försenade, områdets ansvarige); möten har kvar
       `GetsMeetingMail`. `PlanningNotifyMode.Help` säger vad som mejlas direkt.
