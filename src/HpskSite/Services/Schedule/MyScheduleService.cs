@@ -184,6 +184,7 @@ namespace HpskSite.Services.Schedule
                     FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE sa.MemberId = @0
+                      AND sa.CompetitionId IS NOT NULL   -- Expertgruppen K8: ett planeringsuppdrag utan tävling fick Fetch<int> att kasta
                       AND (sa.Status IS NULL OR sa.Status <> @3)
                       AND ( (sa.StartsAt IS NOT NULL AND CAST(sa.StartsAt AS date) BETWEEN @1 AND @2)
                          OR (sa.StartsAt IS NULL AND sp.PassDate IS NOT NULL AND CAST(sp.PassDate AS date) BETWEEN @1 AND @2) )",

@@ -58,43 +58,59 @@ namespace HpskSite.Services.Staffing
                 planningId, competitionId, RoleOwnerType.Planning, RoleOwnerType.Competition);
         }
 
-        public static void Attach(IUmbracoDatabase db, int planningId, int competitionId)
+        public static List<AccessRevoked> Attach(IUmbracoDatabase db, int planningId, int competitionId)
         {
-            if (planningId <= 0 || competitionId <= 0) return;
+            if (planningId <= 0 || competitionId <= 0) return new();
             Adopt(db, planningId, competitionId);
-            RecomputeFamily(db, planningId);
+            return RecomputeFamily(db, planningId);
         }
 
-        public static void Detach(IUmbracoDatabase db, int planningId, int competitionId)
+        public static List<AccessRevoked> Detach(IUmbracoDatabase db, int planningId, int competitionId)
         {
-            if (planningId <= 0) return;
+            if (planningId <= 0) return new();
             if (competitionId > 0) Adopt(db, planningId, competitionId);
-            RecomputeFamily(db, planningId);
+            return RecomputeFamily(db, planningId);
         }
 
         private sealed class LinkPair { public int PlanningId { get; set; } public int TargetId { get; set; } }
+
+        /// <summary>Behörigheter i tävlingen som upphörde i en planering när dess tävling byttes (Stefan B7).</summary>
+        public sealed record AccessRevoked(int PlanningId, int Count);
 
         /// <summary>
         /// Omgång 3: varje planering i familjen får den tävling dess bemanning gäller (<see cref="PlanningFamilyRules.StaffingCompetition"/>)
         /// på alla sina rader. EN väg — koppla, koppla loss, "Bemannar för" och borttagning går hit, så att familjens
         /// planeringar aldrig kan säga olika saker om vilken tävling de bemannar. Familjen är högst några tiotal planeringar.
+        /// <para><b>Expertgruppen K3 / Stefan B7 (2026-10-25):</b> byts en rads tävling upphör dess behörighet i tävlingen
+        /// (<c>HasAdminAccess</c>) — förut följde den tyst med till den nya tävlingen (koppla loss, "Bemannar för"). Den som
+        /// bemannar ger den igen om den behövs; anroparen skriver en rad i planeringen om det som upphörde.</para>
+        /// <para>Familjen låses först (huvudplaneringens rad, UPDLOCK/HOLDLOCK): två samtidiga ändringar i samma familj
+        /// räknar annars på en inaktuell bild av kopplingarna.</para>
         /// </summary>
-        public static void RecomputeFamily(IUmbracoDatabase db, int planningId)
+        public static List<AccessRevoked> RecomputeFamily(IUmbracoDatabase db, int planningId)
         {
+            var revoked = new List<AccessRevoked>();
+            db.ExecuteScalar<int>("SELECT COUNT(*) FROM Planning WITH (UPDLOCK, HOLDLOCK) WHERE Id = (SELECT FamilyRootId FROM Planning WHERE Id = @0)", planningId);
             var family = HpskSite.Services.Planning.PlanningFamily.Rows(db, planningId);
-            if (family.Count == 0) return;
+            if (family.Count == 0) return revoked;
             var ids = string.Join(",", family.Select(f => f.Id));
             var links = db.Fetch<LinkPair>($"SELECT PlanningId, TargetId FROM PlanningLink WHERE TargetKind = N'competition' AND PlanningId IN ({ids})")
                 .GroupBy(l => l.PlanningId).ToDictionary(g => g.Key, g => g.First().TargetId);
             foreach (var f in family)
             {
                 var comp = HpskSite.Models.Planning.PlanningFamilyRules.StaffingCompetition(f, links);
+                // B7: behörigheten gäller tävlingen raden HADE — den följer inte med till en annan.
+                var n = comp is int nc
+                    ? db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1 AND CompetitionId IS NOT NULL AND CompetitionId <> @1", f.Id, nc)
+                    : db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1 AND CompetitionId IS NOT NULL", f.Id);
+                if (n > 0) revoked.Add(new AccessRevoked(f.Id, n));
                 foreach (var t in AllTables)
                 {
                     if (comp is int c) db.Execute($"UPDATE {t} SET CompetitionId = @1 WHERE PlanningId = @0 AND (CompetitionId IS NULL OR CompetitionId <> @1)", f.Id, c);
                     else db.Execute($"UPDATE {t} SET CompetitionId = NULL WHERE PlanningId = @0 AND CompetitionId IS NOT NULL", f.Id);
                 }
             }
+            return revoked;
         }
     }
 }

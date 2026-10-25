@@ -242,12 +242,8 @@ namespace HpskSite.Controllers
             var err = _planning.SetStaffsFor(id, competitionId, x.MemberId);
             if (err != null) return No(err);
             var after = _planning.StaffingCompetitionFor(id);
-            // Speglingarna (tävlingsansvariga, stationschefer) för både den gamla och den nya tävlingen.
-            foreach (var cid in new[] { before, after }.Where(v => v > 0).Distinct())
-            {
-                try { _staffing.SyncCompetitionMirrors(cid!.Value); }
-                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: speglingen till tävling {Comp} misslyckades.", id, cid); }
-            }
+            // Speglingarna för familjens alla tävlingar (behörigheten i den gamla upphörde, B7).
+            SyncFamilyMirrors(id, before, after);
             return Ok(new { success = true, staffingCompetitionId = after });
         }
 

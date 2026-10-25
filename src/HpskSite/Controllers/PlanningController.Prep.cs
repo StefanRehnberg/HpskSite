@@ -230,11 +230,27 @@ namespace HpskSite.Controllers
         /// tävlingens dagar i bemanningen. Körs efter transaktionen: speglingarna skrivs genom tävlingslagringen.
         /// Ett fel här får aldrig ångra kopplingen; nästa ändring i bemanningen räknar om speglingarna igen.
         /// </summary>
+        /// <summary>
+        /// Speglingarna (tävlingsansvariga, stationschefer) för ALLA familjens kopplade tävlingar plus <paramref name="extra"/>
+        /// (den som just kopplades loss). Expertgruppen K3 / Stefan B7: när bemanningens tävling byts upphör behörigheten i
+        /// den gamla — och raden kan ha haft vilken som helst av familjens tävlingar, inte bara den som kopplades.
+        /// </summary>
+        private void SyncFamilyMirrors(int planningId, params int?[] extra)
+        {
+            var comps = _planning.FamilyLinks(_planning.Family(planningId)).Values.Select(v => (int?)v)
+                .Concat(extra).Where(v => v > 0).Select(v => v!.Value).Distinct();
+            foreach (var c in comps)
+            {
+                try { _staffing.SyncCompetitionMirrors(c); }
+                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: speglingen till tävling {Comp} misslyckades.", planningId, c); }
+            }
+        }
+
         private void AfterStaffingLinkChanged(int planningId, int competitionId, int byMemberId, bool unlinked = false)
         {
+            SyncFamilyMirrors(planningId, competitionId);
             try
             {
-                _staffing.SyncCompetitionMirrors(competitionId);
                 if (!unlinked)
                     _staffDays.AddCompetitionDays(new HpskSite.Models.Staffing.StaffOwner(planningId, competitionId), byMemberId);
             }

@@ -197,7 +197,8 @@ namespace HpskSite.Services.Planning
         /// </summary>
         public DeleteResult Delete(int planningId, int byMemberId)
         {
-            using var s = _scopes.CreateScope(autoComplete: true);
+            using var s = _scopes.CreateScope();   // INTE autoComplete: allt eller inget
+
             var db = s.Database;
             var kids = db.ExecuteScalar<int>("SELECT COUNT(*) FROM Planning WHERE ParentPlanningId = @0 AND DeletedAt IS NULL", planningId);
             if (kids > 0)
@@ -213,7 +214,8 @@ namespace HpskSite.Services.Planning
             db.Execute("UPDATE Planning SET DeletedAt = @1, DeletedBy = @2, SeededFromCompetitionId = NULL WHERE Id = @0 AND DeletedAt IS NULL",
                 planningId, Now, byMemberId);
             // Syskon som bemannade den här planeringens tävling ("Bemannar för") faller tillbaka på huvudplaneringens.
-            HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId);
+            NoteRevokedAccess(db, HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId), Now);
+            s.Complete();
             return new DeleteResult(null, comps);
         }
 
@@ -925,6 +927,23 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             InsertSystem(s.Database, planningId, key, body, null, subjectParticipantId, (refKind, refId), Now);
             Bump(s.Database, planningId);
+        }
+
+        /// <summary>
+        /// Stefan B7 (2026-10-25): när bemanningens tävling byts upphör behörigheten i den gamla
+        /// (<see cref="HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily"/>). Planeringen får en rad om det, och
+        /// loggen en post — så att det aldrig sker tyst.
+        /// </summary>
+        private void NoteRevokedAccess(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            List<HpskSite.Services.Staffing.StaffingPlanningLink.AccessRevoked> revoked, DateTime now)
+        {
+            foreach (var r in revoked)
+            {
+                InsertSystem(db, r.PlanningId, "staff-access-revoked",
+                    (r.Count == 1 ? "En funktionär" : $"{r.Count} funktionärer") + " miste behörigheten i tävlingen när bemanningens tävling byttes. "
+                    + "Ge den igen under Bemanning om den behövs.", null, null, null, now);
+                _logger.LogInformation("Planering {Id}: {Count} behörigheter i tävlingen upphörde när bemanningens tävling byttes.", r.PlanningId, r.Count);
+            }
         }
 
         private static void InsertSystem(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int planningId, string key,

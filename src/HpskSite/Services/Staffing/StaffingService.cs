@@ -1039,6 +1039,13 @@ namespace HpskSite.Services.Staffing
 
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 var db = scope.Database;
+                // Expertgruppen (arkitekten, 2026-10-25): bara den planering som SJÄLV är kopplad till tävlingen får
+                // tävlingsledarna. En del som ärver tävlingen (huvudplaneringens, "Bemannar för") fick dem annars — den som
+                // råkade laddas först.
+                if (owner.HasPlanning && db.ExecuteScalar<int>(
+                        "SELECT COUNT(*) FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition' AND TargetId = @1",
+                        owner.PlanningId, competitionId) == 0)
+                    return;
                 var existing = db.Fetch<StaffAssignment>(
                     "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
                     owner.P, owner.C, TavlingsledningRole);

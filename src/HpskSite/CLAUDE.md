@@ -12793,6 +12793,20 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     - **Prodkollen** `Migrations/check-prod-planning-family-after-deploy-2026-10-25.sql` (P5 i körordningen).
     - Sviten fick avsnitt H: N1 (ingångarna räknas per vy), N3 (rättighetsmatrisen ur EN tabell, A/B med B som
       sammankallande → exakt en cell), N5, N7 (kortets överkant på dator och telefon), N8 (med A/B) och B3.
+  - **Bemanningen över familjen, steg 1a (Expertgruppen 2026-10-25, `notes/tavlingsplanering-bemanning-familjen-plan-2026-10-25-utvardering.md`):**
+    - **B7:** `StaffingPlanningLink.RecomputeFamily` låser familjen (rotens rad, UPDLOCK/HOLDLOCK) och NOLLAR `HasAdminAccess`
+      på rader vars tävling byts — behörigheten följde förut tyst med vid Koppla loss / Bemannar för. Returnerar
+      `AccessRevoked` per planering; `PlanningService.NoteRevokedAccess` skriver systemraden `staff-access-revoked` + loggar.
+      Controllern speglar om ALLA familjens tävlingar efteråt (`SyncFamilyMirrors`).
+    - `LinkToCompetition`, `Unlink`, `SetStaffsFor`, `Delete` (och `CreateForCompetition`) skriver i flera steg → scope
+      UTAN autoComplete + `s.Complete()` sist (autoComplete committar även vid undantag).
+    - `UX_PlanningLink_Competition` (en tävling per planering, filtrerat) i P1 (regenererad, bevisad på tom databas).
+    - `ReconcileManagersIntoRoster` bara för planeringen med EGEN koppling till tävlingen (en del som ärver fick annars
+      tävlingsledarna, den som laddades först).
+    - K8: `GetCompetitionIdsForMember` frågan nr 2 filtrerar `CompetitionId IS NOT NULL` (ett planeringsuppdrag utan
+      tävling fick `Fetch<int>` att kasta, sväljt → medlemmens fönster tomt).
+    - **B14:** en delplanering flyttar ALDRIG till en annan familj — `ParentPlanningId` sätts bara i `CreateSub` och
+      `CopyOne`. Bygg ingen väg som ändrar den.
   - **Paraplyet och Överskottet (Stefan 2026-10-25 kväll):** en huvudplanering med delplaneringar (`isUmbrella`:
     `planning.family` finns och ingen `parent`) har ingen *Tävlingen* i rälsen och ingen tävlingsrad i Nästa steg —
     tävlingarna ligger i delarna — utom när den själv har en tävling/ansökan (`hasOwnCompetition`). **Överskottet är

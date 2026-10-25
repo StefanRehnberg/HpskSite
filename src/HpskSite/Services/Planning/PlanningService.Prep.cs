@@ -128,7 +128,7 @@ namespace HpskSite.Services.Planning
                 });
                 InsertSystem(db, p.Id, "planning-created", "Planeringen skapades.", me.Id, null, null, now);
                 // P2b: tävlingens bemanning hör nu till planeringen.
-                HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, p.Id, i.CompetitionId);
+                NoteRevokedAccess(db, HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, p.Id, i.CompetitionId), now);
                 var imported = import == null ? 0 : ImportWorkBreakdown(db, p.Id, i.CompetitionId, me.Id, import, now);
                 if (imported > 0)
                     InsertSystem(db, p.Id, "prep-imported", $"Tävlingens förberedelser flyttades in: {imported} uppgifter.", null, null, null, now);
@@ -160,7 +160,8 @@ namespace HpskSite.Services.Planning
             var now = Now;
             try
             {
-                using var s = _scopes.CreateScope(autoComplete: true);
+                // INTE autoComplete: kastar bemanningens flytt efter kopplingen ska inget sparas (en koppling utan bemanning).
+                using var s = _scopes.CreateScope();
                 var db = s.Database;
                 if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'competition' AND TargetId = @0", competitionId) > 0)
                     return "Tävlingen hör redan till en planering.";
@@ -174,11 +175,19 @@ namespace HpskSite.Services.Planning
                 });
                 InsertSystem(db, planningId, "competition-linked", "Planeringen kopplades till tävlingen.", null, null, (PlanningLinkRow.Competition, competitionId), now);
                 // P2b: planeringens bemanning får tävlingen, och tävlingens tidigare bemanning tas in.
-                HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, planningId, competitionId);
+                NoteRevokedAccess(db, HpskSite.Services.Staffing.StaffingPlanningLink.Attach(db, planningId, competitionId), now);
                 Bump(db, planningId);
+                s.Complete();
                 return null;
             }
-            catch (Exception ex) when (IsUniqueViolation(ex)) { return "Tävlingen hör redan till en planering."; }
+            // UX_PlanningLink_Target (tävlingen har en planering) eller UX_PlanningLink_Competition (planeringen har en
+            // tävling, Expertgruppen 2026-10-25) — någon hann koppla samtidigt.
+            catch (Exception ex) when (IsUniqueViolation(ex))
+            {
+                return ex.ToString().Contains("UX_PlanningLink_Competition", StringComparison.Ordinal)
+                    ? "Planeringen kopplades just till en annan tävling. Läs om sidan."
+                    : "Tävlingen hör redan till en planering.";
+            }
         }
 
         /// <summary>
@@ -188,17 +197,18 @@ namespace HpskSite.Services.Planning
         public string? Unlink(int planningId, int byMemberId)
         {
             var now = Now;
-            using var s = _scopes.CreateScope(autoComplete: true);
+            using var s = _scopes.CreateScope();   // INTE autoComplete: allt eller inget (kopplingen, bemanningen, deltagarna)
             var db = s.Database;
             var oldComp = db.ExecuteScalar<int?>("SELECT TOP 1 TargetId FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId) ?? 0;
             var n = db.Execute("DELETE FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId);
             if (n == 0) return "Planeringen är inte kopplad till någon tävling.";
             // P2b: bemanningen stannar i planeringen och tappar tävlingen (och därmed appbehörigheten till den).
-            HpskSite.Services.Staffing.StaffingPlanningLink.Detach(db, planningId, oldComp);
+            NoteRevokedAccess(db, HpskSite.Services.Staffing.StaffingPlanningLink.Detach(db, planningId, oldComp), now);
             db.Execute("UPDATE PlanningMember SET RemovedAt = @1, RemovedBy = @2 WHERE PlanningId = @0 AND ViaCompetition = 1 AND RemovedAt IS NULL",
                 planningId, now, byMemberId);
             InsertSystem(db, planningId, "competition-unlinked", "Planeringen kopplades loss från tävlingen.", null, null, null, now);
             Bump(db, planningId);
+            s.Complete();
             return null;
         }
 

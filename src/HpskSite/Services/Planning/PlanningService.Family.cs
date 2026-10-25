@@ -170,12 +170,13 @@ namespace HpskSite.Services.Planning
             var links = FamilyLinks(family);
             if (links.ContainsKey(planningId)) return "Planeringen är kopplad till en egen tävling — bemanningen gäller den.";
             if (competitionId > 0 && !links.Values.Contains(competitionId.Value)) return "Tävlingen hör inte till någon planering i familjen.";
-            using var s = _scopes.CreateScope(autoComplete: true);
+            using var s = _scopes.CreateScope();   // INTE autoComplete: valet och bemanningens omräkning hör ihop
             var db = s.Database;
             db.Execute("UPDATE Planning SET StaffsForCompetitionId = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0",
                 planningId, competitionId > 0 ? competitionId : null, Now, byMemberId);
-            HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId);
+            NoteRevokedAccess(db, HpskSite.Services.Staffing.StaffingPlanningLink.RecomputeFamily(db, planningId), Now);
             Bump(db, planningId);
+            s.Complete();
             return null;
         }
 
