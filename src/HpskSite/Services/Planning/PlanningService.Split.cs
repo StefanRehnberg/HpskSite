@@ -23,6 +23,43 @@ namespace HpskSite.Services.Planning
     /// </summary>
     public partial class PlanningService
     {
+        /// <summary>En planering i listsidans familjer: id, namn, läge, mål och huvudplaneringen (null = en huvudplanering).</summary>
+        public sealed class HubFamilyRow
+        {
+            public int Id { get; set; }
+            public string Name { get; set; } = "";
+            public string Status { get; set; } = "";
+            public string? TargetText { get; set; }
+            public int? ParentPlanningId { get; set; }
+        }
+
+        /// <summary>
+        /// Listsidan (Stefan 2026-10-25: delplaneringarna under sin huvudplanering). För medlemmens planeringar
+        /// <paramref name="mineIds"/>: varje planerings huvudplanering (<c>Parents</c>, för dem medlemmen inte själv är med i —
+        /// de visas som en rubrik) och huvudplaneringens delplaneringar som medlemmen får LÄSA men inte är med i
+        /// (<c>ReadableSubs</c> — sammankallande eller Kan ändra i huvudplaneringen, samma regel som <see cref="IsParentConvener"/>).
+        /// <c>ParentOf</c> = huvudplaneringen för var och en av medlemmens planeringar.
+        /// </summary>
+        public (Dictionary<int, int> ParentOf, List<HubFamilyRow> Parents, List<HubFamilyRow> ReadableSubs) HubFamilies(int memberId, IReadOnlyCollection<int> mineIds)
+        {
+            var empty = (new Dictionary<int, int>(), new List<HubFamilyRow>(), new List<HubFamilyRow>());
+            if (memberId <= 0 || mineIds.Count == 0) return empty;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var ids = string.Join(",", mineIds);
+            var mine = db.Fetch<HubFamilyRow>($"SELECT Id, Name, Status, TargetText, ParentPlanningId FROM Planning WHERE Id IN ({ids}) AND DeletedAt IS NULL");
+            var parentOf = mine.Where(p => p.ParentPlanningId > 0).ToDictionary(p => p.Id, p => p.ParentPlanningId!.Value);
+            var missing = parentOf.Values.Distinct().Where(id => !mineIds.Contains(id)).ToList();
+            var parents = missing.Count == 0 ? new List<HubFamilyRow>()
+                : db.Fetch<HubFamilyRow>($"SELECT Id, Name, Status, TargetText, ParentPlanningId FROM Planning WHERE Id IN ({string.Join(",", missing)}) AND DeletedAt IS NULL");
+            var subs = db.Fetch<HubFamilyRow>($@"SELECT s.Id, s.Name, s.Status, s.TargetText, s.ParentPlanningId FROM Planning s
+                 WHERE s.DeletedAt IS NULL AND s.ParentPlanningId IN ({ids}) AND s.Id NOT IN ({ids})
+                   AND EXISTS (SELECT 1 FROM PlanningMember m WHERE m.PlanningId = s.ParentPlanningId AND m.MemberId = @0
+                               AND m.RemovedAt IS NULL AND m.Access IN (N'Owner', N'Editor'))
+                 ORDER BY s.Name", memberId);
+            return (parentOf, parents, subs);
+        }
+
         /// <summary>
         /// Sammankallande eller Kan ändra (aktiv) i planeringens huvudplanering — den som får LÄSA delplaneringen.
         /// Omgång 3 (Expertgruppen, persona 3): Kan ändra kom till — banansvarige som leder arbetet i huvudplaneringen såg
@@ -278,20 +315,9 @@ namespace HpskSite.Services.Planning
                 return map[pid.Value] = CopyRow(src, follows, follower: follows);
             }
 
-            // P4: ett område med stationer följer med som område i delplaneringen — stationerna, värden och beskrivningen
-            // behövs i stationsöversikten. Utan stationer är delplaneringen själv området.
+            // Delplaneringen är själv området. (Förut följde ett område med STATIONER med som område; sedan 2026-10-25 bär
+            // inga områden stationer — stationernas ansvariga har en egen plats och stannar på stationernas planering.)
             int? childArea = null;
-            if (!string.IsNullOrWhiteSpace(area.Stations))
-            {
-                var ca = new PlanningAreaRow
-                {
-                    PlanningId = childId, Name = area.Name, Description = area.Description, HostClubId = area.HostClubId,
-                    HostRegionId = area.HostRegionId, HostText = area.HostText, Stations = area.Stations, ResponsibleName = area.ResponsibleName, ResponsibleParticipantId = R(area.ResponsibleParticipantId),
-                    SortOrder = 1, CreatedAt = now, CreatedBy = ownerPid,
-                };
-                db.Insert(ca);
-                childArea = ca.Id;
-            }
 
             foreach (var t in tasks)
             {

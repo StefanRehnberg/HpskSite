@@ -318,16 +318,10 @@ namespace HpskSite.Services.Planning
             var others = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WITH (UPDLOCK) WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId);
             if (others.Any(a => a.Id != areaId && string.Equals(a.Name, n, StringComparison.OrdinalIgnoreCase)))
                 return new AreaResult(areaId, $"Det finns redan ett område som heter \"{n}\".");
-            // P4: stationerna — läsbara, och inte redan ett annat områdes (i planeringen eller dess delplaneringar).
-            string? stations = null;
-            if (details?.Stations != null)
-            {
-                var (list, perr) = PlanningStations.Parse(details.Stations);
-                if (perr != null) return new AreaResult(areaId, perr);
-                var conflict = StationConflict(db, planningId, areaId, list);
-                if (conflict != null) return new AreaResult(areaId, conflict);
-                stations = list.Count == 0 ? "" : PlanningStations.Format(list);
-            }
+            // Stefan 2026-10-25: ett område bär inga stationer — vem som utformar en station väljs under Stationerna
+            // (PlanningStationResponsible). Ett äldre anrop som skickar stationer får veta det i stället för att sparas.
+            if (!string.IsNullOrWhiteSpace(details?.Stations))
+                return new AreaResult(areaId, "Stationernas ansvariga väljs under Stationerna, inte på ett område.");
             PlanningAreaRow row;
             if (areaId > 0)
             {
@@ -336,7 +330,7 @@ namespace HpskSite.Services.Planning
                 row.Name = n;
                 row.ResponsibleParticipantId = responsiblePid > 0 ? responsiblePid : null;
                 row.ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200);
-                ApplyAreaDetails(row, details, stations);
+                ApplyAreaDetails(row, details);
                 db.Update(row);
             }
             else
@@ -347,7 +341,7 @@ namespace HpskSite.Services.Planning
                     ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200),
                     SortOrder = (others.Count == 0 ? 0 : others.Max(a => a.SortOrder)) + 1, CreatedAt = now, CreatedBy = byParticipantId,
                 };
-                ApplyAreaDetails(row, details, stations);
+                ApplyAreaDetails(row, details);
                 db.Insert(row);
             }
             Bump(db, planningId);
@@ -368,10 +362,9 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d, string? stations = null)
+        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d)
         {
             if (d == null) return;
-            if (stations != null) row.Stations = stations.Length == 0 ? null : stations;
             row.Description = Clean(d.Description, 2000);
             row.HostClubId = d.HostClubId > 0 ? d.HostClubId : null;
             row.HostRegionId = row.HostClubId.HasValue ? null : (d.HostRegionId > 0 ? d.HostRegionId : null);
@@ -471,29 +464,74 @@ namespace HpskSite.Services.Planning
         /// Fyller i från en standardmall: områden som inte redan finns (på namnet) läggs till med sina uppgifter,
         /// vars sista dag är "N dagar före" tävlingen. Ett område som redan finns rörs inte.
         /// </summary>
-        internal (int Areas, int Tasks) SeedTemplate(int planningId, List<PrepArea> template, DateTime? anchor, int byParticipantId)
+        /// <summary>En rad i mallens förhandsvisning. <see cref="Key"/> = "område:uppgift" (index i mallen) — samma mall
+        /// (storlek och grenar) ger samma nycklar, så valet i steg 2 pekar ut exakt de uppgifter som visades.</summary>
+        internal sealed record TemplatePlanItem(string Key, string Area, bool AreaExists, string Title, string? Description,
+            DateTime? Due, int? DaysBefore, bool Milestone, bool Exists);
+
+        /// <summary>
+        /// Vad mallen skulle lägga in, utan att skriva något. EN regel med <see cref="SeedTemplate"/> (som läser samma
+        /// plan), så listan i steg 2 och det som läggs in kan inte skilja sig åt. <see cref="TemplatePlanItem.Exists"/> =
+        /// uppgiften finns redan i området och läggs inte in igen.
+        /// </summary>
+        internal List<TemplatePlanItem> PlanTemplate(int planningId, List<PrepArea> template, DateTime? anchor)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return PlanTemplate(s.Database, planningId, template, anchor);
+        }
+
+        private static List<TemplatePlanItem> PlanTemplate(NPoco.IDatabase db, int planningId, List<PrepArea> template, DateTime? anchor)
+        {
+            var areaIds = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId)
+                .GroupBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var list = new List<TemplatePlanItem>();
+            for (var ai = 0; ai < template.Count; ai++)
+            {
+                var def = template[ai];
+                // Omgång 3 (K10): ett område som redan finns får mallens uppgifter som saknas där (en andra gren, eller en
+                // större mall) — förut hoppades hela området över och den andra grenens uppgifter kom aldrig in.
+                var existed = areaIds.TryGetValue(def.Area, out var areaId);
+                var have = existed
+                    ? db.Fetch<string>("SELECT Title FROM PlanningTask WHERE PlanningId = @0 AND AreaId = @1", planningId, areaId).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (var ii = 0; ii < def.Items.Count; ii++)
+                {
+                    var item = def.Items[ii];
+                    var title = item.TitleFromAnchor != null && anchor.HasValue ? item.TitleFromAnchor(anchor.Value.Date) : item.Title;
+                    var due = item.DueFromAnchor != null && anchor.HasValue ? item.DueFromAnchor(anchor.Value.Date)
+                        : PlanningTaskRules.DueFromDaysBefore(item.DaysBeforeComp, anchor);
+                    list.Add(new TemplatePlanItem($"{ai}:{ii}", def.Area, existed, title, item.Description, due, item.DaysBeforeComp,
+                        item.Milestone, have.Contains(title) || have.Contains(item.Title)));
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Fyller i från en standardmall. <paramref name="keys"/> = de uppgifter användaren valde i steg 2 (nycklarna ur
+        /// <see cref="PlanTemplate"/>); null = alla. Ett område skapas bara när minst en av dess uppgifter läggs in —
+        /// annars står tomma områden kvar efter de uppgifter användaren valde bort.
+        /// </summary>
+        internal (int Areas, int Tasks) SeedTemplate(int planningId, List<PrepArea> template, DateTime? anchor, int byParticipantId, ISet<string>? keys = null)
         {
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var names = db.Fetch<string>("SELECT Name FROM PlanningArea WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var plan = PlanTemplate(db, planningId, template, anchor);
             int areas = 0, tasks = 0;
-            foreach (var def in template)
+            for (var ai = 0; ai < template.Count; ai++)
             {
-                // Omgång 3 (K10): ett område som redan finns får mallens uppgifter som saknas där (en andra gren, eller en
-                // större mall) — förut hoppades hela området över och den andra grenens uppgifter kom aldrig in.
-                var existed = names.Contains(def.Area);
+                var def = template[ai];
+                var chosen = plan.Where(p => p.Key.StartsWith(ai + ":", StringComparison.Ordinal) && !p.Exists
+                    && (keys == null || keys.Contains(p.Key))).ToList();
+                if (chosen.Count == 0) continue;
+                var existed = chosen[0].AreaExists;
                 var area = EnsureArea(db, planningId, def.Area, byParticipantId, now);
                 if (!existed) areas++;
-                var have = existed
-                    ? db.Fetch<string>("SELECT Title FROM PlanningTask WHERE PlanningId = @0 AND AreaId = @1", planningId, area.Id).ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var sort = existed ? NextTaskSort(db, planningId, area.Id) : 0;
-                foreach (var item in def.Items)
+                foreach (var p in chosen)
                 {
-                    var title = item.TitleFromAnchor != null && anchor.HasValue ? item.TitleFromAnchor(anchor.Value.Date) : item.Title;
-                    if (have.Contains(title) || have.Contains(item.Title)) continue;
+                    var item = def.Items[int.Parse(p.Key[(p.Key.IndexOf(':') + 1)..])];
                     var t = NewTask(planningId, area.Id, item.Title, item.Description, item.DaysBeforeComp, anchor, PlanningTaskSource.Template, null, ++sort, byParticipantId, now);
                     // P3: milstolparna, och förbundets frister ur tävlingens dag när den är känd.
                     t.IsMilestone = item.Milestone;
@@ -544,57 +582,45 @@ namespace HpskSite.Services.Planning
         public const string CourseApprovalTaskTitle = "Banläggaren godkänner stationerna";
 
         /// <summary>
-        /// "Bygg station N" för varje station som saknar en uppgift (fältskytte). Banan i planeringen (2026-10-24): uppgiften
-        /// hamnar i det område som har stationen; en station utan område hamnar i <i>Stationsbygge</i>. En station som ett
-        /// område i en annan planering i familjen har läggs in där (av den planeringen), inte här. Huvudplaneringen får
-        /// dessutom milstolpen <see cref="CourseApprovalTaskTitle"/>. Inga dubbletter i familjen.
+        /// "Bygg station N" för varje station som saknar en uppgift (fältskytte), på stationernas planering
+        /// (<see cref="StationOwnerId"/>). Stefan 2026-10-25: uppgifterna ligger i området <i>Stationsbygge</i> och den
+        /// ansvarige personen (<see cref="PlanningStationResponsibleRow.ParticipantId"/>) får uppgiften — inget område per
+        /// ansvarig. Milstolpen <see cref="CourseApprovalTaskTitle"/> följer med. Inga dubbletter i familjen.
         /// </summary>
         public int SeedStationTasks(int planningId, int stationCount, int byParticipantId)
         {
             if (stationCount <= 0) return 0;
+            if (StationOwnerId(planningId) != planningId) return 0; // stationerna sköts i en annan planering i familjen
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var family = StationFamily(db, planningId);
             var familyIds = family.Count == 0 ? planningId.ToString() : string.Join(",", family.Select(f => f.Id));
-            var isRoot = family.Count == 0 || family.Any(f => f.Id == planningId && !(f.ParentPlanningId > 0));
-            var owner = new Dictionary<int, PlanningAreaRow>();
-            foreach (var a in db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({familyIds}) AND DeletedAt IS NULL AND Stations IS NOT NULL"))
-                foreach (var n in PlanningStations.Parse(a.Stations).Stations) owner.TryAdd(n, a);
+            var responsible = db.Fetch<PlanningStationResponsibleRow>("SELECT * FROM PlanningStationResponsible WHERE PlanningId = @0", planningId)
+                .ToDictionary(r => r.Station);
+            var active = db.Fetch<int>("SELECT Id FROM PlanningMember WHERE PlanningId = @0 AND RemovedAt IS NULL", planningId).ToHashSet();
             var have = db.Fetch<string>($"SELECT ScopeKey FROM PlanningTask WHERE PlanningId IN ({familyIds}) AND ScopeType = N'Station' AND DeletedAt IS NULL")
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            PlanningAreaRow? fallback = null;
-            var sorts = new Dictionary<int, int>();
+            PlanningAreaRow? area = null;
+            var sort = 0;
             var added = 0;
             for (var n = 1; n <= Math.Min(stationCount, PlanningStations.Max); n++)
             {
                 if (have.Contains(n.ToString())) continue;
-                int areaId;
-                if (owner.TryGetValue(n, out var a))
-                {
-                    if (a.PlanningId != planningId) continue; // delplaneringen lägger in sina egna
-                    areaId = a.Id;
-                }
-                else
-                {
-                    if (!isRoot) continue;
-                    fallback ??= EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
-                    areaId = fallback.Id;
-                }
-                if (!sorts.TryGetValue(areaId, out var sort)) sort = NextTaskSort(db, planningId, areaId);
-                sorts[areaId] = ++sort;
-                var t = NewTask(planningId, areaId, $"Bygg station {n}", null, null, null, PlanningTaskSource.Station, n.ToString(), sort, byParticipantId, now);
+                if (area == null) { area = EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now); sort = NextTaskSort(db, planningId, area.Id); }
+                var t = NewTask(planningId, area.Id, $"Bygg station {n}", null, null, null, PlanningTaskSource.Station, n.ToString(), ++sort, byParticipantId, now);
                 t.ScopeType = "Station"; t.ScopeKey = n.ToString();
+                if (responsible.TryGetValue(n, out var r) && r.ParticipantId is int pid && active.Contains(pid)) t.AssigneeParticipantId = pid;
                 db.Insert(t);
                 TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, null, null, false, now);
                 added++;
             }
-            if (isRoot && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningTask WHERE PlanningId = @0 AND Title = @1 AND DeletedAt IS NULL",
+            if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningTask WHERE PlanningId = @0 AND Title = @1 AND DeletedAt IS NULL",
                     planningId, CourseApprovalTaskTitle) == 0)
             {
-                fallback ??= EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
+                var fallback = area ?? EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
                 var t = NewTask(planningId, fallback.Id, CourseApprovalTaskTitle,
-                    "Varje förenings del godkänns av en banläggare, sedan stationerna som helhet (under Stationerna i planeringen).",
+                    "En banläggare godkänner station för station, sedan stationerna som helhet (under Stationerna i planeringen).",
                     null, null, PlanningTaskSource.Station, "course", NextTaskSort(db, planningId, fallback.Id) + 1, byParticipantId, now);
                 t.IsMilestone = true;
                 db.Insert(t);

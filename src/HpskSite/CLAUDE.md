@@ -12877,6 +12877,66 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       vem = någon i planeringen (`responsibleId`, områdets namn = personens), en klubb/krets (värd) eller ett namn.
       Först när ett område har stationer syns *Vem gör vilka stationer* (`#plStAreas`), steget Fördela och Sätt ihop.
       `data-st-step` = stegets namn (Fördela/Utforma/Godkänn/Sätt ihop och godkänn/Tävlingen).
+  - **⚠️⚠️ EN KONFIGURATION, EN ANSVARIG PER STATION (Stefan 2026-10-25 — ERSÄTTER delarna, sammansättningen och
+    "Vem gör vilka stationer" ovan):** "Stationschef" är den som leder stationen på tävlingsdagen; i planeringen heter
+    det **Ansvarig** (person, klubb eller krets). Stationerna fanns i två konfigurationer (delen och helheten) — nu
+    finns bara planeringens EN konfiguration. Inga delar skapas längre, och ytan har ingen Sätt ihop.
+    - **⚠️⚠️ Ansvaret har en EGEN TABELL, `PlanningStationResponsible`** (Stefan 2026-10-25: "varför skapas ett område?")
+      — EN rad per station (unikt planering + station) på stationernas planering (`StationOwnerId`): `Kind`
+      Person/Club/Region/Name, `ParticipantId` (personen, eller KONTAKTEN för klubb/krets/namn — den som får ändra i
+      konfiguratorn), `HostId`, `Name` (visningsnamnet när ansvaret sattes), `Key` (grupperar en ansvarigs stationer).
+      **Ett område bär inga stationer:** `PlanningArea.Stations` läses och skrivs inte längre; `SaveArea` med stationer
+      vägras. `POST SetStationResponsible(stations, who = p:{pid}|h:{0|1}:{id}|text, name, contactId, release)` (release =
+      stationer samma ansvarige släpper) och `POST ClearStationResponsible(stations)` — bara på stationernas planering.
+      ⚠️ Taket på stationsnumret gäller bara när antalet är KÄNT (konfigurationen eller en kopplad fälttävling) — annars
+      räknade `StationCount` ur de redan tilldelade och vägrade nästa station. `MoveWork` (byt ut en deltagare) flyttar
+      raderna; `PlanningPurgeService` tar dem. Borttaget: `AssignStations`, `StationAreas`, `StationConflict`,
+      `CreateAreaConfig`, `AssembleCourse`, `SyncPartsAsync` och utdelningens kopia av ett områdes stationer.
+      *En uppgift per station* lägger uppgifterna i *Stationsbygge* med den ansvarige som ansvarig för uppgiften.
+      Bemanningens stationsrader (`FamilyAreaStations`) = 1..konfigurationens antal ∪ stationer med en ansvarig.
+      Migrering `create-planning-station-responsible.sql` (P3k, efter P3j). Kortet **Ansvariga** (`#plStAreas`,
+      rader `[data-st-resp=nyckel]`: Ansvarig · Stationer · Kontakt; Välj stationer… / Ta bort som ansvarig) och
+      dialogen *Ge stationer en ansvarig* (`openResponsible`, `#saWho`, `#saResp`, `#stGrid`). Stationsraden: Station ·
+      Ansvarig · Utformad · Godkänd · Uppgifter (`responsible`, `responsibleKey`). Läget: Utforma · Godkänn · Tävlingen.
+    - **Rätten per station:** `FaltskytteConfigurationService.StationRightsAsync` (partial `.Stations.cs`) — `All` =
+      får ändra konfigurationen; annars stationerna där medlemmen är ansvarig eller kontakt
+      (`PlanningStationResponsible.ParticipantId` → `PlanningMember.MemberId`). `Get` bär `planningStations` {all, mine, responsible, checksums,
+      approvals, stationCount, canJudge}; konfiguratorn (`faltCfgPlanningDecorate`) visar Ansvarig, godkännandet och
+      "Bara läsning", och stänger av fälten på andras stationer.
+    - **⚠️⚠️ Sparas STATION FÖR STATION:** `POST UpdateStations {Id, Stations, JsonBlob, Expected}` slår ihop bara de
+      stationerna (`StationBlob.Merge`), vägrar en station man inte är ansvarig för ("Du är inte ansvarig för station
+      N — X är det.") och en station som ändrats sedan fliken läste den (kontrollsumman per station). Skrivningen är
+      **compare-and-swap** (`SwapBlobAsync`: `UPDATE … WHERE CAST(JsonBlob AS varbinary(max)) = gamla`, varbinary
+      eftersom sorteringen inte skiljer på stora och små bokstäver), högst fem försök. Utan den försvann en stations
+      ändring när någon annan sparade en annan station i samma ögonblick (sviten hittade det). Konfiguratorns
+      `faltCfgSaveToServer(json, stations)` går dit när `window._faltCfgPlanning` finns.
+    - **Godkännandet station för station, sedan helheten:** blobbens `_stationApproval` {n: {s,by,at,c,sum}}
+      (`StationBlob`; Pending/Approved/Returned). `POST StationApproval {ConfigId, Station, Action, Comment}`:
+      request = den ansvarige; approve/return = banläggare som kan ändra konfigurationen (eller sajtadmin); return
+      kräver en kommentar. En station vars innehåll ändrats är ett utkast igen (`StationBlob.Current` jämför `sum`).
+      Helheten kan begäras/godkännas först när alla är godkända (`StationBlob.WholeBlocker` i `PartsBlockerAsync`).
+      En hel sparning (den gamla vägen, för den som kan ändra allt) behåller SERVERNS godkännanden och öppnar bara
+      ändrade stationer (`KeepServerApprovals`). Samma CAS-skrivning.
+    - **Projektet:** stationernas konfiguration ligger i ett **FaltskytteProject med planeringens namn** (Stefan),
+      kopplat via `PlanningLink` TargetKind **`faltproject`** (`PlanningCourseService.EnsureProjectAsync`, anropas vid
+      skapandet och av `GET Stations` för en äldre konfiguration). Projektet syns för planeringens deltagare
+      (`FaltskytteProjectService.ListAccessibleAsync`). Unikt index `UX_PlanningLink_Project` (ett projekt per
+      planering); går kopplingen inte att skriva tas projektet bort igen. ⚠️ CHECK-villkoret `CK_PlanningLink_Kind`
+      måste tillåta `faltproject` (P3j) — annars skapades ett tomt projekt vid VARJE sidladdning.
+    - Svit `tavlingsplanering-stationer-verify.mjs` 50/50 (A/B utan ansvarsregeln, serverns godkännanden och
+      helhetsspärren → 13 röda; rätten utan den ansvarige → sviten faller). Test `StationBlobTests`. Felen i
+      konfiguratorn visas i en rad under planeringsrutan (`faltCfgPlanningError`), aldrig `alert()`.
+  - **Fyll i från en mall i två steg (Stefan 2026-10-25):** steg 1 = gren + sorts tävling (`Visa uppgifterna`), steg 2
+    = mallens uppgifter med en ruta var (`GET PreviewTemplate` → `PlanningService.PlanTemplate`, nycklar
+    "områdesindex:uppgiftsindex"); `SeedTemplate(items)` lägger bara in de valda (utelämnat = alla). EN plan för båda, så
+    listan och det som läggs in kan inte skilja sig. Ett område skapas bara när minst en av dess uppgifter väljs;
+    befintliga uppgifter står gråa. Tillbaka behåller valen. Provas i o3 (avsnitt 5).
+  - **Listsidan: delplaneringarna under sin huvudplanering (Stefan 2026-10-25):** `MyPlannings` bär `parentId` och
+    `readOnly` per planering, plus `parents` (huvudplaneringar man bara är med i via en delplanering — en grå RUBRIK,
+    ingen länk, eftersom man inte får läsa den) och läsbara delplaneringar för den som är sammankallande eller Kan ändra i
+    huvudplaneringen (`PlanningService.HubFamilies`, samma regel som `IsParentConvener`; nivån "Läser …", bara Öppna).
+    Utfällt alltid; fler än fem delplaneringar får en Dölj-knapp. En sökträff i en delplanering tar med huvudplaneringen
+    som sammanhang (räknas inte i "Visar x av y"). Svit `tavlingsplanering-lista-verify.mjs` 15/15 (A/B gamla vyn → röd).
   - **Planeringstestet körning 2 (2026-10-25, `notes/planeringstest/`, granskning `expertgrupp-resultat-k2-2026-10-25.md`):**
     - ⚠️ `SaveArea` med `details=1` utan `stations` = RÖR INTE (förut `?? ""` som tömde föreningens stationer).
     - ⚠️ `UpdateWithVersionAsync` ger ingen ny version till en INAKTUELL flik (`ExpectedVersion` ≠ nuvarande) även när

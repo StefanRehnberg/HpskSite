@@ -89,13 +89,79 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du har inte rättighet att visa denna konfiguration." });
 
                 var view = await _configService.BuildViewAsync(config, viewerId, includeJson: true);
-                return Json(new { success = true, configuration = view });
+                return Json(new { success = true, configuration = view, planningStations = await PlanningStationsJsonAsync(config, viewerId.Value) });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting Fältskytte configuration {Id}", id);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Stefan 2026-10-25: en planerings stationer — vem som är ansvarig för vilken station, vilka den inloggade får
+        /// ändra, varje stations kontrollsumma (skickas tillbaka vid sparning) och godkännandet per station. Null när
+        /// konfigurationen inte är en planerings stationer.
+        /// </summary>
+        private async Task<object?> PlanningStationsJsonAsync(FaltskytteConfiguration config, int viewerId)
+        {
+            var r = await _configService.StationRightsAsync(config, viewerId);
+            if (!r.IsCourse) return null;
+            var isBanlaggare = await HttpContext.RequestServices.GetRequiredService<CertificationService>()
+                .HasActiveCertAsync(viewerId, HpskSite.Models.CertificationTypes.Banlaggare);
+            var approvals = Enumerable.Range(1, Math.Max(r.StationCount, 0))
+                .Select(n => (n, a: HpskSite.Models.Planning.StationBlob.Current(config.JsonBlob, n)))
+                .Where(x => x.a != null)
+                .ToDictionary(x => x.n.ToString(), x => (object)new { status = x.a!.Status, comment = x.a.Comment, at = x.a.At });
+            return new
+            {
+                all = r.All,
+                mine = r.Stations.OrderBy(n => n),
+                responsible = r.Responsible.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+                checksums = HpskSite.Models.Planning.StationBlob.Checksums(config.JsonBlob).ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+                approvals,
+                stationCount = r.StationCount,
+                canJudge = isBanlaggare && r.All,
+            };
+        }
+
+        public sealed class UpdateStationsRequest
+        {
+            public int Id { get; set; }
+            public List<int> Stations { get; set; } = new();
+            public string JsonBlob { get; set; } = "";
+            public Dictionary<string, string>? Expected { get; set; }
+        }
+
+        /// <summary>Sparar en eller flera stationer (en planerings stationer) — bara de stationerna, se UpdateStationsAsync.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateStations([FromBody] UpdateStationsRequest request)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+            var expected = request.Expected?.Where(kv => int.TryParse(kv.Key, out _)).ToDictionary(kv => int.Parse(kv.Key), kv => kv.Value);
+            var (ok, msg, sums) = await _configService.UpdateStationsAsync(request.Id, viewerId.Value, request.Stations, request.JsonBlob, expected);
+            return Json(new { success = ok, message = msg, checksums = sums?.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value) });
+        }
+
+        public sealed class StationApprovalRequest
+        {
+            public int ConfigId { get; set; }
+            public int Station { get; set; }
+            public string Action { get; set; } = "";
+            public string? Comment { get; set; }
+        }
+
+        /// <summary>Godkännandet av EN station: request / approve / return / reopen.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> StationApproval([FromBody] StationApprovalRequest request)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+            var (ok, msg) = await _configService.SetStationApprovalAsync(request.ConfigId, viewerId.Value, request.Station, request.Action, request.Comment);
+            return Json(new { success = ok, message = msg });
         }
 
         /// <summary>

@@ -26,11 +26,47 @@ namespace HpskSite.Services.Planning
         private readonly FaltskytteConfigurationService _configs;
         private readonly ICompetitionStore _competitions;
         private readonly ILogger<PlanningCourseService> _logger;
+        private readonly FaltskytteProjectService _projects;
 
         public PlanningCourseService(PlanningService planning, FaltskytteConfigurationService configs, ICompetitionStore competitions,
-            ILogger<PlanningCourseService> logger)
+            ILogger<PlanningCourseService> logger, FaltskytteProjectService projects)
         {
-            _planning = planning; _configs = configs; _competitions = competitions; _logger = logger;
+            _planning = planning; _configs = configs; _competitions = competitions; _logger = logger; _projects = projects;
+        }
+
+        /// <summary>
+        /// Stefan 2026-10-25: konfigurationer som skapas från en planering ligger i ett projekt i Fältkonfiguratorn med samma
+        /// namn som (stationernas) planering. Skapar projektet första gången och lägger konfigurationen i det.
+        /// </summary>
+        public async Task EnsureProjectAsync(int planningId, FaltskytteConfiguration config, int memberId)
+        {
+            try
+            {
+                if (config.ProjectId > 0) return;
+                var owner = _planning.Get(_planning.StationOwnerId(planningId));
+                if (owner == null) return;
+                var projectId = _planning.ProjectLinkId(owner.Id);
+                if (projectId == null)
+                {
+                    var (ok, _, created) = await _projects.CreateAsync(new CreateFaltskytteProjectRequest
+                    {
+                        Name = owner.Name.Length > 200 ? owner.Name[..200] : owner.Name,
+                        Description = $"Fältkonfigurationerna i planeringen {owner.Name}.",
+                    }, memberId);
+                    if (!ok || created == null) return;
+                    try { _planning.LinkProject(owner.Id, created.Id, memberId); }
+                    catch
+                    {
+                        // Ett projekt som inte kan kopplas till planeringen blir inte kvar som ett tomt projekt i konfiguratorn.
+                        await _projects.DeleteAsync(created.Id, memberId);
+                        throw;
+                    }
+                    projectId = created.Id;
+                }
+                await _configs.SetProjectForPlanningAsync(config.Id, projectId.Value);
+                config.ProjectId = projectId;
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: projektet i Fältkonfiguratorn kunde inte skapas.", planningId); }
         }
 
         public static bool IsFalt(string? type) =>
@@ -70,7 +106,7 @@ namespace HpskSite.Services.Planning
                 fromCourse = Math.Max(o?.Value<int?>(CourseAssembly.StationCountKey) ?? 0, FaltskytteAttachedConfigState.StationCount(courseBlob));
             }
             catch { /* en oläsbar bana räknas som tom */ }
-            return Math.Max(Math.Max(comp?.NumberOfSeriesOrStations ?? 0, _planning.MaxAreaStation(planningId)), fromCourse);
+            return Math.Max(Math.Max(comp?.NumberOfSeriesOrStations ?? 0, _planning.MaxAssignedStation(planningId)), fromCourse);
         }
 
         /// <summary>
@@ -102,13 +138,14 @@ namespace HpskSite.Services.Planning
             var (ok, msg, created) = await _configs.CreateAsync(new CreateFaltskytteConfigurationRequest
             {
                 Name = name.Length > 200 ? name[..200] : name,
-                Description = $"Tävlingens stationer i planeringen {root.Name}. Är stationerna uppdelade läggs delarna ihop hit med Sätt ihop stationerna.",
+                Description = $"Tävlingens stationer i planeringen {root.Name}. Varje station kan ha en ansvarig som ändrar just den.",
                 Visibility = "Private",
                 JsonBlob = blob.ToString(Newtonsoft.Json.Formatting.None),
             }, memberId);
             if (!ok || created == null) return (null, msg ?? "Stationerna kunde inte skapas.");
             var linkError = _planning.LinkCourseConfig(p.Id, created.Id, memberId);
             if (linkError != null) { await _configs.DeleteAsync(created.Id); return (null, linkError); }
+            await EnsureProjectAsync(p.Id, created, memberId);
             return (created, null);
         }
 
@@ -171,43 +208,16 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>
-        /// Stationerna-vyn (Stefan 2026-10-24): föreningarna vars stationer ändrades får sina delar omsynkade
-        /// (<see cref="AreaConfigBlob.Resync"/>) och omdöpta efter stationerna. Svaret: delarna som var godkända (eller
-        /// väntade) och nu är utkast igen.
-        /// </summary>
-        public async Task<List<string>> SyncPartsAsync(int planningId, IEnumerable<PlanningService.AreaStationsChange> changed)
-        {
-            var reopened = new List<string>();
-            var links = _planning.AreaConfigLinks(planningId);
-            var course = await CourseConfigAsync(planningId);
-            foreach (var c in changed)
-            {
-                var link = links.FirstOrDefault(l => l.AreaId == c.AreaId);
-                if (link == null) continue;
-                var part = await _configs.GetByIdAsync(link.ConfigId);
-                if (part == null) continue;
-                var blob = AreaConfigBlob.Resync(part.JsonBlob, course?.JsonBlob, c.Stations);
-                var area = _planning.AreaWithStations(c.PlanningId, c.AreaId);
-                var planning = _planning.Get(c.PlanningId);
-                var name = area == null || planning == null ? null
-                    : $"{planning.Name} – {area.Area.Name}" + (c.Stations.Count > 0 ? $" (station {string.Join(", ", c.Stations.OrderBy(n => n))})" : "");
-                if (await _configs.ReplaceForPlanningAsync(part.Id, blob, name)) reopened.Add(name ?? part.Name);
-                if (c.Stations.Count > 0) await _configs.SetFirstStationNumberAsync(part.Id, c.Stations.Min());
-            }
-            return reopened;
-        }
-
-        /// <summary>
         /// "Ändra antalet stationer": tävlingens antal i helheten (<c>_stationCount</c>). Färre stationer vägras så länge en
-        /// förening har en station över gränsen eller en sådan station är byggd.
+        /// station över gränsen har en ansvarig eller är byggd.
         /// </summary>
         public async Task<string?> SetStationCountAsync(PlanningRow p, int memberId, int count)
         {
             if (count < 1 || count > PlanningStations.Max) return $"Tävlingen kan ha 1–{PlanningStations.Max} stationer.";
             var (course, err) = await CreateCourseAsync(p, memberId, count);
             if (course == null) return err;
-            var areaMax = _planning.MaxAreaStation(p.Id);
-            if (areaMax > count) return $"Station {areaMax} görs av någon i uppdelningen. Släpp den först under Vem gör vilka stationer.";
+            var assignedMax = _planning.MaxAssignedStation(p.Id);
+            if (assignedMax > count) return $"Station {assignedMax} har en ansvarig. Ta bort den ansvarige för stationen först.";
             var built = CourseAssembly.BuiltStations(course.JsonBlob);
             if (built.Count > 0 && built.Max > count) return $"Station {built.Max} är byggd. Ta bort den i konfiguratorn först.";
             var comp = FaltCompetition(p.Id);

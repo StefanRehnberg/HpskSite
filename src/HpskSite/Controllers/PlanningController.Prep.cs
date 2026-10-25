@@ -346,18 +346,52 @@ namespace HpskSite.Controllers
         //  Mallar, kretsens checklista, stationer, inklistring
         // =====================================================================================
 
-        /// <summary>Fyller i från en standardmall (klubb, krets eller sm) för tävlingens gren.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SeedTemplate(int id, string size, string? discipline)
+        /// <summary>
+        /// Steg 2 i "Fyll i från en mall" (Stefan 2026-10-25: användaren väljer vilka av mallens uppgifter som ska in):
+        /// mallens uppgifter per område, med sista dag och om uppgiften redan finns. Skriver ingenting.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PreviewTemplate(int id, string size, string? discipline)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Mallen fylls i av den som kan ändra planeringen.");
             var comp = LinkedCompetition(id);
-            // Omgång 3 (K10): flera grenar på en gång ("Precision,Faltskytte"); en kopplad tävling bestämmer sin egen.
-            var discs = comp != null ? new[] { comp.TypeId } : (discipline ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
+            var plan = _planning.PlanTemplate(id, PrepTemplates.ForMany(TemplateDisciplines(comp, discipline), size), AnchorFor(x.Planning, comp));
+            return Ok(new
+            {
+                success = true,
+                areas = plan.GroupBy(p => p.Area).Select(g => new
+                {
+                    area = g.Key,
+                    exists = g.First().AreaExists,
+                    items = g.Select(p => new
+                    {
+                        key = p.Key, title = p.Title, description = p.Description, milestone = p.Milestone, exists = p.Exists,
+                        due = p.Due?.ToString("yyyy-MM-dd"), daysBefore = p.DaysBefore,
+                    }),
+                }),
+            });
+        }
+
+        // Omgång 3 (K10): flera grenar på en gång ("Precision,Faltskytte"); en kopplad tävling bestämmer sin egen.
+        private static string[] TemplateDisciplines(HpskSite.Models.Competitions.CompetitionInfo? comp, string? discipline) =>
+            comp != null ? new[] { comp.TypeId } : (discipline ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        /// <summary>Fyller i från en standardmall (klubb, krets eller sm) för tävlingens gren. <paramref name="items"/> =
+        /// de valda uppgifternas nycklar ur <see cref="PreviewTemplate"/>, en per rad; utelämnat = alla.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedTemplate(int id, string size, string? discipline, string? items)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Mallen fylls i av den som kan ändra planeringen.");
+            var comp = LinkedCompetition(id);
+            var discs = TemplateDisciplines(comp, discipline);
+            var keys = items == null ? null : items.Split(new[] { '\n', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+            if (keys != null && keys.Count == 0) return No("Välj minst en uppgift.");
+            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.ForMany(discs, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId, keys);
             // Planeringstestet k2: mallens gren blev aldrig planeringens — Stationerna och bemanningens roller följer grenen.
             // En planering utan gren och en mall med EN gren: då är det den grenen.
             if (comp == null && string.IsNullOrWhiteSpace(x.Planning.DisciplineKey) && discs.Length == 1

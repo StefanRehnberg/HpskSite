@@ -2228,7 +2228,7 @@ async function faltCfgSimpleSaveStation(stationNum) {
     var _fldEl = document.getElementById(faltCfgGetTargetFieldId()); if (_fldEl) _fldEl.value = json;
 
     if (faltCfgIsEditMode()) {
-        var ok = await faltCfgSaveToServer(json);
+        var ok = await faltCfgSaveToServer(json, [stationNum]);
         if (!ok) return;
     }
     faltCfgWeaponClasses.forEach(function (c) {
@@ -2274,7 +2274,7 @@ async function faltCfgSaveStation(stationNum, wc) {
 
     // In edit mode: save to server immediately
     if (faltCfgIsEditMode()) {
-        var ok = await faltCfgSaveToServer(json);
+        var ok = await faltCfgSaveToServer(json, [stationNum]);
         if (!ok) return;
     }
 
@@ -2299,15 +2299,22 @@ async function faltCfgSaveAll() {
     if (faltCfgIsEditMode()) {
         // Ett misslyckat sparande får inte rensa osparad-markeringarna — då ser
         // redigeraren sparad ut medan servern har den gamla versionen.
-        if (!await faltCfgSaveToServer(json)) return false;
+        // En planerings stationer: bara de ändrade stationerna sparas (numret står sist i nyckeln "C_3").
+        var dirtyNums = Array.from(new Set(Array.from(faltCfgDirtyStations).map(function (k) { return parseInt(String(k).split('_').pop(), 10); }).filter(function (n) { return n > 0; })));
+        if (!await faltCfgSaveToServer(json, dirtyNums)) return false;
     }
 
     faltCfgDirtyStations.clear();
     return true;
 }
 
-async function faltCfgSaveToServer(json) {
+async function faltCfgSaveToServer(json, stations) {
     var token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    // Stefan 2026-10-25: en planerings stationer sparas station för station (UpdateStations) — utom när den som kan
+    // ändra allt sparar något som inte är en station (tävlingstyp, mörker): då hela, med serverns godkännanden.
+    if (faltCfgIsStandaloneEditor() && window._faltCfgPlanning && !(window._faltCfgPlanning.all && !(stations && stations.length)))
+        return await faltCfgPlanningSave(json, stations);
 
     // Standalone configuration editor: save to FaltskytteConfiguration table.
     if (faltCfgIsStandaloneEditor()) {
@@ -2705,11 +2712,146 @@ function faltCfgAssembledNote() {
         }).join('')
         + '<div class="mt-1">Ändra de stationerna i delen. Ändras de här skrivs de över nästa gång stationerna sätts ihop i planeringen.</div>';
 }
+// ─── En planerings stationer (Stefan 2026-10-25) ────────────────────
+// EN konfiguration, ansvar per station: den ansvarige ändrar bara sina stationer (resten är låsta för hen), varje
+// sparning skickar bara de ändrade stationerna med deras kontrollsumma (UpdateStations — flera kan arbeta samtidigt),
+// och banläggaren godkänner station för station (StationApproval), sedan helheten. window._faltCfgPlanning sätts av
+// editorn ur Get (planningStations); null = en vanlig konfiguration.
+function faltCfgPlanningCan(n) {
+    var P = window._faltCfgPlanning;
+    return !P || P.all || (P.mine || []).indexOf(n) >= 0;
+}
+async function faltCfgPlanningSave(json, stations) {
+    var P = window._faltCfgPlanning;
+    var list = (stations || []).filter(function (n) { return faltCfgPlanningCan(n); });
+    if (!list.length) return true;
+    var expected = {};
+    list.forEach(function (n) { expected[n] = (P.checksums || {})[n] || ''; });
+    var token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/UpdateStations', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ id: window._faltCfgConfigurationId, stations: list, jsonBlob: json, expected: expected })
+        });
+        var data = await resp.json();
+        if (!data.success) { faltCfgPlanningError('Kunde inte spara: ' + (data.message || 'Okänt fel')); return false; }
+        faltCfgPlanningError(null);
+        P.checksums = data.checksums || P.checksums;
+        faltCfgPlanningRefresh();
+        return true;
+    } catch (err) { faltCfgPlanningError('Det gick inte att nå servern — stationen är inte sparad. Försök igen.'); console.error(err); return false; }
+}
+// Fel i planeringens stationer visas i planeringsrutan, aldrig i en dialogruta.
+function faltCfgPlanningError(msg) {
+    var note = document.getElementById('faltCfgPlanningNote');
+    if (!note) { if (msg) console.error(msg); return; }
+    var el = document.getElementById('faltCfgPlanningErr');
+    if (!msg) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'faltCfgPlanningErr'; el.className = 'alert alert-danger py-2 small'; el.setAttribute('role', 'alert'); note.insertAdjacentElement('afterend', el); }
+    el.textContent = msg;
+    note.scrollIntoView({ block: 'nearest' });
+}
+async function faltCfgPlanningRefresh() {
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + window._faltCfgConfigurationId);
+        var data = await resp.json();
+        if (data.success && data.planningStations) {
+            var sums = window._faltCfgPlanning && window._faltCfgPlanning.checksums;
+            window._faltCfgPlanning = data.planningStations;
+            // Kontrollsummorna är det fliken senast LÄSTE eller sparade — en annans sparning ska stoppa ens nästa.
+            if (sums) window._faltCfgPlanning.checksums = sums;
+            faltCfgPlanningDecorate();
+        }
+    } catch (e) { console.error(e); }
+}
+var FALT_PL_STATUS = { Pending: ['Väntar på godkännande', 'text-bg-warning'], Approved: ['Godkänd', 'text-bg-success'], Returned: ['Tillbaka', 'text-bg-warning'] };
+function faltCfgPlanningDecorate() {
+    var P = window._faltCfgPlanning;
+    var host = document.getElementById('faltCfgTabContent');
+    if (!P || !host) return;
+    var note = document.getElementById('faltCfgPlanningNote');
+    if (!note) {
+        note = document.createElement('div');
+        note.id = 'faltCfgPlanningNote';
+        note.className = 'alert alert-light border py-2 small';
+        host.parentNode.insertBefore(note, host);
+    }
+    var mine = (P.mine || []).slice().sort(function (a, b) { return a - b; });
+    note.innerHTML = '<div class="fw-semibold mb-1"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Planeringens stationer</div>'
+        + (P.all ? 'Du kan ändra alla stationer.' : mine.length ? 'Du är ansvarig för station ' + mine.join(', ') + ' och kan ändra dem. De andra stationerna kan du läsa.' : 'Du kan läsa stationerna.')
+        + ' Varje station godkänns av en banläggare, sedan helheten.';
+    var count = document.getElementById('faltCfg_stationCount');
+    if (count && !P.all) count.disabled = true;
+    var canonical = faltCfgGetCanonicalClass ? faltCfgGetCanonicalClass() : null;
+    host.querySelectorAll('.card[data-station]').forEach(function (card) {
+        var n = parseInt(card.getAttribute('data-station'), 10);
+        var header = card.querySelector('.card-header');
+        if (!header) return;
+        card.querySelectorAll('.fk-pl').forEach(function (el) { el.remove(); });
+        var editable = faltCfgPlanningCan(n);
+        var a = (P.approvals || {})[n];
+        var title = header.querySelector('[data-station-title]');
+        var badges = '';
+        if ((P.responsible || {})[n]) badges += ' <span class="badge text-bg-light border fk-pl">Ansvarig: ' + faltCfgEscapeHtml(P.responsible[n]) + '</span>';
+        if (a && FALT_PL_STATUS[a.status]) badges += ' <span class="badge ' + FALT_PL_STATUS[a.status][1] + ' fk-pl" data-fk-st-status="' + a.status + '">' + FALT_PL_STATUS[a.status][0] + '</span>';
+        if (!editable) badges += ' <span class="badge text-bg-secondary fk-pl">Bara läsning</span>';
+        if (title) title.insertAdjacentHTML('beforeend', badges);
+        if (!editable) {
+            card.querySelectorAll('.card-body input, .card-body select, .card-body textarea, .card-body button').forEach(function (el) { el.disabled = true; });
+            header.querySelectorAll('.btn-success, .btn-group, .dropdown, input').forEach(function (el) { el.classList.add('d-none'); });
+        }
+        var st = canonical && faltCfgData[canonical] ? (faltCfgData[canonical].stations || []).find(function (s) { return s.station === n; }) : null;
+        var hasContent = typeof faltCfgStationHasContent === 'function' ? faltCfgStationHasContent(st) : true;
+        var btns = [];
+        if (editable && hasContent && (!a || a.status === 'Returned')) btns.push(['request', 'Be om godkännande', 'btn-outline-primary']);
+        if (P.canJudge && hasContent && (!a || a.status !== 'Approved')) { btns.push(['approve', 'Godkänn', 'btn-outline-success']); btns.push(['return', 'Skicka tillbaka…', 'btn-outline-secondary']); }
+        if (P.canJudge && a && a.status === 'Approved') btns.push(['reopen', 'Ta tillbaka godkännandet', 'btn-outline-secondary']);
+        if (btns.length) {
+            var row = header.querySelector('.d-flex');
+            row.insertAdjacentHTML('beforeend', '<span class="d-flex flex-wrap gap-1 fk-pl">' + btns.map(function (b) {
+                return '<button type="button" class="btn btn-sm ' + b[2] + '" data-fk-st-action="' + b[0] + '" data-fk-st-n="' + n + '">' + b[1] + '</button>';
+            }).join('') + '</span>');
+        }
+        if (a && a.status === 'Returned' && a.comment)
+            header.insertAdjacentHTML('beforeend', '<div class="small mt-1 fk-pl"><i class="bi bi-reply me-1" aria-hidden="true"></i>' + faltCfgEscapeHtml(a.comment) + '</div>');
+    });
+}
+document.addEventListener('click', async function (e) {
+    var b = e.target.closest('[data-fk-st-action],[data-fk-st-send]');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var n = parseInt(b.getAttribute('data-fk-st-n'), 10);
+    var action = b.getAttribute('data-fk-st-action') || 'return';
+    var comment = null;
+    if (action === 'return' && !b.hasAttribute('data-fk-st-send')) {
+        // Ingen prompt(): ett fält i stationens rubrik.
+        var header = b.closest('.card-header');
+        if (header.querySelector('.fk-pl-return')) return;
+        header.insertAdjacentHTML('beforeend', '<div class="fk-pl fk-pl-return mt-2 d-flex flex-wrap gap-2 align-items-start">'
+            + '<textarea class="form-control form-control-sm" rows="2" maxlength="1000" style="max-width:420px" placeholder="Vad behöver ändras på station ' + n + '?" id="fkStReturn_' + n + '"></textarea>'
+            + '<button type="button" class="btn btn-sm btn-primary" data-fk-st-send="1" data-fk-st-n="' + n + '">Skicka tillbaka</button></div>');
+        document.getElementById('fkStReturn_' + n).focus();
+        return;
+    }
+    if (b.hasAttribute('data-fk-st-send')) comment = (document.getElementById('fkStReturn_' + n) || {}).value || '';
+    b.disabled = true;
+    try {
+        var token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/StationApproval', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ configId: window._faltCfgConfigurationId, station: n, action: action, comment: comment })
+        });
+        var data = await resp.json();
+        if (!data.success) { faltCfgPlanningError(data.message || 'Det gick inte.'); b.disabled = false; return; }
+        faltCfgPlanningError(null);
+        await faltCfgPlanningRefresh();
+    } catch (err) { console.error(err); b.disabled = false; }
+});
 (function () {
     var orig = renderActiveTab;
     renderActiveTab = function () {
         var r = orig.apply(this, arguments);
-        try { faltCfgAssembledNote(); faltCfgFocusStationFromHash(); } catch (e) { console.error(e); }
+        try { faltCfgAssembledNote(); faltCfgPlanningDecorate(); faltCfgFocusStationFromHash(); } catch (e) { console.error(e); }
         return r;
     };
     // Editorn kan ha ritat stationerna innan kroken ovan fanns (konfigurationen hämtas asynkront) — titta en stund efteråt.
@@ -2718,7 +2860,7 @@ function faltCfgAssembledNote() {
         tries++;
         try {
             if (document.querySelector('#faltCfgTabContent .card[data-station]')) {
-                faltCfgAssembledNote(); faltCfgFocusStationFromHash();
+                faltCfgAssembledNote(); faltCfgPlanningDecorate(); faltCfgFocusStationFromHash();
                 if (faltCfgHashStationDone) { clearInterval(timer); return; }
             }
         } catch (e) { console.error(e); clearInterval(timer); return; }

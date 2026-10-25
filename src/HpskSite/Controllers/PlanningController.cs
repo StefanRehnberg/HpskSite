@@ -259,20 +259,34 @@ namespace HpskSite.Controllers
             var pending = _planning.PendingCounts(ownerIds);
             var conveners = _planning.ConvenerNames(mineIds.Concat(listed.Select(p => p.Id)).Concat(support.Select(p => p.Id)));
             var myRequests = _planning.OpenRequestsByMember(me);
-            string Conv(int pid) => conveners.TryGetValue(pid, out var l) ? string.Join(", ", l) : "";
+            // Stefan 2026-10-25: delplaneringarna under sin huvudplanering — varje rad säger vilken huvudplanering den hör
+            // till, huvudplaneringar man inte själv är med i följer med som rubriker, och den som leder huvudplaneringen ser
+            // delplaneringarna (läsa) även när hen inte är med i dem.
+            var (parentOf, parents, readableSubs) = _planning.HubFamilies(me, mineIds);
+            var subConveners = _planning.ConvenerNames(readableSubs.Select(p => p.Id));
+            string Conv(int pid) => conveners.TryGetValue(pid, out var l) ? string.Join(", ", l) : subConveners.TryGetValue(pid, out var l2) ? string.Join(", ", l2) : "";
             return Json(new
             {
                 success = true,
                 isSiteAdmin = isAdmin,
                 inviteCap = PlanningInviteRules.MaxPerDay,
-                plannings = mine.Select(m => new
+                plannings = mine.Select(m => (object)new
                 {
                     id = m.PlanningId, participantId = m.ParticipantId, name = m.Name, status = m.Status,
                     targetText = m.TargetText, targetStart = D(m.TargetStart), access = m.Access,
                     accessLabel = PlanningAccessLevel.Label(m.Access), unread = m.Unread, votesOwed = m.VotesOwed,
                     nextMeetingAt = DT(m.NextMeetingAt), nextMeetingTitle = m.NextMeetingTitle,
                     conveners = Conv(m.PlanningId), pendingRequests = pending.GetValueOrDefault(m.PlanningId),
-                }),
+                    parentId = parentOf.TryGetValue(m.PlanningId, out var par) ? par : (int?)null, readOnly = false,
+                }).Concat(readableSubs.Select(p => (object)new
+                {
+                    id = p.Id, participantId = 0, name = p.Name, status = p.Status, targetText = p.TargetText, targetStart = (string?)null,
+                    access = "", accessLabel = ParentReaderLabel, unread = 0, votesOwed = 0, nextMeetingAt = (string?)null,
+                    nextMeetingTitle = (string?)null, conveners = Conv(p.Id), pendingRequests = 0,
+                    parentId = p.ParentPlanningId, readOnly = true,
+                })),
+                // Huvudplaneringar man bara är med i via en delplanering: en rubrik, inte en länk (man får inte läsa den).
+                parents = parents.Select(p => new { id = p.Id, name = p.Name, status = p.Status, targetText = p.TargetText }),
                 listed = listed.Select(p => new
                 {
                     id = p.Id, name = p.Name, targetText = p.TargetText, targetStart = D(p.TargetStart),

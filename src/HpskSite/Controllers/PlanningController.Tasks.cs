@@ -59,15 +59,10 @@ namespace HpskSite.Controllers
             {
                 var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
                 var course = _planning.CourseConfigId(planningId) ?? competitionConfigId;
+                // Stefan 2026-10-25: stationerna är EN konfiguration — varje station öppnas där (inga delar).
                 if (course > 0)
                     for (var n = 1; n <= PlanningStations.Max; n++) urls[n] = $"/faltkonfig/{course}/redigera#station={n}";
-                foreach (var l in _planning.AreaConfigLinks(planningId))
-                {
-                    var cfg = await svc.GetByIdAsync(l.ConfigId);
-                    if (cfg == null) continue;
-                    var map = AreaConfigBlob.CourseStations(cfg.JsonBlob);
-                    for (var i = 0; i < map.Count; i++) urls[map[i]] = $"/faltkonfig/{cfg.Id}/redigera#station={i + 1}";
-                }
+                await Task.CompletedTask;
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: stationernas länkar kunde inte räknas.", planningId); }
             return urls;

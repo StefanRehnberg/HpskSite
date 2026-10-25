@@ -23,7 +23,7 @@ namespace HpskSite.Services
     ///       Region  — anyone with regional admin in OwnerClubId's region.
     ///       Public  — any authenticated user.
     /// </summary>
-    public class FaltskytteConfigurationService
+    public partial class FaltskytteConfigurationService
     {
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<FaltskytteConfigurationService> _logger;
@@ -395,6 +395,10 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
             var config = await db.SingleOrDefaultAsync<FaltskytteConfiguration>("WHERE Id = @0", request.Id);
             if (config == null) return (false, "Konfigurationen hittades inte.", null);
+            // Stefan 2026-10-25: en planerings stationer — godkännandet per station är serverns, och en godkänd station
+            // som ändras här blir ett utkast igen (StationBlob).
+            if (request.JsonBlob != null && await CoursePlanningIdAsync(config.Id) != null)
+                request.JsonBlob = KeepServerApprovals(config.JsonBlob, request.JsonBlob);
 
             // JsonBlob (the configuration data) is locked when Approved. Metadata stays editable.
             // The check is content-aware: an Update where the supplied JsonBlob normalizes to the
@@ -566,6 +570,10 @@ namespace HpskSite.Services
         /// </summary>
         private async Task<string?> PartsBlockerAsync(FaltskytteConfiguration config)
         {
+            // Stefan 2026-10-25: en planerings stationer godkänns station för station, sedan helheten.
+            if (await CoursePlanningIdAsync(config.Id) != null
+                && HpskSite.Models.Planning.StationBlob.WholeBlocker(config.JsonBlob, StationCountOf(config.JsonBlob)) is { } stationBlocker)
+                return stationBlocker;
             var parts = HpskSite.Models.Planning.CourseAssembly.AssembledFrom(config.JsonBlob);
             if (parts.Count == 0) return null;
             using var db = _databaseFactory.CreateDatabase();

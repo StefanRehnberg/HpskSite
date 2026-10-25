@@ -21,6 +21,11 @@
     .plh-badge { background: var(--bs-warning); color: #1b1206; font-weight: 700; font-size: .8rem; border-radius: 1rem; padding: .1rem .55rem; white-space: nowrap; display: inline-block; margin: 1px 0; }
     .plh-table td a.plh-name { font-weight: 600; text-decoration: none; }
     .plh-table td a.plh-name:hover { text-decoration: underline; }
+    /* Stefan 2026-10-25: delplaneringarna står indragna under sin huvudplanering, med en linje till vänster. */
+    .plh-table tr.plh-sub > td:first-child { padding-left: 2.25rem; position: relative; }
+    .plh-table tr.plh-sub > td:first-child::before { content: ""; position: absolute; left: 1rem; top: 0; bottom: 0; border-left: 2px solid var(--bs-border-color); }
+    .plh-table tr.plh-head > td { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .plh-kind { font-size: .75rem; color: var(--bs-secondary-color); font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
 </style>
 
 <div class="plh-page container-fluid px-lg-4 py-4">
@@ -124,6 +129,8 @@
     const post = (action, params) => req('/umbraco/surface/Planning/' + action, { method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: new URLSearchParams(params).toString() });
     let data = null, rows = [], fns = [];
+    const folded = new Set(); // huvudplaneringar vars delplaneringar användaren fällt ihop (bara när de är många)
+    const FOLD_FROM = 6;
     const LEVELS = [['Follower', 'Följer'], ['Participant', 'Deltar'], ['Editor', 'Kan ändra'], ['Owner', 'Sammankallande']];
 
     function say(html, kind) { $('plhMsg').innerHTML = html ? `<div class="alert alert-${kind || 'success'} alert-dismissible">${html}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button></div>` : ''; }
@@ -192,13 +199,60 @@
                 : 'Du är inte med i någon planering ännu. Skapa en under <b>Åtgärder → Ny planering</b>, eller vänta på en inbjudan — den kommer med mejl.'}</div>`;
             return;
         }
-        const body = rows.map(p => {
+        const body = grouped(rows, all).map(x => x.head ? headRow(x.head, x.subs) : rowHtml(x.p, x.sub, x.subs)).join('');
+        $('plhList').innerHTML = `<div class="table-responsive"><table class="table align-middle plh-table"><thead><tr>
+            <th>Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th class="d-none d-md-table-cell">Din nivå</th>
+            <th class="d-none d-md-table-cell">Nästa möte</th><th class="d-none d-md-table-cell">Väntar</th><th class="text-end"></th></tr></thead><tbody>${body}</tbody></table></div>`;
+    }
+    // Familjerna: varje huvudplanering följd av sina delplaneringar. En delplanering vars huvudplanering inte står i listan
+    // får en rubrik (en huvudplanering man bara är med i via en delplanering — eller en som sökningen inte träffade).
+    // Ordningen följer serverns: där familjens första planering står.
+    function grouped(rows, all) {
+        const byId = new Map(all.map(p => [p.id, p]));
+        const out = [], seen = new Set();
+        const subsOf = rootId => rows.filter(p => p.parentId === rootId);
+        for (const p of rows) {
+            const root = p.parentId || p.id;
+            if (seen.has(root)) continue;
+            seen.add(root);
+            const subs = subsOf(root);
+            const rootRow = rows.find(x => x.id === root);
+            if (rootRow) out.push({ p: rootRow, sub: false, subs: subs.length });
+            else {
+                // Sökningen tog bort huvudplaneringen, men den finns i listan: visa den ändå, som sammanhang.
+                const inAll = byId.get(root);
+                if (inAll) out.push({ p: inAll, sub: false, subs: subs.length });
+                else {
+                    // Med i huvudplaneringen men den står under ett annat filter (aktiv/arkiverad): rubriken säger var.
+                    const own = (data.plannings || []).find(x => x.id === root && !x.readOnly);
+                    out.push({ head: own ? { id: root, name: own.name, elsewhere: own.status === 'Archived' ? 'Arkiverade' : 'Mina planeringar' }
+                        : (data.parents || []).find(x => x.id === root) || { id: root, name: 'Huvudplaneringen' }, subs: subs.length });
+                }
+            }
+            if (!folded.has(root)) subs.forEach(x => out.push({ p: x, sub: true }));
+        }
+        return out;
+    }
+    function foldButton(id, n) {
+        if (n < FOLD_FROM) return '';
+        return `<button type="button" class="btn btn-link btn-sm p-0 ms-1" data-plh-fold="${id}">${folded.has(id) ? 'Visa delplaneringarna' : 'Dölj delplaneringarna'}</button>`;
+    }
+    function headRow(h, n) {
+        return `<tr class="plh-head" data-plh-head="${h.id}"><td colspan="6"><span class="plh-kind">Huvudplanering</span>
+            <div class="fw-semibold">${esc(h.name)}</div>
+            <div class="small">${h.elsewhere ? `Huvudplaneringen står under ${esc(h.elsewhere)}.`
+                : `Du är med i ${n === 1 ? 'en delplanering' : n + ' delplaneringar'} här. Huvudplaneringen öppnar den som leder den.`}${foldButton(h.id, n)}</div></td></tr>`;
+    }
+    function rowHtml(p, sub, nSubs) {
+        {
             const mine = p.kind === 'mine';
             const open = mine ? `/tavlingsplanering/${p.id}` : '';
             const name = mine ? `<a class="plh-name" href="${open}">${esc(p.name)}</a>` : `<span class="fw-semibold">${esc(p.name)}</span>`;
             const level = mine ? esc(p.accessLabel) : p.kind === 'listed' ? '<span class="text-muted">Inte med</span>' : '<span class="text-muted">Support</span>';
             const next = p.nextMeetingAt ? esc(fmt(p.nextMeetingAt)) : '<span class="text-muted">—</span>';
-            const items = mine ? [
+            const items = mine && p.readOnly ? [
+                { href: open, icon: 'bi-box-arrow-up-right', label: 'Öppna' },
+            ] : mine ? [
                 { href: open, icon: 'bi-box-arrow-up-right', label: 'Öppna' },
                 { divider: true },
                 { icon: 'bi-box-arrow-right', label: 'Lämna planeringen…', danger: true, fn: () => leave(p) },
@@ -206,7 +260,9 @@
                 p.requested ? { icon: 'bi-x-circle', label: 'Dra tillbaka förfrågan', fn: () => withdraw(p) }
                             : { icon: 'bi-person-plus', label: 'Be om att få vara med…', fn: () => ask(p) },
             ] : [{ icon: 'bi-person-check', label: 'Hantera förfrågningar…', fn: () => support(p) }];
-            return `<tr><td>${name}<div class="small text-muted">${esc(p.targetText || '')}</div>
+            const kind = sub ? '<span class="plh-kind">Delplanering</span><br>' : '';
+            const subsInfo = !sub && nSubs ? `<div class="small text-muted">${nSubs === 1 ? 'En delplanering' : nSubs + ' delplaneringar'}${foldButton(p.id, nSubs)}</div>` : '';
+            return `<tr${sub ? ' class="plh-sub"' : ''} data-plh-row="${p.id}"><td>${kind}${name}<div class="small text-muted">${esc(p.targetText || '')}</div>${subsInfo}
                     <div class="d-md-none small mt-1">${p.conveners ? 'Sammankallande: ' + esc(p.conveners) + ' · ' : ''}Du: ${level}${p.nextMeetingAt ? ' · nästa möte ' + esc(fmt(p.nextMeetingAt)) : ''}</div>
                     <div class="d-md-none mt-1">${waits(p)}</div></td>
                 <td class="d-none d-md-table-cell">${esc(p.conveners || '')}</td>
@@ -214,12 +270,15 @@
                 <td class="d-none d-md-table-cell text-nowrap">${next}</td>
                 <td class="d-none d-md-table-cell">${waits(p)}</td>
                 <td class="text-end">${menu(items)}</td></tr>`;
-        }).join('');
-        $('plhList').innerHTML = `<div class="table-responsive"><table class="table align-middle plh-table"><thead><tr>
-            <th>Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th class="d-none d-md-table-cell">Din nivå</th>
-            <th class="d-none d-md-table-cell">Nästa möte</th><th class="d-none d-md-table-cell">Väntar</th><th class="text-end"></th></tr></thead><tbody>${body}</tbody></table></div>`;
+        }
     }
     document.addEventListener('click', e => { const b = e.target.closest('[data-plh-fn]'); if (b) fns[+b.dataset.plhFn](); });
+    document.addEventListener('click', e => {
+        const b = e.target.closest('[data-plh-fold]'); if (!b) return;
+        const id = +b.dataset.plhFold;
+        if (folded.has(id)) folded.delete(id); else folded.add(id);
+        render();
+    });
     $('plhFilter').addEventListener('change', render);
     $('plhSearch').addEventListener('input', render);
 

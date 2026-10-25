@@ -102,9 +102,16 @@ namespace HpskSite.Services
             if (await _authService.IsCurrentUserAdminAsync())
                 return await db.FetchAsync<FaltskytteProject>("ORDER BY ModifiedDate DESC");
 
+            // Stefan 2026-10-25: en planerings projekt syns för den som är med i planeringen (deltagaren ändrar fortfarande
+            // bara det planeringen tillåter — projektet ger ingen ändringsrätt).
             return await db.FetchAsync<FaltskytteProject>(
                 @"WHERE OwnerMemberId = @0
                      OR Id IN (SELECT ProjectId FROM FaltskytteProjectMember WHERE MemberId = @0)
+                     OR Id IN (SELECT l.TargetId FROM PlanningLink l
+                                 JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL
+                                 JOIN Planning f ON (f.Id = COALESCE(p.ParentPlanningId, p.Id) OR f.ParentPlanningId = COALESCE(p.ParentPlanningId, p.Id)) AND f.DeletedAt IS NULL
+                                 JOIN PlanningMember pm ON pm.PlanningId = f.Id AND pm.MemberId = @0 AND pm.RemovedAt IS NULL
+                                WHERE l.TargetKind = N'faltproject')
                    ORDER BY ModifiedDate DESC", memberId);
         }
 

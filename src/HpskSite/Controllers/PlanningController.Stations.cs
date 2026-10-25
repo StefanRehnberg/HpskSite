@@ -63,6 +63,8 @@ namespace HpskSite.Controllers
             };
         }
 
+        private static string NonEmpty(string? a, string b) => string.IsNullOrWhiteSpace(a) ? b : a;
+
         private static bool IsFalt(string? type) =>
             HpskSite.Models.Staffing.FunctionaryRoles.FaltFamily.Contains(type ?? "", StringComparer.OrdinalIgnoreCase);
 
@@ -76,6 +78,10 @@ namespace HpskSite.Controllers
             // Banan i planeringen (2026-10-24): antalet stationer ur tävlingen, banan och områdena — det största.
             var courseSvc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
             var course = x.Caller.ViaLink ? null : await courseSvc.CourseConfigAsync(id);
+            // Stefan 2026-10-25: planeringens stationer ligger i planeringens projekt i Fältkonfiguratorn — också de som
+            // skapades innan projektet fanns.
+            if (course != null && !(course.ProjectId > 0) && PlanningAccess.CanEditPlanning(x.Caller))
+                await courseSvc.EnsureProjectAsync(id, course, x.MemberId);
             var rows = _planning.Stations(id, courseSvc.StationCount(id, course?.JsonBlob));
             var me = x.MemberId;
             object? courseJson = null;
@@ -83,7 +89,6 @@ namespace HpskSite.Controllers
             {
                 var csvc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
                 var canView = await csvc.CanViewAsync(course, me);
-                var parts = await courseSvc.PartsAsync(id, course.JsonBlob);
                 var total = courseSvc.StationCount(id, course.JsonBlob);
                 var built = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(course.JsonBlob);
                 var attachedId = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.AttachedId(comp?.StationConfig);
@@ -93,7 +98,8 @@ namespace HpskSite.Controllers
                     canView, canEdit = canView && await csvc.CanEditAsync(course, me),
                     assembledAt = CourseAssembly.AssembledAt(course.JsonBlob),
                     stationCount = total, builtStations = built,
-                    parts = parts.Select(p => new { id = p.ConfigId, name = p.Name, status = p.Status, stations = p.Stations, state = p.State }),
+                    approvedStations = Enumerable.Range(1, Math.Max(total, 0)).Count(n => StationBlob.Current(course.JsonBlob, n)?.Status == StationBlob.Approved),
+                    projectUrl = course.ProjectId > 0 ? "/faltkonfig" : null, // konfiguratorns lista grupperar per projekt
                     // Tävlingens kopia: ansluten och aktuell, ansluten men äldre, en annan bana, eller ingen.
                     competition = falt ? new
                     {
@@ -124,88 +130,114 @@ namespace HpskSite.Controllers
                     };
                 }
             }
-            // Omgång 3 (3.3): ett områdes delkonfiguration — en egen fältkonfiguration för områdets stationer.
-            var areaConfigs = new List<object>();
-            // Stationerna-vyn: vilka av tävlingens stationer som är byggda — i helheten eller i en förenings del.
             var builtSet = new SortedSet<int>(CourseAssembly.BuiltStations(course?.JsonBlob));
-            var partStates = course == null ? new Dictionary<int, string>()
-                : (await courseSvc.PartsAsync(id, course.JsonBlob)).ToDictionary(p => p.ConfigId, p => p.State);
-            var partByArea = new Dictionary<int, object>();
-            if (!x.Caller.ViaLink)
-            {
-                var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
-                foreach (var l in _planning.AreaConfigLinks(id))
-                {
-                    var cfg = await svc.GetByIdAsync(l.ConfigId);
-                    if (cfg == null) continue;
-                    var canView = await svc.CanViewAsync(cfg, me);
-                    var map = AreaConfigBlob.CourseStations(cfg.JsonBlob);
-                    foreach (var i in CourseAssembly.BuiltStations(cfg.JsonBlob))
-                        if (i >= 1 && i <= map.Count) builtSet.Add(map[i - 1]);
-                    var json = new
-                    {
-                        areaId = l.AreaId, planningId = l.PlanningId, id = cfg.Id, name = cfg.Name, url = $"/faltkonfig/{cfg.Id}/redigera",
-                        status = cfg.ApprovalStatus ?? "Draft", canView, canEdit = canView && await svc.CanEditAsync(cfg, me),
-                        stations = map, state = partStates.GetValueOrDefault(cfg.Id, "new"),
-                    };
-                    areaConfigs.Add(json);
-                    partByArea[l.AreaId] = json;
-                }
-            }
             var canEditPlanning = PlanningAccess.CanEditPlanning(x.Caller) && !x.Caller.ViaLink;
-            var areas = _planning.StationAreas(id).Select(a => new
+            // Stefan 2026-10-25: de ansvariga — en rad per ansvarig med sina stationer (PlanningStationResponsible).
+            var people = _planning.Participants(_planning.StationOwnerId(id)).ToDictionary(p => p.Id);
+            string WhoName(PlanningStationResponsibleRow r) =>
+                r.Kind == PlanningStationResponsibleRow.KindPerson && r.ParticipantId is int pid && people.TryGetValue(pid, out var p) ? p.DisplayName
+                : r.Kind == PlanningStationResponsibleRow.KindClub && r.HostId > 0 ? NonEmpty(OrgName(DocumentOwnerType.Club, r.HostId), r.Name)
+                : r.Kind == PlanningStationResponsibleRow.KindRegion && r.HostId > 0 ? NonEmpty(OrgName(DocumentOwnerType.Region, r.HostId), r.Name)
+                : r.Name;
+            var responsibles = rows.Where(r => r.Responsible != null).Select(r => r.Responsible!).GroupBy(r => r.Key).Select(g =>
             {
-                id = a.Id, name = a.Name, planningId = a.PlanningId,
-                planning = FamilyLabel(x.Planning, a.PlanningId),
-                host = a.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, a.HostClubId) : a.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, a.HostRegionId) : a.HostText,
-                responsible = a.ResponsibleParticipantId > 0 ? _planning.Participant(a.PlanningId, a.ResponsibleParticipantId!.Value)?.DisplayName : a.ResponsibleName,
-                stations = PlanningStations.Parse(a.Stations).Stations.OrderBy(n => n).ToList(),
-                editable = canEditPlanning && a.PlanningId == id,
-                part = partByArea.GetValueOrDefault(a.Id),
-            }).ToList();
+                var f = g.First();
+                var contact = f.Kind != PlanningStationResponsibleRow.KindPerson && f.ParticipantId is int cid && people.TryGetValue(cid, out var c) ? c : null;
+                return new
+                {
+                    key = g.Key, kind = f.Kind, name = WhoName(f), participantId = f.ParticipantId, hostId = f.HostId,
+                    contactId = contact?.Id, contact = contact?.DisplayName,
+                    // En person som lämnat planeringen kan inte ändra stationerna — det ska synas.
+                    left = f.ParticipantId is int lp && !people.ContainsKey(lp),
+                    stations = g.Select(r => r.Station).OrderBy(n => n).ToList(),
+                    editable = canEditPlanning,
+                };
+            }).OrderBy(r => r.stations.First()).ToList();
             var urls = x.Caller.ViaLink ? new Dictionary<int, string>() : await StationUrlsAsync(id, me, falt ? StationConfigId(comp) : null);
             return Json(new
             {
                 success = true,
                 competition = comp == null ? null : new { id = comp.Id, name = comp.Name, falt, stationCount = falt ? comp.NumberOfSeriesOrStations : 0 },
                 config,
-                areaConfigs,
-                areas,
+                responsibles,
                 course = courseJson,
                 stationCount = courseSvc.StationCount(id, course?.JsonBlob),
                 canCreateCourse = course == null && canEditPlanning && WholeStationsElsewhere(x.Planning) == null,
                 wholeElsewhere = WholeStationsElsewhere(x.Planning),
-                canCreateAreaConfig = canEditPlanning,
                 stations = rows.Select(r => new
                 {
-                    number = r.Number, areaId = r.AreaId, area = r.AreaName,
-                    host = r.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, r.HostClubId) : r.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, r.HostRegionId) : r.HostText,
-                    planningId = r.PlanningId, planning = FamilyLabel(x.Planning, r.PlanningId),
+                    number = r.Number,
+                    responsible = r.Responsible == null ? null : WhoName(r.Responsible), responsibleKey = r.Responsible?.Key,
+                    planningId = r.PlanningId,
                     chiefs = r.Chiefs, openTasks = r.OpenTasks,
+                    // Godkännandet per station (Stefan 2026-10-25): Pending / Approved / Returned, null = utkast.
+                    approval = course == null ? null : StationBlob.Current(course.JsonBlob, r.Number)?.Status,
+                    approvalComment = course == null ? null : StationBlob.Current(course.JsonBlob, r.Number)?.Comment,
                     built = builtSet.Contains(r.Number), url = urls.GetValueOrDefault(r.Number),
                 }),
             });
         }
 
         /// <summary>
-        /// Stationerna-vyn (Stefan 2026-10-24): föreningen får exakt de här stationerna. En station som en annan förening i
-        /// planeringen har flyttas; föreningarnas delar följer med (<see cref="PlanningCourseService.SyncPartsAsync"/>).
+        /// Stefan 2026-10-25: "Ge stationer en ansvarig". <paramref name="who"/> = <c>p:{deltagare}</c> (en person i
+        /// planeringen), <c>h:{0=klubb|1=krets}:{id}</c> eller <c>text</c> (<paramref name="name"/>). <paramref name="contactId"/> =
+        /// personen i planeringen som utformar stationerna åt en klubb, krets eller ett namn. <paramref name="release"/> =
+        /// stationer samma ansvarige hade och inte längre ska ha. Inget område skapas.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AssignStations(int id, int areaId, string? stations)
+        public async Task<IActionResult> SetStationResponsible(int id, string? stations, string? who, int? contactId, string? name, string? release)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som fördelar stationerna.");
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som väljer stationernas ansvariga.");
+            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
             var (list, perr) = PlanningStations.Parse(stations ?? "");
             if (perr != null) return No(perr);
+            var (rel, rerr) = PlanningStations.Parse(release ?? "");
+            if (rerr != null) return No(rerr);
+            PlanningService.StationWho w;
+            var v = (who ?? "").Trim();
+            if (v.StartsWith("p:") && int.TryParse(v[2..], out var pid) && pid > 0)
+            {
+                var p = _planning.Participant(id, pid);
+                if (p == null || !p.IsActive) return No("Den ansvarige finns inte i planeringen.");
+                w = new(PlanningStationResponsibleRow.KindPerson, pid, null, p.DisplayName);
+            }
+            else if (v.StartsWith("h:"))
+            {
+                var parts = v.Split(':');
+                if (parts.Length != 3 || !int.TryParse(parts[1], out var ht) || !int.TryParse(parts[2], out var hid) || hid <= 0) return No("Välj klubben eller kretsen.");
+                var hostType = ht;
+                if (!BoardTargets(id).Any(t => t.OwnerType == hostType && t.OwnerId == hid))
+                    return No("Välj en klubb eller krets som någon i planeringen företräder, eller skriv namnet.");
+                w = new(hostType == DocumentOwnerType.Club ? PlanningStationResponsibleRow.KindClub : PlanningStationResponsibleRow.KindRegion,
+                    contactId > 0 ? contactId : null, hid, OrgName(hostType, hid));
+            }
+            else if (v == "text") w = new(PlanningStationResponsibleRow.KindName, contactId > 0 ? contactId : null, null, name ?? "");
+            else return No("Välj vem som är ansvarig.");
             var courseSvc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
-            var max = courseSvc.StationCount(id, (await courseSvc.CourseConfigAsync(id))?.JsonBlob);
-            var r = _planning.AssignStations(id, areaId, list, max);
-            if (r.Error != null) return No(r.Error);
-            var reopened = await courseSvc.SyncPartsAsync(id, r.Changed);
-            return Ok(new { success = true, changed = r.Changed.Count, reopened });
+            // Taket gäller bara när antalet är KÄNT (stationernas konfiguration eller en kopplad fälttävling) — annars räknas
+            // StationCount ur stationerna som redan har en ansvarig, och nästa station vägrades (p4 hittade det).
+            var course = await courseSvc.CourseConfigAsync(id);
+            var max = course != null || courseSvc.FaltCompetition(id) != null ? courseSvc.StationCount(id, course?.JsonBlob) : 0;
+            var err = _planning.SetStationResponsible(id, list, rel, w, max, x.Caller.ParticipantId);
+            return err == null ? Ok() : No(err);
+        }
+
+        /// <summary>Stationerna blir utan ansvarig ("Ta bort som ansvarig", "Ingen ansvarig").</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ClearStationResponsible(int id, string? stations)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som väljer stationernas ansvariga.");
+            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
+            var (list, perr) = PlanningStations.Parse(stations ?? "");
+            if (perr != null) return No(perr);
+            var err = _planning.ClearStationResponsible(id, list);
+            return err == null ? Ok() : No(err);
         }
 
         /// <summary>"Ändra antalet stationer" (Stationerna-vyn).</summary>
@@ -219,71 +251,6 @@ namespace HpskSite.Controllers
             if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
             var err = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().SetStationCountAsync(x.Planning, x.MemberId, stationCount);
             return err == null ? Ok(new { success = true }) : No(err);
-        }
-
-        /// <summary>
-        /// Omgång 3 (Expertgruppen 3.3, "arkitektens väg"): en fältkonfiguration för ETT områdes stationer, så att en krets
-        /// eller klubb som har stationerna 3–6 kan bygga, få godkända och skriva ut sina egna stationer. Har tävlingen en
-        /// ansluten konfiguration kopieras områdets stationer därifrån; annars börjar den tom. Den som skapar äger den och
-        /// områdets stationschefer blir medarbetare. Konfigurationen numrerar 1..N och bär banans nummer i
-        /// <c>_courseStations</c>.
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CreateAreaConfig(int id, int areaId)
-        {
-            var x = await ResolveAsync(id, null);
-            if (x == null) return Missing();
-            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som skapar områdets fältkonfiguration.");
-            var area = _planning.AreaWithStations(id, areaId);
-            if (area == null) return No("Området finns inte i planeringen.");
-            if (area.Stations.Count == 0) return No("Ange områdets stationer först.");
-            if (_planning.AreaConfigLinks(id).Any(l => l.AreaId == areaId)) return No("Området har redan en delkonfiguration.");
-            var comp = StationCompetition(x.Planning);
-            var falt = comp != null && IsFalt(comp.CompetitionType);
-            var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
-            string? source = null;
-            // Banan i planeringen (2026-10-24): planeringens bana först — den är det föreningarna bygger vidare på.
-            var courseCfg = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().CourseConfigAsync(id);
-            if (courseCfg != null && HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(courseCfg.JsonBlob) > 0)
-                source = courseCfg.JsonBlob;
-            var configId = source == null && falt ? StationConfigId(comp) : null;
-            if (configId > 0)
-            {
-                var src = await svc.GetByIdAsync(configId.Value);
-                if (src != null && await svc.CanViewAsync(src, x.MemberId)) source = src.JsonBlob;
-            }
-            // Utan ansluten konfiguration: tävlingens egen stationskonfiguration (en äldre tävling har den inline).
-            if (source == null && falt && configId == null) source = comp!.StationConfig;
-            var stations = area.Stations.OrderBy(n => n).ToList();
-            var name = $"{x.Planning.Name} – {area.Area.Name} (station {string.Join(", ", stations)})";
-            var (ok, msg, created) = await svc.CreateAsync(new HpskSite.CompetitionTypes.Faltskytte.Models.CreateFaltskytteConfigurationRequest
-            {
-                Name = name.Length > 200 ? name[..200] : name,
-                Description = $"Delkonfiguration för området {area.Area.Name} i planeringen {x.Planning.Name}.",
-                Visibility = "Private",
-                OwnerClubId = area.Area.HostClubId,
-                JsonBlob = HpskSite.Models.Planning.AreaConfigBlob.Build(source, stations),
-            }, x.MemberId);
-            if (!ok || created == null) return No(msg ?? "Fältkonfigurationen kunde inte skapas.");
-            await svc.SetFirstStationNumberAsync(created.Id, stations[0]);
-            var linkError = _planning.LinkAreaConfig(id, areaId, created.Id, x.MemberId);
-            if (linkError != null) { await svc.DeleteAsync(created.Id); return No(linkError); }
-            var added = new List<string>();
-            // Banan i planeringen (2026-10-24): områdets ansvarige bygger delen — även en som bara deltar i planeringen.
-            var resp = area.Area.ResponsibleParticipantId > 0 ? _planning.Participant(id, area.Area.ResponsibleParticipantId!.Value) : null;
-            if (resp is { IsActive: true, MemberId: > 0 } && resp.MemberId != x.MemberId)
-            {
-                var (respOk, _) = await svc.AddCollaboratorAsync(created.Id, resp.MemberId!.Value);
-                if (respOk) added.Add(resp.DisplayName);
-            }
-            foreach (var c in _planning.StationChiefMembers(id).Where(c => ChiefStations(c.Station).Intersect(stations).Any()))
-            {
-                if (c.MemberId == x.MemberId || c.MemberId == resp?.MemberId) continue;
-                var (addedOk, _) = await svc.AddCollaboratorAsync(created.Id, c.MemberId);
-                if (addedOk) added.Add(c.Name);
-            }
-            return Ok(new { success = true, id = created.Id, url = $"/faltkonfig/{created.Id}/redigera", copied = source != null, added });
         }
 
         /// <summary>
@@ -303,25 +270,6 @@ namespace HpskSite.Controllers
             var svc = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
             var (cfg, err) = await svc.CreateCourseAsync(x.Planning, x.MemberId, stationCount ?? 0);
             return cfg == null ? No(err ?? "Stationerna kunde inte skapas.") : Ok(new { success = true, id = cfg.Id, url = $"/faltkonfig/{cfg.Id}/redigera" });
-        }
-
-        /// <summary>"Sätt ihop banan": områdenas delkonfigurationer läggs ihop till banans fältkonfiguration.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AssembleCourse(int id)
-        {
-            var x = await ResolveAsync(id, null);
-            if (x == null) return Missing();
-            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som sätter ihop stationerna.");
-            if (WholeStationsElsewhere(x.Planning) is { } elsewhere) return No(elsewhere);
-            var r = await HttpContext.RequestServices.GetRequiredService<PlanningCourseService>().AssembleAsync(x.Planning, x.MemberId);
-            if (r.Error != null) return No(r.Error);
-            return Ok(new
-            {
-                success = true, changed = r.Changed, url = $"/faltkonfig/{r.ConfigId}/redigera",
-                warnings = r.Result?.Warnings ?? new List<string>(), missing = r.Result?.Missing ?? new List<int>(),
-                fromCourse = r.Result?.FromCourse ?? new List<int>(), stationCount = r.Result?.StationCount ?? 0,
-            });
         }
 
         /// <summary>Ansluter banan till den kopplade fälttävlingen (en kopia, som i Redigera tävling).</summary>
@@ -350,27 +298,14 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> GiveChiefsConfigAccess(int id, int? areaId)
+        public async Task<IActionResult> GiveChiefsConfigAccess(int id)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som ger stationscheferna tillgång.");
-            int? configId;
-            IEnumerable<int>? onlyStations = null;
-            if (areaId > 0)
-            {
-                // Omgång 3 (3.3): områdets delkonfiguration delas med områdets stationschefer — inte med hela banans.
-                var link = _planning.AreaConfigLinks(id).FirstOrDefault(l => l.AreaId == areaId);
-                if (link == null) return No("Området har ingen delkonfiguration.");
-                configId = link.ConfigId;
-                onlyStations = _planning.AreaWithStations(link.PlanningId, link.AreaId)?.Stations ?? new List<int>();
-            }
-            else
-            {
-                var comp = StationCompetition(x.Planning);
-                configId = comp != null && IsFalt(comp.CompetitionType) ? StationConfigId(comp) : null;
-                if (!(configId > 0)) return No("Tävlingen har ingen ansluten fältkonfiguration.");
-            }
+            var comp = StationCompetition(x.Planning);
+            int? configId = comp != null && IsFalt(comp.CompetitionType) ? StationConfigId(comp) : null;
+            if (!(configId > 0)) return No("Tävlingen har ingen ansluten fältkonfiguration.");
             var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.FaltskytteConfigurationService>();
             var cfg = await svc.GetByIdAsync(configId.Value);
             if (cfg == null) return No("Fältkonfigurationen finns inte.");
@@ -381,7 +316,6 @@ namespace HpskSite.Controllers
             foreach (var c in _planning.StationChiefMembers(id))
             {
                 if (c.MemberId == cfg.OwnerMemberId || collab.Contains(c.MemberId)) continue;
-                if (onlyStations != null && !ChiefStations(c.Station).Intersect(onlyStations).Any()) continue;
                 var (ok, _) = await svc.AddCollaboratorAsync(cfg.Id, c.MemberId);
                 if (ok) added.Add(c.Name);
             }

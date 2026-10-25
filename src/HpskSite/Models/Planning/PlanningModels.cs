@@ -636,8 +636,51 @@ namespace HpskSite.Models.Planning
         public int? HostClubId { get; set; }
         public int? HostRegionId { get; set; }
         public string? HostText { get; set; }
-        /// <summary>P4: stationerna området ansvarar för ("3-6, 9"), när en klubb eller krets har en eller flera stationer.</summary>
+        /// <summary>
+        /// P4: stationerna området ansvarade för ("3-6, 9"). ⚠️ LÄSES OCH SKRIVS INTE LÄNGRE (Stefan 2026-10-25): vem som
+        /// utformar en station står i <see cref="PlanningStationResponsibleRow"/>, inte på ett område. Kolumnen står kvar
+        /// för NPoco och historiken.
+        /// </summary>
         public string? Stations { get; set; }
+    }
+
+    /// <summary>
+    /// Stefan 2026-10-25: vem som är ANSVARIG för att utforma en station — en person i planeringen, en klubb, en krets
+    /// eller ett namn. EN rad per station (unikt på planering + station), på stationernas planering
+    /// (<c>PlanningService.StationOwnerId</c>). Inte ett område: ett område är en del av tävlingens organisation, det här
+    /// är en uppgift en person eller förening har för några stationer. "Stationschef" är något annat — den som leder
+    /// stationen på tävlingsdagen (bemanningens roll).
+    /// </summary>
+    [TableName("PlanningStationResponsible")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningStationResponsibleRow
+    {
+        public const string KindPerson = "Person", KindClub = "Club", KindRegion = "Region", KindName = "Name";
+
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int Station { get; set; }
+        /// <summary><see cref="KindPerson"/> / <see cref="KindClub"/> / <see cref="KindRegion"/> / <see cref="KindName"/>.</summary>
+        public string Kind { get; set; } = KindPerson;
+        /// <summary>Personen i planeringen som utformar stationen i konfiguratorn — den ansvarige själv, eller kontakten när
+        /// en klubb, krets eller ett namn är ansvarig. Null = ingen (då ändrar bara den som kan ändra alla stationer).</summary>
+        public int? ParticipantId { get; set; }
+        /// <summary>Klubbens eller kretsens id för <see cref="KindClub"/> / <see cref="KindRegion"/>.</summary>
+        public int? HostId { get; set; }
+        /// <summary>Namnet som visas: personens, klubbens, kretsens eller det skrivna, när ansvaret sattes.</summary>
+        public string Name { get; set; } = "";
+        public DateTime AssignedAt { get; set; }
+        public int AssignedBy { get; set; }
+
+        /// <summary>Vem det är — samma nyckel för alla stationer samma ansvarige har (kortet Ansvariga grupperar på den).</summary>
+        [Ignore]
+        public string Key => Kind switch
+        {
+            KindPerson => "p:" + ParticipantId,
+            KindClub => "c:" + HostId,
+            KindRegion => "r:" + HostId,
+            _ => "n:" + (Name ?? "").Trim().ToLowerInvariant(),
+        };
     }
 
     /// <summary>
@@ -731,6 +774,8 @@ namespace HpskSite.Models.Planning
         public const string Competition = "competition"; // competitionstore-ok: kopplingens sort (TargetKind), inte doktypens alias
         /// <summary>Omgång 3 (3.3): en fältkonfiguration (delkonfigurationen för ett område). <see cref="AreaId"/> säger vilket.</summary>
         public const string Faltconfig = "faltconfig";
+        /// <summary>Stefan 2026-10-25: projektet i Fältkonfiguratorn som planeringens stationer ligger i (samma namn som planeringen).</summary>
+        public const string Faltproject = "faltproject";
         public int Id { get; set; }
         public int PlanningId { get; set; }
         public int PlanningPartId { get; set; }

@@ -627,6 +627,9 @@ namespace HpskSite.Services.Planning
                 planningId, fromPid, toPid);
             db.Execute("UPDATE PlanningArea SET ResponsibleParticipantId = @2 WHERE PlanningId = @0 AND ResponsibleParticipantId = @1 AND DeletedAt IS NULL",
                 planningId, fromPid, toPid);
+            // Stationerna den gamla var ansvarig för (eller kontakt för) går till den nya.
+            db.Execute("UPDATE PlanningStationResponsible SET ParticipantId = @2 WHERE PlanningId = @0 AND ParticipantId = @1",
+                planningId, fromPid, toPid);
             // En roll den nya redan har (samma namn) läggs inte till en gång till; den gamla avslutas i båda fallen.
             db.Execute(@"INSERT INTO PlanningRole (PlanningId, ParticipantId, RoleKey, Name, AddedAt, AddedBy)
                          SELECT r.PlanningId, @2, r.RoleKey, r.Name, @3, r.AddedBy FROM PlanningRole r

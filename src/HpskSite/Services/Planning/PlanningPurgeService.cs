@@ -23,7 +23,7 @@ namespace HpskSite.Services.Planning
             "StaffingSourceScope", "StaffRequestLog",
             "PlanningSurplus", "PlanningDecisionResponse", "PlanningDecision",
             "PlanningDocumentRef", "PlanningDocument", "PlanningDocumentCategory",
-            "PlanningTaskEvent", "PlanningTask", "PlanningArea",
+            "PlanningTaskEvent", "PlanningTask", "PlanningStationResponsible", "PlanningArea",
             "PlanningMeetingTopic", "PlanningRole",
             "PlanningMessageMention", "PlanningMessage", "PlanningMessageRead", "PlanningNotifyLog",
             "PlanningRequest", "PlanningMember", "PlanningPart", "PlanningLink", "PlanningActivity",

@@ -7,10 +7,9 @@ using Umbraco.Cms.Infrastructure.Persistence;
 namespace HpskSite.Services.Planning
 {
     /// <summary>
-    /// P4 (Stefan 2026-10-24, fråga 13a): stationerna i fältskytte delas mellan klubbar eller kretsar. Ett område bär sina
-    /// stationer (<see cref="PlanningAreaRow.Stations"/>) och sin värd; stationschefen är bemanningens roll
-    /// <i>Stationschef</i> per station. Översikten läser huvudplaneringen OCH dess delplaneringar — en förening som fått sina
-    /// stationer utdelade till en egen planering finns kvar i bilden.
+    /// Stationerna i fältskytte. Stefan 2026-10-25: EN konfiguration på stationernas planering, och en ANSVARIG per station
+    /// (<see cref="PlanningStationResponsibleRow"/>, <c>PlanningService.StationResponsible.cs</c>) — inte områden.
+    /// Stationschefen är bemanningens roll <i>Stationschef</i> per station.
     /// </summary>
     public partial class PlanningService
     {
@@ -23,44 +22,23 @@ namespace HpskSite.Services.Planning
             return db.Fetch<PlanningRow>("SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", root);
         }
 
-        /// <summary>Stationen som ett annat område i planeringsfamiljen redan har, eller null.</summary>
-        private static string? StationConflict(IUmbracoDatabase db, int planningId, int areaId, List<int> mine)
-        {
-            if (mine.Count == 0) return null;
-            var family = StationFamily(db, planningId);
-            if (family.Count == 0) return null;
-            var names = family.ToDictionary(f => f.Id, f => f.Name);
-            var others = db.Fetch<PlanningAreaRow>($@"SELECT * FROM PlanningArea WHERE PlanningId IN ({string.Join(",", names.Keys)})
-                AND DeletedAt IS NULL AND Stations IS NOT NULL AND Id <> @0", areaId);
-            var hit = PlanningStations.Conflict(mine, others.Select(o => (
-                o.PlanningId == planningId ? o.Name : $"{o.Name} ({names[o.PlanningId]})", o.Stations)));
-            return hit == null ? null : $"Station {hit.Value.Station} hör redan till området {hit.Value.OtherArea}.";
-        }
-
-        public sealed record StationRow(int Number, int? AreaId, string? AreaName, int? HostClubId, int? HostRegionId, string? HostText,
-            int PlanningId, string PlanningName, List<string> Chiefs, int OpenTasks);
+        public sealed record StationRow(int Number, PlanningStationResponsibleRow? Responsible, int PlanningId, List<string> Chiefs, int OpenTasks);
 
         /// <summary>
-        /// En rad per station: området och värden som ansvarar, stationscheferna ur bemanningen och de öppna uppgifterna på
-        /// stationen — i planeringen och dess delplaneringar. <paramref name="stationCount"/> (tävlingens antal stationer) tar
-        /// med stationer som ingen ansvarar för ännu.
+        /// En rad per station: den ansvarige (<see cref="PlanningStationResponsibleRow"/>), stationscheferna ur bemanningen
+        /// och de öppna uppgifterna på stationen — i planeringen och dess delplaneringar. <paramref name="stationCount"/>
+        /// (tävlingens antal stationer) tar med stationer som ingen ansvarar för ännu.
         /// </summary>
         public List<StationRow> Stations(int planningId, int stationCount)
         {
+            var owner = StationOwnerId(planningId);
+            if (owner == 0) return new List<StationRow>();
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
-            if (p == null) return new List<StationRow>();
-            // Stationsnumren gäller hela familjen: huvudplaneringen ser sina delplaneringars stationer, och en delplanering
-            // ser huvudplaneringens och syskonens som deras (inte som lediga) — Expertgruppen 2026-10-24 F4.
             var family = StationFamily(db, planningId);
-            var ids = string.Join(",", family.Select(f => f.Id));
-            var names = family.ToDictionary(f => f.Id, f => f.Name);
-            var areas = db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({ids}) AND DeletedAt IS NULL AND Stations IS NOT NULL");
-            var byStation = new Dictionary<int, PlanningAreaRow>();
-            foreach (var a in areas.OrderBy(a => a.PlanningId == planningId ? 0 : 1).ThenBy(a => a.SortOrder))
-                foreach (var n in PlanningStations.Parse(a.Stations).Stations)
-                    byStation.TryAdd(n, a);
+            var ids = string.Join(",", family.Select(f => f.Id).DefaultIfEmpty(planningId));
+            var byStation = db.Fetch<PlanningStationResponsibleRow>("SELECT * FROM PlanningStationResponsible WHERE PlanningId = @0", owner)
+                .ToDictionary(r => r.Station);
             var chiefs = db.Fetch<ChiefRow>($@"SELECT MemberId, ScopeKey, DisplayName FROM StaffAssignment
                 WHERE PlanningId IN ({ids}) AND RoleKey = N'stationschef' AND ScopeType = N'Station' AND ScopeKey IS NOT NULL ORDER BY DisplayName");
             var chiefMap = new Dictionary<int, List<string>>();
@@ -75,13 +53,8 @@ namespace HpskSite.Services.Planning
             var tasks = taskKeys.Select(k => int.TryParse(k, out var n) ? n : 0).Where(n => n > 0).GroupBy(n => n).ToDictionary(g => g.Key, g => g.Count());
             var all = new SortedSet<int>(byStation.Keys.Concat(chiefMap.Keys).Concat(tasks.Keys));
             for (var i = 1; i <= Math.Min(stationCount, PlanningStations.Max); i++) all.Add(i);
-            return all.Select(n =>
-            {
-                byStation.TryGetValue(n, out var a);
-                var pid = a?.PlanningId ?? planningId;
-                return new StationRow(n, a?.Id, a?.Name, a?.HostClubId, a?.HostRegionId, a?.HostText, pid, names.GetValueOrDefault(pid, ""),
-                    chiefMap.GetValueOrDefault(n) ?? new List<string>(), tasks.GetValueOrDefault(n));
-            }).ToList();
+            return all.Select(n => new StationRow(n, byStation.GetValueOrDefault(n), owner,
+                chiefMap.GetValueOrDefault(n) ?? new List<string>(), tasks.GetValueOrDefault(n))).ToList();
         }
 
         /// <summary>Medlemmarna som är stationschefer i planeringen och dess delplaneringar (för fältkonfigurationen).</summary>
@@ -184,6 +157,25 @@ namespace HpskSite.Services.Planning
             return (links.FirstOrDefault(l => l.PlanningId == owner) ?? links.FirstOrDefault())?.TargetId;
         }
 
+        /// <summary>Projektet i Fältkonfiguratorn som planeringens stationer ligger i, eller null.</summary>
+        public int? ProjectLinkId(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.FirstOrDefault<int?>($@"SELECT TOP 1 l.TargetId FROM PlanningLink l JOIN FaltskytteProject fp ON fp.Id = l.TargetId
+                WHERE l.TargetKind = N'{PlanningLinkRow.Faltproject}' AND l.PlanningId = @0 ORDER BY l.Id", planningId);
+        }
+
+        /// <summary>Kopplar ett projekt i Fältkonfiguratorn till planeringen.</summary>
+        public void LinkProject(int planningId, int projectId, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Insert(new PlanningLinkRow
+            {
+                PlanningId = planningId, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltproject, TargetId = projectId, AreaId = null,
+                LinkedAt = Now, LinkedBy = byMemberId,
+            });
+        }
+
         /// <summary>Kopplar stationernas konfiguration till stationernas planering. Vägrar en andra i familjen.</summary>
         public string? LinkCourseConfig(int planningId, int configId, int byMemberId)
         {
@@ -203,83 +195,13 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        /// <summary>Högsta stationsnumret i familjens områden, eller 0.</summary>
-        public int MaxAreaStation(int planningId)
+        /// <summary>Högsta stationen som har en ansvarig, på stationernas planering, eller 0.</summary>
+        public int MaxAssignedStation(int planningId)
         {
+            var owner = StationOwnerId(planningId);
+            if (owner == 0) return 0;
             using var s = _scopes.CreateScope(autoComplete: true);
-            var family = StationFamily(s.Database, planningId);
-            if (family.Count == 0) return 0;
-            var areas = s.Database.Fetch<string>($@"SELECT Stations FROM PlanningArea WHERE PlanningId IN ({string.Join(",", family.Select(f => f.Id))})
-                AND DeletedAt IS NULL AND Stations IS NOT NULL");
-            return areas.SelectMany(a => PlanningStations.Parse(a).Stations).DefaultIfEmpty(0).Max();
-        }
-
-        // =====================================================================================
-        //  Stationerna-vyn (Stefan 2026-10-24): stationerna väljs per förening, och en station flyttar
-        // =====================================================================================
-
-        /// <summary>Ett område vars stationer ändrades: (område, planering, de nya stationerna).</summary>
-        public sealed record AreaStationsChange(int AreaId, int PlanningId, List<int> Stations);
-
-        public sealed record AssignResult(string? Error, List<AreaStationsChange> Changed);
-
-        /// <summary>
-        /// Ger området exakt <paramref name="stations"/>. En station som ett annat område i SAMMA planering har flyttas hit;
-        /// en station som hör till ett område i en annan planering i familjen (en delplanering eller huvudplaneringen) vägras
-        /// — den ändras där. Svaret säger vilka områden som ändrades, så att deras delar kan följa med.
-        /// </summary>
-        public AssignResult AssignStations(int planningId, int areaId, IReadOnlyCollection<int> stations, int maxStation)
-        {
-            var wanted = stations.Where(n => n > 0).Distinct().OrderBy(n => n).ToList();
-            if (wanted.Count > 0 && maxStation > 0 && wanted.Max() > maxStation)
-                return new AssignResult($"Tävlingen har {maxStation} stationer. Ändra antalet stationer först.", new());
-            if (wanted.Count > 0 && wanted.Max() > PlanningStations.Max)
-                return new AssignResult($"Högst {PlanningStations.Max} stationer.", new());
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var db = s.Database;
-            var family = StationFamily(db, planningId);
-            if (family.Count == 0) return new AssignResult("Planeringen finns inte.", new());
-            var names = family.ToDictionary(f => f.Id, f => f.Name);
-            var areas = db.Fetch<PlanningAreaRow>($@"SELECT * FROM PlanningArea WITH (UPDLOCK, HOLDLOCK)
-                WHERE PlanningId IN ({string.Join(",", names.Keys)}) AND DeletedAt IS NULL");
-            var area = areas.FirstOrDefault(a => a.Id == areaId && a.PlanningId == planningId);
-            if (area == null) return new AssignResult("Den som ska göra stationerna finns inte i planeringen.", new());
-            foreach (var other in areas.Where(a => a.Id != areaId && a.PlanningId != planningId && a.Stations != null))
-            {
-                var hit = PlanningStations.Parse(other.Stations).Stations.Intersect(wanted).OrderBy(n => n).FirstOrDefault();
-                if (hit > 0)
-                    return new AssignResult($"Station {hit} hör till {other.Name} i planeringen {names[other.PlanningId]}. Ändra den där.", new());
-            }
-            var changed = new List<AreaStationsChange>();
-            foreach (var other in areas.Where(a => a.Id != areaId && a.PlanningId == planningId && a.Stations != null))
-            {
-                var mine = PlanningStations.Parse(other.Stations).Stations;
-                var left = mine.Except(wanted).ToList();
-                if (left.Count == mine.Count) continue;
-                other.Stations = left.Count == 0 ? null : PlanningStations.Format(left);
-                db.Update(other);
-                changed.Add(new AreaStationsChange(other.Id, other.PlanningId, left));
-            }
-            var before = PlanningStations.Parse(area.Stations).Stations.OrderBy(n => n).ToList();
-            if (!before.SequenceEqual(wanted))
-            {
-                area.Stations = wanted.Count == 0 ? null : PlanningStations.Format(wanted);
-                db.Update(area);
-                changed.Add(new AreaStationsChange(area.Id, area.PlanningId, wanted));
-            }
-            if (changed.Count > 0) Bump(db, planningId);
-            return new AssignResult(null, changed);
-        }
-
-        /// <summary>Familjens områden som har stationer (föreningarna i Stationerna-vyn), huvudplaneringens först.</summary>
-        public List<PlanningAreaRow> StationAreas(int planningId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var db = s.Database;
-            var ids = string.Join(",", StationFamily(db, planningId).Select(f => f.Id));
-            if (ids.Length == 0) return new();
-            return db.Fetch<PlanningAreaRow>($"SELECT * FROM PlanningArea WHERE PlanningId IN ({ids}) AND DeletedAt IS NULL AND Stations IS NOT NULL")
-                .OrderBy(a => a.PlanningId == planningId ? 0 : 1).ThenBy(a => a.PlanningId).ThenBy(a => a.SortOrder).ToList();
+            return s.Database.ExecuteScalar<int?>("SELECT MAX(Station) FROM PlanningStationResponsible WHERE PlanningId = @0", owner) ?? 0;
         }
 
         /// <summary>Kopplar en fältkonfiguration till ett område. Vägrar ett andra för samma område.</summary>

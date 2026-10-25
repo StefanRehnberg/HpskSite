@@ -76,8 +76,9 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Omgång 3 (3.2): banans stationer för en planering som inte (eller inte ännu) har en fälttävling — områdenas
-        /// stationer i hela familjen (huvudplaneringen och delplaneringarna), stigande.
+        /// Omgång 3 (3.2): stationerna för en planering som inte (eller inte ännu) har en fälttävling, stigande — i hela
+        /// familjen (huvudplaneringen och delplaneringarna). Stefan 2026-10-25: stationerna 1..N ur stationernas
+        /// fältkonfiguration (<c>_stationCount</c> eller de byggda), plus stationer som har en ansvarig.
         /// </summary>
         public List<int> FamilyAreaStations(StaffOwner owner)
         {
@@ -86,9 +87,24 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var root = db.ExecuteScalar<int?>("SELECT CASE WHEN ParentPlanningId > 0 THEN ParentPlanningId ELSE Id END FROM Planning WHERE Id = @0", pid) ?? 0;
             if (root <= 0) return new();
-            var raw = db.Fetch<string>(@"SELECT a.Stations FROM PlanningArea a JOIN Planning p ON p.Id = a.PlanningId
-                WHERE (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL AND a.DeletedAt IS NULL AND a.Stations IS NOT NULL", root);
-            return raw.SelectMany(s => HpskSite.Models.Planning.PlanningStations.Parse(s).Stations).Distinct().OrderBy(n => n).ToList();
+            var set = new SortedSet<int>(db.Fetch<int>(@"SELECT r.Station FROM PlanningStationResponsible r JOIN Planning p ON p.Id = r.PlanningId
+                WHERE (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL", root));
+            var blobs = db.Fetch<string>(@"SELECT c.JsonBlob FROM PlanningLink l JOIN Planning p ON p.Id = l.PlanningId
+                JOIN FaltskytteConfiguration c ON c.Id = l.TargetId
+                WHERE l.TargetKind = N'faltconfig' AND l.AreaId IS NULL AND (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL", root);
+            var count = 0;
+            foreach (var b in blobs)
+            {
+                try
+                {
+                    var o = string.IsNullOrWhiteSpace(b) ? null : Newtonsoft.Json.Linq.JObject.Parse(b);
+                    count = Math.Max(count, Math.Max(o?.Value<int?>(HpskSite.Models.Planning.CourseAssembly.StationCountKey) ?? 0,
+                        HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteAttachedConfigState.StationCount(b)));
+                }
+                catch { /* en oläsbar konfiguration ger inga stationer */ }
+            }
+            for (var n = 1; n <= Math.Min(count, HpskSite.Models.Planning.PlanningStations.Max); n++) set.Add(n);
+            return set.ToList();
         }
 
         /// <summary>

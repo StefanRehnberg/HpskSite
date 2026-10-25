@@ -390,6 +390,8 @@ async function fkEditorLoad() {
         fkEditorConfig = data.configuration;
         // Omgang 3 (K9): versionen editorn laste - skickas med vid varje sparning av banan.
         window._faltCfgVersion = fkEditorConfig.version || null;
+        // Stefan 2026-10-25: en planerings stationer - ansvar, sparning och godkannande per station.
+        window._faltCfgPlanning = data.planningStations || null;
         fkEditorRenderMeta();
 
         var blob = {};
