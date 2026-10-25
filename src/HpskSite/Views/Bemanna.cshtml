@@ -67,6 +67,7 @@
     var shootTargets = null, shootPicked = {};   // omgång 3 steg 9: veckans tävlingar och de funktionären tänker tävla i
     var checked = {};            // { nyckel: [{from,to}, ...] }
     var items = [];              // det som ritades, i ordning — kryssrutorna bär index hit, aldrig text
+    var parts = null;            // steg 6a: delarna i en huvudplanering (annars null = en planering eller tävling som förut)
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
@@ -100,6 +101,25 @@
                     var key = c.slotId > 0 ? 's:' + c.slotId : 'n:' + (c.date || '') + '|' + (c.roleKey || '');
                     checked[key] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; });
                 });
+            }
+            // Steg 6a: en huvudplanering med delar visar alla delarnas behov på en sida.
+            parts = null;
+            if (planningId > 0) {
+                try {
+                    var wr = await fetch('/mina-uppdrag/week?planningId=' + planningId + (PREVIEW ? '&preview=true' : ''), { headers: { 'Accept': 'application/json' } });
+                    var wd = await wr.json();
+                    if (wd.success && wd.parts && wd.parts.length) {
+                        parts = wd.parts; checked = {};
+                        parts.forEach(function (p) {
+                            var ms = p.mySignup; if (!ms) return;
+                            if (ms.comment && !q('beComment').value) q('beComment').value = ms.comment;
+                            (ms.slots || []).forEach(function (c) {
+                                var key = p.planningId + '#' + (c.slotId > 0 ? 's:' + c.slotId : 'n:' + (c.date || '') + '|' + (c.roleKey || ''));
+                                checked[key] = (c.times || []).map(function (t) { return { from: t.from || '', to: t.to || '' }; });
+                            });
+                        });
+                    }
+                } catch (e) { parts = null; }
             }
             shootTargets = d.shootTargets || null;
             shootPicked = {};
@@ -146,14 +166,32 @@
             + '</div>';
     }
 
+    // Steg 6a: för en huvudplanering med delar ritas varje del under en egen rubrik; ett val bär delens id i nyckeln ("{del}#{nyckel}").
     function renderSlots() {
         var host = q('beSlots');
         items = [];
+        if (!parts) {
+            var one = partHtml(0, needDays, slots, roleChoice);
+            host.innerHTML = one || '<div class="text-muted small fst-italic">Arrangören har inte angett vad som behövs ännu. Titta in igen lite senare.</div>';
+            return;
+        }
+        var any = false, out = '';
+        parts.forEach(function (p) {
+            var h = partHtml(p.planningId, p.needDays || [], p.slots || [], p.roleChoice !== false);
+            if (!h) return;
+            any = true;
+            out += '<div class="mt-4 pt-2 border-top"><h2 class="h5 mb-0"><i class="bi bi-diagram-3 me-1"></i>' + esc(p.isShared ? 'Hela veckan (gemensamt)' : p.name) + '</h2>' + h + '</div>';
+        });
+        host.innerHTML = any ? out : '<div class="text-muted small fst-italic">Arrangören har inte angett vad som behövs ännu. Titta in igen lite senare.</div>';
+    }
+
+    function partHtml(pid, needDays, slots, roleChoice) {
+        var pre = pid ? pid + '#' : '';
         var byDate = {};
         needDays.forEach(function (d) { (byDate[d.date] = byDate[d.date] || { need: null, slots: [] }).need = d; });
         slots.forEach(function (s) { (byDate[s.date] = byDate[s.date] || { need: null, slots: [] }).slots.push(s); });
         var dates = Object.keys(byDate).sort();
-        if (!dates.length) { host.innerHTML = '<div class="text-muted small fst-italic">Arrangören har inte angett vad som behövs ännu. Titta in igen lite senare.</div>'; return; }
+        if (!dates.length) return '';
         var html = '';
         dates.forEach(function (date) {
             var g = byDate[date], n = g.need;
@@ -164,12 +202,12 @@
                 if (roleChoice) {
                     n.roles.forEach(function (r) {
                         var sub = r.missing > 0 ? r.missing + ' fattas av ' + r.needed : 'Alla ' + r.needed + ' platser är fyllda, men fler kan behövas';
-                        html += choiceHtml({ key: 'n:' + date + '|' + r.roleKey, date: date, roleKey: r.roleKey }, '<strong>' + esc(r.roleName) + '</strong>', esc(sub));
+                        html += choiceHtml({ key: pre + 'n:' + date + '|' + r.roleKey, date: date, roleKey: r.roleKey }, '<strong>' + esc(r.roleName) + '</strong>', esc(sub));
                     });
-                    html += choiceHtml({ key: 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Var det behövs</strong>', 'Arrangören väljer en uppgift åt dig');
+                    html += choiceHtml({ key: pre + 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Var det behövs</strong>', 'Arrangören väljer en uppgift åt dig');
                 } else {
                     var miss = n.roles.reduce(function (a, r) { return a + (r.missing || 0); }, 0);
-                    html += choiceHtml({ key: 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Jag kan hjälpa till den här dagen</strong>',
+                    html += choiceHtml({ key: pre + 'n:' + date + '|', date: date, roleKey: '' }, '<strong>Jag kan hjälpa till den här dagen</strong>',
                         (miss > 0 ? miss + (miss === 1 ? ' person fattas. ' : ' personer fattas. ') : '') + 'Arrangören väljer en uppgift åt dig');
                 }
             }
@@ -177,11 +215,11 @@
                 if (n) html += '<div class="small text-muted mt-1 mb-1">Något annat den här dagen:</div>';
                 g.slots.forEach(function (s) {
                     var timeRange = (s.startTime || s.endTime) ? ' <span class="text-muted">(' + esc(s.startTime || '') + '–' + esc(s.endTime || '') + ')</span>' : '';
-                    html += choiceHtml({ key: 's:' + s.id, slotId: s.id }, '<strong>' + esc(s.headline) + '</strong>' + timeRange, s.description ? esc(s.description) : '');
+                    html += choiceHtml({ key: pre + 's:' + s.id, slotId: s.id }, '<strong>' + esc(s.headline) + '</strong>' + timeRange, s.description ? esc(s.description) : '');
                 });
             }
         });
-        host.innerHTML = html;
+        return html;
     }
 
     // Omgång 3 steg 9: en rad per tävling i veckan — kryssruta och (när ikryssad) klass. Index i data-attributet, aldrig text.
@@ -287,7 +325,25 @@
         readShootClasses();
         var shootIntents = shootTargets && shootTargets.length
             ? Object.keys(shootPicked).map(function (k) { return { targetPlanningId: +k, classes: shootPicked[k] || '' }; }) : null;
-        var d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots, shootIntents: shootIntents });
+        var d;
+        if (parts) {
+            // En anmälan i flera delar: valen grupperas per del ("{del}#{nyckel}") och sparas i ett anrop.
+            var byPid = {};
+            Object.keys(checked).forEach(function (key) {
+                var m = key.match(/^(\d+)#(.*)$/); if (!m) return;
+                var k = m[2], times = (checked[key] || []).filter(function (t) { return (t.from && t.from.length) || (t.to && t.to.length); });
+                var ch;
+                if (k.indexOf('s:') === 0) ch = { slotId: +k.slice(2), times: times };
+                else { var rest = k.slice(2), bar = rest.indexOf('|'); ch = { slotId: 0, date: rest.slice(0, bar), roleKey: rest.slice(bar + 1), times: times }; }
+                (byPid[m[1]] = byPid[m[1]] || []).push(ch);
+            });
+            d = await post('/mina-uppdrag/help-signup-week', {
+                planningId: planningId, comment: q('beComment').value.trim(), shootIntents: shootIntents,
+                parts: Object.keys(byPid).map(function (pid) { return { planningId: +pid, slots: byPid[pid] }; })
+            });
+        } else {
+            d = await post('/mina-uppdrag/help-signup', { competitionId: compId, planningId: planningId, comment: q('beComment').value.trim(), slots: payloadSlots, shootIntents: shootIntents });
+        }
         btn.disabled = false;
         if (d.success) { var s = q('beSaved'); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 2500); }
         else alert(d.message || 'Kunde inte spara.');

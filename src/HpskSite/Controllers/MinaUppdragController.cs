@@ -20,7 +20,7 @@ namespace HpskSite.Controllers
     /// The functionary invitation notification (StaffingController.NotifyAssignment) deep-links here.
     /// </summary>
     [Route("mina-uppdrag")]
-    public class MinaUppdragController : Controller
+    public partial class MinaUppdragController : Controller
     {
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
