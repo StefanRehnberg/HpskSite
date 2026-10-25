@@ -1816,6 +1816,14 @@ window.PlaneringBemanning = (function () {
             ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div>
             ${rid ? `<button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 align-self-start" data-plbw-repl="${rid}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hitta ersättare</button>` : ''}</li>`;
     }
+    // Steg 6c (B12): när personen har tid att skjuta själv, per tävling i veckan.
+    function shootWindowsHtml(list) {
+        if (!list || !list.length) return '';
+        return `<div class="pl-card" id="plbwShoot"><h2 class="h6 mb-1">Lediga fönster att skjuta i</h2>
+            <p class="pl-help small mb-2">Tiden mellan uppdrag och egna starter, minst en timme, kl. 07–20 — så ser du när hen hinner skjuta innan startlistan är gjord.</p>
+            ${list.map(t => `<div class="mb-2"><b>${esc(t.name)}</b>${t.declared ? ' <span class="badge text-bg-success fw-normal">Tänker tävla</span>' : ''}
+                ${(t.days || []).map(day => `<div class="small plbw-win"><span class="plb-dim">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}:</span> ${day.windows.length ? day.windows.map(w => esc(w.from + '–' + w.to)).join(', ') : '<span class="text-danger">ingen ledig tid</span>'}</div>`).join('')}</div>`).join('')}</div>`;
+    }
     async function drawWeekPerson(key, seq) {
         const d = await sget('GetFamilyPersonWeek', { personKey: key });
         if (seq !== B.seq) return;
@@ -1836,7 +1844,8 @@ window.PlaneringBemanning = (function () {
         h += (d.days || []).map(day => `<div class="pl-card plbw-day" data-date="${esc(day.date)}"><h2 class="h6 mb-1">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}</h2>
             ${(day.carriedIn || []).map(c => `<div class="plb-dim small"><i class="bi bi-moon me-1" aria-hidden="true"></i>Från kvällen före: ${esc(c.label)}</div>`).join('')}
             <ul class="list-unstyled mb-0">${(day.items || []).map(weekItemHtml).join('')}</ul></div>`).join('');
-        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Uppdragen ändras i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
+        h += shootWindowsHtml(d.shootWindows);
+        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Uppdragen ändras i<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
         area().innerHTML = h;
     }
     async function applyWeekLink(d, body, goKey) {

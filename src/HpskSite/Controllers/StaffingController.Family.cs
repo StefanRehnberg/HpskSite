@@ -134,6 +134,42 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Steg 6c (B12): när personen har tid att skjuta själv, per tävling i veckan och dag — luckorna mellan uppdrag och egna starter
+        /// (<see cref="FreeWindowRules"/>). <c>declared</c> = hen har sagt att hen tänker tävla där. Tom lista när veckan inte har tävlingar med datum.
+        /// </summary>
+        private object ShootWindows(int rootPlanningId, FamilyWeekService.Person p)
+        {
+            try
+            {
+                var intents = HttpContext.RequestServices.GetRequiredService<ShootIntentService>();
+                var declared = intents.ForFamily(rootPlanningId).Where(i => i.PersonKey == p.Key).Select(i => i.TargetPlanningId).ToHashSet();
+                var busy = p.Days.SelectMany(d => d.Items)
+                    .Where(i => i.Entry.Kind != PersonWeekKind.Intent && i.Entry.Interval is not null)
+                    .Select(i => i.Entry.Interval!.Value).ToList();
+                var sv = CultureInfo.GetCultureInfo("sv-SE");
+                return intents.Targets(rootPlanningId).Where(t => t.From != null).Select(t =>
+                {
+                    var last = (t.To ?? t.From)!.Value.Date;
+                    if ((last - t.From!.Value.Date).TotalDays > 14) last = t.From.Value.Date;
+                    var days = new List<object>();
+                    for (var d = t.From.Value.Date; d <= last; d = d.AddDays(1))
+                        days.Add(new
+                        {
+                            date = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                            label = d.ToString("dddd d MMM", sv),
+                            windows = FreeWindowRules.Windows(busy, d).Select(w => new { from = w.Start.ToString("HH:mm", CultureInfo.InvariantCulture), to = w.End.ToString("HH:mm", CultureInfo.InvariantCulture) }),
+                        });
+                    return (object)new { planningId = t.PlanningId, name = t.Name, declared = declared.Contains(t.PlanningId), days };
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Staffing: lediga fönster för {Key} i planering {Planning} gick inte att räkna.", p.Key, rootPlanningId);
+                return new List<object>();
+            }
+        }
+
         /// <summary>Steg 3: en persons vecka dag för dag, med egna starter, krockar, platsbyten och förslag på vem hen kan vara.</summary>
         [HttpGet]
         public async Task<IActionResult> GetFamilyPersonWeek(int competitionId, string personKey)
@@ -164,6 +200,7 @@ namespace HpskSite.Controllers
                     success = true, key = p.Key, name = p.Name, memberId = p.MemberId, isExternal = p.IsExternal,
                     assignments = p.Assignments, clashes = p.Clashes, warnings = p.Warnings,
                     days = p.Days.Select(WeekDayJson), match,
+                    shootWindows = ShootWindows(root.PlanningId, p),
                 });
             }
             catch (Exception ex)
