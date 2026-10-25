@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly MyScheduleService _schedule;
         private readonly ScheduleIcsBuilder _ics;
+        private readonly MyWeekService _week;
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
@@ -39,17 +40,19 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IMemberService memberService,
             MyScheduleService schedule,
-            ScheduleIcsBuilder ics)
+            ScheduleIcsBuilder ics,
+            MyWeekService week)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
             _schedule = schedule;
             _ics = ics;
+            _week = week;
         }
 
         [HttpGet("")]
-        public async Task<IActionResult> Index(int c = 0)
+        public async Task<IActionResult> Index(int c = 0, int p = 0)
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return StatusCode(500, "Umbraco-kontext saknas.");
@@ -59,8 +62,19 @@ namespace HpskSite.Controllers
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null)
             {
-                var back = c > 0 ? $"/mitt-schema?c={c}" : "/mitt-schema";
+                var back = c > 0 ? $"/mitt-schema?c={c}" : p > 0 ? $"/mitt-schema?p={p}" : "/mitt-schema";
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(back)}");
+            }
+
+            // Steg 4: veckan över en planeringsfamilj (p = huvudplaneringen). Bara medlemmens egna rader — Get läser personens nyckel.
+            if (c <= 0 && p > 0)
+            {
+                var week = _week.Get(memberId.Value, p);
+                if (week == null) return NotFound();
+                ViewData["Schedule"] = week;
+                ViewData["Mode"] = "single";
+                ViewData["Title"] = $"Mitt schema — {week.CompName}";
+                return View("MittSchema", rootNode);
             }
 
             if (c > 0)
@@ -85,6 +99,7 @@ namespace HpskSite.Controllers
                 .ToList();
 
             ViewData["Schedules"] = all;
+            ViewData["Weeks"] = _week.ForMember(memberId.Value, today.AddDays(-3), today.AddDays(120));
             try { ViewData["PlanningMeetings"] = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningService)) is HpskSite.Services.Planning.PlanningService ps
                 ? ps.UpcomingMeetingsForMember(memberId.Value, today.AddHours(-3), today.AddDays(120)) : null; }
             catch { /* Mitt schema klarar sig utan planeringens möten */ }
@@ -98,13 +113,14 @@ namespace HpskSite.Controllers
         /// are reported back in a header so the page can tell the member instead of silently dropping them.
         /// </summary>
         [HttpGet("kalender.ics")]
-        public async Task<IActionResult> Calendar(int c)
+        public async Task<IActionResult> Calendar(int c = 0, int p = 0)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Unauthorized();
-            if (c <= 0) return NotFound();
+            if (c <= 0 && p <= 0) return NotFound();
 
-            var sched = _schedule.GetSchedule(memberId.Value, c);
+            var sched = c > 0 ? _schedule.GetSchedule(memberId.Value, c) : _week.Get(memberId.Value, p);
+            if (sched == null) return NotFound();
             if (!sched.HasAny) return NotFound();
 
             var baseUrl = $"{Request.PublicBase()}";

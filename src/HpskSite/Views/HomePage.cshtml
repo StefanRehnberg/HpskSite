@@ -334,7 +334,7 @@ else
             <div class="card-body">
                 @foreach (var sc in schedule.Items)
                 {
-                    <div class="@(sc.CompetitionId == schedule.Items[0].CompetitionId ? "" : "mt-3 pt-3 border-top")">
+                    <div class="@(sc == schedule.Items[0] ? "" : "mt-3 pt-3 border-top")">
                         <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2 mb-2">
                             <span>
                                 <span class="fw-semibold">@sc.CompName</span>
@@ -344,7 +344,7 @@ else
                                     <span class="badge bg-primary ms-1">Idag</span>
                                 }
                             </span>
-                            <a href="/mitt-schema?c=@sc.CompetitionId" class="small text-decoration-none">Hela dagen →</a>
+                            <a href="/mitt-schema?@sc.ScheduleQuery" class="small text-decoration-none">@(sc.PlanningId > 0 ? "Hela veckan" : "Hela dagen") →</a>
                         </div>
 
                         @if (sc.NextItem != null)

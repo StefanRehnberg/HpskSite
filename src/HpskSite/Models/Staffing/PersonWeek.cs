@@ -28,7 +28,10 @@ namespace HpskSite.Models.Staffing
         string? Place,
         string Label,
         int? PlanningId = null,
-        int? CompetitionId = null);
+        int? CompetitionId = null,
+        string? Title = null,
+        string? Part = null,
+        string? Status = null);
 
     public sealed record PersonWeekClash(string WithSourceKey, string WithLabel, ClashKind Kind)
     {

@@ -57,6 +57,9 @@ namespace HpskSite.Models.Schedule
         public List<string> ConflictsWith { get; set; } = new();
         public bool HasConflict => ConflictsWith.Count > 0;
 
+        /// <summary>Veckan (steg 4): en gul varning som inte är en krock — trångt mellan två platser, eller en avsikt att tävla samma dag.</summary>
+        public string? WarningText { get; set; }
+
         /// <summary>Tie-break within a day when StartsAt is null. Minutes-since-midnight when known.</summary>
         public int SortHint { get; set; }
 
@@ -150,6 +153,15 @@ namespace HpskSite.Models.Schedule
     public class MySchedule
     {
         public int CompetitionId { get; set; }
+
+        /// <summary>
+        /// Steg 4: &gt; 0 när det här är medlemmens <b>vecka över en planeringsfamilj</b> (huvudplaneringens id) i stället för en
+        /// tävling — alla delars uppdrag, egna starter och avsikter i tidsordning. <see cref="CompetitionId"/> är då 0.
+        /// </summary>
+        public int PlanningId { get; set; }
+        public bool IsWeek => PlanningId > 0;
+        /// <summary>Frågesträngen till <c>/mitt-schema</c> och kalenderfilen: <c>p=</c> för en vecka, <c>c=</c> för en tävling.</summary>
+        public string ScheduleQuery => IsWeek ? $"p={PlanningId}" : $"c={CompetitionId}";
         public string CompName { get; set; } = "";
         public DateTime? CompDate { get; set; }
         public DateTime? CompEndDate { get; set; }
@@ -189,6 +201,9 @@ namespace HpskSite.Models.Schedule
     public class ScheduleHubItem
     {
         public int CompetitionId { get; set; }
+        /// <summary>Steg 4: huvudplaneringens id när raden är en veckovy över en familj (då är <see cref="CompetitionId"/> 0).</summary>
+        public int PlanningId { get; set; }
+        public string ScheduleQuery => PlanningId > 0 ? $"p={PlanningId}" : $"c={CompetitionId}";
         public string CompName { get; set; } = "";
         public DateTime? CompDate { get; set; }
         public string DateLabel { get; set; } = "";      // "Idag", "Imorgon", "lör 8 aug"

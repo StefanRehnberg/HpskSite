@@ -67,6 +67,17 @@ namespace HpskSite.Services.Schedule
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+
+                // Steg 4 (B9): ett mejl per person och dag för en planeringsfamiljs vecka. Fristående från pushen — mejlet
+                // beror inte på att någon slagit på påminnelser — och ett fel här får inte stoppa pushpåminnelserna.
+                try
+                {
+                    var mails = await scope.ServiceProvider.GetRequiredService<StaffWeekDigestService>().SendAsync(DateTime.Now, ct);
+                    if (mails > 0) _logger.LogInformation("Veckomejl skickade: {Count}", mails);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Veckomejlen föll."); }
+
                 var push = scope.ServiceProvider.GetRequiredService<WebPushService>();
                 if (!push.IsConfigured) return;
 

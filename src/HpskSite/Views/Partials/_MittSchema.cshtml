@@ -104,7 +104,7 @@ else
                 shown++;
                 <div class="list-group-item px-0 @(item.IsPast ? "opacity-50" : "")">
                     <div class="d-flex gap-3">
-                        <div class="text-nowrap fw-semibold" style="min-width:5.5rem;">
+                        <div class="text-nowrap fw-semibold flex-shrink-0" style="min-width:5.5rem;">
                             <i class="bi @item.IconClass me-1 @item.AccentClass"></i>@item.TimeLabel
                         </div>
                         <div class="flex-grow-1">
@@ -140,6 +140,10 @@ else
                             @if (!compact && item.HasConflict)
                             {
                                 <div class="small text-warning-emphasis">Krockar med: @item.ConflictText</div>
+                            }
+                            @if (!compact && !string.IsNullOrWhiteSpace(item.WarningText))
+                            {
+                                <div class="small text-warning-emphasis">Obs: @item.WarningText</div>
                             }
                             @if (!compact && !string.IsNullOrWhiteSpace(item.Link))
                             {

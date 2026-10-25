@@ -23,13 +23,15 @@ namespace HpskSite.Services.Schedule
         private const int PreviewRows = 4;
 
         private readonly MyScheduleService _schedule;
+        private readonly MyWeekService _week;
         private readonly ILogger<ScheduleHubService> _logger;
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
-        public ScheduleHubService(MyScheduleService schedule, ILogger<ScheduleHubService> logger)
+        public ScheduleHubService(MyScheduleService schedule, MyWeekService week, ILogger<ScheduleHubService> logger)
         {
             _schedule = schedule;
+            _week = week;
             _logger = logger;
         }
 
@@ -74,6 +76,29 @@ namespace HpskSite.Services.Schedule
                         PreviewSpansOtherDays = spansOtherDays,
                     });
                     s.ShownCompetitionIds.Add(compId);
+                }
+
+                // Steg 4: veckan över en planeringsfamilj (flera delar, eller det gemensamma utan tävling) — ett kort per
+                // familj utöver tävlingskorten. Tävlingens id läggs medvetet inte i ShownCompetitionIds: uppdragskortet ska
+                // fortsätta visa en obesvarad inbjudan.
+                foreach (var w in _week.ForMember(memberId, today, today.AddDays(WindowDays)))
+                {
+                    var preview = BuildPreview(w);
+                    var first = w.CompDate?.Date;
+                    s.Items.Add(new ScheduleHubItem
+                    {
+                        PlanningId = w.PlanningId,
+                        CompName = w.CompName,
+                        CompDate = w.CompDate,
+                        DateLabel = BuildDateLabel(w.CompDate, w.CompEndDate),
+                        IsToday = w.Days.Any(d => d.IsToday),
+                        IsTomorrow = first == today.AddDays(1),
+                        ItemCount = w.ItemCount,
+                        ConflictCount = w.ConflictCount,
+                        NextItem = w.NextItem,
+                        Preview = preview,
+                        PreviewSpansOtherDays = true,
+                    });
                 }
 
                 // Soonest first; undated last.

@@ -103,7 +103,8 @@ namespace HpskSite.Services.Staffing
                 var time = interval is { AllDay: false } iv ? $" {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : (interval is { AllDay: true } ? " hela dagen" : "");
                 For(key, a.DisplayName.Trim(), a.MemberId).Add(new PersonWeekEntry(
                     "a" + a.Id, PersonWeekKind.Assignment, date.Value, interval, Venue(a.CompetitionId),
-                    $"{RoleNameFor(pid)(a.RoleKey)}{time} ({partName.GetValueOrDefault(pid, "")})", pid, a.CompetitionId));
+                    $"{RoleNameFor(pid)(a.RoleKey)}{time} ({partName.GetValueOrDefault(pid, "")})", pid, a.CompetitionId,
+                    RoleNameFor(pid)(a.RoleKey), partName.GetValueOrDefault(pid), a.Status));
             }
 
             var targets = _intents.Targets(planningId);

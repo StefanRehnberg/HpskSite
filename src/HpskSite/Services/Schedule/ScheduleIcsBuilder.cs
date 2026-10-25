@@ -57,7 +57,7 @@ namespace HpskSite.Services.Schedule
                 if (end <= start) end = start.AddMinutes(30);
 
                 sb.Append("BEGIN:VEVENT\r\n");
-                AppendLine(sb, "UID", $"{item.SourceKey}-{schedule.CompetitionId}@pistol.nu");
+                AppendLine(sb, "UID", $"{item.SourceKey}-{(schedule.IsWeek ? "p" + schedule.PlanningId : schedule.CompetitionId.ToString(CultureInfo.InvariantCulture))}@pistol.nu");
                 AppendLine(sb, "DTSTAMP", Utc(stamp));
                 // Local wall-clock without a TZID: the times we hold ARE wall-clock at the range, and
                 // floating times are interpreted in the viewer's own zone — which is the right answer
@@ -67,7 +67,7 @@ namespace HpskSite.Services.Schedule
                 AppendLine(sb, "SUMMARY", BuildSummary(item, schedule));
                 AppendLine(sb, "LOCATION", item.Where);
                 AppendLine(sb, "DESCRIPTION", BuildDescription(item, schedule, stamp));
-                AppendLine(sb, "URL", $"{siteBaseUrl.TrimEnd('/')}/mitt-schema?c={schedule.CompetitionId}");
+                AppendLine(sb, "URL", $"{siteBaseUrl.TrimEnd('/')}/mitt-schema?{schedule.ScheduleQuery}");
                 AppendLine(sb, "CATEGORIES", item.Kind);
 
                 sb.Append("BEGIN:VALARM\r\n");
@@ -101,6 +101,7 @@ namespace HpskSite.Services.Schedule
             if (!string.IsNullOrWhiteSpace(item.Where)) parts.Add(item.Where!);
             if (!string.IsNullOrWhiteSpace(item.Detail)) parts.Add(item.Detail!);
             if (item.HasConflict) parts.Add("OBS krockar med: " + string.Join("; ", item.ConflictsWith));
+            if (!string.IsNullOrWhiteSpace(item.WarningText)) parts.Add("OBS " + item.WarningText);
             parts.Add($"Hämtat från pistol.nu {stamp.ToLocalTime():yyyy-MM-dd HH:mm}. Ändrar arrangören tiden behöver du hämta schemat igen.");
             return string.Join("\\n", parts);
         }
