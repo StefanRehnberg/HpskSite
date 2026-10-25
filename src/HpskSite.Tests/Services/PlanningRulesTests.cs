@@ -60,15 +60,47 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
-        public void Only_the_convener_splits_and_never_in_a_sub_planning()
+        public void Only_the_convener_creates_a_sub_planning_and_never_in_a_sub_planning()
         {
             var top = new PlanningRow { Id = 1 };
             var sub = new PlanningRow { Id = 2, ParentPlanningId = 1 };
-            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner)), top).Should().BeTrue();
-            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner)), sub).Should().BeFalse();
-            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Editor)), top).Should().BeFalse();
-            PlanningAccess.CanSplitArea(C(P(1, PlanningAccessLevel.Owner), link: true), top).Should().BeFalse();
-            PlanningAccess.CanSplitArea(new PlanningCaller(null, false, ParentReader: true), top).Should().BeFalse();
+            PlanningAccess.CanCreateSub(C(P(1, PlanningAccessLevel.Owner)), top).Should().BeTrue();
+            PlanningAccess.CanCreateSub(C(P(1, PlanningAccessLevel.Owner)), sub).Should().BeFalse();
+            PlanningAccess.CanCreateSub(C(P(1, PlanningAccessLevel.Editor)), top).Should().BeFalse();
+            PlanningAccess.CanCreateSub(C(P(1, PlanningAccessLevel.Owner), link: true), top).Should().BeFalse();
+            PlanningAccess.CanCreateSub(new PlanningCaller(null, false, ParentReader: true), top).Should().BeFalse();
+        }
+
+        [Fact]
+        public void The_area_lead_handles_the_area_tasks_but_does_not_decide_done()
+        {
+            // Stefan 2026-10-25 (B5): områdets ansvarige (Deltar) tar, ändrar och sätter läge på områdets uppgifter.
+            var lead = C(P(5, PlanningAccessLevel.Participant));
+            var task = new PlanningTaskRow { CreatedBy = 99, AssigneeParticipantId = 98 };
+            PlanningAccess.CanEditTask(lead, task, areaLeadPid: 5).Should().BeTrue();
+            PlanningAccess.CanReportOnTask(lead, task, areaLeadPid: 5).Should().BeTrue();
+            // Inte ett annat områdes uppgift, och inte en uppgift utan område.
+            PlanningAccess.CanEditTask(lead, task, areaLeadPid: 6).Should().BeFalse();
+            PlanningAccess.CanEditTask(lead, task).Should().BeFalse();
+            // En följare som är ansvarig leder inte (Följer skriver inte), och inte via mejllänken.
+            PlanningAccess.CanEditTask(C(P(5, PlanningAccessLevel.Follower)), task, areaLeadPid: 5).Should().BeFalse();
+            PlanningAccess.CanEditTask(C(P(5, PlanningAccessLevel.Participant), link: true), task, areaLeadPid: 5).Should().BeFalse();
+            // Utförd beslutas fortfarande på mötet eller av den sammankallande.
+            PlanningAccess.CanDecideTask(lead, false, new PlanningRow { DoneAtMeetingsOnly = true }, task).Should().BeFalse();
+        }
+
+        [Fact]
+        public void Reading_a_sub_planning_through_the_parent_needs_owner_or_editor_not_via_competition()
+        {
+            // Stefan 2026-10-25 (B3): en rad som bara kom genom tävlingsbehörigheten ger ingen läsrätt i delplaneringarna.
+            PlanningFamily.ReadsSubViaParent(P(1, PlanningAccessLevel.Owner)).Should().BeTrue();
+            PlanningFamily.ReadsSubViaParent(P(1, PlanningAccessLevel.Editor)).Should().BeTrue();
+            PlanningFamily.ReadsSubViaParent(P(1, PlanningAccessLevel.Participant)).Should().BeFalse();
+            PlanningFamily.ReadsSubViaParent(P(1, PlanningAccessLevel.Owner, removed: true)).Should().BeFalse();
+            var viaCompetition = P(1, PlanningAccessLevel.Editor);
+            viaCompetition.ViaCompetition = true;
+            PlanningFamily.ReadsSubViaParent(viaCompetition).Should().BeFalse();
+            PlanningFamily.ReadsSubViaParent(null).Should().BeFalse();
         }
 
         [Fact]

@@ -14,13 +14,7 @@ namespace HpskSite.Services.Planning
     public partial class PlanningService
     {
         /// <summary>Planeringarna som delar stationernas nummer: huvudplaneringen och dess delplaneringar.</summary>
-        private static List<PlanningRow> StationFamily(IUmbracoDatabase db, int planningId)
-        {
-            var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
-            if (p == null) return new List<PlanningRow>();
-            var root = p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
-            return db.Fetch<PlanningRow>("SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", root);
-        }
+        private static List<PlanningRow> StationFamily(IUmbracoDatabase db, int planningId) => PlanningFamily.Rows(db, planningId);
 
         public sealed record StationRow(int Number, PlanningStationResponsibleRow? Responsible, int PlanningId, List<string> Chiefs, int OpenTasks);
 
@@ -62,7 +56,7 @@ namespace HpskSite.Services.Planning
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var ids = string.Join(",", db.Fetch<int>("SELECT Id FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", planningId));
+            var ids = string.Join(",", PlanningFamily.Ids(db, planningId));
             if (ids.Length == 0) return new();
             return db.Fetch<ChiefRow>($@"SELECT MemberId, DisplayName, ScopeKey FROM StaffAssignment
                 WHERE PlanningId IN ({ids}) AND RoleKey = N'stationschef' AND ScopeType = N'Station' AND MemberId IS NOT NULL AND MemberId > 0
@@ -78,37 +72,6 @@ namespace HpskSite.Services.Planning
         }
 
         // =====================================================================================
-        //  Omgång 3 (Expertgruppen 3.3): en delkonfiguration per område
-        // =====================================================================================
-
-        /// <summary>Ett område med sina stationer — för delkonfigurationen.</summary>
-        public sealed record AreaStations(PlanningAreaRow Area, List<int> Stations);
-
-        public AreaStations? AreaWithStations(int planningId, int areaId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var a = s.Database.SingleOrDefault<PlanningAreaRow>(
-                "SELECT * FROM PlanningArea WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", areaId, planningId);
-            if (a == null) return null;
-            var (stations, _) = PlanningStations.Parse(a.Stations);
-            return new AreaStations(a, stations);
-        }
-
-        /// <summary>Familjens delkonfigurationer: område → konfiguration (en per område).</summary>
-        public sealed record AreaConfigLink(int PlanningId, int AreaId, int ConfigId);
-
-        public List<AreaConfigLink> AreaConfigLinks(int planningId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var family = StationFamily(s.Database, planningId);
-            if (family.Count == 0) return new();
-            // Ett borttaget område släpper sin konfiguration ur bilden (raden står kvar; området kan inte väckas igen).
-            return s.Database.Fetch<PlanningLinkRow>($@"SELECT l.* FROM PlanningLink l JOIN PlanningArea a ON a.Id = l.AreaId AND a.DeletedAt IS NULL
-                    WHERE l.TargetKind = N'{PlanningLinkRow.Faltconfig}' AND l.PlanningId IN ({string.Join(",", family.Select(f => f.Id))})")
-                .Select(l => new AreaConfigLink(l.PlanningId, l.AreaId!.Value, l.TargetId)).ToList();
-        }
-
-        // =====================================================================================
         //  Banan i planeringen (Stefan 2026-10-24): banans konfiguration, ägd av huvudplaneringen
         // =====================================================================================
 
@@ -116,8 +79,8 @@ namespace HpskSite.Services.Planning
         public int FamilyRootId(int planningId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            var p = s.Database.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
-            return p == null ? 0 : p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
+            if (s.Database.ExecuteScalar<int>("SELECT COUNT(*) FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId) == 0) return 0;
+            return PlanningFamily.Root(s.Database, planningId);
         }
 
         /// <summary>
@@ -143,7 +106,7 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>
-        /// Stationernas konfiguration: länken utan område på stationernas planering (<see cref="StationOwnerId"/>). Stationer
+        /// Stationernas konfiguration: länken på stationernas planering (<see cref="StationOwnerId"/>). Stationer
         /// som skapats på huvudplaneringen innan en Fält-delplanering fanns följer med dit (betan, 2026-10-24).
         /// </summary>
         public int? CourseConfigId(int planningId)
@@ -153,7 +116,7 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             var family = StationFamily(s.Database, planningId).Select(f => f.Id).ToList();
             var links = s.Database.Fetch<PlanningLinkRow>($@"SELECT * FROM PlanningLink
-                WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND AreaId IS NULL AND PlanningId IN ({string.Join(",", family.DefaultIfEmpty(owner))}) ORDER BY Id");
+                WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId IN ({string.Join(",", family.DefaultIfEmpty(owner))}) ORDER BY Id");
             return (links.FirstOrDefault(l => l.PlanningId == owner) ?? links.FirstOrDefault())?.TargetId;
         }
 
@@ -171,7 +134,7 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             s.Database.Insert(new PlanningLinkRow
             {
-                PlanningId = planningId, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltproject, TargetId = projectId, AreaId = null,
+                PlanningId = planningId, TargetKind = PlanningLinkRow.Faltproject, TargetId = projectId,
                 LinkedAt = Now, LinkedBy = byMemberId,
             });
         }
@@ -184,11 +147,11 @@ namespace HpskSite.Services.Planning
             if (root == 0) return "Planeringen finns inte.";
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            if (db.ExecuteScalar<int>($"SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId IS NULL", root) > 0)
+            if (db.ExecuteScalar<int>($"SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0", root) > 0)
                 return "Planeringen har redan sina stationer.";
             db.Insert(new PlanningLinkRow
             {
-                PlanningId = root, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltconfig, TargetId = configId, AreaId = null,
+                PlanningId = root, TargetKind = PlanningLinkRow.Faltconfig, TargetId = configId,
                 LinkedAt = Now, LinkedBy = byMemberId,
             });
             Bump(db, root);
@@ -204,21 +167,5 @@ namespace HpskSite.Services.Planning
             return s.Database.ExecuteScalar<int?>("SELECT MAX(Station) FROM PlanningStationResponsible WHERE PlanningId = @0", owner) ?? 0;
         }
 
-        /// <summary>Kopplar en fältkonfiguration till ett område. Vägrar ett andra för samma område.</summary>
-        public string? LinkAreaConfig(int planningId, int areaId, int configId, int byMemberId)
-        {
-            using var s = _scopes.CreateScope(autoComplete: true);
-            var db = s.Database;
-            if (db.ExecuteScalar<int>($"SELECT COUNT(*) FROM PlanningLink WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = N'{PlanningLinkRow.Faltconfig}' AND PlanningId = @0 AND AreaId = @1",
-                    planningId, areaId) > 0)
-                return "Området har redan en delkonfiguration.";
-            db.Insert(new PlanningLinkRow
-            {
-                PlanningId = planningId, PlanningPartId = 0, TargetKind = PlanningLinkRow.Faltconfig, TargetId = configId, AreaId = areaId,
-                LinkedAt = Now, LinkedBy = byMemberId,
-            });
-            Bump(db, planningId);
-            return null;
-        }
     }
 }

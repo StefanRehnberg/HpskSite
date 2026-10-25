@@ -81,11 +81,7 @@ namespace HpskSite.Services.Staffing
         /// </summary>
         public static void RecomputeFamily(IUmbracoDatabase db, int planningId)
         {
-            var p = db.SingleOrDefault<HpskSite.Models.Planning.PlanningRow>("SELECT * FROM Planning WHERE Id = @0", planningId);
-            if (p == null) return;
-            var root = p.ParentPlanningId > 0 ? p.ParentPlanningId!.Value : p.Id;
-            var family = db.Fetch<HpskSite.Models.Planning.PlanningRow>(
-                "SELECT * FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL", root);
+            var family = HpskSite.Services.Planning.PlanningFamily.Rows(db, planningId);
             if (family.Count == 0) return;
             var ids = string.Join(",", family.Select(f => f.Id));
             var links = db.Fetch<LinkPair>($"SELECT PlanningId, TargetId FROM PlanningLink WHERE TargetKind = N'competition' AND PlanningId IN ({ids})")

@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using HpskSite.Models.Planning;
 using HpskSite.Services.Planning;
@@ -17,7 +19,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopyPlanning(int id, string? name, string? targetStart, string? targetEnd,
-            int? recipientMemberId, string? includeMe)
+            int? recipientMemberId, string? includeMe, string? includeSubs = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
@@ -33,11 +35,22 @@ namespace HpskSite.Controllers
             int? Club(Umbraco.Cms.Core.Models.IMember? m) => m != null && _memberClubs.GetPrimaryClubId(m) is var c && c > 0 ? c : null;
 
             var comp = LinkedCompetition(id);
+            // Stefan 2026-10-25 (B7): delplaneringarna följer med (förval) — var och en med sin egen dag att räkna från.
+            Dictionary<int, (DateTime?, int?)>? subs = null;
+            if (includeSubs != "0" && !(x.Planning.ParentPlanningId > 0))
+            {
+                subs = new();
+                foreach (var sub in _planning.Family(id).Where(f => f.ParentPlanningId == id))
+                {
+                    var sc = LinkedCompetition(sub.Id);
+                    subs[sub.Id] = (AnchorFor(sub, sc), sc?.Id);
+                }
+            }
             var (report, err) = _planning.Copy(id, new PlanningService.CopyInput(
                 string.IsNullOrWhiteSpace(name) ? PlanningCopyRules.DefaultName(x.Planning.Name) : name!.Trim(), start, end,
                 recipientId, MemberDisplayName(recipient), Club(recipient),
                 x.MemberId, MemberDisplayName(me), Club(me), includeMe != "0",
-                AnchorFor(x.Planning, comp), comp?.Id));
+                AnchorFor(x.Planning, comp), comp?.Id, subs));
             if (err != null || report == null) return No(err ?? "Planeringen kunde inte kopieras.");
 
             var mailed = false;
@@ -54,7 +67,7 @@ namespace HpskSite.Controllers
             {
                 success = true, planningId = report.PlanningId, url = $"/tavlingsplanering/{report.PlanningId}",
                 areas = report.Areas, tasks = report.Tasks, roles = report.Roles, days = report.Days, needs = report.Needs,
-                datesDropped = report.DatesDropped, daysDropped = report.DaysDropped,
+                datesDropped = report.DatesDropped, daysDropped = report.DaysDropped, subPlannings = report.SubPlannings,
                 toSomeoneElse = recipientId != x.MemberId, recipient = MemberDisplayName(recipient), mailed,
             });
         }

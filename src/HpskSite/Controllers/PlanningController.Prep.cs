@@ -275,31 +275,20 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        /// <summary>
+        /// Ett område: namn och ansvarig. Stefan 2026-10-25: områdena läggs upp under Uppgifter (<i>Hantera områden</i>) —
+        /// ingen annan dialog skapar dem. Ett äldre anrop med värd, beskrivning eller stationer får veta att de inte finns.
+        /// </summary>
         public async Task<IActionResult> SaveArea(int id, int areaId, string name, int? responsibleId, string? responsibleName,
-            string? description = null, int? hostType = null, int? hostId = null, string? hostText = null, string? details = null,
-            string? stations = null)
+            string? description = null, int? hostId = null, string? hostText = null, string? stations = null)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Områdena ändras av den som kan ändra planeringen.");
-            // Omgång 2 steg 4: beskrivning och värd skickas bara av områdesdialogen (details = "1"). Utelämnat = rör inte dem,
-            // så mallarna och snabbdialogerna inte tömmer en värd någon satt.
-            PlanningService.AreaDetails? extra = null;
-            if (details == "1")
-            {
-                int? club = null, region = null;
-                if (hostId > 0)
-                {
-                    // Bara en klubb eller krets som någon i planeringen företräder — samma urval som förslagens styrelser.
-                    if (!BoardTargets(id).Any(t => t.OwnerType == hostType && t.OwnerId == hostId))
-                        return No("Välj en klubb eller krets som någon i planeringen företräder, eller skriv värden som text.");
-                    if (hostType == Models.DocumentOwnerType.Club) club = hostId; else region = hostId;
-                }
-                // Stationerna väljs under rälsens Stationerna (2026-10-24) och områdesdialogen skickar dem inte längre:
-                // utelämnat = rör inte (förut blev det "" och tömde föreningens stationer — planeringstestet k2, fynd 1).
-                extra = new PlanningService.AreaDetails(description, club, region, hostText, stations);
-            }
-            var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId, extra);
+            if (!string.IsNullOrWhiteSpace(stations)) return No("Stationernas ansvariga väljs under Stationerna, inte på ett område.");
+            if (!string.IsNullOrWhiteSpace(description) || hostId > 0 || !string.IsNullOrWhiteSpace(hostText))
+                return No("Ett område har bara ett namn och en ansvarig. Vem som sköter en del sätts på en delplanering.");
+            var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId);
             return r.Error == null ? Ok(new { success = true, areaId = r.AreaId }) : No(r.Error);
         }
 

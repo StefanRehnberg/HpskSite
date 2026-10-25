@@ -435,6 +435,33 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>
+        /// Stefan 2026-10-25 (B5): en uppgift i ett område <i>behöver hjälp</i> eller är <i>klar att pröva</i> — områdets
+        /// ansvarige får ett mejl (en gång per uppgift, läge och dag), utom den som stängt av notiserna.
+        /// </summary>
+        public async Task<bool> TaskStatusToAreaLeadAsync(int planningId, int taskId, int leadParticipantId, string status, PlanningMemberRow? by)
+        {
+            var p = _planning.Get(planningId);
+            var task = _planning.GetTask(planningId, taskId);
+            var who = _planning.Participant(planningId, leadParticipantId);
+            if (p == null || task == null || who == null || !who.IsActive) return false;
+            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            var r = ResolveRecipient(who);
+            if (r == null) return false;
+            var help = status == PlanningTaskStatus.NeedsHelp;
+            var byName = by?.DisplayName ?? "Någon";
+            var inner = new StringBuilder();
+            inner.Append(help
+                ? $"<p>{H(byName)} behöver hjälp med en uppgift i ett område du är ansvarig för:</p>"
+                : $"<p>{H(byName)} säger att en uppgift i ett område du är ansvarig för är klar att pröva:</p>");
+            inner.Append($"<p style=\"font-size:18px\"><b>{H(task.Title)}</b></p>");
+            if (!string.IsNullOrWhiteSpace(task.LatestReport)) inner.Append($"<p style=\"white-space:pre-wrap\">{H(task.LatestReport)}</p>");
+            inner.Append($"<p>{Button("Visa uppgifterna", OpenUrl(r, planningId, "uppgifter"))}</p>");
+            return await SendMail(r, planningId, help ? "task-needshelp" : "task-ready", "task", taskId, DateTime.Today,
+                help ? $"Behöver hjälp: {task.Title}" : $"Klar att pröva: {task.Title}",
+                Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
+        }
+
+        /// <summary>
         /// Omgång 3 steg 10 (K5): en gäst vars mejllänk gått ut ber om en ny. Mejlet går bara till adressen som står på
         /// gästens deltagarrad — en länk per planering hen är med i. Svaret till den som frågar är alltid detsamma
         /// (anroparen), så sidan säger aldrig om en adress finns. Returnerar antalet mejl som gick iväg.

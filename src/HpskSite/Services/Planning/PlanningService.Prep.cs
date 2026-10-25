@@ -109,8 +109,6 @@ namespace HpskSite.Services.Planning
                     CreatedAt = now, CreatedBy = i.MemberId, UpdatedAt = now, UpdatedBy = i.MemberId,
                 };
                 db.Insert(p);
-                var root = new PlanningPartRow { PlanningId = p.Id, Kind = "Root", Name = p.Name, SortOrder = 0, CreatedAt = now };
-                db.Insert(root);
                 db.Execute("INSERT INTO PlanningActivity (PlanningId, ChangeSeq, ChangedAt) VALUES (@0, 1, @1)", p.Id, now);
                 var me = new PlanningMemberRow
                 {
@@ -123,7 +121,7 @@ namespace HpskSite.Services.Planning
                 db.Insert(new PlanningReadRow { PlanningId = p.Id, ParticipantId = me.Id, LastReadMessageId = 0, LastDigestMessageId = 0 });
                 db.Insert(new PlanningLinkRow
                 {
-                    PlanningId = p.Id, PlanningPartId = root.Id, TargetKind = PlanningLinkRow.Competition, TargetId = i.CompetitionId,
+                    PlanningId = p.Id, TargetKind = PlanningLinkRow.Competition, TargetId = i.CompetitionId,
                     LinkedAt = now, LinkedBy = i.MemberId,
                 });
                 InsertSystem(db, p.Id, "planning-created", "Planeringen skapades.", me.Id, null, null, now);
@@ -166,11 +164,9 @@ namespace HpskSite.Services.Planning
                 // Omgång 3: bara tävlingskopplingen räknas — ett områdes delkonfiguration (faltconfig) är en annan sort.
                 if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition'", planningId) > 0)
                     return "Planeringen är redan kopplad till en tävling. En planering med flera tävlingar kommer när planeringen kan delas upp.";
-                var root = db.ExecuteScalar<int?>("SELECT TOP 1 Id FROM PlanningPart WHERE PlanningId = @0 AND Kind = N'Root' AND DeletedAt IS NULL ORDER BY Id", planningId);
-                if (root == null) return "Planeringen saknar sin grunddel.";
                 db.Insert(new PlanningLinkRow
                 {
-                    PlanningId = planningId, PlanningPartId = root.Value, TargetKind = PlanningLinkRow.Competition, TargetId = competitionId,
+                    PlanningId = planningId, TargetKind = PlanningLinkRow.Competition, TargetId = competitionId,
                     LinkedAt = now, LinkedBy = byMemberId,
                 });
                 InsertSystem(db, planningId, "competition-linked", "Planeringen kopplades till tävlingen.", null, null, (PlanningLinkRow.Competition, competitionId), now);
@@ -300,13 +296,11 @@ namespace HpskSite.Services.Planning
 
         public sealed record AreaResult(int AreaId, string? Error);
 
-        /// <summary>Omgång 2 steg 4: det delarna hade. Värden är EN sak: en klubb, en krets eller fri text.</summary>
-        /// <param name="Stations">P4: stationerna området ansvarar för ("3-6, 9"); null = rör inte, tom text = inga.</param>
-        public sealed record AreaDetails(string? Description, int? HostClubId, int? HostRegionId, string? HostText, string? Stations = null);
-
-        /// <summary>Nytt område (<paramref name="areaId"/> = 0) eller ändrat. <paramref name="details"/> null = rör inte beskrivning och värd.</summary>
-        public AreaResult SaveArea(int planningId, int areaId, string name, int? responsiblePid, string? responsibleName, int byParticipantId,
-            AreaDetails? details = null)
+        /// <summary>
+        /// Nytt område (<paramref name="areaId"/> = 0) eller ändrat: ett namn och en ansvarig (en deltagare eller ett namn).
+        /// Stefan 2026-10-25: ett område har ingen värd, beskrivning eller stationer — det är ett ansvarsområde.
+        /// </summary>
+        public AreaResult SaveArea(int planningId, int areaId, string name, int? responsiblePid, string? responsibleName, int byParticipantId)
         {
             var n = Clean(name, MaxAreaName);
             if (n == null) return new AreaResult(areaId, "Ge området ett namn, till exempel \"Materiel\".");
@@ -318,10 +312,6 @@ namespace HpskSite.Services.Planning
             var others = db.Fetch<PlanningAreaRow>("SELECT * FROM PlanningArea WITH (UPDLOCK) WHERE PlanningId = @0 AND DeletedAt IS NULL", planningId);
             if (others.Any(a => a.Id != areaId && string.Equals(a.Name, n, StringComparison.OrdinalIgnoreCase)))
                 return new AreaResult(areaId, $"Det finns redan ett område som heter \"{n}\".");
-            // Stefan 2026-10-25: ett område bär inga stationer — vem som utformar en station väljs under Stationerna
-            // (PlanningStationResponsible). Ett äldre anrop som skickar stationer får veta det i stället för att sparas.
-            if (!string.IsNullOrWhiteSpace(details?.Stations))
-                return new AreaResult(areaId, "Stationernas ansvariga väljs under Stationerna, inte på ett område.");
             PlanningAreaRow row;
             if (areaId > 0)
             {
@@ -330,7 +320,6 @@ namespace HpskSite.Services.Planning
                 row.Name = n;
                 row.ResponsibleParticipantId = responsiblePid > 0 ? responsiblePid : null;
                 row.ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200);
-                ApplyAreaDetails(row, details);
                 db.Update(row);
             }
             else
@@ -341,7 +330,6 @@ namespace HpskSite.Services.Planning
                     ResponsibleName = responsiblePid > 0 ? null : Clean(responsibleName, 200),
                     SortOrder = (others.Count == 0 ? 0 : others.Max(a => a.SortOrder)) + 1, CreatedAt = now, CreatedBy = byParticipantId,
                 };
-                ApplyAreaDetails(row, details);
                 db.Insert(row);
             }
             Bump(db, planningId);
@@ -362,15 +350,6 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        private static void ApplyAreaDetails(PlanningAreaRow row, AreaDetails? d)
-        {
-            if (d == null) return;
-            row.Description = Clean(d.Description, 2000);
-            row.HostClubId = d.HostClubId > 0 ? d.HostClubId : null;
-            row.HostRegionId = row.HostClubId.HasValue ? null : (d.HostRegionId > 0 ? d.HostRegionId : null);
-            row.HostText = row.HostClubId.HasValue || row.HostRegionId.HasValue ? null : Clean(d.HostText, 200);
-        }
-
         /// <summary>Flyttar området ett steg upp (-1) eller ner (+1).</summary>
         public string? MoveArea(int planningId, int areaId, int direction)
         {
@@ -388,11 +367,16 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
+        /// <summary>
+        /// Hör området till planeringen? Läses med UPDLOCK: en uppgift som sparas in i ett område medan området flyttas till
+        /// en annan planering (<c>MoveAreas</c>) väntar på flytten och får sedan veta att området inte finns här — i stället
+        /// för att bli kvar och peka på ett borttaget område (Expertgruppen, lösningsarkitekt 7).
+        /// </summary>
         private static string? AreaError(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int planningId, int? areaId)
         {
             if (!(areaId > 0)) return null;
-            return db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningArea WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", areaId, planningId) == 1
-                ? null : "Området finns inte.";
+            return db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningArea WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", areaId, planningId) == 1
+                ? null : "Området finns inte här (längre). Läs om sidan och försök igen.";
         }
 
         // =====================================================================================
@@ -583,7 +567,7 @@ namespace HpskSite.Services.Planning
 
         /// <summary>
         /// "Bygg station N" för varje station som saknar en uppgift (fältskytte), på stationernas planering
-        /// (<see cref="StationOwnerId"/>). Stefan 2026-10-25: uppgifterna ligger i området <i>Stationsbygge</i> och den
+        /// (<see cref="StationOwnerId"/>). Stefan 2026-10-25: uppgifterna ligger i området <i>Bygga banan</i> och den
         /// ansvarige personen (<see cref="PlanningStationResponsibleRow.ParticipantId"/>) får uppgiften — inget område per
         /// ansvarig. Milstolpen <see cref="CourseApprovalTaskTitle"/> följer med. Inga dubbletter i familjen.
         /// </summary>
@@ -607,7 +591,7 @@ namespace HpskSite.Services.Planning
             for (var n = 1; n <= Math.Min(stationCount, PlanningStations.Max); n++)
             {
                 if (have.Contains(n.ToString())) continue;
-                if (area == null) { area = EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now); sort = NextTaskSort(db, planningId, area.Id); }
+                if (area == null) { area = EnsureArea(db, planningId, PrepTemplates.BuildCourseArea, byParticipantId, now); sort = NextTaskSort(db, planningId, area.Id); }
                 var t = NewTask(planningId, area.Id, $"Bygg station {n}", null, null, null, PlanningTaskSource.Station, n.ToString(), ++sort, byParticipantId, now);
                 t.ScopeType = "Station"; t.ScopeKey = n.ToString();
                 if (responsible.TryGetValue(n, out var r) && r.ParticipantId is int pid && active.Contains(pid)) t.AssigneeParticipantId = pid;
@@ -618,7 +602,7 @@ namespace HpskSite.Services.Planning
             if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningTask WHERE PlanningId = @0 AND Title = @1 AND DeletedAt IS NULL",
                     planningId, CourseApprovalTaskTitle) == 0)
             {
-                var fallback = area ?? EnsureArea(db, planningId, "Stationsbygge", byParticipantId, now);
+                var fallback = area ?? EnsureArea(db, planningId, PrepTemplates.BuildCourseArea, byParticipantId, now);
                 var t = NewTask(planningId, fallback.Id, CourseApprovalTaskTitle,
                     "En banläggare godkänner station för station, sedan stationerna som helhet (under Stationerna i planeringen).",
                     null, null, PlanningTaskSource.Station, "course", NextTaskSort(db, planningId, fallback.Id) + 1, byParticipantId, now);

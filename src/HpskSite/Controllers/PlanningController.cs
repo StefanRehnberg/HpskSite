@@ -124,8 +124,9 @@ namespace HpskSite.Controllers
         /// går medvetet inte att skilja åt utåt.
         /// </summary>
         /// <param name="allowParentReader">
-        /// Omgång 2 steg 5: släpp in huvudplaneringens sammankallande som LÄSARE av en delplanering. ⚠️ Bara de läsande
-        /// anropen sätter den — ett skrivande anrop som fick en läsare skulle annars bara ha sina Can-regler kvar som skydd.
+        /// Släpp in Kan ändra i huvudplaneringen som LÄSARE av en delplanering (<see cref="PlanningFamily"/>). ⚠️ Bara de
+        /// läsande anropen sätter den — ett skrivande anrop som fick en läsare skulle annars bara ha sina Can-regler kvar som
+        /// skydd. (Huvudplaneringens SAMMANKALLANDE får en egen rad som sammankallande i delplaneringen, B4.)
         /// </param>
         private async Task<Ctx?> ResolveAsync(int planningId, string? t, bool allowParentReader = false)
         {
@@ -148,8 +149,11 @@ namespace HpskSite.Controllers
             if (me <= 0) return null;
             var participant = _planning.ParticipantForMember(planningId, me);
             participant = await ApplyCompetitionAccessAsync(planningId, me, participant);
+            // Stefan 2026-10-25 (B4): huvudplaneringens sammankallande är sammankallande här.
+            if (p.ParentPlanningId > 0 && !(participant is { IsActive: true, Access: PlanningAccessLevel.Owner, ViaCompetition: false }))
+                participant = _planning.EnsureParentOwner(p, me, MemberDisplayName(_memberService.GetById(me))) ?? participant;
             var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, false);
-            if (!c.IsParticipant && allowParentReader && _planning.IsParentConvener(p, me))
+            if (!c.IsParticipant && allowParentReader && _planning.ReadsSubViaParent(p, me))
                 c = new PlanningCaller(null, false, ParentReader: true);
             if (!PlanningAccess.CanReadContent(c)) return null;
             return new Ctx(p, c, me);
@@ -399,6 +403,8 @@ namespace HpskSite.Controllers
                     // Omgång 2 steg 5: huvudplaneringen (för en delplanering) och delplaneringarnas läge (för huvudplaneringen).
                     parent = ParentJson(x.Planning, x.MemberId),
                     subPlannings = SubPlanningsJson(x.Planning, c, x.MemberId),
+                    // Stefan B3: en delplanering läser huvudplaneringens fattade beslut.
+                    parentDecisions = ParentDecisionsJson(x.Planning),
                     // Omgång 3: familjens tävlingar och "Bemannar för".
                     family = FamilyJson(x.Planning),
                     // Stefan 2026-10-25: stationernas ENDA plats i familjen (rälsen visar Stationerna bara där).
@@ -426,9 +432,11 @@ namespace HpskSite.Controllers
                     canAddDocument = PlanningAccess.CanAddDocument(c),
                     canLinkCompetition = PlanningAccess.CanLinkCompetition(c),
                     viaCompetition = c.Participant?.ViaCompetition ?? false,
-                    // Omgång 2 steg 5: läser delplaneringen som sammankallande i huvudplaneringen (inte med, inga notiser).
+                    // Läser delplaneringen genom huvudplaneringen (Kan ändra där; inte med, inga notiser).
                     isParentReader = c.ParentReader && !c.IsParticipant,
-                    canSplit = PlanningAccess.CanSplitArea(c, x.Planning),
+                    // Stefan 2026-10-25: Ny delplanering (Översikt) och Flytta ett område inom familjen (Uppgifter).
+                    canCreateSub = PlanningAccess.CanCreateSub(c, x.Planning),
+                    canMoveAreas = PlanningAccess.CanMoveAreas(c),
                     openTasks = c.IsParticipant ? tasks.Count(tk => tk.AssigneeParticipantId == c.ParticipantId && PlanningTaskStatus.IsOpen(tk.Status)) : 0,
                 },
                 participants = people.Select(p => new
@@ -447,7 +455,7 @@ namespace HpskSite.Controllers
                     viaCompetition = p.ViaCompetition,
                     openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),
-                // Omgång 2 steg 4: områdena (ersätter delarna) — för meddelandena, Inställningar och dokumentkategorierna.
+                // Områdena (ansvarsområden) — för meddelandena och dokumentkategorierna. De hanteras under Uppgifter.
                 areas = AreasJson(id, _planning.Participants(id, includeRemoved: true).ToDictionary(pp => pp.Id, pp => pp.DisplayName), tasks),
                 // Förslagen när en roll ges: bemanningens katalog + planeringens vanliga ansvar. Egen text går alltid.
                 roleSuggestions = PlanningTaskRules.RoleSuggestions().Select(r => r.Name),

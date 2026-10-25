@@ -71,12 +71,32 @@ namespace HpskSite.Tests.Services
         public void Flera_grenar_gemensamma_omraden_en_gang_grenens_med_namn()
         {
             var t = PrepTemplates.ForMany(new[] { "Precision", "Faltskytte" }, "sm");
-            t.Count(a => a.Area == "Kansli & inbjudan").Should().Be(1);
+            t.Count(a => a.Area == "Inbjudan & anmälan").Should().Be(1);
+            t.Count(a => a.Area == "Säkerhet & sjukvård").Should().Be(1);
             t.Count(a => a.Area == "Förbundet").Should().Be(1);
             t.Should().Contain(a => a.Area == "Materiel – Fält").And.Contain(a => a.Area == "Materiel – Precision");
             // Fältets eget förbundskrav följer med in i det gemensamma området.
             t.Single(a => a.Area == "Förbundet").Items.Should().Contain(i => i.Title == "Fältets underlag till förbundet");
-            t.Single(a => a.Area == "Kansli & inbjudan").Items.Select(i => i.Title).Should().OnlyHaveUniqueItems();
+            t.Single(a => a.Area == "Inbjudan & anmälan").Items.Select(i => i.Title).Should().OnlyHaveUniqueItems();
+        }
+
+        [Fact]
+        public void Mallens_ord_ar_arrangorens_och_varje_uppgift_finns_en_gang()
+        {
+            foreach (var d in new[] { "Precision", "Faltskytte", "Springskytte", "Milsnabb" })
+                foreach (var size in PrepTemplates.Sizes)
+                {
+                    var t = PrepTemplates.For(d, size);
+                    t.Select(a => a.Area).Should().NotContain(a => a.Contains("Sanktion") || a == "Bankonfiguration" || a == "Stationsbygge" || a.StartsWith("Kansli"));
+                    Titles(t).Should().NotContain(x => x.Contains("domare"), $"{d}/{size}");
+                    Titles(t).Should().OnlyHaveUniqueItems($"{d}/{size}");
+                    t.Should().Contain(a => a.Area == "Säkerhet & sjukvård").And.Contain(a => a.Area == "Funktionärer").And.Contain(a => a.Area == "Prisutdelning");
+                    (t.Any(a => a.Area == "Ekonomi") && t.Any(a => a.Area == "Parkering")).Should().Be(size != "klubb", $"{d}/{size}");
+                }
+            // Juryn bara där SHB kräver den (C.4.1.5).
+            Titles(PrepTemplates.For("Precision", "krets")).Should().NotContain(x => x.Contains("jury"));
+            Titles(PrepTemplates.For("Precision", "nationell")).Should().Contain(x => x.StartsWith("Utse tävlingsjury —"));
+            PrepTemplates.For("Faltskytte", "klubb").Should().Contain(a => a.Area == PrepTemplates.BuildCourseArea);
         }
 
         [Fact]

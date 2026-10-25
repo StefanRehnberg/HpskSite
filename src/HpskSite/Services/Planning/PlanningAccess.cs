@@ -11,8 +11,9 @@ namespace HpskSite.Services.Planning
     /// <param name="Participant">Den aktiva deltagarraden, eller null.</param>
     /// <param name="ViaLink">Kom in genom en signerad länk i ett mejl (utan inloggning).</param>
     /// <param name="ParentReader">
-    /// Omgång 2 steg 5: sammankallande i huvudplaneringen som läser en delplanering utan att vara med i den. Läser allt
-    /// som en deltagare läser — men är ingen deltagare: skriver inget, får inga notiser, räknas inte någonstans.
+    /// Kan ändra i huvudplaneringen som läser en delplanering utan att vara med i den (<see cref="PlanningFamily"/>). Läser
+    /// allt som en deltagare läser — men är ingen deltagare: skriver inget, får inga notiser, räknas inte någonstans.
+    /// (Huvudplaneringens sammankallande är sammankallande i delplaneringen — en deltagare, inte en läsare.)
     /// </param>
     public sealed record PlanningCaller(PlanningMemberRow? Participant, bool ViaLink, bool ParentReader = false)
     {
@@ -41,15 +42,29 @@ namespace HpskSite.Services.Planning
         private static bool AtLeast(PlanningCaller c, string level) =>
             c.IsParticipant && PlanningAccessLevel.Rank(c.Access) >= PlanningAccessLevel.Rank(level);
 
-        /// <summary>Läsa planeringen. Deltagarna — och huvudplaneringens sammankallande i en delplanering (bara läsa).</summary>
+        /// <summary>Läsa planeringen. Deltagarna — och Kan ändra i huvudplaneringen, i en delplanering (bara läsa).</summary>
         public static bool CanReadContent(PlanningCaller c) => c.IsParticipant || (c.ParentReader && !c.ViaLink);
         public static bool CanReadMessages(PlanningCaller c) => CanReadContent(c);
 
         /// <summary>
-        /// Dela ut ett område till en egen planering: den sammankallande, inloggad, och bara i en planering som inte själv
+        /// Stefan 2026-10-25: skapa en delplanering — den sammankallande, inloggad, och bara i en planering som inte själv
         /// är en delplanering (en nivå).
         /// </summary>
-        public static bool CanSplitArea(PlanningCaller c, PlanningRow p) => CanManagePlanning(c) && !(p.ParentPlanningId > 0);
+        public static bool CanCreateSub(PlanningCaller c, PlanningRow p) => CanManagePlanning(c) && !(p.ParentPlanningId > 0);
+
+        /// <summary>
+        /// Flytta ett område till en annan planering i familjen: den sammankallande här. Att hen också leder målet prövas av
+        /// anroparen (huvudplaneringens sammankallande leder varje delplanering).
+        /// </summary>
+        public static bool CanMoveAreas(PlanningCaller c) => CanManagePlanning(c);
+
+        /// <summary>
+        /// Stefan 2026-10-25 (Expertgruppen B5, K2 §3.9): områdets ANSVARIGE (Deltar och uppåt, inloggad) leder områdets
+        /// uppgifter — tar dem, ändrar dem och sätter läget. Att besluta <i>Utförd</i> ingår inte. <paramref name="areaLeadPid"/>
+        /// = uppgiftens områdes ansvarige (deltagar-id), eller null.
+        /// </summary>
+        public static bool LeadsArea(PlanningCaller c, int? areaLeadPid) =>
+            areaLeadPid > 0 && areaLeadPid == c.ParticipantId && AtLeast(c, PlanningAccessLevel.Participant) && !c.ViaLink;
 
         /// <summary>Skriva meddelanden. Deltar och uppåt — Följer läser bara.</summary>
         public static bool CanWriteMessages(PlanningCaller c) => AtLeast(c, PlanningAccessLevel.Participant);
@@ -109,16 +124,19 @@ namespace HpskSite.Services.Planning
         /// <summary>Skapa en uppgift: Deltar och uppåt (det är så det går till på ett möte).</summary>
         public static bool CanCreateTasks(PlanningCaller c) => CanWriteMessages(c);
 
-        /// <summary>Ändra en uppgifts innehåll, ansvarig och datum, eller ta bort den: den som skapade den, eller Kan ändra och uppåt.</summary>
-        public static bool CanEditTask(PlanningCaller c, PlanningTaskRow t) =>
-            c.IsParticipant && (t.CreatedBy == c.ParticipantId || EditorSignedIn(c));
+        /// <summary>
+        /// Ändra en uppgifts innehåll, ansvarig och datum, eller ta bort den: den som skapade den, Kan ändra och uppåt — eller
+        /// områdets ansvarige (<see cref="LeadsArea"/>).
+        /// </summary>
+        public static bool CanEditTask(PlanningCaller c, PlanningTaskRow t, int? areaLeadPid = null) =>
+            c.IsParticipant && (t.CreatedBy == c.ParticipantId || EditorSignedIn(c) || LeadsArea(c, areaLeadPid));
 
         /// <summary>
         /// Ändra läget (fram till Klar att pröva) och skriva hur det går: den som har uppgiften — även den
         /// som följer — eller Kan ändra och uppåt (inloggad).
         /// </summary>
-        public static bool CanReportOnTask(PlanningCaller c, PlanningTaskRow t) =>
-            c.IsParticipant && (t.AssigneeParticipantId == c.ParticipantId || EditorSignedIn(c));
+        public static bool CanReportOnTask(PlanningCaller c, PlanningTaskRow t, int? areaLeadPid = null) =>
+            c.IsParticipant && (t.AssigneeParticipantId == c.ParticipantId || EditorSignedIn(c) || LeadsArea(c, areaLeadPid));
 
         /// <summary>
         /// Besluta Utförd / Fortsätter / ångra. På ett pågående möte: alla som deltar (mötet beslutar) — inloggade;
@@ -142,7 +160,7 @@ namespace HpskSite.Services.Planning
                 || (t != null && c.IsParticipant && t.AssigneeParticipantId == c.ParticipantId);
         }
 
-        /// <summary>Områden, mallar, kretsens checklista och stationer: Kan ändra och uppåt (inte via mejllänk).</summary>
+        /// <summary>Lägga upp, ändra och ta bort områden; mallar, kretsens checklista och stationer: Kan ändra och uppåt (inte via mejllänk).</summary>
         public static bool CanManageAreas(PlanningCaller c) => CanEditPlanning(c);
 
         /// <summary>Kommentera en uppgift: Deltar och uppåt, och den som har uppgiften.</summary>

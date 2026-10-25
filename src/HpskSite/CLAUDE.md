@@ -12694,7 +12694,9 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     låg 2028 utanför de 30), DTO:n har `canDelete`, `planningId`, `planningName` (klubbens lista: "Från planeringen …").
     Svit `tavlingsplanering-tavling-verify.mjs` 57/57 (A/B: utan asClub → 2 röda; PlanningReader nekar → 3 röda;
     ClubCanDelete utan statusvillkoret → 4 röda). ⚠️ Guidens åtta steg körs inte i sviten (fältpåsen + återanropet).
-- ⚠️⚠️ **OMGJORT 2026-10-24 (omgång 2, steg 4): Områden ersätter Delar.** Steg D ovan gäller inte längre för
+- ⚠️⚠️ **ERSATT 2026-10-25 av "Områden och delplaneringar, Expertgruppens modell" nedan** — områdets beskrivning,
+  värd, `AreaHostOptions`, `#stAreas` och "＋ Nytt område…" finns inte längre. Historik:
+  **OMGJORT 2026-10-24 (omgång 2, steg 4): Områden ersätter Delar.** Steg D ovan gäller inte längre för
   uppgifter/meddelanden: migrering `merge-planning-parts-into-areas.sql` (körordning efter P3c) slår ihop delarna
   (utom `Root`) med `PlanningArea` (samma namn = samma område), flyttar `PartId` → `AreaId` och **tar bort
   `PlanningTask.PartId` och `PlanningMessage.PartId`**. `PlanningArea` fick `Description`, `HostClubId`/`HostRegionId`/
@@ -12710,7 +12712,8 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   `CompetitionTypes`) och ändras på raden `#plbDisc` i Bemanningens rutnät (`SetDiscipline`); Gren-kortet i
   Inställningar är borta. Ingen gren per område. Svit p3 180/180 (A/B: områdesprövningen i `Post` → 1 röd;
   `wireNewArea` som inte sparar → 2 röda).
-- **Omgång 2 steg 5 (2026-10-24): dela ut ett område till en egen planering.** `Planning.ParentPlanningId` (migrering
+- ⚠️⚠️ **ERSATT 2026-10-25 — `SplitArea`/`SplitPreview`/`CanSplitArea`/`openSplit`/`IsParentConvener` finns inte
+  längre; se nästa punkt.** Historik: **Omgång 2 steg 5 (2026-10-24): dela ut ett område till en egen planering.** `Planning.ParentPlanningId` (migrering
   `add-parent-to-planning.sql`, körordning P3h) — EN nivå: `PlanningAccess.CanSplitArea` = sammankallande, inloggad, och
   planeringen är inte själv en delplanering. `PlanningService.Split.cs`: `SplitPreview` (skriver inget; förslag till
   deltagare, dokument och sammankallande) och `SplitArea` (EN transaktion): ny planering via `Create` med den valda som
@@ -12729,6 +12732,45 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   deltagare) och `me.isParentReader`, `me.canSplit`. Ytor: radmenyn i `#stAreas` (*Dela ut till en egen planering…*,
   `openSplit`), kortet `#plSubPlannings` på Översikt, raden "Del av …" och kortet `#plParentReader`. Svit
   `tavlingsplanering-dela-verify.mjs` 57/57 (A/B: läsaren utan Owner-villkoret + bifogningarna inte släppta → 3 röda).
+- ⭐ **Områden och delplaneringar, Expertgruppens modell (Stefan 2026-10-25: "Kör på expertgruppens rekommendation")** —
+  utvärderingen `notes/expertgrupp-omraden-delplaneringar-2026-10-25.md` (B1–B12). TVÅ skilda begrepp:
+  - **Område = ansvarsområde:** `PlanningAreaRow` har bara namn + ansvarig (deltagare eller fritt namn). Bor under
+    Uppgifter (områdesrubriken + Åtgärder → *Nytt område…*, `openArea`) och skapas bara där och av mallen. `SaveArea`
+    vägrar `description`/`stations`/värd med ett meddelande. **B5:** områdets ansvarige (Deltar+, inloggad —
+    `PlanningAccess.LeadsArea`) får ändra, ta och sätta läge på områdets uppgifter (`CanEditTask`/`CanReportOnTask` med
+    `areaLeadPid`, controllerns `Lead(AreaLeads(id), task)`), men beslutar INTE Utförd; `Tasks` bär `myAreas`; vid
+    NeedsHelp/ReadyForReview av någon annan mejlas den ansvarige (`PlanningNotifier.TaskStatusToAreaLeadAsync`,
+    `task-needshelp`/`task-ready`).
+  - **Delplanering skapas direkt:** Översikt → Åtgärder / kortet Delplaneringar → *Ny delplanering…* (`openNewSub` →
+    `POST CreateSub`: namn, gren, sammankallande, sköts av, dagar, `areas`). `PlanningAccess.CanCreateSub` = sammankallande
+    i en planering som inte själv är en delplanering. Valda områden flyttar i SAMMA transaktion (`_scopes.CreateScope()` +
+    `outer.Complete()` — ett fel ångrar hela delplaneringen; sviten prövar det med ett okänt område).
+  - **Flytta åt båda hållen (B6):** `MovePreview` (targetId 0 = förhandsvisning utan mål) och `MoveAreas`
+    (`PlanningService.Family.cs`, `MoveAreasCore`). FK `(PlanningId, AreaId)` → flytten skapar en NY områdesrad i målet
+    (eller slår ihop med samma namn) och mjukraderar den gamla. Deltagare via `FindTwin` (medlem, eller gästens e-post);
+    "arbetare" (områdets ansvarige + öppna uppgifters ansvariga) blir aktiva med sin nivå (Owner → Editor), övriga Följer —
+    utom den som läser genom huvudplaneringen (B3), som får en VILANDE rad. Kategorierna följer området; ett okategoriserat
+    dokument följer när alla dess bifogningar flyttar; korsande bifogningar släpps. Systemrader `areas-moved-out`/`-in`,
+    `planning-sub-made`/`-created`. Den som flyttar måste vara Owner i målet (`EnsureParentOwner` först).
+  - **B4:** huvudplaneringens sammankallande är Owner i varje delplanering — `EnsureParentOwner` (lat, i `ResolveAsync`)
+    och vid `CreateSub`. Delplaneringskortets sammankallande-lista utelämnar huvudplaneringens.
+  - **B3:** `PlanningFamily.ReadsSubViaParentSql` = aktiv Owner/Editor i huvudplaneringen och INTE `ViaCompetition`
+    (ersätter `IsParentConvener`). Delplaneringen läser huvudplaneringens fattade beslut (`planning.parentDecisions`,
+    kortet `#plParentDecisions`).
+  - **B11:** `Planning.HostClubId/HostRegionId/HostText` (sköts av) — `SetSubHost`, kortet `#stSubHost` i delplaneringens
+    Inställningar; `HostOptions` (CanEditPlanning; också stationernas ansvariga).
+  - **B7:** `CopyPlanning(includeSubs)` kopierar delplaneringarna med områden och uppgifter (`CopyOne` rekursivt).
+  - **Familjen:** `PlanningFamily` (statisk) + `Planning.FamilyRootId AS COALESCE(ParentPlanningId, Id) PERSISTED`
+    (`IX_Planning_Family`) — alla familjeuppslag (stationer, överskott, bemanning, Fältkonfig) går därigenom.
+  - **`PlanningPart` är BORTA** (tabellen, `PlanningLink.PlanningPartId/AreaId`, `PlanningArea.Description/Host*/Stations`).
+  - **B12, mallens ord:** *Ansökan & tillstånd* (`PrepTemplates.AdminArea`; juryn bara nationell/ldm/sm), *Inbjudan &
+    anmälan*, *Sekretariat & resultat*, nya *Prisutdelning*, *Säkerhet & sjukvård*, *Funktionärer*, och för krets och
+    större *Ekonomi* + *Parkering*; fältets *Banläggning* + *Bygga banan* (`PrepTemplates.BuildCourseArea`, där
+    `SeedStationTasks` lägger "Bygg station N"). Test `PrepTemplatesTests.Mallens_ord_…`.
+  - **Migreringar:** EN konsoliderad P1 (`create-planning-tables.sql`, slutformen; ersätter P2d/P3a/P3b/P3c/P3g/P3h/P3i/P3k
+    — inget av det kördes någonsin i prod) + den bantade P3j. Dev konsoliderad med
+    `consolidate-planning-final-form-dev-2026-10-25.sql`.
+  - Svit `tavlingsplanering-dela-verify.mjs` omskriven (skapa, flytta åt båda hållen, B3/B4/B5 med A/B, ytan, telefon).
 - **P4 (2026-10-24), plan `notes/tavlingsplanering-p4-arbetsplan-2026-10-24.md`:**
   - **SM-annonsen** (fråga 17): `Models/Planning/NpIssues.cs` uppskattar Nationellt Pistolskyttes manusstopp (nr 1 fjärde
     måndagen i februari, nr 2 första i maj, nr 3 andra i augusti, nr 4 första i november; utgivning +42 dagar).
@@ -12775,8 +12817,8 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     skrivningar använder fortfarande `Where`. **De fyra `*_Comp`-indexen gäller bara tävlingens egna rader**
     (`WHERE PlanningId IS NULL AND CompetitionId IS NOT NULL`) — förut föll kopplingen när en delplanering hade samma dag
     (K5). `Get` bär `planning.family` (kort *Tävlingarna* på Översikt, väljaren Bemannar för under Tävlingen).
-  - **Kan ändra** i huvudplaneringen läser delplaneringarna (`IsParentConvener`). Vid delning blir de som hade uppgifter i
-    området men inte valdes **Följare** i delplaneringen. **En planering med delplaneringar går inte att ta bort**;
+  - **Kan ändra** i huvudplaneringen läser delplaneringarna (nu `PlanningFamily.ReadsSubViaParentSql`, se Expertgruppens
+    modell ovan; vid flytt gäller arbetar-regeln där). **En planering med delplaneringar går inte att ta bort**;
     borttagningen tar bort `PlanningLink`, släpper bemanningens `CompetitionId` och speglar om tävlingarna.
   - **Kopplingen (K6):** `LinkableCompetitions` väljer kommande tävlingar vars VÄRD är en klubb eller **krets** som någon i
     planeringen företräder (kretsens nod-id → `regionCode`; en kretsvärdad tävling har `ClubId` 0 — SM!), med seriens värd
@@ -12892,7 +12934,7 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
       räknade `StationCount` ur de redan tilldelade och vägrade nästa station. `MoveWork` (byt ut en deltagare) flyttar
       raderna; `PlanningPurgeService` tar dem. Borttaget: `AssignStations`, `StationAreas`, `StationConflict`,
       `CreateAreaConfig`, `AssembleCourse`, `SyncPartsAsync` och utdelningens kopia av ett områdes stationer.
-      *En uppgift per station* lägger uppgifterna i *Stationsbygge* med den ansvarige som ansvarig för uppgiften.
+      *En uppgift per station* lägger uppgifterna i *Bygga banan* (`PrepTemplates.BuildCourseArea`) med den ansvarige som ansvarig för uppgiften.
       Bemanningens stationsrader (`FamilyAreaStations`) = 1..konfigurationens antal ∪ stationer med en ansvarig.
       Migrering `create-planning-station-responsible.sql` (P3k, efter P3j). Kortet **Ansvariga** (`#plStAreas`,
       rader `[data-st-resp=nyckel]`: Ansvarig · Stationer · Kontakt; Välj stationer… / Ta bort som ansvarig) och

@@ -197,10 +197,19 @@ namespace HpskSite.Models.Planning
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         /// <summary>
-        /// Omgång 2 steg 5: huvudplaneringen, när planeringen är en delplanering (ett område som delats ut). En nivå —
-        /// en delplanering delas inte i sin tur. Huvudplaneringens sammankallande läser delplaneringen utan att vara med.
+        /// Huvudplaneringen, när planeringen är en delplanering. En nivå — en delplanering har inga egna delplaneringar.
+        /// Stefan 2026-10-25 (Expertgruppen): en delplanering skapas DIREKT (<c>PlanningService.CreateSub</c>), aldrig ur ett
+        /// område. Familjens regler står på ett ställe: <see cref="PlanningFamily"/>. (Databasen har dessutom den beräknade
+        /// kolumnen <c>FamilyRootId</c> = huvudplaneringen eller planeringen själv — den finns inte här, NPoco skriver den inte.)
         /// </summary>
         public int? ParentPlanningId { get; set; }
+        /// <summary>
+        /// Stefan 2026-10-25: vem som sköter planeringen — en klubb, en krets eller fri text ("Hallands krets sköter
+        /// precisionen"). Visas för en delplanering; flyttade hit från områdena, som inte längre har någon värd.
+        /// </summary>
+        public int? HostClubId { get; set; }
+        public int? HostRegionId { get; set; }
+        public string? HostText { get; set; }
         /// <summary>P4: gruppens namn i besluten ("SSM-kommittén"). Null = "arbetsgruppen".</summary>
         public string? GroupName { get; set; }
         /// <summary>
@@ -215,47 +224,6 @@ namespace HpskSite.Models.Planning
         public int UpdatedBy { get; set; }
         public DateTime? DeletedAt { get; set; }
         public int? DeletedBy { get; set; }
-    }
-
-    [TableName("PlanningPart")]
-    [PrimaryKey("Id", AutoIncrement = true)]
-    public class PlanningPartRow
-    {
-        public int Id { get; set; }
-        public int PlanningId { get; set; }
-        public int? ParentPlanningPartId { get; set; }
-        /// <summary><see cref="PlanningPartKind"/>: Root (planeringen själv), Discipline (en gren) eller Responsibility (ett ansvar).</summary>
-        public string Kind { get; set; } = PlanningPartKind.Root;
-        public string Name { get; set; } = "";
-        public int SortOrder { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public DateTime? DeletedAt { get; set; }
-        // ---- P3 steg D: delen som organisation ----
-        public string? Description { get; set; }
-        /// <summary>Grenen (CompetitionTypes-id) för en del av sorten Discipline.</summary>
-        public string? DisciplineKey { get; set; }
-        /// <summary>Den som ansvarar för delen (PlanningMember.Id) — eller ett fritt namn.</summary>
-        public int? ResponsibleParticipantId { get; set; }
-        public string? ResponsibleName { get; set; }
-        /// <summary>Vem som står för delen: en klubb, en krets eller fri text ("Förbundets kansli").</summary>
-        public int? HostClubId { get; set; }
-        public int? HostRegionId { get; set; }
-        public string? HostText { get; set; }
-        public int? CreatedBy { get; set; }
-
-        [Ignore] public bool IsRoot => Kind == PlanningPartKind.Root;
-    }
-
-    public static class PlanningPartKind
-    {
-        public const string Root = "Root";
-        // ⚠️ Värdena styrs av CK_PlanningPart_Kind (create-planning-tables.sql): Root, Gren, Ansvar.
-        public const string Discipline = "Gren";
-        public const string Responsibility = "Ansvar";
-        public static string? Normalize(string? k) =>
-            string.Equals(k, Discipline, StringComparison.OrdinalIgnoreCase) ? Discipline
-            : string.Equals(k, Responsibility, StringComparison.OrdinalIgnoreCase) ? Responsibility : null;
-        public static string Label(string? k) => k == Discipline ? "Gren" : k == Responsibility ? "Ansvar" : "Hela planeringen";
     }
 
     [TableName("PlanningMember")]
@@ -615,7 +583,14 @@ namespace HpskSite.Models.Planning
     //  Se notes/tavlingsplanering-p2-plan-2026-10-23.md.
     // ============================================================================================
 
-    /// <summary>Ett område (Materiel, Banor, Servering …). Inte samma sak som en del (gren) i P3.</summary>
+    /// <summary>
+    /// Ett ANSVARSOMRÅDE i planeringen (Servering, Materiel, Banor, Sekretariatet …): ett namn och en ansvarig. Stefan
+    /// 2026-10-25 (Expertgruppen): ett område är aldrig en gren och aldrig förstadiet till en delplanering — en del med egna
+    /// deltagare, möten, bemanning eller tävling är en delplanering (<see cref="PlanningRow.ParentPlanningId"/>). Områdena
+    /// hanteras under Uppgifter; den ansvarige (Deltar) får ta, ändra och sätta läge på områdets uppgifter
+    /// (<c>PlanningAccess.LeadsArea</c>). Databasen håller ihop planeringen och området (<c>FK_PlanningTask_Area</c> m.fl.
+    /// på <c>(PlanningId, AreaId)</c>).
+    /// </summary>
     [TableName("PlanningArea")]
     [PrimaryKey("Id", AutoIncrement = true)]
     public class PlanningAreaRow
@@ -630,18 +605,6 @@ namespace HpskSite.Models.Planning
         public int CreatedBy { get; set; }
         public DateTime? DeletedAt { get; set; }
         public int? ImportedFromWorkAreaId { get; set; }
-        // ---- Omgång 2 steg 4: området har det delarna hade (delarna finns inte längre) ----
-        public string? Description { get; set; }
-        /// <summary>Vem som står för området: en klubb, en krets eller fri text ("Förbundets kansli").</summary>
-        public int? HostClubId { get; set; }
-        public int? HostRegionId { get; set; }
-        public string? HostText { get; set; }
-        /// <summary>
-        /// P4: stationerna området ansvarade för ("3-6, 9"). ⚠️ LÄSES OCH SKRIVS INTE LÄNGRE (Stefan 2026-10-25): vem som
-        /// utformar en station står i <see cref="PlanningStationResponsibleRow"/>, inte på ett område. Kolumnen står kvar
-        /// för NPoco och historiken.
-        /// </summary>
-        public string? Stations { get; set; }
     }
 
     /// <summary>
@@ -764,24 +727,22 @@ namespace HpskSite.Models.Planning
     }
 
     /// <summary>
-    /// Kopplingen planering ↔ tävling. En planering per tävling (unikt index på TargetKind + TargetId).
-    /// TargetKind är alltid "competition" — tävlingarnas id-golv läser kolumnen.
+    /// Kopplingen planering → något utanför: en tävling (en planering per tävling, unikt index på TargetKind + TargetId —
+    /// tävlingarnas id-golv läser kolumnen), stationernas fältkonfiguration eller projektet i Fältkonfiguratorn.
     /// </summary>
     [TableName("PlanningLink")]
     [PrimaryKey("Id", AutoIncrement = true)]
     public class PlanningLinkRow
     {
         public const string Competition = "competition"; // competitionstore-ok: kopplingens sort (TargetKind), inte doktypens alias
-        /// <summary>Omgång 3 (3.3): en fältkonfiguration (delkonfigurationen för ett område). <see cref="AreaId"/> säger vilket.</summary>
+        /// <summary>Stationernas fältkonfiguration (EN per familj, på stationernas planering).</summary>
         public const string Faltconfig = "faltconfig";
         /// <summary>Stefan 2026-10-25: projektet i Fältkonfiguratorn som planeringens stationer ligger i (samma namn som planeringen).</summary>
         public const string Faltproject = "faltproject";
         public int Id { get; set; }
         public int PlanningId { get; set; }
-        public int PlanningPartId { get; set; }
         public string TargetKind { get; set; } = Competition;
         public int TargetId { get; set; }
-        public int? AreaId { get; set; }
         public DateTime LinkedAt { get; set; }
         public int LinkedBy { get; set; }
     }

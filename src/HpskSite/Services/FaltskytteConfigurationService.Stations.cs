@@ -67,7 +67,7 @@ namespace HpskSite.Services
                       JOIN Planning f ON f.Id = r.PlanningId AND f.DeletedAt IS NULL
                       JOIN Planning p ON p.Id = @0
                       LEFT JOIN PlanningMember pm ON pm.Id = r.ParticipantId AND pm.RemovedAt IS NULL
-                     WHERE f.Id = COALESCE(p.ParentPlanningId, p.Id) OR f.ParentPlanningId = COALESCE(p.ParentPlanningId, p.Id)", planningId.Value);
+                     WHERE f.FamilyRootId = p.FamilyRootId", planningId.Value);
                 foreach (var r in rows)
                 {
                     who.TryAdd(r.Station, r.Name);

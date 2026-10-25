@@ -14,10 +14,13 @@ namespace HpskSite.Services.Planning
     {
         /// <param name="SourceAnchor">Källans dag: den kopplade tävlingens, annars planeringens första.</param>
         /// <param name="SourceCompetitionId">Den kopplade tävlingen — bemanningens äldre rader kan ligga på den.</param>
+        /// <param name="Subs">Stefan 2026-10-25 (B7): delplaneringarna som följer med — var och ens dag och tävling (samma
+        /// slags uppgifter som <paramref name="SourceAnchor"/>/<paramref name="SourceCompetitionId"/>). Null = inga.</param>
         public sealed record CopyInput(string Name, DateTime? TargetStart, DateTime? TargetEnd,
             int RecipientMemberId, string RecipientName, int? RecipientClubId,
             int CopierMemberId, string CopierName, int? CopierClubId, bool AddCopier,
-            DateTime? SourceAnchor, int? SourceCompetitionId);
+            DateTime? SourceAnchor, int? SourceCompetitionId,
+            IReadOnlyDictionary<int, (DateTime? Anchor, int? CompetitionId)>? Subs = null);
 
         /// <summary>
         /// En ny planering med källans form. Mottagaren blir sammankallande; den som kopierar är med som Kan ändra
@@ -27,9 +30,34 @@ namespace HpskSite.Services.Planning
         {
             var err = Validate(i.Name, i.TargetStart, i.TargetEnd);
             if (err != null) return (null, err);
-            var now = Now;
-            using var outer = _scopes.CreateScope(autoComplete: true);
+            using var outer = _scopes.CreateScope();
             var db = outer.Database;
+            var (report, e) = CopyOne(db, sourceId, i, null);
+            if (e != null || report == null) return (null, e);
+            // B7: delplaneringarna följer med — med sina områden och uppgifter, samma mottagare, flyttade lika mycket som
+            // huvudplaneringen. Bara från en huvudplanering (en delplanering har inga egna).
+            var subs = 0;
+            if (i.Subs != null)
+            {
+                var offset = PlanningCopyRules.Offset(i.SourceAnchor, i.TargetStart);
+                foreach (var sub in db.Fetch<PlanningRow>("SELECT * FROM Planning WHERE ParentPlanningId = @0 AND DeletedAt IS NULL ORDER BY Name, Id", sourceId))
+                {
+                    var (anchor, comp) = i.Subs.TryGetValue(sub.Id, out var a) ? a : (sub.TargetStart, (int?)null);
+                    var start = PlanningCopyRules.Shift(sub.TargetStart ?? anchor, offset);
+                    var end = PlanningCopyRules.Shift(sub.TargetEnd, offset);
+                    var (sr, se) = CopyOne(db, sub.Id, i with { Name = sub.Name, TargetStart = start, TargetEnd = end ?? start,
+                        SourceAnchor = anchor ?? sub.TargetStart, SourceCompetitionId = comp, Subs = null }, report.PlanningId);
+                    if (se != null || sr == null) return (null, $"Delplaneringen {sub.Name}: {se}");
+                    subs++;
+                }
+            }
+            outer.Complete();
+            return (report with { SubPlannings = subs }, null);
+        }
+
+        private (PlanningCopyReport? Report, string? Error) CopyOne(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int sourceId, CopyInput i, int? parentId)
+        {
+            var now = Now;
             var src = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", sourceId);
             if (src == null) return (null, "Planeringen finns inte.");
 
@@ -43,6 +71,8 @@ namespace HpskSite.Services.Planning
             copy.CopiedFromPlanningId = src.Id;
             copy.Parts = src.Parts;               // Omgång 3 steg 10: samma delar som förlagan
             copy.RolesChosen = src.RolesChosen;
+            copy.ParentPlanningId = parentId;
+            copy.HostClubId = src.HostClubId; copy.HostRegionId = src.HostRegionId; copy.HostText = src.HostText;
             copy.CreatedBy = i.CopierMemberId; copy.UpdatedBy = i.CopierMemberId;
             db.Update(copy);
 
@@ -55,7 +85,6 @@ namespace HpskSite.Services.Planning
                 var na = new PlanningAreaRow
                 {
                     PlanningId = newId, Name = a.Name, ResponsibleName = a.ResponsibleName, SortOrder = a.SortOrder,
-                    Description = a.Description, HostClubId = a.HostClubId, HostRegionId = a.HostRegionId, HostText = a.HostText,
                     CreatedAt = now, CreatedBy = ownerPid,
                 };
                 db.Insert(na);
@@ -119,7 +148,7 @@ namespace HpskSite.Services.Planning
                 if (add.Error != null) return (null, add.Error);
             }
             InsertSystem(db, newId, "planning-copied", $"Planeringen är en kopia av {src.Name}.", ownerPid, null, null, now);
-            InsertSystem(db, sourceId, "planning-copy-made", $"Planeringen kopierades till {i.Name.Trim()}.", null, null, null, now);
+            if (parentId == null) InsertSystem(db, sourceId, "planning-copy-made", $"Planeringen kopierades till {i.Name.Trim()}.", null, null, null, now);
             Bump(db, sourceId);
             return (new PlanningCopyReport(newId, areaMap.Count, taskCount, roles, days, needs, datesDropped, daysDropped), null);
         }

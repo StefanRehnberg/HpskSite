@@ -172,10 +172,10 @@ namespace HpskSite.Services
                 // ⚠️ Frågan MÅSTE börja med SELECT — NPoco gör annars om den till "SELECT * FROM PlanningAccessRow" (ingen CTE).
                 var rows = await db.FetchAsync<PlanningAccessRow>(@"
                     SELECT pm.Access, CAST(CASE WHEN pm.PlanningId IN (L.PlanningId, L.RootId) THEN 1 ELSE 0 END AS BIT) AS Near
-                      FROM (SELECT l.PlanningId, COALESCE(p.ParentPlanningId, p.Id) AS RootId FROM PlanningLink l
+                      FROM (SELECT l.PlanningId, p.FamilyRootId AS RootId FROM PlanningLink l
                               JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL
                              WHERE l.TargetKind = N'faltconfig' AND l.TargetId = @0) L
-                      JOIN Planning f ON (f.Id = L.RootId OR f.ParentPlanningId = L.RootId) AND f.DeletedAt IS NULL
+                      JOIN Planning f ON f.FamilyRootId = L.RootId AND f.DeletedAt IS NULL
                       JOIN PlanningMember pm ON pm.PlanningId = f.Id AND pm.MemberId = @1 AND pm.RemovedAt IS NULL", configId, memberId);
                 return rows.Select(r => (r.Access, r.Near)).ToList();
             }

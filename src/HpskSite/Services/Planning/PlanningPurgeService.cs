@@ -23,10 +23,12 @@ namespace HpskSite.Services.Planning
             "StaffingSourceScope", "StaffRequestLog",
             "PlanningSurplus", "PlanningDecisionResponse", "PlanningDecision",
             "PlanningDocumentRef", "PlanningDocument", "PlanningDocumentCategory",
-            "PlanningTaskEvent", "PlanningTask", "PlanningStationResponsible", "PlanningArea",
-            "PlanningMeetingTopic", "PlanningRole",
+            "PlanningTaskEvent", "PlanningTask",
+            // Meddelandena före områdena: FK_PlanningMessage_Area (2026-10-25) pekar på området.
             "PlanningMessageMention", "PlanningMessage", "PlanningMessageRead", "PlanningNotifyLog",
-            "PlanningRequest", "PlanningMember", "PlanningPart", "PlanningLink", "PlanningActivity",
+            "PlanningStationResponsible", "PlanningArea",
+            "PlanningMeetingTopic", "PlanningRole",
+            "PlanningRequest", "PlanningMember", "PlanningLink", "PlanningActivity",
         };
 
         private readonly IScopeProvider _scopes;

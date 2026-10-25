@@ -85,13 +85,13 @@ namespace HpskSite.Services.Staffing
             if (owner.PlanningIdOrNull is not int pid || pid <= 0) return new();
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var root = db.ExecuteScalar<int?>("SELECT CASE WHEN ParentPlanningId > 0 THEN ParentPlanningId ELSE Id END FROM Planning WHERE Id = @0", pid) ?? 0;
+            var root = HpskSite.Services.Planning.PlanningFamily.Root(db, pid);
             if (root <= 0) return new();
             var set = new SortedSet<int>(db.Fetch<int>(@"SELECT r.Station FROM PlanningStationResponsible r JOIN Planning p ON p.Id = r.PlanningId
-                WHERE (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL", root));
+                WHERE p.FamilyRootId = @0 AND p.DeletedAt IS NULL", root));
             var blobs = db.Fetch<string>(@"SELECT c.JsonBlob FROM PlanningLink l JOIN Planning p ON p.Id = l.PlanningId
                 JOIN FaltskytteConfiguration c ON c.Id = l.TargetId
-                WHERE l.TargetKind = N'faltconfig' AND l.AreaId IS NULL AND (p.Id = @0 OR p.ParentPlanningId = @0) AND p.DeletedAt IS NULL", root);
+                WHERE l.TargetKind = N'faltconfig' AND p.FamilyRootId = @0 AND p.DeletedAt IS NULL", root);
             var count = 0;
             foreach (var b in blobs)
             {

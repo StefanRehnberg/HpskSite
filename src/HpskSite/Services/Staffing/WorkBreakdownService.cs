@@ -163,9 +163,20 @@ namespace HpskSite.Services.Staffing
 
         private static readonly HashSet<string> Common = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Tävlingsledning", "Förbundet", "Kretsen", "Sanktion & administration", "Kansli & inbjudan", "Sekretariat",
+            "Tävlingsledning", "Förbundet", "Kretsen", AdminArea, "Inbjudan & anmälan", "Sekretariat & resultat",
+            "Prisutdelning", "Säkerhet & sjukvård", "Funktionärer", "Ekonomi", "Parkering",
             "Servering", "Boende & logistik", "Marknad & media",
         };
+
+        /// <summary>
+        /// Stefan 2026-10-25 (Expertgruppen B12): mallens ord som arrangören använder. "Sanktion" och "domare" finns inte i
+        /// pistolskyttet — området heter Ansökan & tillstånd och juryn utses bara där SHB kräver den (C.4.1.5).
+        /// </summary>
+        public const string AdminArea = "Ansökan & tillstånd";
+        private const string JuryTitle = "Utse tävlingsjury";
+
+        /// <summary>Fältets bygge av banan på plats — "Bygg station N" läggs här (<c>SeedStationTasks</c>).</summary>
+        public const string BuildCourseArea = "Bygga banan";
 
         private static string DisciplineLabel(string d) => d.ToLowerInvariant() switch
         {
@@ -197,7 +208,7 @@ namespace HpskSite.Services.Staffing
         /// </summary>
         private static void ApplyLevel(List<PrepArea> list, string size, bool falt)
         {
-            var admin = list.FirstOrDefault(a => a.Area == "Sanktion & administration");
+            var admin = list.FirstOrDefault(a => a.Area == AdminArea);
             if (admin != null)
             {
                 var items = admin.Items;
@@ -212,10 +223,13 @@ namespace HpskSite.Services.Staffing
                             + "Sök om tävlingen hos kretsen. Ändra sista dagen efter kretsens frist.");
                     else items.RemoveAt(i); // klubb: ingen ansökan; nationell/ldm: ansökan står under Förbundet
                 }
-                if (size is "nationell" or "ldm" or "sm")
+                // Jury bara vid mästerskap och större nationella tävlingar (SHB C.4.1.5) — klubb- och kretstävlingar har ingen.
+                var j = items.FindIndex(x => x.Title == JuryTitle);
+                if (j >= 0)
                 {
-                    var j = items.FindIndex(x => x.Title == "Boka domare / jury");
-                    if (j >= 0) items[j] = I("Utse tävlingsjury — tre i skyttefrågor väl förfarna personer (SHB C.4.1.5)", size == "nationell" ? 45 : 90);
+                    if (size is "nationell" or "ldm" or "sm")
+                        items[j] = I("Utse tävlingsjury — tre i skyttefrågor väl förfarna personer (SHB C.4.1.5)", size == "nationell" ? 45 : 90);
+                    else items.RemoveAt(j);
                 }
                 if (size != "klubb")
                     items.Add(I("Boka vapenkontrollant(er) — krävs vid mästerskap, nationella tävlingar och standardmedaljer (SHB C.4.2.1)",
@@ -296,28 +310,66 @@ namespace HpskSite.Services.Staffing
             : Array.Empty<PrepItem>()).ToList());
 
         // --- Common områden shared by all disciplines ---
-        private static PrepArea Admin(bool big) => new("Sanktion & administration", new()
+        private static PrepArea Admin(bool big) => new(AdminArea, new()
         {
-            // SM är förbundets uppdrag; där ersätts sanktionen av området Förbundet.
+            // SM är förbundets uppdrag; där står ansökan under området Förbundet. Ansökan per nivå läggs i ApplyLevel.
             big ? I("Kontakta förbundets SM-ansvarige", 365) : I("Sök sanktion (SPSF/krets)", 60),
-            I("Boka domare / jury", big ? 90 : 45),
-            I("Försäkring och tillstånd", big ? 90 : 45),
+            I(JuryTitle, big ? 90 : 45),
+            I("Försäkring och tillstånd (markägare, polis vid behov)", big ? 90 : 45),
             I("Fastställ tidsplan och ansvarsfördelning", big ? 75 : 30),
         });
-        private static PrepArea Kansli(bool big) => new("Kansli & inbjudan", new()
+        private static PrepArea Kansli(bool big) => new("Inbjudan & anmälan", new()
         {
             big ? new PrepItem("Publicera inbjudan", 75, "Först när förbundet har godkänt inbjudan (SHB C.3.5.2.1).") : I("Publicera inbjudan", 35),
             I("Öppna anmälan", big ? 60 : 30),
-            I("Bekräfta anmälningar / seedning", big ? 14 : 7),
-            I("Publicera startlista", 3),
+            I("Stäng anmälan och bekräfta anmälningarna", big ? 14 : 7),
         });
-        private static PrepArea Sekretariat(bool big) => new("Sekretariat", new()
+        private static PrepArea Sekretariat(bool big, string lottning = "Lotta och publicera startlistan") => new("Sekretariat & resultat", new()
         {
-            I("Startlistor och lottning", 3),
-            I("Förbered resultatinmatning / live-tavla", 2),
-            I("Priser, medaljer och diplom", big ? 30 : 10),
-            I("Standardmedaljer / märken att dela ut", big ? 30 : 14),
+            I(lottning, 3),
+            I("Förbered resultatinmatning och resultattavla", 2),
+            I("Publicera resultatet", 0),
         });
+        private static PrepArea Prisutdelning(bool big) => new("Prisutdelning", new()
+        {
+            I("Priser, medaljer och diplom", big ? 30 : 10),
+            I("Standardmedaljer och märken att dela ut", big ? 30 : 14),
+            I("Planera prisutdelningen — tid, plats och vem som delar ut", big ? 14 : 3),
+        });
+        private static PrepArea Sakerhet(bool big) => new("Säkerhet & sjukvård", new()
+        {
+            I("Säkerhetsplan och säkerhetsansvarig", big ? 60 : 21),
+            I("Sjukvårdsansvarig, första hjälpen och larmrutin", big ? 30 : 7),
+            I("Hjärtstartare på plats", big ? 21 : 7),
+        });
+        private static PrepArea Funktionarer(bool big) => new("Funktionärer", new()
+        {
+            I("Bemanna funktionärerna (under Bemanning)", big ? 45 : 21),
+            I("Skicka information till funktionärerna", big ? 14 : 5),
+            I("Genomgång med funktionärerna", 1),
+        });
+        private static PrepArea Ekonomi(bool big) => new("Ekonomi", new()
+        {
+            I("Budget och startavgift", big ? 120 : 45),
+            I("Kontrollera att startavgifterna har kommit in", 3),
+        });
+        private static PrepArea Parkering(bool big) => new("Parkering", new()
+        {
+            I("Parkering och vägvisning till banan", big ? 21 : 7),
+            I(big ? "Parkeringsvakter" : "Någon som visar till parkeringen", big ? 14 : 3),
+        });
+
+        /// <summary>De gemensamma områdena i den ordning arrangören tänker: före, under, efter. Klubbtävlingen hålls kort.</summary>
+        private static void AddCommon(List<PrepArea> list, bool mid, bool big, bool falt, PrepArea? sekretariat = null, PrepArea? sakerhet = null)
+        {
+            list.Add(Funktionarer(big));
+            list.Add(sakerhet ?? Sakerhet(big));
+            list.Add(sekretariat ?? Sekretariat(big));
+            list.Add(Prisutdelning(big));
+            list.Add(Kansli(big));
+            if (mid) { list.Add(Ekonomi(big)); list.Add(Parkering(big)); list.Add(Servering(big)); }
+            if (big) { list.Insert(0, Forbundet(falt)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+        }
         private static PrepArea Servering(bool big) => new("Servering", new()
         {
             I("Planera kiosk/servering", big ? 30 : 10),
@@ -347,12 +399,8 @@ namespace HpskSite.Services.Staffing
                 I("Räkna och beställ tavlor (deltagare × serier)", big ? 45 : 21),
                 I("Klister/tejp och markeringsutrustning", 7),
                 I("Ladda batterier / kontrollera högtalare", 2),
-                I("Första hjälpen", 7),
             }));
-            list.Add(Sekretariat(big));
-            list.Add(Kansli(big));
-            if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, Forbundet(false)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            AddCommon(list, mid, big, falt: false);
             return list;
         }
 
@@ -377,12 +425,6 @@ namespace HpskSite.Services.Staffing
                 I("Start/mål + tidtagningsgrindar", 3),
                 I("Skyltning, avspärrning och gångstråk", 2),
             }));
-            list.Add(new("Sjukvård", new()
-            {
-                I("Sjukvårdsansvarig och första hjälpen", big ? 30 : 14),
-                I("Hjärtstartare på plats", big ? 21 : 10),
-                I("Vätskestationer", 3),
-            }));
             list.Add(new("Materiel", new()
             {
                 I("Tidtagningsutrustning (löpande klocka)", big ? 30 : 14),
@@ -390,30 +432,25 @@ namespace HpskSite.Services.Staffing
                 I("Straffrunde-markörer och koner", 3),
                 I("Reservutrustning för tidtagning", 7),
             }));
-            list.Add(new("Sekretariat", new()
-            {
-                I("Startlistor (individuellt + mass-start/stafett)", 3),
-                I("Ålders- och könsklasser", 5),
-                I("Tid → resultat och live-tavla", 2),
-                I("Priser och medaljer", big ? 30 : 10),
-            }));
-            list.Add(Kansli(big));
-            if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, Forbundet(false)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            var sakerhet = Sakerhet(big);
+            sakerhet.Items.Add(I("Vätskestationer", 3));
+            var sekretariat = Sekretariat(big, "Lotta och publicera startlistan (individuellt, masstart eller stafett)");
+            sekretariat.Items.Insert(1, I("Ålders- och könsklasser", 5));
+            AddCommon(list, mid, big, falt: false, sekretariat, sakerhet);
             return list;
         }
 
         private static List<PrepArea> Falt(bool mid, bool big)
         {
             var list = new List<PrepArea> { Admin(big) };
-            list.Add(new("Bankonfiguration", new()
+            list.Add(new("Banläggning", new()
             {
-                I("Färdigställ stationskonfiguration (Fältkonfigurator)", big ? 60 : 30),
-                I("Begär Banläggare-godkännande av konfigurationen", big ? 45 : 21),
-                I("Fastställ patrullflöde och utsläppsintervall", 14),
+                I("Lägg banan — stationerna i Fältkonfiguratorn", big ? 60 : 30),
+                I("Begär banläggarens godkännande i Fältkonfiguratorn", big ? 45 : 21),
+                I("Bestäm patrullernas väg och tiden mellan patrullerna", 14),
                 I("Mörkerbelysning (om mörkerfältskjutning)", 14),
             }));
-            list.Add(new("Stationsbygge", new()
+            list.Add(new(BuildCourseArea, new()
             {
                 I("Placera ut figurer på rätt avstånd per station", 3),
                 I("Skärmar, säkerhetsvinklar och kulfång per station", 3),
@@ -425,19 +462,15 @@ namespace HpskSite.Services.Staffing
                 I("Beställ figurer per station (Figurkatalogen)", big ? 45 : 21),
                 I("Markeringsmateriel per station", 7),
                 I("Tidur och QR-kort per station", 3),
-                I("Sjukvård och första hjälpen", 7),
             }));
-            list.Add(Sekretariat(big));
-            list.Add(Kansli(big));
-            if (mid) list.Add(Servering(big));
-            if (big) { list.Insert(0, Forbundet(true)); list.Insert(0, TavlingsledningArea(big)); list.Add(Logistik()); list.Add(MarknadArea()); }
+            AddCommon(list, mid, big, falt: true);
             return list;
         }
 
         private static PrepArea TavlingsledningArea(bool big) => new("Tävlingsledning", new()
         {
-            I("Utse tävlingsledare och säkerhetschef", big ? 120 : 60),
-            I("Ta fram tidsplan och säkerhetsplan", big ? 90 : 45),
+            I("Utse tävlingsledare", big ? 120 : 60),
+            I("Ta fram tidsplanen för tävlingsdagarna", big ? 90 : 45),
             I("Fördela ansvar per område", big ? 75 : 30),
             I("Ackreditering funktionärer", big ? 21 : 10),
         });

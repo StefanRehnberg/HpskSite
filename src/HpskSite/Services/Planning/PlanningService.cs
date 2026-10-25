@@ -39,12 +39,12 @@ namespace HpskSite.Services.Planning
 
         public static readonly string[] Tables =
         {
-            "Planning", "PlanningActivity", "PlanningPart", "PlanningMember", "PlanningMessage",
+            "Planning", "PlanningActivity", "PlanningMember", "PlanningMessage",
             "PlanningMessageMention", "PlanningMessageRead", "PlanningMeeting", "PlanningMeetingOption",
             "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
             "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
             "PlanningArea", "PlanningDocument", "PlanningDocumentCategory", "PlanningDocumentRef",
-            "PlanningDecision", "PlanningDecisionResponse", "PlanningSurplus",
+            "PlanningDecision", "PlanningDecisionResponse", "PlanningSurplus", "PlanningStationResponsible",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>
@@ -62,8 +62,8 @@ namespace HpskSite.Services.Planning
                                                  ("Planning", "DisciplineKey"), ("StaffAssignment", "PlanningId"),
                                                  ("Planning", "SignupRoleChoice"), ("StaffCrewNeed", "DayDate"),
                                                  ("PlanningTask", "IsMilestone"), ("PlanningTask", "SentToForbundetBy"),
-                                                 ("PlanningPart", "HostText"), ("PlanningArea", "HostText"), ("PlanningMessage", "AreaId"),
-                                                 ("PlanningDocumentCategory", "AreaId"), ("Planning", "ParentPlanningId"), ("Planning", "GroupName"), ("PlanningArea", "Stations"),
+                                                 ("PlanningMessage", "AreaId"), ("PlanningDocumentCategory", "AreaId"),
+                                                 ("Planning", "ParentPlanningId"), ("Planning", "FamilyRootId"), ("Planning", "HostText"), ("Planning", "GroupName"),
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
                                                  ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
@@ -96,7 +96,7 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
-        /// <summary>Skapar planeringen med grunddelen och den som skapar som <i>Sammankallande</i>.</summary>
+        /// <summary>Skapar planeringen med den som skapar som <i>Sammankallande</i>.</summary>
         public (int PlanningId, int ParticipantId) Create(CreateInput i)
         {
             var now = Now;
@@ -113,7 +113,6 @@ namespace HpskSite.Services.Planning
                 CreatedAt = now, CreatedBy = i.MemberId, UpdatedAt = now, UpdatedBy = i.MemberId,
             };
             db.Insert(p);
-            db.Insert(new PlanningPartRow { PlanningId = p.Id, Kind = "Root", Name = p.Name, SortOrder = 0, CreatedAt = now });
             db.Execute("INSERT INTO PlanningActivity (PlanningId, ChangeSeq, ChangedAt) VALUES (@0, 1, @1)", p.Id, now);
             var me = new PlanningMemberRow
             {
@@ -143,7 +142,6 @@ namespace HpskSite.Services.Planning
             if (p == null) return "Planeringen finns inte.";
             var err = Validate(name, start, end);
             if (err != null) return err;
-            var renamed = !string.Equals(p.Name, name.Trim(), StringComparison.Ordinal);
             p.Name = name.Trim();
             p.TargetText = Clean(targetText, 200);
             p.TargetStart = start?.Date;
@@ -154,7 +152,6 @@ namespace HpskSite.Services.Planning
             p.UpdatedAt = Now;
             p.UpdatedBy = byMemberId;
             db.Update(p);
-            if (renamed) db.Execute("UPDATE PlanningPart SET Name = @1 WHERE PlanningId = @0 AND Kind = N'Root'", planningId, p.Name);
             Bump(db, planningId);
             return null;
         }

@@ -42,5 +42,5 @@ namespace HpskSite.Models.Planning
 
     /// <summary>Vad kopian fick med sig — svaret säger det, så att ingenting försvinner tyst.</summary>
     public sealed record PlanningCopyReport(int PlanningId, int Areas, int Tasks, int Roles, int Days, int Needs,
-        int DatesDropped, int DaysDropped);
+        int DatesDropped, int DaysDropped, int SubPlannings = 0);
 }

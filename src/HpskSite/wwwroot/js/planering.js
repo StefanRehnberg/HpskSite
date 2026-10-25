@@ -203,43 +203,6 @@
         return o('', allLabel || 'Alla områden') + o('0', 'Utan område') + areas().map(a => o(a.id, a.name)).join('');
     }
     function areaMatches(areaId, f) { return f === '' || (f === '0' ? !areaId : areaId === parseInt(f, 10)); }
-    // "＋ Nytt område…" i en rullgardin: en rad direkt under listan (aldrig en dialog — den delade dialogen hade ersatt
-    // formuläret man står i). Det nya området läggs in, väljs och finns sedan överallt.
-    const NEW_AREA = '__newarea';
-    function newAreaOption() { return S && S.me.canEdit && !TOKEN ? `<option value="${NEW_AREA}">＋ Nytt område…</option>` : ''; }
-    function wireNewArea(select) {
-        if (!select) return;
-        let prev = select.value === NEW_AREA ? '' : select.value;
-        select.addEventListener('change', () => {
-            if (select.value !== NEW_AREA) { prev = select.value; return; }
-            select.value = prev;
-            if (select.parentNode.querySelector('.pl-newarea')) { select.parentNode.querySelector('.pl-newarea input').focus(); return; }
-            const row = document.createElement('div');
-            row.className = 'pl-newarea d-flex gap-2 mt-2 flex-wrap';
-            row.innerHTML = `<input class="form-control" style="max-width:16rem" maxlength="200" placeholder="Områdets namn" aria-label="Det nya områdets namn">
-                <button type="button" class="btn btn-primary btn-sm" data-act="add">Lägg till</button>
-                <button type="button" class="btn btn-link btn-sm" data-act="cancel">Avbryt</button>
-                <div class="text-danger small w-100 d-none" data-act="err"></div>`;
-            select.insertAdjacentElement('afterend', row);
-            const input = row.querySelector('input'), err = row.querySelector('[data-act="err"]');
-            input.focus();
-            const add = async () => {
-                const name = input.value.trim();
-                if (!name) { err.textContent = 'Skriv vad området heter.'; err.classList.remove('d-none'); return; }
-                const r = await post('SaveArea', { areaId: 0, name });
-                if (!r.success) { err.textContent = r.message || 'Området kunde inte läggas till.'; err.classList.remove('d-none'); return; }
-                await Promise.all([reloadPeople(), reloadTasks()]);
-                const opt = document.createElement('option'); opt.value = String(r.areaId); opt.textContent = name;
-                select.insertBefore(opt, select.querySelector(`option[value="${NEW_AREA}"]`));
-                select.value = String(r.areaId); prev = select.value;
-                select.dispatchEvent(new Event('change'));
-                row.remove();
-            };
-            row.querySelector('[data-act="add"]').addEventListener('click', add);
-            input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } else if (e.key === 'Escape') row.remove(); });
-            row.querySelector('[data-act="cancel"]').addEventListener('click', () => row.remove());
-        });
-    }
     let view = '';
     let replyTo = CFG.reply || 0;
     let pplQuery = '', pplFilter = '';   // Deltagarlistans sök och filter (lever över omritningar)
@@ -421,8 +384,9 @@
         if (p.targetText) parts.push(esc(p.targetText));
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
-        // Omgång 2 steg 5: en delplanering säger vilken planering den är en del av.
+        // En delplanering säger vilken planering den är en del av, och vem som sköter den.
         if (p.parent) parts.push('Del av ' + (p.parent.url ? `<a href="${esc(p.parent.url)}">${esc(p.parent.name)}</a>` : esc(p.parent.name)));
+        if (p.parent && p.parent.host) parts.push('Sköts av ' + esc(p.parent.host));
         if (p.competition) parts.push(`Tävlingen <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>`
             + (TOKEN || !p.competition.manageUrl ? '' : ` · <a href="${esc(p.competition.manageUrl)}">Tävlingshanteringen</a>`));
         return parts.join(' · ');
@@ -440,6 +404,8 @@
                 fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
             // Omgång 3 steg 10: delar som inte visas förrän de behövs.
             ...partActions(),
+            // Stefan 2026-10-25: en delplanering skapas HÄR, direkt — för en gren, en tävling eller en förening som sköter en del.
+            S.me.canCreateSub && !TOKEN && { label: 'Ny delplanering…', icon: 'bi-diagram-3', fn: openNewSub },
         ] : []);
         const p = S;
         const html = [];
@@ -452,7 +418,7 @@
                 Vill du vara med och bestämma — be den sammankallande ändra din nivå till <i>Deltar</i>.</p></div>`);
         }
         if (p.me.isParentReader) {
-            html.push(`<div class="pl-card" id="plParentReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen som sammankallande i
+            html.push(`<div class="pl-card" id="plParentReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen eftersom du kan ändra i
                 ${p.planning.parent && p.planning.parent.url ? `<a href="${esc(p.planning.parent.url)}">${esc(p.planning.parent.name)}</a>` : 'huvudplaneringen'}.
                 Du är inte med i den: du skriver inget här och får inga notiser härifrån. Vill du vara med — be den sammankallande bjuda in dig.</p></div>`);
         }
@@ -501,6 +467,7 @@
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget att svara på just nu.</p>'}</div>`);
         html.push(familyCompetitionsCardHtml());
         html.push(subPlanningsCardHtml());
+        html.push(parentDecisionsCardHtml());
         html.push('<div id="plStationsSum"></div>');
 
         // Kom igång — står kvar för den sammankallande tills de tre stegen är gjorda, och bockar av dem (k2: den försvann
@@ -962,8 +929,8 @@
                     </ul>
                 </div>
                 ${canAddDocs() ? '<button class="btn btn-outline-secondary" type="button" id="plAttach"><i class="bi bi-paperclip me-1"></i>Bifoga dokument</button>' : ''}
-                ${!target && (areas().length || newAreaOption()) ? `<div><select id="plArea" class="form-select" style="max-width:15rem" aria-label="Meddelandet gäller">
-                    <option value="">Gäller hela planeringen</option>${areas().map(a => `<option value="${a.id}"${String(a.id) === msgArea ? ' selected' : ''}>Gäller ${esc(a.name)}</option>`).join('')}${newAreaOption()}</select></div>` : ''}
+                ${!target && areas().length ? `<div><select id="plArea" class="form-select" style="max-width:15rem" aria-label="Meddelandet gäller">
+                    <option value="">Gäller hela planeringen</option>${areas().map(a => `<option value="${a.id}"${String(a.id) === msgArea ? ' selected' : ''}>Gäller ${esc(a.name)}</option>`).join('')}</select></div>` : ''}
                 <span class="pl-help small" id="plMentionNote">${pendingMentions.size ? 'Nämner: ' + esc([...pendingMentions.values()].join(', ')) : 'Den du nämner får ett mejl direkt.'}</span>
             </div><div id="plPendingDocs">${pendingDocsHtml()}</div></div>`;
     }
@@ -1003,7 +970,6 @@
     function wireComposer() {
         if (!$('plSend')) return;
         $('plSend').onclick = send;
-        wireNewArea($('plArea'));
         const at = $('plAttach');
         if (at) at.onclick = () => pickDocuments({
             preselected: [...pendingDocs.keys()],
@@ -1600,6 +1566,12 @@
                     <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th class="pl-noprint"></th></tr></thead>
                 <tbody id="tkRows"></tbody></table></div></div>`);
         }
+        if (TASKS.canManageAreas && !(TASKS.areas || []).length)
+            html.push(`<div class="pl-card mt-3" id="tkAreasHint"><h2>Områden</h2>
+                <p class="mb-2">Dela upp arbetet i <b>områden</b> med var sin ansvarig — till exempel Servering, Materiel och Banor. Uppgifterna grupperas efter dem,
+                    och den ansvarige kan ta och ändra områdets uppgifter.</p>
+                <button type="button" class="btn btn-outline-primary btn-sm" data-area-new="1"><i class="bi bi-folder-plus me-1"></i>Nytt område…</button>
+                <p class="pl-help small mb-0 mt-2">En del med egna deltagare, möten eller en egen tävling — till exempel en gren på en SM-vecka — är en <b>delplanering</b>. Den skapas under Översikt.</p></div>`);
         html.push(`<div class="pl-card mt-3"><h2>Lägena</h2><div class="d-flex gap-2 flex-wrap align-items-center">
             ${['NotStarted', 'InProgress', 'NeedsHelp', 'ReadyForReview', 'Done'].map(s => tkChip({ status: s, statusLabel: (TASKS.statuses.find(x => x.value === s) || {}).label || s })).join(' → ')}</div>
             <p class="pl-help mb-0 mt-2">${TASKS.doneAtMeetingsOnly
@@ -1612,6 +1584,7 @@
         $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderTaskRows(); });
         $('tkArea')?.addEventListener('change', e => { tkArea = e.target.value; renderTaskRows(); });
     }
+    document.addEventListener('click', e => { if (e.target.closest('[data-area-new]')) { e.preventDefault(); openArea(null); } });
 
     function taskMatches(t, q) {
         const f = tkFilter;
@@ -1681,11 +1654,15 @@
                     { label: 'Flytta upp', fn: () => moveArea(g.area, -1) },
                     { label: 'Flytta ner', fn: () => moveArea(g.area, 1) },
                     canAddDocs() && { label: 'Bifoga dokument…', fn: () => pickDocuments({ attach: { kind: 'Area', id: g.area.id } }) },
+                    S.me.canMoveAreas && familyTargets().length && { label: 'Flytta till en annan planering…', fn: () => openMoveArea(g.area) },
                     { divider: true },
                     { label: 'Ta bort området…', danger: true, fn: () => deleteArea(g.area) },
-                ]) : '';
+                ]) : (TASKS.canCreate && (TASKS.myAreas || []).includes(g.area.id) ? rowMenu([
+                    { label: 'Ny uppgift i området…', fn: () => openTaskEdit(null, g.area.id) },
+                ]) : '');
+                const mineLead = (TASKS.myAreas || []).includes(g.area.id);
                 parts.push(`<tr class="pl-areah"><td colspan="6" class="ps-3"><div class="d-flex flex-wrap align-items-center gap-2">
-                    <b>${esc(g.area.name)}</b>${g.area.responsible ? `<span class="pl-help small">Ansvarig: ${esc(g.area.responsible)}</span>` : ''}
+                    <b>${esc(g.area.name)}</b>${g.area.responsible ? `<span class="pl-help small">Ansvarig: ${esc(g.area.responsible)}${mineLead ? ' (du)' : ''}</span>` : ''}
                     <span class="ms-auto pl-help small">${openN === 0 && allIn.length ? 'allt utfört' : openN + ' öppna'}</span>${menu}</div>${docChips('Area', g.area.id)}</td></tr>`);
                 parts.push(g.rows.length ? g.rows.map(taskRow).join('') : `<tr><td colspan="6" class="pl-help ps-4 small">Inga uppgifter i området ännu.</td></tr>`);
             } else if (g.rows.length) {
@@ -1703,7 +1680,7 @@
     }
     function areaOptions(cur) {
         return '<option value="">Utan område</option>' + (TASKS.areas || [])
-            .map(a => `<option value="${a.id}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('') + newAreaOption();
+            .map(a => `<option value="${a.id}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
     }
     // Vem: en deltagare. Omgång 3 (Stefan 2026-10-24): en uppgift går bara till någon som är med — den som ska ha den
     // bjuds in först. Ett fritt namn från förr (t.ex. inläst ur tävlingens gamla lista) står kvar tills någon ändrar det.
@@ -1733,7 +1710,7 @@
             title: t ? 'Ändra uppgiften' : 'Ny uppgift', okLabel: t ? 'Spara' : 'Lägg till', wide: false,
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="teTitle">Vad ska göras?</label>
                     <input id="teTitle" class="form-control" maxlength="300" value="${esc(t ? t.title : '')}"></div>
-                ${(TASKS.areas || []).length || newAreaOption() ? `<div class="mb-3"><label class="form-label" for="teArea">Område</label><select id="teArea" class="form-select">${areaOptions(t ? t.areaId : presetArea || (parseInt(tkArea, 10) || null))}</select></div>` : ''}
+                ${(TASKS.areas || []).length ? `<div class="mb-3"><label class="form-label" for="teArea">Område</label><select id="teArea" class="form-select">${areaOptions(t ? t.areaId : presetArea || (parseInt(tkArea, 10) || null))}</select></div>` : ''}
                 <div class="mb-3">${whoField(t)}</div>
                 <div class="mb-3"><div class="form-label">Klart senast (valfritt)</div>
                     ${showDays ? `<div class="btn-group mb-2" role="group" aria-label="Sista dag som">
@@ -1757,7 +1734,6 @@
             onOpen: body => {
                 datePicker(body.querySelector('#teDue'));
                 wireWho(body);
-                wireNewArea(body.querySelector('#teArea'));
                 body.querySelectorAll('[name=teDueMode]').forEach(r => r.addEventListener('change', () => {
                     const d = body.querySelector('#teDueDays').checked;
                     body.querySelector('#teDueDateBox').classList.toggle('d-none', d);
@@ -1927,40 +1903,27 @@
     }
 
     // ---------------------------------------------------------------- områden
-    // Omgång 2 steg 4: ett område har det delarna hade — ansvarig, värd (klubb, krets eller fri text) och beskrivning.
-    async function openArea(a) {
-        const o = await get('AreaHostOptions');
-        if (!o.success) { failMsg(o); return; }
-        const hostVal = a ? (a.hostClubId ? '0:' + a.hostClubId : a.hostRegionId ? '1:' + a.hostRegionId : (a.hostText ? 'text' : '')) : '';
+    // Stefan 2026-10-25 (Expertgruppen): ett område är ett ANSVARSOMRÅDE — ett namn och en ansvarig. Det hör hemma här under
+    // Uppgifter och skapas bara här (och av mallen). En del med egna deltagare, möten eller en egen tävling är en delplanering
+    // (Översikt → Ny delplanering), aldrig ett område.
+    function openArea(a) {
         formModal({
             title: a ? 'Ändra området' : 'Nytt område', okLabel: a ? 'Spara' : 'Lägg till', wide: false,
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="arName">Områdets namn</label>
-                    <input id="arName" class="form-control" maxlength="200" value="${esc(a ? a.name : '')}" placeholder="Till exempel Fält, Sekretariatet eller Servering"></div>
-                <div class="mb-3"><label class="form-label" for="arResp">Ansvarig (valfritt)</label>
+                    <input id="arName" class="form-control" maxlength="200" value="${esc(a ? a.name : '')}" placeholder="Till exempel Servering, Materiel eller Banor"></div>
+                <div class="mb-1"><label class="form-label" for="arResp">Ansvarig (valfritt)</label>
                     <select id="arResp" class="form-select">${peopleOptions(a ? a.responsibleId : null)}<option value="__name"${a && !a.responsibleId && a.responsibleName ? ' selected' : ''}>Skriv ett namn…</option></select>
-                    <input id="arRespName" class="form-control mt-2${a && !a.responsibleId && a.responsibleName ? '' : ' d-none'}" maxlength="200" value="${esc(a && !a.responsibleId ? a.responsibleName || '' : '')}"></div>
-                <div class="mb-3"><label class="form-label" for="arHost">Värd (valfritt)</label>
-                    <select id="arHost" class="form-select"><option value="">—</option>${o.hosts.map(h => `<option value="${h.ownerType}:${h.ownerId}"${hostVal === h.ownerType + ':' + h.ownerId ? ' selected' : ''}>${esc(h.name)}</option>`).join('')}
-                        <option value="text"${hostVal === 'text' ? ' selected' : ''}>Annan (skriv)</option></select>
-                    <div class="pl-help small mt-1">Den klubb eller krets som står för området. Klubbarna och kretsarna som någon i planeringen företräder.</div>
-                    <input id="arHostText" class="form-control mt-2${hostVal === 'text' ? '' : ' d-none'}" maxlength="200" value="${esc(a ? a.hostText || '' : '')}" placeholder="Till exempel: Förbundets kansli"></div>
-                <div class="mb-1"><label class="form-label" for="arDesc">Beskrivning (valfri)</label>
-                    <textarea id="arDesc" class="form-control" rows="3" maxlength="2000">${esc(a ? a.description || '' : '')}</textarea></div>`,
+                    <input id="arRespName" class="form-control mt-2${a && !a.responsibleId && a.responsibleName ? '' : ' d-none'}" maxlength="200" value="${esc(a && !a.responsibleId ? a.responsibleName || '' : '')}">
+                    <div class="pl-help small mt-1">Den ansvarige får ta, ändra och sätta läge på områdets uppgifter, och får veta när någon behöver hjälp eller är klar att pröva.</div></div>`,
             onOpen: body => {
-                const sync = () => {
-                    body.querySelector('#arRespName').classList.toggle('d-none', body.querySelector('#arResp').value !== '__name');
-                    body.querySelector('#arHostText').classList.toggle('d-none', body.querySelector('#arHost').value !== 'text');
-                };
-                body.querySelectorAll('#arResp, #arHost').forEach(el => el.addEventListener('change', sync));
+                body.querySelector('#arResp').addEventListener('change', () =>
+                    body.querySelector('#arRespName').classList.toggle('d-none', body.querySelector('#arResp').value !== '__name'));
                 body.querySelector('#arName').focus();
             },
             onOk: async body => {
-                const v = body.querySelector('#arResp').value, host = body.querySelector('#arHost').value;
-                const [ht, hid] = host && host !== 'text' ? host.split(':') : ['', ''];
+                const v = body.querySelector('#arResp').value;
                 const r = await post('SaveArea', { areaId: a ? a.id : 0, name: body.querySelector('#arName').value,
-                    responsibleId: v === '__name' ? '' : v, responsibleName: v === '__name' ? body.querySelector('#arRespName').value : '',
-                    details: '1', description: body.querySelector('#arDesc').value,
-                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#arHostText').value : '' });
+                    responsibleId: v === '__name' ? '' : v, responsibleName: v === '__name' ? body.querySelector('#arRespName').value : '' });
                 if (!r.success) return r.message;
                 await Promise.all([reloadTasks(), reloadPeople()]); rerender(); return true;
             }
@@ -2120,7 +2083,7 @@
     }
     async function seedStations() {
         const n = TASKS.stationCount || 0;
-        if (!await plConfirm('En uppgift per station?', `"Bygg station 1" … "Bygg station ${n}" läggs i området Stationsbygge, och den som är ansvarig för en station får dess uppgift. Milstolpen "Banläggaren godkänner stationerna" läggs till. Stationer som redan har en uppgift hoppas över.`, 'Lägg till')) return;
+        if (!await plConfirm('En uppgift per station?', `"Bygg station 1" … "Bygg station ${n}" läggs i området Bygga banan, och den som är ansvarig för en station får dess uppgift. Milstolpen "Banläggaren godkänner stationerna" läggs till. Stationer som redan har en uppgift hoppas över.`, 'Lägg till')) return;
         const r = await post('SeedStations', {});
         if (!r.success) { failMsg(r); return; }
         await reloadTasks(); rerender();
@@ -2136,7 +2099,6 @@
                 <div id="psPreview" class="mt-3"></div>`,
             onOpen: body => {
                 body.querySelector('#psText').addEventListener('input', () => { ready = false; $('plFormOk').textContent = 'Visa hur det blir'; body.querySelector('#psPreview').innerHTML = ''; });
-                wireNewArea(body.querySelector('#psArea'));
             },
             onOk: async body => {
                 const params = { text: body.querySelector('#psText').value, areaId: body.querySelector('#psArea') ? body.querySelector('#psArea').value : '' };
@@ -2317,17 +2279,17 @@
     document.addEventListener('click', e => { if (e.target.closest('[data-doc-add]')) openDocAdd({}); });
 
     // ---------------------------------------------------------------- kategorier
-    // Omgång 2 steg 4: en kategori kan höra till ett område — dess dokument är förvalda när området delas ut till en egen planering.
+    // En kategori kan höra till ett område — flyttas området till en annan planering i familjen följer kategorin med.
     function openCategory(c) {
-        const withArea = areas().length || newAreaOption();
+        const withArea = areas().length > 0;
         formModal({
             title: c ? 'Ändra kategorin' : 'Ny kategori', okLabel: c ? 'Spara' : 'Lägg till', wide: false,
             html: `<label class="form-label" for="dcCatName">Vad heter kategorin?</label>
                 <input id="dcCatName" class="form-control" maxlength="200" value="${esc(c ? c.name : '')}" placeholder="Till exempel Inbjudan, Banor eller Avtal">
                 ${withArea ? `<div class="mt-3"><label class="form-label" for="dcCatArea">Hör till området (valfritt)</label>
-                    <select id="dcCatArea" class="form-select"><option value="0">Hela planeringen</option>${areas().map(a => `<option value="${a.id}"${c && c.areaId === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}${newAreaOption()}</select>
-                    <div class="pl-help small mt-1">Delas området ut till en egen planering är kategorins dokument förvalda att följa med.</div></div>` : ''}`,
-            onOpen: body => { wireNewArea(body.querySelector('#dcCatArea')); body.querySelector('#dcCatName').focus(); },
+                    <select id="dcCatArea" class="form-select"><option value="0">Hela planeringen</option>${areas().map(a => `<option value="${a.id}"${c && c.areaId === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>
+                    <div class="pl-help small mt-1">Flyttas området till en annan planering i familjen följer kategorin och dess dokument med.</div></div>` : ''}`,
+            onOpen: body => { body.querySelector('#dcCatName').focus(); },
             onOk: async body => {
                 const r = await post('SaveDocumentCategory', Object.assign({ categoryId: c ? c.id : '', name: body.querySelector('#dcCatName').value },
                     body.querySelector('#dcCatArea') ? { areaId: body.querySelector('#dcCatArea').value } : {}));
@@ -3088,9 +3050,35 @@
         showMsg(`${esc(p.name)} är nu sammankallande.`, 'success');
     }
 
+    // Stefan B11: vem som sköter en delplanering — en klubb, en krets eller fri text.
+    async function openSubHost() {
+        const o = await get('HostOptions');
+        if (!o.success) { failMsg(o); return; }
+        const par = S.planning.parent || {};
+        const cur = par.hostClubId ? '0:' + par.hostClubId : par.hostRegionId ? '1:' + par.hostRegionId : (par.hostText ? 'text' : '');
+        formModal({
+            title: 'Vem sköter delplaneringen?', okLabel: 'Spara', wide: false,
+            html: `<select id="shHost" class="form-select"><option value="">—</option>${o.hosts.map(h => `<option value="${h.ownerType}:${h.ownerId}"${cur === h.ownerType + ':' + h.ownerId ? ' selected' : ''}>${esc(h.name)}</option>`).join('')}
+                    <option value="text"${cur === 'text' ? ' selected' : ''}>Annan (skriv)</option></select>
+                <input id="shText" class="form-control mt-2${cur === 'text' ? '' : ' d-none'}" maxlength="200" value="${esc(par.hostText || '')}">
+                <div class="pl-help small mt-1">Den klubb eller krets som står för delen. Klubbarna och kretsarna som någon i planeringen företräder.</div>`,
+            onOpen: body => body.querySelector('#shHost').addEventListener('change', e =>
+                body.querySelector('#shText').classList.toggle('d-none', e.target.value !== 'text')),
+            onOk: async body => {
+                const v = body.querySelector('#shHost').value;
+                const [ht, hid] = v && v !== 'text' ? v.split(':') : ['', ''];
+                const r = await post('SetSubHost', { hostType: ht, hostId: hid, hostText: v === 'text' ? body.querySelector('#shText').value : '' });
+                if (!r.success) return r.message;
+                await reloadPeople(); rerender(); return true;
+            },
+        });
+    }
+    document.addEventListener('click', e => { if (e.target.closest('[data-sub-host]')) { e.preventDefault(); openSubHost(); } });
+
     // Kopiera planeringen (P3): formen följer med, aldrig personerna eller innehållet.
     function openCopyPlanning() {
         const p = S.planning;
+        const subs = (p.subPlannings || []).length;
         let chosen = 0, chosenName = '', timer = 0;
         formModal({
             title: 'Kopiera planeringen', okLabel: 'Kopiera', wide: true,
@@ -3108,7 +3096,10 @@
                     <input id="cpQ" class="form-control mb-2" placeholder="Sök på namn" autocomplete="off">
                     <div id="cpHits" class="pl-help small mb-2">Skriv minst två bokstäver.</div>
                     <div class="form-check"><input class="form-check-input" type="checkbox" id="cpIncludeMe" checked><label class="form-check-label" for="cpIncludeMe">Jag är med i kopian som Kan ändra</label></div>
-                </div>`,
+                </div>
+                ${subs ? `<div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="cpSubs" checked>
+                    <label class="form-check-label fw-semibold" for="cpSubs">Ta med delplaneringarna (${subs})</label>
+                    <div class="pl-help small">Varje delplanering kopieras med sina områden och uppgifter, med samma ledning som kopian, och flyttas lika många dagar.</div></div>` : ''}`,
             onOpen: body => {
                 datePicker(body.querySelector('#cpStart')); datePicker(body.querySelector('#cpEnd'));
                 body.querySelectorAll('input[name="cpWho"]').forEach(r => r.addEventListener('change', () =>
@@ -3143,12 +3134,14 @@
                     name: body.querySelector('#cpName').value.trim(), targetStart: dateValue(body.querySelector('#cpStart')),
                     targetEnd: dateValue(body.querySelector('#cpEnd')), recipientMemberId: other ? chosen : 0,
                     includeMe: other && !body.querySelector('#cpIncludeMe').checked ? '0' : '1',
+                    includeSubs: body.querySelector('#cpSubs') && !body.querySelector('#cpSubs').checked ? '0' : '1',
                 });
                 if (!r.success) return r.message || 'Det gick inte att kopiera.';
                 const lost = [];
                 if (r.datesDropped) lost.push(`${r.datesDropped} fasta datum följde inte med (ingen första dag att räkna från)`);
                 if (r.daysDropped) lost.push(`${r.daysDropped} av bemanningens dagar följde inte med`);
-                const what = `${r.tasks} uppgifter i ${r.areas} områden, ${r.roles} roller, ${r.days} dagar och ${r.needs} behov`;
+                const what = `${r.tasks} uppgifter i ${r.areas} områden, ${r.roles} roller, ${r.days} dagar och ${r.needs} behov`
+                    + (r.subPlannings ? ` — och ${r.subPlannings === 1 ? 'en delplanering' : r.subPlannings + ' delplaneringar'}` : '');
                 showMsg(`Kopian <a href="${esc(r.url)}">${esc(body.querySelector('#cpName').value.trim())}</a> är skapad med ${what}.`
                     + (lost.length ? ' ' + esc(lost.join('; ')) + '.' : '')
                     + (r.toSomeoneElse ? ` ${esc(r.recipient)} är sammankallande` + (r.mailed ? ' och har fått ett mejl.' : ' — men mejlet kunde inte skickas, säg till hen.') : ''),
@@ -3234,7 +3227,9 @@
                 <div class="pl-help small">På: den som har uppgiften säger <i>Klar att pröva</i>, och mötet (eller du som sammankallande) bestämmer att den är utförd.
                     Av: den som har uppgiften, och den som kan ändra planeringen, bockar av den direkt — bra när en person planerar en klubbtävling ensam.</div></div>
                 <span id="stDoneSaved" class="pl-help small"></span></div>` : ''}
-            ${areasCardHtml()}
+            ${p.parent && S.me.canManage ? `<div class="pl-card" style="max-width:720px" id="stSubHost"><h2>Delplaneringen</h2>
+                <p class="mb-2">Del av <b>${esc(p.parent.name)}</b>. Sköts av: <b>${esc(p.parent.host || '—')}</b></p>
+                <button type="button" class="btn btn-outline-primary btn-sm" data-sub-host="1">Ändra vem som sköter delplaneringen…</button></div>` : ''}
             ${S.me.isSiteAdmin ? `<div class="pl-card" style="max-width:720px"><h2>Förbundets adress</h2>
                 <p class="pl-help small">Gäller alla planeringar: dit går milstolpar som skickas till förbundet (till exempel inbjudan i tid till tidningen). Syns bara för sajtadministratörer.</p>
                 <div class="d-flex gap-2 flex-wrap"><input id="stForbundet" type="email" class="form-control" style="max-width:320px" maxlength="256" value="${esc((TASKS && TASKS.forbundetEmail) || '')}" placeholder="namn@pistolskytteforbundet.se">
@@ -3545,114 +3540,6 @@
         await reloadDecisions(); await reloadMessages(); render(view);
     }
 
-    // ================================================================ Områden (omgång 2 steg 4)
-    // Områdena ersätter delarna: ett område (Fält, Sekretariatet, Servering …) grupperar uppgifter OCH meddelanden och har
-    // en ansvarig och en värd. De hanteras under Inställningar; uppgifterna grupperas efter dem och meddelandena filtreras.
-    function areasCardHtml() {
-        const list = areas();
-        const canManage = S.me.canEdit && !TOKEN;
-        if (!list.length) return `<div class="pl-card" style="max-width:720px" id="stAreas"><h2>Områden</h2>
-            <p class="mb-2">Dela upp planeringen i <b>områden</b> — till exempel Fält, Precision och Sekretariatet på en SM-vecka, eller Materiel och Servering på en klubbtävling.
-                Varje område kan ha en ansvarig och en värd, den klubb eller krets som står för det. Uppgifter och meddelanden märks med ett område.</p>
-            ${canManage ? '<button class="btn btn-outline-primary" data-area-new="1"><i class="bi bi-plus-lg me-1"></i>Nytt område…</button>' : ''}</div>`;
-        return `<div class="pl-card p-0" style="max-width:720px" id="stAreas"><div class="pl-cardh px-3 pt-3"><h2>Områden</h2>
-                ${canManage ? '<button class="btn btn-outline-primary btn-sm" data-area-new="1"><i class="bi bi-plus-lg me-1"></i>Nytt område…</button>' : ''}</div>
-            <div class="table-responsive"><table class="table align-middle mb-0">
-            <thead><tr><th class="ps-3">Område</th><th class="d-none d-md-table-cell">Ansvarig</th><th class="d-none d-md-table-cell">Värd</th><th>Uppgifter</th><th class="pl-noprint"></th></tr></thead>
-            <tbody>${list.map((a, i) => {
-                const menu = canManage ? rowMenu([
-                    { label: 'Ändra området…', fn: () => openArea(a) },
-                    { label: 'Visa områdets uppgifter', fn: () => { tkArea = String(a.id); tkFilter = 'all'; go('uppgifter'); } },
-                    S.me.canReadMessages && { label: 'Visa områdets meddelanden', fn: () => { msgArea = String(a.id); go('meddelanden'); } },
-                    i > 0 && { label: 'Flytta upp', fn: () => moveArea(a, -1) },
-                    i < list.length - 1 && { label: 'Flytta ner', fn: () => moveArea(a, 1) },
-                    S.me.canSplit && { label: 'Dela ut till en egen planering…', fn: () => openSplit(a) },
-                    { divider: true },
-                    { label: 'Ta bort området…', danger: true, fn: () => deleteArea(a) },
-                ]) : '';
-                const sub = [a.responsible ? 'Ansvarig: ' + a.responsible : '', a.host ? 'Värd: ' + a.host : ''].filter(Boolean).join(' · ');
-                return `<tr data-area-row="${a.id}"><td class="ps-3"><b>${esc(a.name)}</b>
-                        ${sub ? `<div class="pl-help small d-md-none">${esc(sub)}</div>` : ''}
-                        ${a.description ? `<div class="small mt-1" style="white-space:pre-wrap;">${esc(a.description)}</div>` : ''}</td>
-                    <td class="d-none d-md-table-cell">${esc(a.responsible || '—')}</td><td class="d-none d-md-table-cell">${esc(a.host || '—')}</td>
-                    <td><a href="#vy=uppgifter" data-area-tasks="${a.id}">${a.openTasks} öppna</a><div class="pl-help small">av ${a.tasks}</div></td>
-                    <td class="text-end pe-3">${menu}</td></tr>`;
-            }).join('')}</tbody></table></div></div>`;
-    }
-    document.addEventListener('click', e => { if (e.target.closest('[data-area-new]')) { e.preventDefault(); openArea(null); } });
-    document.addEventListener('click', e => {
-        const a = e.target.closest('[data-area-tasks]'); if (!a) return;
-        e.preventDefault(); tkArea = a.dataset.areaTasks; tkFilter = 'open'; go('uppgifter');
-    });
-    // ================================================================ Dela ut ett område (omgång 2 steg 5)
-    // Området blir en egen planering — en delplanering — med egna deltagare, möten, meddelanden, uppgifter, dokument och
-    // bemanning. Uppgifterna och trådarna flyttar; deltagarna och dokumenten väljs. Huvudplaneringens sammankallande läser
-    // delplaneringen, och Översikt visar hur det går för den.
-    async function openSplit(a) {
-        const r = await get('SplitPreview', { areaId: a.id });
-        if (!r.success) { failMsg(r, 'Det gick inte att läsa området.'); return; }
-        const people = S.participants;
-        const conv = people.filter(p => !p.isGuest);
-        const sugP = new Set(r.suggestedParticipants), sugD = new Set(r.suggestedDocuments);
-        const docs = (DOCS && DOCS.documents) || [];
-        const discOpts = (S.planning.disciplines || []).map(d => `<option value="${esc(d.id)}"${d.id === r.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('');
-        const moves = [];
-        moves.push(r.tasks === 1 ? '1 uppgift' : `${r.tasks} uppgifter`);
-        moves.push(r.threads === 1 ? '1 tråd' : `${r.threads} trådar`);
-        const html = `
-            <p class="mb-2">Området <b>${esc(a.name)}</b> blir en egen planering. Den får egna deltagare, möten, meddelanden, uppgifter, dokument och bemanning.</p>
-            <div class="pl-card mb-3" style="background:var(--bs-tertiary-bg)"><ul class="mb-0 small">
-                <li><b>Flyttar dit:</b> områdets ${esc(moves.join(' och '))}, med historiken.</li>
-                <li><b>Deltagarna</b> du väljer blir med i den nya planeringen — och är kvar här.</li>
-                <li>Den som skrivit i området eller har något där men inte väljs <b>följer</b> den nya planeringen, så att hen kan läsa sitt.</li>
-                <li><b>Dokumenten</b> du väljer flyttar dit. De förvalda hör till området.</li>
-                <li><b>Stannar här:</b> mötena, förslagen och bemanningen.</li>
-                <li>Den som är sammankallande eller kan ändra här kan läsa den nya planeringen, och Översikt visar hur det går för den.</li></ul></div>
-            <div class="row g-3">
-                <div class="col-md-7"><label class="form-label" for="spName">Namn</label>
-                    <input id="spName" class="form-control" maxlength="200" value="${esc(a.name + ' — ' + S.planning.name)}"></div>
-                <div class="col-md-5"><label class="form-label" for="spDisc">Gren</label>
-                    <select id="spDisc" class="form-select"><option value="">Ingen gren</option>${discOpts}</select></div>
-                <div class="col-12"><label class="form-label" for="spConv">Sammankallande i den nya planeringen</label>
-                    <select id="spConv" class="form-select">${conv.map(p => `<option value="${p.id}"${p.id === r.suggestedConvener ? ' selected' : ''}>${esc(p.name)}${p.represents ? ' (' + esc(p.represents) + ')' : ''}</option>`).join('')}</select>
-                    <div class="pl-help small mt-1">Den som leder delen. Hen är också med här, i huvudplaneringen.</div></div>
-            </div>
-            <h3 class="h6 mt-3 mb-1">Deltagare <span class="pl-help small fw-normal">(${people.length})</span></h3>
-            <div class="pl-help small mb-1">Förvalda: den som ansvarar för området och de som har dess uppgifter.</div>
-            <div id="spPeople" class="border rounded p-2" style="max-height:220px;overflow:auto">
-                ${people.map(p => `<div class="form-check"><input class="form-check-input" type="checkbox" id="spP${p.id}" value="${p.id}"${sugP.has(p.id) ? ' checked' : ''}>
-                    <label class="form-check-label" for="spP${p.id}">${esc(p.name)} <span class="pl-help small">· ${esc(p.accessLabel)}${p.represents ? ' · ' + esc(p.represents) : ''}</span></label></div>`).join('')}
-            </div>
-            <h3 class="h6 mt-3 mb-1">Dokument <span class="pl-help small fw-normal">(${docs.length})</span></h3>
-            ${docs.length ? `<div class="pl-help small mb-1">Förvalda: områdets kategorier och det som är bifogat till områdets uppgifter och trådar.</div>
-            <div id="spDocs" class="border rounded p-2" style="max-height:220px;overflow:auto">
-                ${docs.map(d => `<div class="form-check"><input class="form-check-input" type="checkbox" id="spD${d.id}" value="${d.id}"${sugD.has(d.id) ? ' checked' : ''}>
-                    <label class="form-check-label" for="spD${d.id}">${esc(d.title)}${d.categoryId ? ` <span class="pl-help small">· ${esc(catName(d.categoryId))}</span>` : ''}</label></div>`).join('')}
-            </div>` : '<p class="pl-help small mb-0" id="spDocs">Planeringen har inga dokument.</p>'}`;
-        formModal({
-            title: 'Dela ut ' + a.name + ' till en egen planering', okLabel: 'Skapa planeringen', html,
-            onOk: async body => {
-                const name = body.querySelector('#spName').value.trim();
-                if (!name) return 'Ge den nya planeringen ett namn.';
-                const convId = body.querySelector('#spConv').value;
-                if (!convId) return 'Välj vem som ska vara sammankallande.';
-                const ids = [...body.querySelectorAll('#spPeople input:checked')].map(i => i.value);
-                if (!ids.includes(convId)) ids.push(convId);
-                const docIds = [...body.querySelectorAll('#spDocs input:checked')].map(i => i.value);
-                const res = await post('SplitArea', { areaId: a.id, name, discipline: body.querySelector('#spDisc').value,
-                    convenerParticipantId: convId, participants: ids.join(','), documents: docIds.join(',') });
-                if (!res.success) return res.message || 'Det gick inte att dela ut området.';
-                if (String(tkArea) === String(a.id)) tkArea = '';
-                if (String(msgArea) === String(a.id)) msgArea = '';
-                await loadAll(); render(view);
-                const det = res.detached ? ` ${res.detached === 1 ? 'En bifogning' : res.detached + ' bifogningar'} mellan något som flyttade och något som stannade släpptes.` : '';
-                showMsg(`<b>${esc(res.name)}</b> är skapad: ${res.tasks} uppgifter, ${res.messages} meddelanden och ${res.documents} dokument flyttade dit, och ${res.participants} deltagare är med.${esc(det)}
-                    <a href="${esc(res.url)}">Öppna den nya planeringen</a>`);
-                return true;
-            },
-        });
-    }
-
     // ================================================================ Stationerna (Stefan 2026-10-24, omgjord 2026-10-25)
     // En egen plats i rälsen för fältskytte. Stefan 2026-10-25:
     // - stationerna har EN plats — den planering i familjen som är fältskytte (en SM-veckas Fält-delplanering);
@@ -3849,7 +3736,7 @@
         const chosen = new Set(a ? a.stations : presetStation ? [presetStation] : []);
         let hosts = [];
         if (!a) {
-            const o = await get('AreaHostOptions');
+            const o = await get('HostOptions');
             if (!o.success) { failMsg(o); return; }
             hosts = o.hosts;
         }
@@ -4155,20 +4042,143 @@
     function subPlanningsCardHtml() {
         const list = S.planning.subPlannings || [];
         if (!list.length) return '';
-        return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2></div>
-            <p class="pl-help small px-3 mb-2">Områden som delats ut till egna planeringar. ${S.me.canEdit ? 'Du som kan ändra här kan också läsa dem.' : ''}</p>
+        return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2>
+                ${S.me.canCreateSub && !TOKEN ? '<button type="button" class="btn btn-outline-primary btn-sm" data-sub-new="1"><i class="bi bi-plus-lg me-1"></i>Ny delplanering…</button>' : ''}</div>
+            <p class="pl-help small px-3 mb-2">De delar som planeras för sig — en gren, en tävling eller en förening som sköter en del. Du som är sammankallande här är det i dem också${S.me.canEdit && !S.me.canManage ? ', och du som kan ändra här kan läsa dem' : ''}.</p>
             <div class="table-responsive"><table class="table align-middle mb-0">
             <thead><tr><th class="ps-3">Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th>Uppgifter</th><th class="d-none d-md-table-cell">Nästa</th></tr></thead>
             <tbody>${list.map(s => {
                 const next = [s.nextMilestone ? `<i class="bi bi-flag-fill text-primary"></i> ${esc(s.nextMilestone)}${s.nextMilestoneDue ? ' · ' + esc(fmtDay(s.nextMilestoneDue)) : ''}` : '',
                     s.nextMeeting ? `<i class="bi bi-calendar-event"></i> ${esc(s.nextMeeting)} · ${esc(fmtShort(s.nextMeetingAt))}` : ''].filter(Boolean).join('<br>');
+                const sub = [s.discipline, s.host ? 'sköts av ' + s.host : ''].filter(Boolean).join(' · ');
                 return `<tr data-sub-row="${s.id}"><td class="ps-3">${s.url ? `<a href="${esc(s.url)}"><b>${esc(s.name)}</b></a>` : `<b>${esc(s.name)}</b>`}
                         ${s.status === 'Archived' ? ' <span class="pl-state off">Arkiverad</span>' : ''}
+                        ${sub ? `<div class="pl-help small">${esc(sub)}</div>` : ''}
                         <div class="pl-help small d-md-none">${esc(s.conveners)}</div></td>
                     <td class="d-none d-md-table-cell">${esc(s.conveners || '—')}</td>
                     <td>${s.openTasks} öppna <span class="pl-help small">av ${s.tasks}</span>${s.overdue ? `<div class="small text-danger">${s.overdue} försenade</div>` : ''}</td>
                     <td class="d-none d-md-table-cell small">${next || '<span class="pl-help">—</span>'}</td></tr>`;
             }).join('')}</tbody></table></div></div>`;
+    }
+    document.addEventListener('click', e => { if (e.target.closest('[data-sub-new]')) { e.preventDefault(); openNewSub(); } });
+
+    // Stefan 2026-10-25 (B3): delplaneringens folk läser huvudplaneringens fattade beslut.
+    function parentDecisionsCardHtml() {
+        const list = S.planning.parentDecisions || [];
+        const parent = S.planning.parent;
+        if (!list.length || !parent) return '';
+        return `<div class="pl-card" id="plParentDecisions"><h2>Beslut i ${esc(parent.name)}</h2>
+            <p class="pl-help small">Det huvudplaneringen har bestämt, som gäller er del också.</p>
+            ${list.map(d => `<div class="py-2 border-top"><b>${esc(d.title)}</b> <span class="pl-help small">· ${esc(fmtShort(d.decidedAt))}</span>
+                ${d.body ? `<div class="small mt-1" style="white-space:pre-wrap">${esc(d.body)}</div>` : ''}</div>`).join('')}</div>`;
+    }
+
+    // ================================================================ Ny delplanering (Stefan 2026-10-25, Expertgruppen)
+    // En delplanering skapas DIREKT, utan att först skapa ett område. Den får egna deltagare, möten, uppgifter, bemanning och
+    // tävlingskoppling. Valda områden flyttar dit med sina uppgifter, trådar och dokumentkategorier.
+    async function openNewSub() {
+        const o = await get('HostOptions');
+        const hosts = o.success ? o.hosts : [];
+        const conv = (S.participants || []).filter(p => !p.isGuest).slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+        const me = conv.find(p => p.isMe);
+        const discOpts = (S.planning.disciplines || []).map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+        const areasList = areas();
+        const count = id => (TASKS ? TASKS.tasks.filter(t => t.areaId === id).length : 0);
+        formModal({
+            title: 'Ny delplanering', okLabel: 'Skapa delplaneringen', wide: true,
+            html: `<p class="mb-3">En delplanering är en egen planering under <b>${esc(S.planning.name)}</b> — för en gren, en tävling eller en förening som sköter en del.
+                    Den får egna deltagare, möten, uppgifter och bemanning. Du som är sammankallande här är sammankallande där också.</p>
+                <div class="row g-3">
+                    <div class="col-md-7"><label class="form-label fw-semibold" for="nsName">Namn</label>
+                        <input id="nsName" class="form-control" maxlength="200" placeholder="Till exempel Fält — ${esc(S.planning.name)}"></div>
+                    <div class="col-md-5"><label class="form-label" for="nsDisc">Gren (valfritt)</label>
+                        <select id="nsDisc" class="form-select"><option value="">Ingen gren</option>${discOpts}</select></div>
+                    <div class="col-md-6"><label class="form-label" for="nsConv">Sammankallande</label>
+                        <select id="nsConv" class="form-select">${conv.map(p => `<option value="${p.id}"${p.isMe ? ' selected' : ''}>${esc(p.name)}${p.represents ? ' (' + esc(p.represents) + ')' : ''}</option>`).join('')}</select>
+                        <div class="pl-help small mt-1">Den som leder delen. Saknas hen — bjud in hen här först.</div></div>
+                    <div class="col-md-6"><label class="form-label" for="nsHost">Sköts av (valfritt)</label>
+                        <select id="nsHost" class="form-select"><option value="">—</option>${hosts.map(h => `<option value="${h.ownerType}:${h.ownerId}">${esc(h.name)}</option>`).join('')}<option value="text">Annan (skriv)</option></select>
+                        <input id="nsHostText" class="form-control mt-2 d-none" maxlength="200" placeholder="Till exempel Hallands krets">
+                        <div class="pl-help small mt-1">Den klubb eller krets som står för delen.</div></div>
+                    <div class="col-sm-6"><label class="form-label" for="nsStart">Första dagen</label><input id="nsStart" class="form-control" value="${esc(S.planning.targetStart || '')}"></div>
+                    <div class="col-sm-6"><label class="form-label" for="nsEnd">Sista dagen</label><input id="nsEnd" class="form-control" value="${esc(S.planning.targetEnd || '')}"></div>
+                </div>
+                ${areasList.length ? `<h3 class="h6 mt-4 mb-1">Ta med områden (valfritt)</h3>
+                    <div class="pl-help small mb-2">Ett område du kryssar i flyttar till delplaneringen med sina uppgifter, trådar och dokumentkategorier. De som har dess uppgifter blir med där.</div>
+                    <div id="nsAreas" class="border rounded p-2" style="max-height:200px;overflow:auto">${areasList.map(a => `<div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="nsA${a.id}" value="${a.id}"><label class="form-check-label" for="nsA${a.id}">${esc(a.name)}
+                        <span class="pl-help small">· ${count(a.id)} uppgifter${a.responsible ? ' · ' + esc(a.responsible) : ''}</span></label></div>`).join('')}</div>
+                    <div id="nsPreview" class="pl-help small mt-2"></div>` : ''}`,
+            onOpen: body => {
+                datePicker(body.querySelector('#nsStart')); datePicker(body.querySelector('#nsEnd'));
+                const host = body.querySelector('#nsHost');
+                host.addEventListener('change', () => body.querySelector('#nsHostText').classList.toggle('d-none', host.value !== 'text'));
+                body.querySelector('#nsAreas')?.addEventListener('change', async () => {
+                    const ids = [...body.querySelectorAll('#nsAreas input:checked')].map(i => i.value);
+                    const pv = body.querySelector('#nsPreview');
+                    if (!ids.length) { pv.textContent = ''; return; }
+                    const r = await get('MovePreview', { targetId: 0, areas: ids.join(',') });
+                    pv.innerHTML = r.success ? esc(moveSummary(r)) : esc(r.message || '');
+                });
+                body.querySelector('#nsName').focus();
+            },
+            onOk: async body => {
+                const name = body.querySelector('#nsName').value.trim();
+                if (!name) return 'Ge delplaneringen ett namn.';
+                const host = body.querySelector('#nsHost').value;
+                const [ht, hid] = host && host !== 'text' ? host.split(':') : ['', ''];
+                const ids = [...body.querySelectorAll('#nsAreas input:checked')].map(i => i.value);
+                const res = await post('CreateSub', { name, discipline: body.querySelector('#nsDisc').value,
+                    convenerParticipantId: body.querySelector('#nsConv').value,
+                    targetStart: dateValue(body.querySelector('#nsStart')), targetEnd: dateValue(body.querySelector('#nsEnd')),
+                    hostType: ht, hostId: hid, hostText: host === 'text' ? body.querySelector('#nsHostText').value : '', areas: ids.join(',') });
+                if (!res.success) return res.message || 'Det gick inte att skapa delplaneringen.';
+                ids.forEach(id => { if (String(tkArea) === String(id)) tkArea = ''; if (String(msgArea) === String(id)) msgArea = ''; });
+                await loadAll(); render(view);
+                const moved = res.areas ? ` ${res.areas === 1 ? 'Ett område' : res.areas + ' områden'} flyttade dit med ${res.tasks} uppgifter.` : '';
+                const det = res.detached ? ` ${res.detached === 1 ? 'En bifogning' : res.detached + ' bifogningar'} mellan något som flyttade och något som stannade släpptes.` : '';
+                showMsg(`Delplaneringen <b>${esc(res.name)}</b> är skapad.${esc(moved)}${esc(det)} <a href="${esc(res.url)}">Öppna den</a>`);
+                return true;
+            },
+        });
+    }
+    function moveSummary(r) {
+        const parts = [`${r.tasks} ${r.tasks === 1 ? 'uppgift' : 'uppgifter'}`, `${r.threads} ${r.threads === 1 ? 'tråd' : 'trådar'}`, `${r.documents} ${r.documents === 1 ? 'dokument' : 'dokument'}`];
+        let t = 'Flyttar: ' + parts.join(', ') + '.';
+        if (r.joining && r.joining.length) t += ` Blir med där: ${r.joining.join(', ')}.`;
+        if (r.detached) t += ` ${r.detached === 1 ? 'En bifogning' : r.detached + ' bifogningar'} mellan något som flyttar och något som stannar släpps.`;
+        return t;
+    }
+
+    // ================================================================ Flytta ett område inom familjen (åt båda hållen)
+    function familyTargets() { const f = S.planning.family; return f && f.plannings ? f.plannings : []; }
+    function openMoveArea(a) {
+        const targets = familyTargets();
+        formModal({
+            title: `Flytta ${a.name}`, okLabel: 'Flytta området', wide: false,
+            html: `<p class="mb-2">Området flyttar med sina uppgifter, trådar och dokumentkategorier till den planering du väljer. Det går att flytta tillbaka.</p>
+                <label class="form-label fw-semibold" for="mvTarget">Till</label>
+                <select id="mvTarget" class="form-select">${targets.map(t => `<option value="${t.id}">${esc(t.name)}${t.isParent ? ' (huvudplaneringen)' : ''}</option>`).join('')}</select>
+                <div id="mvPreview" class="pl-help small mt-2"></div>`,
+            onOpen: body => {
+                const sel = body.querySelector('#mvTarget');
+                const preview = async () => {
+                    const r = await get('MovePreview', { targetId: sel.value, areas: String(a.id) });
+                    body.querySelector('#mvPreview').innerHTML = r.success ? esc(moveSummary(r)) : esc(r.message || '');
+                };
+                sel.addEventListener('change', preview); preview();
+            },
+            onOk: async body => {
+                const res = await post('MoveAreas', { targetId: body.querySelector('#mvTarget').value, areas: String(a.id) });
+                if (!res.success) return res.message || 'Det gick inte att flytta området.';
+                if (String(tkArea) === String(a.id)) tkArea = '';
+                if (String(msgArea) === String(a.id)) msgArea = '';
+                await loadAll(); render(view);
+                showMsg(`${esc(a.name)} flyttade till <a href="${esc(res.url)}">${esc(res.target)}</a>: ${res.tasks} uppgifter och ${res.threads} trådar.`
+                    + (res.joined && res.joined.length ? ` ${esc(res.joined.join(', '))} är nu med där.` : ''));
+                return true;
+            },
+        });
     }
 
     function openMessageArea(m) {

@@ -12,10 +12,10 @@ using Newtonsoft.Json.Linq;
 namespace HpskSite.Services.Planning
 {
     /// <summary>
-    /// Banan i planeringen (Stefan 2026-10-24, <c>notes/tavlingsplanering-banan-2026-10-24.md</c>): planeringen äger banans
-    /// fältkonfiguration innan tävlingen finns, föreningarna bygger sina stationer i varsin delkonfiguration (områdena), och
-    /// "Sätt ihop banan" lägger ihop delarna (<see cref="CourseAssembly"/>). När planeringen kopplas till en fälttävling
-    /// ansluts banan till tävlingen — en kopia, som när man ansluter en konfiguration i Redigera tävling.
+    /// Banan i planeringen (Stefan 2026-10-24, omgjord 2026-10-25): planeringen äger stationernas fältkonfiguration innan
+    /// tävlingen finns — EN konfiguration, med en ansvarig per station (<c>PlanningStationResponsible</c>). När planeringen
+    /// kopplas till en fälttävling ansluts den till tävlingen — en kopia, som när man ansluter en konfiguration i Redigera
+    /// tävling.
     ///
     /// <para><b>⚠️ Banan tillhör familjens HUVUDPLANERING</b> (stationsnumren gäller hela familjen): en delplanering läser
     /// och sätter ihop samma bana.</para>
@@ -149,29 +149,6 @@ namespace HpskSite.Services.Planning
             return (created, null);
         }
 
-        public sealed record AssembleOutcome(CourseAssemblyResult? Result, bool Changed, int ConfigId, string? Error);
-
-        /// <summary>
-        /// "Sätt ihop banan": banans konfiguration (skapas om den saknas) får delarnas stationer. En godkänd bana vägras av
-        /// konfigurationens lås — "Begär ändring" först. Ändrades ingenting sparas ingenting.
-        /// </summary>
-        public async Task<AssembleOutcome> AssembleAsync(PlanningRow p, int memberId)
-        {
-            var (course, err) = await CreateCourseAsync(p, memberId, 0);
-            if (course == null) return new AssembleOutcome(null, false, 0, err);
-            var parts = new List<CoursePart>();
-            foreach (var l in _planning.AreaConfigLinks(p.Id))
-            {
-                var cfg = await _configs.GetByIdAsync(l.ConfigId);
-                if (cfg != null) parts.Add(new CoursePart(cfg.Id, cfg.Name, cfg.JsonBlob));
-            }
-            var result = CourseAssembly.Assemble(course.JsonBlob, parts, StationCount(p.Id, course.JsonBlob), DateTime.Now);
-            if (CourseAssembly.Checksum(result.Blob) == CourseAssembly.Checksum(course.JsonBlob))
-                return new AssembleOutcome(result, false, course.Id, null);
-            var (ok, msg, _) = await _configs.UpdateWithVersionAsync(new UpdateFaltskytteConfigurationRequest { Id = course.Id, JsonBlob = result.Blob });
-            return ok ? new AssembleOutcome(result, true, course.Id, null) : new AssembleOutcome(result, false, course.Id, msg);
-        }
-
         /// <summary>
         /// Ansluter banan till tävlingen: en kopia i tävlingens stationskonfiguration med <c>_attachedConfigId</c>, tävlingstypen
         /// och antalet stationer — samma som att ansluta i Redigera tävling. <paramref name="onlyIfEmpty"/>: bara när tävlingen
@@ -230,24 +207,6 @@ namespace HpskSite.Services.Planning
             blob[CourseAssembly.StationCountKey] = count;
             var (ok, msg, _) = await _configs.UpdateWithVersionAsync(new UpdateFaltskytteConfigurationRequest { Id = course.Id, JsonBlob = blob.ToString(Newtonsoft.Json.Formatting.None) });
             return ok ? null : msg;
-        }
-
-        /// <summary>Delarna och deras läge mot banan: med, ändrad sedan ihopläggningen eller inte med än.</summary>
-        public sealed record PartState(int ConfigId, string Name, string Status, List<int> Stations, string State);
-
-        public async Task<List<PartState>> PartsAsync(int planningId, string? courseBlob)
-        {
-            var assembled = CourseAssembly.AssembledFrom(courseBlob).ToDictionary(a => a.ConfigId);
-            var list = new List<PartState>();
-            foreach (var l in _planning.AreaConfigLinks(planningId))
-            {
-                var cfg = await _configs.GetByIdAsync(l.ConfigId);
-                if (cfg == null) continue;
-                var state = !assembled.TryGetValue(cfg.Id, out var a) ? "new"
-                    : CourseAssembly.Checksum(cfg.JsonBlob) != a.Checksum ? "changed" : "current";
-                list.Add(new PartState(cfg.Id, cfg.Name, cfg.ApprovalStatus ?? "Draft", AreaConfigBlob.CourseStations(cfg.JsonBlob), state));
-            }
-            return list;
         }
     }
 }

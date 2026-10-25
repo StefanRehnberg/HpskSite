@@ -32,11 +32,14 @@ namespace HpskSite.Services.Planning
             Bump(db, planningId);
         }
 
-        /// <summary>Planeringen och dess delplaneringar (överskottet räknar allas bemanning).</summary>
+        /// <summary>
+        /// Hela familjen (överskottet räknar allas bemanning). Stefan 2026-10-25 (B10): även från en delplanering — förr
+        /// räknade en delplanering bara sig själv.
+        /// </summary>
         public List<int> FamilyIds(int planningId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.Fetch<int>("SELECT Id FROM Planning WHERE (Id = @0 OR ParentPlanningId = @0) AND DeletedAt IS NULL ORDER BY CASE WHEN Id = @0 THEN 0 ELSE 1 END, Id", planningId);
+            return PlanningFamily.Ids(s.Database, planningId);
         }
     }
 }

@@ -109,7 +109,7 @@ namespace HpskSite.Services
                      OR Id IN (SELECT ProjectId FROM FaltskytteProjectMember WHERE MemberId = @0)
                      OR Id IN (SELECT l.TargetId FROM PlanningLink l
                                  JOIN Planning p ON p.Id = l.PlanningId AND p.DeletedAt IS NULL
-                                 JOIN Planning f ON (f.Id = COALESCE(p.ParentPlanningId, p.Id) OR f.ParentPlanningId = COALESCE(p.ParentPlanningId, p.Id)) AND f.DeletedAt IS NULL
+                                 JOIN Planning f ON f.FamilyRootId = p.FamilyRootId AND f.DeletedAt IS NULL
                                  JOIN PlanningMember pm ON pm.PlanningId = f.Id AND pm.MemberId = @0 AND pm.RemovedAt IS NULL
                                 WHERE l.TargetKind = N'faltproject')
                    ORDER BY ModifiedDate DESC", memberId);

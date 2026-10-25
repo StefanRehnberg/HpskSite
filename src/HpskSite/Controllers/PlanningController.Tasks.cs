@@ -18,7 +18,8 @@ namespace HpskSite.Controllers
     {
         private object TaskJson(PlanningTaskRow t, PlanningCaller c, IReadOnlyDictionary<int, string> names,
             IReadOnlyDictionary<int, PlanningMeetingRow> meetings, DateTime now, PlanningRow? planning = null,
-            IReadOnlyDictionary<int, int>? comments = null, IReadOnlyDictionary<int, string>? stationUrls = null) => new
+            IReadOnlyDictionary<int, int>? comments = null, IReadOnlyDictionary<int, string>? stationUrls = null,
+            IReadOnlyDictionary<int, int>? areaLeads = null) => new
         {
             id = t.Id, title = t.Title, description = t.Description,
             assigneeId = t.AssigneeParticipantId,
@@ -44,9 +45,17 @@ namespace HpskSite.Controllers
             isMilestone = t.IsMilestone, sendToForbundet = t.SendToForbundet,
             sentToForbundetAt = DT(t.SentToForbundetAt),
             sentToForbundetBy = t.SentToForbundetBy.HasValue ? names.GetValueOrDefault(t.SentToForbundetBy.Value, "Någon") : null,
-            canEdit = PlanningAccess.CanEditTask(c, t),
-            canReport = PlanningAccess.CanReportOnTask(c, t),
+            canEdit = PlanningAccess.CanEditTask(c, t, Lead(areaLeads, t)),
+            canReport = PlanningAccess.CanReportOnTask(c, t, Lead(areaLeads, t)),
         };
+
+        /// <summary>Uppgiftens områdes ansvarige (deltagar-id), eller null (<see cref="PlanningAccess.LeadsArea"/>).</summary>
+        private static int? Lead(IReadOnlyDictionary<int, int>? areaLeads, PlanningTaskRow t) =>
+            t.AreaId.HasValue && areaLeads != null && areaLeads.TryGetValue(t.AreaId.Value, out var l) ? l : null;
+
+        /// <summary>Områdenas ansvariga (område → deltagare), för <see cref="PlanningAccess.LeadsArea"/>.</summary>
+        private Dictionary<int, int> AreaLeads(int planningId) =>
+            _planning.Areas(planningId).Where(a => a.ResponsibleParticipantId > 0).ToDictionary(a => a.Id, a => a.ResponsibleParticipantId!.Value);
 
         /// <summary>
         /// Banan i planeringen (2026-10-24): var station N byggs — i områdets delkonfiguration om stationen har en (med
@@ -93,6 +102,7 @@ namespace HpskSite.Controllers
             var comments = _planning.CommentCounts(id);
             var cfg = await StationUrlsAsync(id, x.MemberId, StationConfigId(comp));
             var anchor = AnchorFor(x.Planning, comp);
+            var leads = AreaLeads(id);
             return Json(new
             {
                 success = true,
@@ -109,7 +119,9 @@ namespace HpskSite.Controllers
                 stationCount = await StationCountAsync(id),
                 statuses = PlanningTaskStatus.All.Select(s => new { value = s, label = PlanningTaskStatus.Label(s), assignee = PlanningTaskStatus.AssigneeSettable.Contains(s) }),
                 areas = AreasJson(id, names, tasks),
-                tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg)),
+                tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg, leads)),
+                // Stefan B5: områden där den som frågar är ansvarig (hen leder deras uppgifter).
+                myAreas = leads.Where(kv => kv.Value == x.Caller.ParticipantId && x.Caller.IsParticipant).Select(kv => kv.Key),
             });
         }
 
@@ -164,7 +176,7 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
-            if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften ändras av den som lade till den, eller av den som kan ändra planeringen.");
+            if (!PlanningAccess.CanEditTask(x.Caller, task, Lead(AreaLeads(id), task))) return No("Uppgiften ändras av den som lade till den, områdets ansvarige eller den som kan ändra planeringen.");
             var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost,
                 task.AssigneeName);
             if (err != null) return No(err);
@@ -189,7 +201,8 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
-            if (!PlanningAccess.CanReportOnTask(x.Caller, task)) return No("Det är den som har uppgiften som säger hur det går.");
+            var lead = Lead(AreaLeads(id), task);
+            if (!PlanningAccess.CanReportOnTask(x.Caller, task, lead)) return No("Det är den som har uppgiften, eller områdets ansvarige, som säger hur det går.");
             if (PlanningTaskStatus.Normalize(status) == PlanningTaskStatus.Done)
             {
                 // Tävlingens egen planering ("Utförd beslutas på mötena" av): den ansvarige bockar av själv.
@@ -199,8 +212,17 @@ namespace HpskSite.Controllers
                 var e2 = e1 ?? _planning.DecideTask(id, taskId, x.Caller.ParticipantId, true, null, null);
                 return e2 == null ? Ok() : No(e2);
             }
+            var newStatus = string.IsNullOrWhiteSpace(status) ? null : PlanningTaskStatus.Normalize(status);
             var err = _planning.ReportOnTask(id, taskId, x.Caller.ParticipantId, string.IsNullOrWhiteSpace(status) ? null : status, report, x.Caller.ViaLink);
-            return err == null ? Ok() : No(err);
+            if (err != null) return No(err);
+            // Stefan B5: områdets ansvarige får veta när en uppgift i området behöver hjälp eller är klar att pröva.
+            if (lead > 0 && lead != x.Caller.ParticipantId && newStatus != task.Status
+                && newStatus is PlanningTaskStatus.NeedsHelp or PlanningTaskStatus.ReadyForReview)
+            {
+                try { await _notify.TaskStatusToAreaLeadAsync(id, taskId, lead!.Value, newStatus, x.Caller.Participant); }
+                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: områdets ansvarige kunde inte aviseras om uppgift {Task}.", id, taskId); }
+            }
+            return Ok();
         }
 
         /// <summary>
@@ -241,7 +263,7 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
-            if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften tas bort av den som lade till den, eller av den som kan ändra planeringen.");
+            if (!PlanningAccess.CanEditTask(x.Caller, task, Lead(AreaLeads(id), task))) return No("Uppgiften tas bort av den som lade till den, områdets ansvarige eller den som kan ändra planeringen.");
             var err = _planning.RemoveTask(id, taskId, x.Caller.ParticipantId);
             return err == null ? Ok() : No(err);
         }

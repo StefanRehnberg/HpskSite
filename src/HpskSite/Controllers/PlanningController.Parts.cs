@@ -10,32 +10,34 @@ using Microsoft.AspNetCore.Mvc;
 namespace HpskSite.Controllers
 {
     /// <summary>
-    /// Omgång 2 steg 4 (2026-10-24): OMRÅDENA ersätter delarna. Ett område grupperar uppgifter och meddelanden och har en
-    /// ansvarig, en värd (klubb, krets eller fri text) och en beskrivning. EN form (<see cref="AreasJson"/>) för planeringens
-    /// svar och uppgifternas, så att de inte kan säga olika saker.
+    /// OMRÅDENA: ansvarsområden (Servering, Materiel, Banor …) med en ansvarig. Stefan 2026-10-25: ett område är bara det —
+    /// ingen värd, ingen beskrivning, aldrig en gren eller förstadiet till en delplanering. EN form (<see cref="AreasJson"/>)
+    /// för planeringens svar och uppgifternas, så att de inte kan säga olika saker.
     /// </summary>
     public partial class PlanningController
     {
         private object AreasJson(int planningId, IReadOnlyDictionary<int, string> names, List<PlanningTaskRow> tasks) =>
             _planning.Areas(planningId).Select(a => new
             {
-                id = a.Id, name = a.Name, description = a.Description,
+                id = a.Id, name = a.Name,
                 responsibleId = a.ResponsibleParticipantId,
                 responsible = a.ResponsibleParticipantId.HasValue ? names.GetValueOrDefault(a.ResponsibleParticipantId.Value, "Har lämnat planeringen") : a.ResponsibleName,
                 responsibleName = a.ResponsibleName,
-                hostClubId = a.HostClubId, hostRegionId = a.HostRegionId, hostText = a.HostText,
-                host = a.HostClubId > 0 ? OrgName(DocumentOwnerType.Club, a.HostClubId) : a.HostRegionId > 0 ? OrgName(DocumentOwnerType.Region, a.HostRegionId) : a.HostText,
                 openTasks = tasks.Count(t => t.AreaId == a.Id && PlanningTaskStatus.IsOpen(t.Status)),
                 tasks = tasks.Count(t => t.AreaId == a.Id),
             }).ToList();
 
-        /// <summary>Värdarna att välja bland: de klubbar och kretsar som någon i planeringen företräder (annars fri text).</summary>
+        /// <summary>
+        /// Vem som kan SKÖTA en delplanering (Stefan B11): de klubbar och kretsar som någon i planeringen företräder (annars
+        /// fri text). Används av <i>Ny delplanering</i>, delplaneringens Inställningar och stationernas ansvariga — därför
+        /// räcker Kan ändra; själva sparandet har sin egen grind.
+        /// </summary>
         [HttpGet]
-        public async Task<IActionResult> AreaHostOptions(int id)
+        public async Task<IActionResult> HostOptions(int id)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Det är den som kan ändra planeringen som lägger upp områden.");
+            if (x.Caller.ViaLink || !PlanningAccess.CanEditPlanning(x.Caller)) return No("Det är den som kan ändra planeringen som väljer klubb eller krets.");
             return Json(new
             {
                 success = true,
