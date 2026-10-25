@@ -91,15 +91,8 @@ namespace HpskSite.Services.Staffing
                 if (onlyKey != null && key != onlyKey) continue;
                 var pid = a.PlanningId!.Value;
                 StaffPass? pass = a.PassId is int ap && passById.TryGetValue(ap, out var pp) ? pp : null;
-                var date = a.StartsAt?.Date ?? a.DayDate?.Date ?? pass?.PassDate.Date;
+                var (date, interval) = WhenOf(a, pass);
                 if (date == null) continue;
-                StaffInterval? interval;
-                if (a.StartsAt != null)
-                    interval = StaffInterval.FromMoments(a.StartsAt, a.EndsAt);              // bara ena änden = okänt
-                else if (pass != null && StaffTimeCoverage.ParseRange(PassRange(pass)) is { } r)
-                    interval = StaffInterval.From(date.Value, r.Start, r.End);
-                else
-                    interval = StaffInterval.From(date.Value, null, null);                    // heldag
                 var time = interval is { AllDay: false } iv ? $" {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : (interval is { AllDay: true } ? " hela dagen" : "");
                 For(key, a.DisplayName.Trim(), a.MemberId).Add(new PersonWeekEntry(
                     "a" + a.Id, PersonWeekKind.Assignment, date.Value, interval, Venue(a.CompetitionId),
@@ -155,6 +148,24 @@ namespace HpskSite.Services.Staffing
                     items.Count(i => i.HasClash), items.Count(i => i.HasWarning && !i.HasClash), days));
             }
             return result.OrderByDescending(p => p.Clashes).ThenBy(p => p.Name, sv).ToList();
+        }
+
+        /// <summary>
+        /// Dagen och tidsintervallet för ett uppdrag — en enda regel för veckan och för ersättarsökningen (steg 6b): starttid → dag →
+        /// passets dag; bara ena änden angiven = okänt intervall (null); varken start eller slut = heldag.
+        /// </summary>
+        public static (DateTime? Date, StaffInterval? Interval) WhenOf(StaffAssignment a, StaffPass? pass)
+        {
+            var date = a.StartsAt?.Date ?? a.DayDate?.Date ?? pass?.PassDate.Date;
+            if (date == null) return (null, null);
+            StaffInterval? interval;
+            if (a.StartsAt != null)
+                interval = StaffInterval.FromMoments(a.StartsAt, a.EndsAt);              // bara ena änden = okänt
+            else if (pass != null && StaffTimeCoverage.ParseRange(PassRange(pass)) is { } r)
+                interval = StaffInterval.From(date.Value, r.Start, r.End);
+            else
+                interval = StaffInterval.From(date.Value, null, null);                    // heldag
+            return (date, interval);
         }
 
         private static string? PassRange(StaffPass p) =>

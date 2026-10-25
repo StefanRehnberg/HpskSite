@@ -851,6 +851,42 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
+        /// Steg 6b ("Hitta ersättare"): lämnar <b>ett</b> uppdrag över till en annan medlem. Radens id, dag, tid och roll behålls —
+        /// det är samma uppdrag, så kalenderfiler, krockar och historiken följer med. Allt som hörde till personen går: konto,
+        /// e-post, telefon, förening, incheckning och behörighet (samma skäl som vid en ersättare, omgång 3 K3). Den nya personen
+        /// ska svara (Invited) och får en ny länk; den tidigare personens namn sparas i <c>OriginalName</c>.
+        /// </summary>
+        public (bool Ok, string? Message, StaffAssignment? Row, string? OldName) ReplaceHolder(int assignmentId, StaffOwner owner, int newMemberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var a = db.SingleOrDefault<StaffAssignment>(
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
+            if (a == null) return (false, "Uppdraget hittades inte.", null, null);
+            if (a.MemberId == newMemberId) return (false, "Det är redan den personens uppdrag.", null, null);
+            var m = _memberService.GetById(newMemberId);
+            if (m == null) return (false, "Medlemmen hittades inte.", null, null);
+
+            var oldName = a.DisplayName;
+            var hadAccess = a.HasAdminAccess;
+            if (string.IsNullOrEmpty(a.OriginalName)) a.OriginalName = a.DisplayName;
+            a.MemberId = newMemberId;
+            a.DisplayName = ResolveMemberName(newMemberId);
+            a.Email = null; a.Phone = null;                       // null = medlemmens egna (CompetitionPeopleService)
+            a.RepresentsClubId = null; a.RepresentsRegionId = null;
+            a.Status = StaffAssignmentStatus.Invited;
+            a.CheckedInAt = null;
+            a.HasAdminAccess = false;
+            a.InviteNonce = Guid.NewGuid();                       // länkar till den förra personen slutar gälla
+            a.ModifiedDate = DateTime.UtcNow;
+            if (string.Equals(a.OriginalName, a.DisplayName, StringComparison.Ordinal)) a.OriginalName = null;
+            db.Update(a);
+
+            if (hadAccess && owner.HasCompetition) { try { SyncCompetitionManagers(owner.Comp); } catch { } }
+            return (true, null, a, oldName);
+        }
+
+        /// <summary>
         /// Split a timed assignment at a clock time and hand the remainder to someone else — "han blev sjuk
         /// en timme in i passet". Doing it by hand is two edits with nothing tying them together, and it is
         /// easy to leave the tail uncovered without noticing.

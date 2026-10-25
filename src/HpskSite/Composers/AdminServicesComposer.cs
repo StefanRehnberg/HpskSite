@@ -443,6 +443,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.ShootIntentService>();
             // Steg 3: personens vecka över familjen (PersonWeek).
             builder.Services.AddScoped<HpskSite.Services.Staffing.FamilyWeekService>();
+            // Steg 6b: Hitta ersättare (reservpoolen ur självanmälan, rankad efter ledighet och roll).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffReplacementService>();
             // Prep documents (sanktion/inbjudan/ritning…) stored under App_Data (survives deploys).
             builder.Services.AddScoped<HpskSite.Services.Staffing.PrepDocumentStorage>();
             // THE PEOPLE LAYER: one row per human across roster + sign-ups + availability + prep ownership.

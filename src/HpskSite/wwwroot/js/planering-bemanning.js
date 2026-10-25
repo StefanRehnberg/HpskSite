@@ -1073,6 +1073,7 @@ window.PlaneringBemanning = (function () {
                 const timed = a.shiftLabel && a.shiftLabel.indexOf('–') > 0;
                 const menu = a.readOnly ? `<span class="badge text-bg-light border fw-normal">${esc(p.sourceLabel || 'Stationer-fliken')}</span>` : A.rowMenu([
                     { label: 'Ändra uppdraget…', fn: () => openAssignment({ id: a.id, person: p }) },
+                    { label: 'Hitta ersättare…', icon: 'bi-person-plus', fn: () => openFindReplacement(a, p) },
                     timed && { label: 'Dela passet — någon annan tar resten…', fn: () => openSplit(a, p) },
                     { label: 'Flytta till en annan dag…', fn: () => moveFromPerson(a) },
                     (p.memberId || p.email) && { label: 'Skicka förfrågan om uppdraget…', fn: () => notifyOne(a, p) },
@@ -1299,6 +1300,38 @@ window.PlaneringBemanning = (function () {
                 const r = await spost('SplitAssignment', { id: a.id, at, memberId: picked ? picked.memberId : 0, newName: picked ? null : who });
                 if (!r.success) return r.message || 'Passet kunde inte delas.';
                 await loadPeople(); drawPerson(p.key);
+                return true;
+            }
+        });
+    }
+    // Steg 6b (B11): Hitta ersättare. De som anmält sig till dagen i någon del av familjen, lediga och med rätt roll först.
+    // Ett val lämnar över samma rad (id, dag, tid, roll behålls) och aviserar den som tar över.
+    async function openFindReplacement(a, p, after) {
+        const r = await sget('GetReplacementCandidates', { assignmentId: a.id }).catch(() => null);
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte leta efter någon.'), 'danger'); return; }
+        const list = r.candidates || [];
+        const badge = c => c.free === true ? '<span class="badge text-bg-success fw-normal">Ledig</span>'
+            : c.free === false ? '<span class="badge text-bg-warning fw-normal">Upptagen</span>'
+            : '<span class="badge text-bg-secondary fw-normal">Tiden är inte satt</span>';
+        const rows = list.length ? list.map(c => `<label class="list-group-item d-flex gap-2 align-items-start">
+                <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="plbRepl" value="${c.memberId}">
+                <span><b>${esc(c.name)}</b> ${badge(c)}${c.roleMatch ? ' <span class="badge text-bg-light border fw-normal">Har anmält sig som ' + esc(r.target.role) + '</span>' : ''}
+                ${c.free === false && c.busyWith ? `<span class="d-block small text-warning-emphasis">${esc(c.busyWith)}</span>` : ''}
+                ${c.comment ? `<span class="d-block plb-dim small">${esc(c.comment)}</span>` : ''}</span></label>`).join('')
+            : '';
+        A.formModal({
+            title: 'Hitta ersättare', okLabel: 'Lämna över', wide: false,
+            html: `<p class="pl-help mb-2">${esc(r.target.holder)} har ${esc(r.target.role)} ${esc(r.target.when)}. Här är de som anmält sig till dagen.</p>`
+                + (list.length ? `<div class="list-group" role="radiogroup" aria-label="Möjliga ersättare">${rows}</div>
+                    <div class="pl-help small mt-2">Den som tar över får besked och står som Inbjuden tills hen svarat. ${esc(r.target.holder)} står kvar i historiken.</div>`
+                    : `<p class="mb-0">Ingen har anmält sig till den dagen ännu. Skicka en förfrågan under Hitta funktionärer, eller sök en medlem under Ändra uppdraget.</p>`),
+            onOk: async b => {
+                const sel = b.querySelector('input[name="plbRepl"]:checked');
+                if (!sel) return list.length ? 'Välj vem som tar över.' : 'Det finns ingen att lämna över till.';
+                const d = await spost('ReplaceAssignmentHolder', { id: a.id, memberId: +sel.value });
+                if (!d.success) return d.message || 'Uppdraget kunde inte lämnas över.';
+                if (after) await after(); else { await loadPeople(); drawPerson(p.key); }
+                A.showMsg(`Uppdraget är lämnat till <b>${esc(d.name)}</b>. ${d.notified ? 'Hen har fått besked.' : 'Hen kunde inte nås automatiskt — hör av dig.'}`, 'success');
                 return true;
             }
         });
@@ -1776,9 +1809,12 @@ window.PlaneringBemanning = (function () {
     }
     function weekItemHtml(i) {
         const clashes = (i.clashes || []).map(c => { const t = CLASH_TEXT[c.kind] || ['text-bg-light border', c.kind]; return `<div class="small mt-1"><span class="badge ${t[0]} fw-normal">${esc(t[1])}</span> ${esc(c.with)}</div>`; }).join('');
+        // Steg 6b: ett uppdrag (sourceKey "a{id}") kan lämnas över — det är där man ser att någon hoppat av.
+        const rid = i.kind === 'Assignment' && /^a\d+$/.test(i.sourceKey || '') ? i.sourceKey.slice(1) : '';
         return `<li class="d-flex gap-2 py-2 border-bottom plbw-item" data-kind="${esc(i.kind)}"><i class="bi ${WEEK_ICON[i.kind] || 'bi-dot'} mt-1 ${i.hasClash ? 'text-danger' : 'text-body-secondary'}" aria-hidden="true"></i>
-            <div class="min-w-0"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}</div>
-            ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div></li>`;
+            <div class="min-w-0 flex-grow-1"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}</div>
+            ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div>
+            ${rid ? `<button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 align-self-start" data-plbw-repl="${rid}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hitta ersättare</button>` : ''}</li>`;
     }
     async function drawWeekPerson(key, seq) {
         const d = await sget('GetFamilyPersonWeek', { personKey: key });
@@ -1834,10 +1870,11 @@ window.PlaneringBemanning = (function () {
     }
     document.addEventListener('click', async e => {
         if (!A || !A.isActive() || part() !== 'veckan') return;
-        const t = e.target.closest('[data-plbw-person],[data-plbw-back],[data-plbw-cand],[data-plbw-inplan]');
+        const t = e.target.closest('[data-plbw-person],[data-plbw-back],[data-plbw-cand],[data-plbw-inplan],[data-plbw-repl]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.dataset.plbwPerson) nav('veckan', t.dataset.plbwPerson);
+        if (t.dataset.plbwRepl && B.wp) { const key = B.wp.key; openFindReplacement({ id: parseInt(t.dataset.plbwRepl, 10) }, { key }, () => nav('veckan', key)); }
+        else if (t.dataset.plbwPerson) nav('veckan', t.dataset.plbwPerson);
         else if (t.hasAttribute('data-plbw-back')) nav('veckan');
         else if (t.dataset.plbwCand != null && B.wp) {
             const c = ((B.wp.match || {}).candidates || [])[parseInt(t.dataset.plbwCand, 10)]; if (!c) return;

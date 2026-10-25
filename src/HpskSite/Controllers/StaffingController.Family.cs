@@ -271,5 +271,63 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
             }
         }
+
+        // ------------------------------------------------------------------ steg 6b: Hitta ersättare
+
+        /// <summary>
+        /// Vem kan ta uppdraget? De som anmält sig till dagen i någon del av familjen, lediga och med rätt roll först. Bara den som får
+        /// ändra uppdragets del (<c>RowOwnerAsync</c>) ser listan — den visar personers anmälningar och när de är upptagna.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetReplacementCandidates(int assignmentId)
+        {
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(assignmentId));
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var (t, list, err) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().Candidates(assignmentId);
+                if (err != null || t == null) return Json(new { success = false, message = err ?? "Uppdraget hittades inte." });
+                return Json(new
+                {
+                    success = true,
+                    target = new { id = t.AssignmentId, holder = t.HolderName, hasHolder = t.HolderMemberId is > 0, role = t.RoleName, when = t.When },
+                    candidates = list.Select(c => new { memberId = c.MemberId, name = c.Name, roleMatch = c.RoleMatch, free = c.Free, busyWith = c.BusyWith, comment = c.Comment }),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetReplacementCandidates failed for {Id}", assignmentId);
+                return Json(new { success = false, message = "Kunde inte leta efter någon som kan ta uppdraget." });
+            }
+        }
+
+        /// <summary>Lämnar ett uppdrag över till en annan medlem och aviserar hen. Samma rad, ny person (<see cref="StaffingService.ReplaceHolder"/>).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReplaceAssignmentHolder([FromBody] ReplaceHolderRequest request)
+        {
+            if (request == null || request.Id <= 0 || request.MemberId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            var viewer = await ResolveViewerAsync();
+            if (owner == null || viewer == null) return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var r = _staffing.ReplaceHolder(request.Id, owner, request.MemberId);
+                if (!r.Ok) return Json(new { success = false, message = r.Message });
+                var notified = await HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().NotifyAsync(r.Row!, r.OldName, viewer.Id);
+                return Json(new { success = true, notified, name = r.Row!.DisplayName });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ReplaceAssignmentHolder failed for {Id}", request.Id);
+                return Json(new { success = false, message = "Kunde inte lämna över uppdraget." });
+            }
+        }
+    }
+
+    public class ReplaceHolderRequest
+    {
+        public int Id { get; set; }
+        public int MemberId { get; set; }
     }
 }
