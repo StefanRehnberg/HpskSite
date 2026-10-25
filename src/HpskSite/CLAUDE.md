@@ -12866,6 +12866,17 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     - `GET Stations` bär `areas` (med `part` inkl. `state`), `stationCount` och per station `built` (i helheten ELLER i
       en del, `CourseAssembly.BuiltStations`) och `url` (`StationUrlsAsync`).
     - Svit `tavlingsplanering-stationer-verify.mjs` (ersätter banan-sviten); p4 och o3 läser vyn.
+  - **⚠️⚠️ Stationerna omgjorda (Stefan 2026-10-25: "vilken gäller?" och "det är absolut inte så alltid [förening]")**:
+    - **EN plats:** `PlanningService.StationOwnerId` — huvudplaneringen om den är fält; annars planeringen själv om den
+      är fält; annars familjens enda fältplanering (SM-veckans Fält-del); annars huvudplaneringen. `CourseConfigId`
+      läser länken där, med fallback på en länk någon annanstans i familjen (betan). `Get` bär `planning.stationsOwner`
+      {here, id, name, isSub, url}; rälsen visar Stationerna bara där (`stationsWanted`), annars Översikt-raden
+      "sköts i delplaneringen X". `WholeStationsElsewhere` = ägaren är en annan.
+    - **Odelat är utgångsläget:** Läget tre steg Utforma · Godkänn · Tävlingen; inga föreningar, inga gula varningar
+      (stationschef saknas = "—"). **Uppdelning** = Åtgärder → *Dela upp stationerna på flera…* (`openStationArea`):
+      vem = någon i planeringen (`responsibleId`, områdets namn = personens), en klubb/krets (värd) eller ett namn.
+      Först när ett område har stationer syns *Vem gör vilka stationer* (`#plStAreas`), steget Fördela och Sätt ihop.
+      `data-st-step` = stegets namn (Fördela/Utforma/Godkänn/Sätt ihop och godkänn/Tävlingen).
   - **Planeringstestet körning 2 (2026-10-25, `notes/planeringstest/`, granskning `expertgrupp-resultat-k2-2026-10-25.md`):**
     - ⚠️ `SaveArea` med `details=1` utan `stations` = RÖR INTE (förut `?? ""` som tömde föreningens stationer).
     - ⚠️ `UpdateWithVersionAsync` ger ingen ny version till en INAKTUELL flik (`ExpectedVersion` ≠ nuvarande) även när
