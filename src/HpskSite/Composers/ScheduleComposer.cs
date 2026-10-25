@@ -16,6 +16,7 @@ namespace HpskSite.Composers
             // Scoped — reads registrations via the scoped ParticipantAudienceResolver.
             builder.Services.AddScoped<MyScheduleService>();
             builder.Services.AddScoped<MyWeekService>();
+            builder.Services.AddScoped<IWeekDigestMailer, SmtpWeekDigestMailer>();
             builder.Services.AddScoped<StaffWeekDigestService>();
             builder.Services.AddScoped<ScheduleHubService>();
             builder.Services.AddScoped<CompetitionAgendaService>();

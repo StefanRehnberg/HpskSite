@@ -30,7 +30,7 @@ namespace HpskSite.Services
 
         // Per-request memo for the roster app-access lookup (this service is scoped). A page can ask
         // "may this person manage the competition?" several times; the answer can't change mid-request.
-        private readonly Dictionary<(int competitionId, int memberId), bool> _rosterAccessCache = new();
+        private readonly Dictionary<(int competitionId, int memberId, bool includeFamilyGrant), bool> _rosterAccessCache = new();
 
         public AdminAuthorizationService(
             IMemberService memberService,
@@ -819,7 +819,17 @@ namespace HpskSite.Services
         /// <para>The historical name of this right is "competition manager"; read it as "may manage the
         /// competition", not "is a competition official".</para>
         /// </summary>
-        public async Task<bool> HasCompetitionManagementAccess(int competitionId)
+        public Task<bool> HasCompetitionManagementAccess(int competitionId) => ManagementAccessAsync(competitionId, includeFamilyGrant: true);
+
+        /// <summary>
+        /// Tävlingshantering <b>utan</b> det gemensammas familjebehörighet (steg 5, Expertgruppen steg 4–6 K2). Används av
+        /// <see cref="CanManageCompetitionFinanceAsync"/> och <see cref="CanEditCompetitionAsync"/>: den som fått "Får hantera alla
+        /// veckans tävlingar" via huvudplaneringen får tävlingshanteringens skärmar (anmälningar, funktionärer, startlistor) men inte
+        /// ekonomin och inte att ändra vad tävlingen ÄR — det gör bara behörighet som getts för just den tävlingen.
+        /// </summary>
+        private Task<bool> HasDirectCompetitionManagementAccess(int competitionId) => ManagementAccessAsync(competitionId, includeFamilyGrant: false);
+
+        private async Task<bool> ManagementAccessAsync(int competitionId, bool includeFamilyGrant)
         {
             try
             {
@@ -839,7 +849,7 @@ namespace HpskSite.Services
                     if (competition.ManagerIds.Contains(member.Id)) return true;
                 }
 
-                return HasRosterAppAccess(competitionId, member.Id);
+                return HasRosterAppAccess(competitionId, member.Id, includeFamilyGrant);
             }
             catch (Exception gateEx)
             {
@@ -859,12 +869,12 @@ namespace HpskSite.Services
         /// CompetitionManagement, StationPage, SkjutledareView) can union in the roster grant without
         /// re-running the whole member/role lookup.
         /// </summary>
-        public bool HasRosterAppAccess(int competitionId, int memberId)
+        public bool HasRosterAppAccess(int competitionId, int memberId, bool includeFamilyGrant = true)
         {
             if (competitionId <= 0 || memberId <= 0) return false;
-            var key = (competitionId, memberId);
+            var key = (competitionId, memberId, includeFamilyGrant);
             if (_rosterAccessCache.TryGetValue(key, out var cached)) return cached;
-            var granted = _staffingService.HasRosterAdminAccess(competitionId, memberId);
+            var granted = _staffingService.HasRosterAdminAccess(competitionId, memberId, includeFamilyGrant);
             _rosterAccessCache[key] = granted;
             return granted;
         }
@@ -1036,7 +1046,9 @@ namespace HpskSite.Services
             {
                 if (competitionId <= 0) return false;
                 if (await IsCurrentUserAdminAsync()) return true;
-                if (await IsCompetitionManager(competitionId)) return true;
+                // Steg 5 (K2): utan det gemensammas familjebehörighet — den ger tävlingshanteringens skärmar, inte ekonomin
+                // och inte att ändra vad tävlingen är. Behörighet som getts för just den här tävlingen räknas som förut.
+                if (await HasDirectCompetitionManagementAccess(competitionId)) return true;
 
                 var competition = ReadCompetition(competitionId, read);
                 if (competition == null) return false;

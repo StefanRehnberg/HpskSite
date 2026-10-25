@@ -89,9 +89,21 @@ namespace HpskSite.Services.Staffing
             SELECT 1 FROM StaffAssignment sa
               JOIN Planning r ON r.Id = sa.PlanningId AND r.DeletedAt IS NULL AND r.Id = r.FamilyRootId
              WHERE sa.MemberId = @1 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL
+               AND ISNULL(sa.Status, N'') <> N'Declined'
                AND EXISTS (SELECT 1 FROM Planning f
                              JOIN PlanningLink l ON l.PlanningId = f.Id AND l.TargetKind = N'competition' AND l.TargetId = @0
                             WHERE f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL))";
+
+        /// <summary>
+        /// Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.
+        /// <para>En <b>avböjd</b> rad ger ingen familjebehörighet (steg 4–6 L3): behörigheten gäller nu alla veckans tävlingar, så den får
+        /// inte kunna ligga kvar på ett uppdrag som personen tackat nej till. (Den gamla per-tävlingsgrinden är oförändrad.)</para>
+        /// </summary>
+        public bool CarriesFamilyGrant(StaffOwner owner)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return CarriesFamilyGrant(scope.Database, owner);
+        }
 
         /// <summary>Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.</summary>
         private static bool CarriesFamilyGrant(NPoco.IDatabase db, StaffOwner owner) =>
@@ -108,7 +120,7 @@ namespace HpskSite.Services.Staffing
         /// Returns false (never throws) if the table isn't there yet, so auth degrades to the legacy
         /// competitionManagers list rather than locking everyone out.
         /// </summary>
-        public bool HasRosterAdminAccess(int competitionId, int memberId)
+        public bool HasRosterAdminAccess(int competitionId, int memberId, bool includeFamilyGrant = true)
         {
             if (competitionId <= 0 || memberId <= 0) return false;
             try
@@ -117,6 +129,7 @@ namespace HpskSite.Services.Staffing
                 if (scope.Database.ExecuteScalar<int>(
                         "SELECT COUNT(1) FROM StaffAssignment WHERE CompetitionId = @0 AND MemberId = @1 AND HasAdminAccess = 1",
                         competitionId, memberId) > 0) return true;
+                if (!includeFamilyGrant) return false;
                 // Steg 5 (B3): det gemensammas behörighet gäller alla veckans tävlingar. Frågan körs bara när den första sagt nej
                 // och börjar i IX_StaffAssignment_MemberId — personer utan behörighet i en familj betalar ett indexuppslag.
                 return scope.Database.ExecuteScalar<int>("SELECT CASE WHEN " + FamilyGrantSql + " THEN 1 ELSE 0 END", competitionId, memberId) > 0;
@@ -390,6 +403,17 @@ namespace HpskSite.Services.Staffing
         public void SyncCompetitionMirrors(int competitionId)
         {
             if (competitionId <= 0) return;
+            // Steg 4–6 H4: tävlingens tävlingsansvariga (ur redigeringsmodalen) blir rader först när bemanningen öppnas. Kopplas en
+            // planering in och ingen hunnit öppna den skrev speglingen annars [] över listan. Läs in dem som rader FÖRE speglingen.
+            try
+            {
+                int? pid;
+                using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                    pid = scope.Database.ExecuteScalar<int?>(
+                        "SELECT TOP 1 PlanningId FROM PlanningLink WHERE TargetKind = N'competition' AND TargetId = @0", competitionId);
+                if (pid is > 0) ReconcileManagersIntoRoster(new StaffOwner(pid.Value, competitionId));
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: reconcile before mirror failed for competition {CompetitionId}", competitionId); }
             SyncCompetitionManagers(competitionId);
             SyncStationManagers(competitionId);
         }
@@ -634,7 +658,9 @@ namespace HpskSite.Services.Staffing
                 dayFromPass = db.ExecuteScalar<DateTime?>("SELECT PassDate FROM StaffPass WHERE Id = @0", pid);
             var dayDate = a.StartsAt == null ? (a.DayDate ?? dayFromPass) : null;
 
-            var revoke = a.HasAdminAccess && from.CompetitionIdOrNull != to.CompetitionIdOrNull;
+            // Steg 4–6 H3: behörigheten gällde raden där den låg — den följer aldrig med till en annan del. (Förut bara när tävlingen
+            // byttes; en flagga på ett tävlingslöst gemensamt uppdrag flyttades då med och vaknade när delen kopplades.)
+            var revoke = a.HasAdminAccess;
             try
             {
                 db.Execute(@"UPDATE StaffAssignment SET PlanningId = @0, CompetitionId = @1, PassId = NULL, DayDate = @2,
@@ -856,18 +882,18 @@ namespace HpskSite.Services.Staffing
         /// e-post, telefon, förening, incheckning och behörighet (samma skäl som vid en ersättare, omgång 3 K3). Den nya personen
         /// ska svara (Invited) och får en ny länk; den tidigare personens namn sparas i <c>OriginalName</c>.
         /// </summary>
-        public (bool Ok, string? Message, StaffAssignment? Row, string? OldName) ReplaceHolder(int assignmentId, StaffOwner owner, int newMemberId)
+        public (bool Ok, string? Message, StaffAssignment? Row, string? OldName, int? OldMemberId) ReplaceHolder(int assignmentId, StaffOwner owner, int newMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
-            if (a == null) return (false, "Uppdraget hittades inte.", null, null);
-            if (a.MemberId == newMemberId) return (false, "Det är redan den personens uppdrag.", null, null);
+            if (a == null) return (false, "Uppdraget hittades inte.", null, null, null);
+            if (a.MemberId == newMemberId) return (false, "Det är redan den personens uppdrag.", null, null, null);
             var m = _memberService.GetById(newMemberId);
-            if (m == null) return (false, "Medlemmen hittades inte.", null, null);
+            if (m == null) return (false, "Medlemmen hittades inte.", null, null, null);
 
-            var oldName = a.DisplayName;
+            var oldName = a.DisplayName; var oldMemberId = a.MemberId;
             var hadAccess = a.HasAdminAccess;
             if (string.IsNullOrEmpty(a.OriginalName)) a.OriginalName = a.DisplayName;
             a.MemberId = newMemberId;
@@ -880,10 +906,15 @@ namespace HpskSite.Services.Staffing
             a.InviteNonce = Guid.NewGuid();                       // länkar till den förra personen slutar gälla
             a.ModifiedDate = DateTime.UtcNow;
             if (string.Equals(a.OriginalName, a.DisplayName, StringComparison.Ordinal)) a.OriginalName = null;
-            db.Update(a);
+            try { db.Update(a); }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return (false, "Den personen har redan det uppdraget.", null, null, null);   // unikt villkor: samma person, roll, plats och pass
+            }
+            _logger.LogInformation("Staffing: uppdrag {Id} lämnat över från {Old} till medlem {New}", a.Id, oldName, newMemberId);
 
             if (hadAccess && owner.HasCompetition) { try { SyncCompetitionManagers(owner.Comp); } catch { } }
-            return (true, null, a, oldName);
+            return (true, null, a, oldName, oldMemberId);
         }
 
         /// <summary>

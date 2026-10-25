@@ -122,6 +122,14 @@ namespace HpskSite.Controllers
             return Ok(new { success = true, id = r.PlanningId, created = r.Created, imported = r.ImportedTasks, url = $"/tavlingsplanering/{r.PlanningId}#vy=uppgifter" });
         }
 
+        /// <summary>
+        /// Steg 4–6 M3: att koppla en tävling till en planering (eller ta loss den) utsätter den för det gemensammas behörighet (steg 5) —
+        /// kopplingen ÄR godkännandet. Då räcker inte bara redigerarrätten (<see cref="AdminAuthorizationService.CanEditCompetitionAsync"/>
+        /// släpper in den som fått bemanningens "Ge behörighet", t.ex. en kassa): hen ska också vara tävlingens arrangör.
+        /// </summary>
+        private async Task<bool> CanLinkIntoPlanningAsync(int competitionId) =>
+            await _auth.HasCompetitionOrganiserAccessAsync(competitionId) && await _auth.CanEditCompetitionAsync(competitionId);
+
         /// <summary>Kopplar en egen planering till tävlingen (Sammankallande OCH tävlingens redigerare, beslut 9.3).</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -131,7 +139,7 @@ namespace HpskSite.Controllers
             if (x == null) return Missing();
             if (!PlanningAccess.CanLinkCompetition(x.Caller)) return No("Planeringen kopplas av den sammankallande.");
             if (_competitions.GetSaved(competitionId) == null) return No("Tävlingen finns inte.");
-            if (!await _auth.CanEditCompetitionAsync(competitionId)) return No("Du behöver kunna redigera tävlingen för att koppla planeringen till den.");
+            if (!await CanLinkIntoPlanningAsync(competitionId)) return No("Du behöver vara arrangör av tävlingen och kunna redigera den för att koppla planeringen till den.");
             var err = _planning.LinkToCompetition(id, competitionId, x.MemberId);
             if (err != null) return No(err);
             AfterStaffingLinkChanged(id, competitionId, x.MemberId);
@@ -151,7 +159,7 @@ namespace HpskSite.Controllers
             if (!PlanningAccess.CanLinkCompetition(x.Caller)) return No("Planeringen kopplas loss av den sammankallande.");
             var link = _planning.LinkFor(id);
             if (link == null) return No("Planeringen är inte kopplad till någon tävling.");
-            if (!await _auth.CanEditCompetitionAsync(link.TargetId)) return No("Du behöver kunna redigera tävlingen för att koppla loss planeringen.");
+            if (!await CanLinkIntoPlanningAsync(link.TargetId)) return No("Du behöver vara arrangör av tävlingen och kunna redigera den för att koppla loss planeringen.");
             var err = _planning.Unlink(id, x.MemberId);
             if (err != null) return No(err);
             AfterStaffingLinkChanged(id, link.TargetId, x.MemberId, unlinked: true);
@@ -219,7 +227,7 @@ namespace HpskSite.Controllers
             var list = new List<object>();
             foreach (var (c, host) in candidates.OrderBy(k => Math.Abs((k.C.CompetitionDate!.Value - anchor).TotalDays)).ThenBy(k => k.C.CompetitionDate).Take(60))
             {
-                if (!await _auth.CanEditCompetitionAsync(c.Id)) continue;
+                if (!await CanLinkIntoPlanningAsync(c.Id)) continue;
                 list.Add(new { id = c.Id, name = c.DisplayName, date = D(c.CompetitionDate), club = host });
                 if (list.Count >= 30) break;
             }

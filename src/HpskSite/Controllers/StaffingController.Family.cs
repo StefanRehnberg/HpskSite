@@ -100,7 +100,10 @@ namespace HpskSite.Controllers
         private async Task<(StaffOwner? Root, IActionResult? Error)> FamilyRootAsync(int competitionId)
         {
             var owner = await OwnerAsync(competitionId);
-            if (owner is not { HasPlanning: true }) return (null, Json(new { success = false, message = "Ingen behörighet" }));
+            // Steg 4–6 M1: veckan visar alla personer i alla delar — den som bara har tävlingens behörighet (OwnerAsync släpper in
+            // en GET via tävlingen) ska inte se den. Kräver rätt att ändra bemanningen i huvudplaneringen.
+            if (owner is not { HasPlanning: true } || !await CanEditPlanningStaffAsync(owner.PlanningId))
+                return (null, Json(new { success = false, message = "Ingen behörighet" }));
             var root = _owners.Planning(owner.PlanningId);
             if (root == null || root.ParentPlanningId > 0)
                 return (null, Json(new { success = false, message = "Veckan visas i huvudplaneringen." }));
@@ -300,6 +303,10 @@ namespace HpskSite.Controllers
                 var (ok, msg, revoked) = _staffing.MoveToPlanning(request.Id, from, to);
                 if (ok && revoked)
                     _logger.LogInformation("Staffing: assignment {Id} moved from planning {From} to {To}; app access in the competition ended", request.Id, from.PlanningId, to.PlanningId);
+                // Steg 4–6 H3: en Tävlingsledning-rad som flyttar lämnar eller når en tävling — speglingen till tävlingsansvariga ska följa med.
+                if (ok)
+                    foreach (var c in new[] { from.Comp, to.Comp }.Where(c => c > 0).Distinct())
+                        try { _staffing.SyncCompetitionMirrors(c); } catch (Exception ex) { _logger.LogWarning(ex, "Staffing: spegling efter flytt misslyckades för tävling {Comp}", c); }
                 return Json(new { success = ok, message = msg, accessEnded = ok && revoked });
             }
             catch (Exception ex)
@@ -322,13 +329,15 @@ namespace HpskSite.Controllers
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var (t, list, err) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().Candidates(assignmentId);
+                var viewer = await ResolveViewerAsync();
+                var (t, list, err) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>()
+                    .Candidates(assignmentId, pid => viewer != null && _planning.CanEditStaffingIn(pid, viewer.Id));
                 if (err != null || t == null) return Json(new { success = false, message = err ?? "Uppdraget hittades inte." });
                 return Json(new
                 {
                     success = true,
                     target = new { id = t.AssignmentId, holder = t.HolderName, hasHolder = t.HolderMemberId is > 0, role = t.RoleName, when = t.When },
-                    candidates = list.Select(c => new { memberId = c.MemberId, name = c.Name, roleMatch = c.RoleMatch, free = c.Free, busyWith = c.BusyWith, comment = c.Comment }),
+                    candidates = list.Select(c => new { memberId = c.MemberId, name = c.Name, roleMatch = c.RoleMatch, free = c.Free, busyWith = c.BusyWith, comment = c.Comment, phone = c.Phone }),
                 });
             }
             catch (Exception ex)
@@ -351,7 +360,7 @@ namespace HpskSite.Controllers
             {
                 var r = _staffing.ReplaceHolder(request.Id, owner, request.MemberId);
                 if (!r.Ok) return Json(new { success = false, message = r.Message });
-                var notified = await HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().NotifyAsync(r.Row!, r.OldName, viewer.Id);
+                var notified = await HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().NotifyAsync(r.Row!, r.OldName, r.OldMemberId, viewer.Id);
                 return Json(new { success = true, notified, name = r.Row!.DisplayName });
             }
             catch (Exception ex)

@@ -71,21 +71,27 @@ namespace HpskSite.Services.Schedule
         /// <summary>Medlemmens vecka i en familj, eller null när familjen inte finns eller medlemmen inte har något i den.</summary>
         public MySchedule? Get(int memberId, int rootId, DateTime? from = null, DateTime? to = null)
         {
-            if (memberId <= 0 || rootId <= 0) return null;
-            try
-            {
-                var family = _planning.Family(rootId);
-                if (family.Count == 0) return null;
-                var me = _week.Build(rootId, StaffPersonKey.For(memberId, null)).FirstOrDefault();
-                if (me == null) return null;
-                var s = ToSchedule(rootId, family[0].Name, me.Days, from, to, DateTime.Now);
-                return s.HasAny ? s : null;
-            }
+            try { return GetOrThrow(memberId, rootId, from, to); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "MyWeekService: veckan för medlem {Member} i familj {Root} gick inte att bygga.", memberId, rootId);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Som <see cref="Get"/> men ett fel kastas. Veckomejlet måste skilja "ingenting den dagen" (null) från "det gick inte att läsa"
+        /// (undantag): det senare får inte tolkas som att inget ska skickas och tyst förlora mejlet (steg 4–6 C8).
+        /// </summary>
+        public MySchedule? GetOrThrow(int memberId, int rootId, DateTime? from = null, DateTime? to = null)
+        {
+            if (memberId <= 0 || rootId <= 0) return null;
+            var family = _planning.Family(rootId);
+            if (family.Count == 0) return null;
+            var me = _week.Build(rootId, StaffPersonKey.For(memberId, null)).FirstOrDefault();
+            if (me == null) return null;
+            var s = ToSchedule(rootId, family[0].Name, me.Days, from, to, DateTime.Now);
+            return s.HasAny ? s : null;
         }
 
         /// <summary>Alla medlemmens veckor i fönstret, tidigast först.</summary>

@@ -4,7 +4,7 @@ using HpskSite.Models.Staffing;
 namespace HpskSite.Services.Staffing
 {
     /// <summary>En möjlig ersättare. <see cref="Free"/>: null = uppdragets tid är okänd, så det går inte att säga.</summary>
-    public sealed record ReplacementCandidate(int MemberId, string Name, bool RoleMatch, bool? Free, string? BusyWith, string? Comment);
+    public sealed record ReplacementCandidate(int MemberId, string Name, bool RoleMatch, bool? Free, string? BusyWith, string? Comment, string? Phone = null);
 
     /// <summary>
     /// Steg 6b (B11): <b>vem kan ta ett uppdrag som blivit ledigt</b>. Reservpoolen är de som anmält sig till dagen i någon del av

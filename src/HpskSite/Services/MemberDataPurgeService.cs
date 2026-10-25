@@ -137,6 +137,7 @@ namespace HpskSite.Services
             ("RefreshTokens",                "MemberId"),
             ("DeviceRegistrations",          "MemberId"),
             ("WebPushSubscription",          "MemberId"),
+            ("ScheduleReminderLog",          "MemberId"),   // påminnelsernas spärr (push och veckomejl) — bär medlems-id och nyckel
 
             // ── Ranking / stats ──
             ("RankingSnapshot",              "MemberId"),

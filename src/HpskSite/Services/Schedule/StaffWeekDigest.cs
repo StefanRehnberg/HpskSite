@@ -18,6 +18,16 @@ namespace HpskSite.Services.Schedule
         public const int FirstHour = 17;
         public const int LastHour = 21;
 
+        /// <summary>
+        /// Så många gånger ett mejl försöks per person och dag innan vi ger upp (steg 4–6 K3). Förut släpptes spärren vid varje misslyckande
+        /// och svepet (var 5:e minut) försökte om i upp till fem timmar — en adress som studsar hårt fick mejl varje kväll via den delade
+        /// avsändaren. Efter taket får personen inget mejl den dagen; Mitt schema gäller alltid.
+        /// </summary>
+        public const int MaxAttempts = 3;
+
+        /// <summary>Så många misslyckade sändningar i rad avbryter ett svep: SMTP är då nere och det är meningslöst att pröva alla andra.</summary>
+        public const int MaxConsecutiveFailures = 3;
+
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
         public static bool InSendWindow(DateTime now) => now.Hour >= FirstHour && now.Hour <= LastHour;
@@ -25,26 +35,38 @@ namespace HpskSite.Services.Schedule
         /// <summary>Dagen mejlet gäller: i morgon.</summary>
         public static DateTime DayFor(DateTime now) => now.Date.AddDays(1);
 
-        /// <summary>Statusar som ska ha en påminnelse. Ett obesvarat uppdrag (Invited) och ett avböjt (Declined) ska inte.</summary>
+        /// <summary>
+        /// Statusar som ska ha en påminnelse: planerad och bekräftad personal, och den som <b>ännu inte svarat</b> (Invited) — den som tagit över
+        /// ett pass efter en avhoppare är Inbjuden och ska ändå veta att hen väntas (mejlet säger då att hen inte svarat än). Bara
+        /// <b>pennade</b> rader (Planned, ingen har bett personen) och avböjda får inget — ett utkast ska inte mejlas, och en okänd status
+        /// är inte en inbjudan.
+        /// </summary>
         public static bool Remindable(string? status) =>
-            string.IsNullOrEmpty(status)
-            || string.Equals(status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, StaffAssignmentStatus.Confirmed, StringComparison.OrdinalIgnoreCase);
+            string.Equals(status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, StaffAssignmentStatus.Confirmed, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase);
 
-        public static string Key(int rootId, DateTime day) => $"week-{rootId}-{day:yyyyMMdd}";
+        /// <summary>Spärren: <b>en per person och dag</b> (B9) — oavsett hur många familjer personen har uppdrag i.</summary>
+        public static string Key(DateTime day) => $"week-{day:yyyyMMdd}";
 
-        public static string Subject(string planningName, DateTime day)
+        /// <summary>Raden som räknar misslyckade försök (<see cref="MaxAttempts"/>). Prefixet matchas med LIKE.</summary>
+        public static string FailPrefix(DateTime day) => $"weekfail-{day:yyyyMMdd}-";
+
+        public static string Subject(IReadOnlyList<string> planningNames, DateTime day)
         {
             var d = day.ToString("dddd d MMMM", Sv);
-            return $"I morgon ({d}): din dag i {planningName}";
+            return planningNames.Count == 1 ? $"I morgon ({d}): din dag i {planningNames[0]}" : $"I morgon ({d}): din dag";
         }
 
-        /// <summary>Mejlets innehåll för en dag: raderna i tidsordning, krockar och varningar utskrivna, och en knapp till hela veckan.</summary>
-        public static string Inner(MySchedule week, DateTime day, string weekUrl)
+        /// <summary>
+        /// Mejlets innehåll för en familj och en dag: raderna i tidsordning, krockar och varningar utskrivna, och en knapp till hela veckan.
+        /// En obesvarad inbjudan säger det rakt ut, med en länk att svara. <paramref name="siteUrl"/> gör relativa länkar absoluta.
+        /// </summary>
+        public static string Inner(MySchedule week, DateTime day, string weekUrl, string siteUrl = "", bool heading = false)
         {
             var sb = new StringBuilder();
             var items = week.Days.Where(d => d.Date?.Date == day.Date).SelectMany(d => d.Items).ToList();
+            if (heading) sb.Append($"<h3 style=\"margin:18px 0 4px\">{PlanningNotifier.H(week.CompName)}</h3>");
             sb.Append($"<p>Det här har du <b>{PlanningNotifier.H(day.ToString("dddd d MMMM", Sv))}</b>:</p>");
             sb.Append("<table style=\"border-collapse:collapse;width:100%;max-width:560px\">");
             foreach (var it in items)
@@ -54,6 +76,11 @@ namespace HpskSite.Services.Schedule
                 sb.Append("<td style=\"padding:8px 0\">");
                 sb.Append($"<b>{PlanningNotifier.H(it.Title)}</b>");
                 if (!string.IsNullOrWhiteSpace(it.Where)) sb.Append($"<br><span style=\"color:#666\">{PlanningNotifier.H(it.Where)}</span>");
+                if (it.NeedsResponse)
+                {
+                    var link = string.IsNullOrWhiteSpace(it.Link) ? weekUrl : (it.Link!.StartsWith('/') ? siteUrl.TrimEnd('/') + it.Link : it.Link);
+                    sb.Append($"<br><b>Du har inte svarat än.</b> <a href=\"{PlanningNotifier.H(link)}\">Svara här</a>");
+                }
                 if (it.HasConflict)
                     sb.Append($"<br><span style=\"color:#b45309\"><b>Krockar med:</b> {PlanningNotifier.H(it.ConflictText)}</span>");
                 if (!string.IsNullOrWhiteSpace(it.WarningText))
@@ -65,8 +92,19 @@ namespace HpskSite.Services.Schedule
             return sb.ToString();
         }
 
-        public static string Footer() =>
-            "Du får det här mejlet kvällen före en dag där du har ett uppdrag, ett mejl per dag. "
-            + "Svara inte på det — frågor om uppdraget går till den som bemannar.";
+        /// <summary>
+        /// Fotnoten: vem man vänder sig till (den som bemannar, med telefon när den finns) och att mejlet kan vara gammalt om något ändrats
+        /// efter kl 17. Mejlet går att svara på — Reply-To är samma person.
+        /// </summary>
+        public static string Footer(string? contactName = null, string? contactPhone = null)
+        {
+            var contact = string.IsNullOrWhiteSpace(contactName) ? ""
+                : $"Frågor om uppdraget: <b>{PlanningNotifier.H(contactName)}</b>"
+                  + (string.IsNullOrWhiteSpace(contactPhone) ? "" : $", <a href=\"tel:{PlanningNotifier.H(contactPhone)}\">{PlanningNotifier.H(contactPhone)}</a>")
+                  + ". Du kan svara på det här mejlet. ";
+            return contact
+                + "Du får ett mejl per dag, kvällen före en dag där du har ett uppdrag. "
+                + "Ändras något efter kl 17 kan mejlet vara inaktuellt — Mitt schema på pistol.nu gäller alltid.";
+        }
     }
 }

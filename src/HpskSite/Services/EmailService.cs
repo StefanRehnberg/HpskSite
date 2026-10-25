@@ -1805,6 +1805,9 @@ namespace HpskSite.Services
                         smtpClient.EnableSsl = _useSsl;
                         smtpClient.UseDefaultCredentials = false;
                         smtpClient.Credentials = new NetworkCredential(_username, _password);
+                        // Standard är 100 s. Ett SMTP som inte svarar höll förut hela svepet (veckomejlet skickar ett i taget) i minuter
+                        // per mottagare — 30 s räcker gott för ett vanligt mejl.
+                        smtpClient.Timeout = 30_000;
 
                         await smtpClient.SendMailAsync(message);
                         _logger.LogInformation("Email sent successfully to {Email} with subject: {Subject}", toEmail, subject);

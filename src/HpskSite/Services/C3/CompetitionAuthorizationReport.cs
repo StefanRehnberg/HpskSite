@@ -166,6 +166,17 @@ namespace HpskSite.Services.C3
             foreach (var m in db.Fetch<int>("SELECT DISTINCT MemberId FROM StaffAssignment WHERE CompetitionId = @0 AND HasAdminAccess = 1 AND MemberId > 0", competitionId))
                 Get(m).Basis.Add("bemanning");
 
+            // Steg 4–6 M4: det gemensammas behörighet (huvudplaneringen, steg 5) gäller alla veckans tävlingar och syntes inte här.
+            // Samma villkor som StaffingService.FamilyGrantSql, men som lista över medlemmar i stället för en fråga om en.
+            foreach (var m in db.Fetch<int>(@"
+                SELECT DISTINCT sa.MemberId FROM StaffAssignment sa
+                  JOIN Planning r ON r.Id = sa.PlanningId AND r.DeletedAt IS NULL AND r.Id = r.FamilyRootId
+                 WHERE sa.MemberId > 0 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL AND ISNULL(sa.Status, N'') <> N'Declined'
+                   AND EXISTS (SELECT 1 FROM Planning f
+                                 JOIN PlanningLink l ON l.PlanningId = f.Id AND l.TargetKind = N'competition' AND l.TargetId = @0
+                                WHERE f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL)", competitionId))
+                Get(m).Basis.Add("bemanning (veckans planering)");
+
             var groupsByMember = rows.GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.Select(x => x.GroupName).OrderBy(x => x).ToList());
             var result = new List<Candidate>();
             foreach (var c in byId.Values.OrderBy(c => c.MemberId))

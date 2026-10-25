@@ -367,6 +367,13 @@ namespace HpskSite.Controllers
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
+            // Steg 5 (K2/K8): att SÄTTA "Ge behörighet" prövas — den som redan har den kvar får fortfarande ändra raden.
+            if (request.HasAdminAccess && !(request.Id > 0 && _staffing.GetById(request.Id)?.HasAdminAccess == true))
+            {
+                var refusal = await AdminGrantRefusalAsync(owner);
+                if (refusal != null) return Json(new { success = false, message = refusal });
+            }
+
             // The role must exist in this competition's merged catalog (built-ins + arrangör-named rows).
             // It is no longer a closed set — "Vapenkontroll" is as valid as "Startledare" once someone has
             // created it — but it must still be a NAMED role, so everything downstream can group and count.
@@ -1434,6 +1441,11 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
+            if (request.Grant)
+            {
+                var refusal = await AdminGrantRefusalAsync(owner);
+                if (refusal != null) return Json(new { success = false, message = refusal });
+            }
             try
             {
                 var r = _staffing.SetPersonAdminAccess(owner, request.PersonKey, request.Grant);
@@ -1836,6 +1848,37 @@ namespace HpskSite.Controllers
             if (pid <= 0) return false;
             var owner = _owners.ForPlanning(pid);
             return owner is { HasCompetition: true } && owner.Comp == competitionId && await CanEditPlanningStaffAsync(pid);
+        }
+
+        /// <summary>
+        /// Steg 5 (Expertgruppen steg 4–6, K2 och K8): vem får dela ut "Ge behörighet"? Null = får. Annars svaret till den som frågar.
+        /// <list type="bullet">
+        /// <item><b>Det gemensamma</b> (en huvudplanering med delar, utan egen tävling) gäller alla veckans tävlingar — det ger bara
+        /// huvudplaneringens <b>Sammankallande</b>, inte en "Kan ändra". Annars kunde den som bara skriver in folk ge sig själv
+        /// tävlingshantering i varje tävling.</item>
+        /// <item><b>En del som inte själv är kopplad</b> (den får syskonets eller rotens tävling via "Bemannar för" eller arv) ger
+        /// bara den som har organisatörsrätt i just den tävlingen — annars kunde en delplaneringsledare ge appbehörighet i en annan
+        /// klubbs tävling.</item>
+        /// <item>En tävlings egen bemanning och en planering med egen koppling: som förut.</item>
+        /// </list>
+        /// </summary>
+        private async Task<string?> AdminGrantRefusalAsync(StaffOwner owner)
+        {
+            if (!owner.HasPlanning) return null;
+            if (!owner.HasCompetition)
+                return _staffing.CarriesFamilyGrant(owner) && !await IsRootConvenerAsync(owner.PlanningId)
+                    ? "Det gemensammas behörighet ges av huvudplaneringens sammankallande." : null;
+            if (_planning.LinkFor(owner.PlanningId)?.TargetId != owner.Comp && !await _auth.HasCompetitionOrganiserAccessAsync(owner.Comp))
+                return "Behörighet i den här tävlingen ges av arrangören. Planeringen är inte själv kopplad till den.";
+            return null;
+        }
+
+        private async Task<bool> IsRootConvenerAsync(int planningId)
+        {
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return false;
+            var row = _planning.ParticipantForMember(planningId, viewer.Id);
+            return row is { IsActive: true, Access: HpskSite.Models.Planning.PlanningAccessLevel.Owner } && !row.ViaCompetition;
         }
 
         private async Task<bool> CanEditPlanningStaffAsync(int planningId)

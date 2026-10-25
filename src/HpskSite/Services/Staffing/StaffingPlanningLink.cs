@@ -100,8 +100,10 @@ namespace HpskSite.Services.Staffing
             {
                 var comp = HpskSite.Models.Planning.PlanningFamilyRules.StaffingCompetition(f, links);
                 // B7: behörigheten gäller tävlingen raden HADE — den följer inte med till en annan.
+                // Steg 4–6 K1: också raden UTAN tävling — en flagga på det gemensamma uppdraget (steg 5) gäller familjens tävlingar, inte
+                // den tävling raden nu får. Utan det vaknade den som en vanlig behörighet när roten eller delen kopplades.
                 var n = comp is int nc
-                    ? db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1 AND CompetitionId IS NOT NULL AND CompetitionId <> @1", f.Id, nc)
+                    ? db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1 AND (CompetitionId IS NULL OR CompetitionId <> @1)", f.Id, nc)
                     : db.Execute("UPDATE StaffAssignment SET HasAdminAccess = 0 WHERE PlanningId = @0 AND HasAdminAccess = 1 AND CompetitionId IS NOT NULL", f.Id);
                 if (n > 0) revoked.Add(new AccessRevoked(f.Id, n));
                 foreach (var t in AllTables)

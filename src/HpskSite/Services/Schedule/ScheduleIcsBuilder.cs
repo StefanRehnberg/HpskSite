@@ -121,7 +121,8 @@ namespace HpskSite.Services.Schedule
                 .Replace(";", "\\;")
                 .Replace(",", "\\,")
                 .Replace("\r\n", "\\n")
-                .Replace("\n", "\\n");
+                .Replace("\n", "\\n")
+                .Replace("\r", "\\n");   // ett ensamt CR kan annars avsluta raden och ge en egen egenskap i filen
 
             var line = $"{name}:{escaped}";
             const int max = 73;

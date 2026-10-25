@@ -253,6 +253,10 @@ namespace HpskSite.Controllers
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
             var (ok, msg) = _staffing.RespondAsMember(request.AssignmentId, memberId.Value, request.Status ?? "");
+            // Steg 4–6 K5: "jag kan inte" ska nå den som bemannar — förut skrevs bara statusen och ingen fick veta (kvällen före, kl 06:30).
+            if (ok && string.Equals(request.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
+                try { await HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().NotifyDeclinedAsync(request.AssignmentId, memberId.Value); }
+                catch (Exception ex) { HttpContext.RequestServices.GetRequiredService<ILogger<MinaUppdragController>>().LogWarning(ex, "Besked om avböjt uppdrag {Id} föll.", request.AssignmentId); }
             return Json(new { success = ok, message = msg });
         }
 

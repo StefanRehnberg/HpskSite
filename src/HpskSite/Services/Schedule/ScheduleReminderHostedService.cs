@@ -62,21 +62,37 @@ namespace HpskSite.Services.Schedule
             _logger.LogInformation("ScheduleReminderHostedService stopped.");
         }
 
+        /// <summary>
+        /// Pushpåminnelserna FÖRE veckomejlet: pushen är tidskritisk (30 minuter före) och mejlet kan dra ut på tiden när SMTP
+        /// svarar långsamt (steg 4–6 K3). Båda körs alltid; ett fel i det ena stoppar inte det andra.
+        /// </summary>
         private async Task RunSafelyAsync(CancellationToken ct)
+        {
+            await RunPushAsync(ct);
+            await RunDigestAsync(ct);
+        }
+
+        /// <summary>
+        /// Steg 4 (B9): ett mejl per person och dag för en planeringsfamiljs vecka. Fristående från pushen — mejlet beror inte på att
+        /// någon slagit på påminnelser. Svensk tid, så att fönstret kl 17–21 inte flyttar sig om servern kör i UTC (fas D).
+        /// </summary>
+        private async Task RunDigestAsync(CancellationToken ct)
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+                var mails = await scope.ServiceProvider.GetRequiredService<StaffWeekDigestService>().SendAsync(HpskSite.Services.Hosting.SwedishTime.Now, ct);
+                if (mails > 0) _logger.LogInformation("Veckomejl skickade: {Count}", mails);
+            }
+            catch (OperationCanceledException) { /* shutdown */ }
+            catch (Exception ex) { _logger.LogWarning(ex, "Veckomejlen föll."); }
+        }
 
-                // Steg 4 (B9): ett mejl per person och dag för en planeringsfamiljs vecka. Fristående från pushen — mejlet
-                // beror inte på att någon slagit på påminnelser — och ett fel här får inte stoppa pushpåminnelserna.
-                try
-                {
-                    var mails = await scope.ServiceProvider.GetRequiredService<StaffWeekDigestService>().SendAsync(DateTime.Now, ct);
-                    if (mails > 0) _logger.LogInformation("Veckomejl skickade: {Count}", mails);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { _logger.LogWarning(ex, "Veckomejlen föll."); }
+        private async Task RunPushAsync(CancellationToken ct)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
 
                 var push = scope.ServiceProvider.GetRequiredService<WebPushService>();
                 if (!push.IsConfigured) return;

@@ -13,6 +13,9 @@ namespace HpskSite.Controllers
     /// </summary>
     public partial class MinaUppdragController
     {
+        /// <summary>Kommentaren skrivs i varje del med val — en gräns så att ett anrop inte kan fylla tabellen (steg 4–6 M5).</summary>
+        private const int MaxCommentLength = 500;
+
         /// <summary>Delarna i huvudplaneringen <paramref name="planningId"/> med det som behövs i var och en. Bara för en huvudplanering med delar.</summary>
         [HttpGet("week")]
         public async Task<IActionResult> GetWeekParts(int planningId, bool preview = false)
@@ -62,6 +65,7 @@ namespace HpskSite.Controllers
 
             // Alla delar skrivs — också de utan val, så att ett avbockat val tas bort. Kommentaren följer med där personen har valt något
             // (och i huvudplaneringen); annars skulle varje del få en tom anmälan bara för en kommentar.
+            if (request.Comment is { Length: > MaxCommentLength }) request.Comment = request.Comment[..MaxCommentLength];
             var byPart = request.Parts.GroupBy(p => p.PlanningId).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Slots ?? new()).ToList());
             foreach (var f in family)
             {

@@ -176,27 +176,62 @@ namespace HpskSite.Tests
             => StaffWeekDigest.DayFor(new DateTime(2028, 8, 11, 18, 30, 0)).Should().Be(new DateTime(2028, 8, 12));
 
         [Theory]
-        [InlineData(null, true)]
-        [InlineData("Planned", true)]
+        [InlineData(null, false)]
+        [InlineData("", false)]
+        [InlineData("Planned", false)]      // pennad, ingen har bett personen — ett utkast ska inte mejlas
         [InlineData("Accepted", true)]
         [InlineData("Confirmed", true)]
-        [InlineData("Invited", false)]
+        [InlineData("Invited", true)]       // den som tagit över ett pass och inte svarat ska ändå veta att hen väntas
         [InlineData("Declined", false)]
         [InlineData("declined", false)]
-        public void Bara_bekraftade_och_planerade_far_en_paminnelse(string? status, bool expected)
+        public void Pennade_och_avbojda_far_ingen_paminnelse_men_inbjudna_far_(string? status, bool expected)
             => StaffWeekDigest.Remindable(status).Should().Be(expected);
 
         [Fact]
-        public void Spärren_ar_en_per_familj_och_dag()
+        public void Sparren_ar_en_per_person_och_dag_oavsett_familj()
         {
-            StaffWeekDigest.Key(7, new DateTime(2028, 8, 12)).Should().Be("week-7-20280812");
-            StaffWeekDigest.Key(7, new DateTime(2028, 8, 12)).Should().NotBe(StaffWeekDigest.Key(7, new DateTime(2028, 8, 13)));
-            StaffWeekDigest.Key(7, new DateTime(2028, 8, 12)).Should().NotBe(StaffWeekDigest.Key(8, new DateTime(2028, 8, 12)));
+            StaffWeekDigest.Key(new DateTime(2028, 8, 12)).Should().Be("week-20280812");
+            StaffWeekDigest.Key(new DateTime(2028, 8, 12)).Should().NotBe(StaffWeekDigest.Key(new DateTime(2028, 8, 13)));
+            StaffWeekDigest.FailPrefix(new DateTime(2028, 8, 12)).Should().Be("weekfail-20280812-");
+            StaffWeekDigest.Key(new DateTime(2028, 8, 12)).Should().NotStartWith(StaffWeekDigest.FailPrefix(new DateTime(2028, 8, 12)));
         }
 
         [Fact]
-        public void Rubriken_namnar_planeringen_och_dagen()
-            => StaffWeekDigest.Subject("SM-veckan 2028", new DateTime(2028, 8, 12)).Should().Be("I morgon (lördag 12 augusti): din dag i SM-veckan 2028");
+        public void Rubriken_namnar_planeringen_och_dagen_och_utelamnar_namnet_nar_det_ar_flera()
+        {
+            StaffWeekDigest.Subject(new[] { "SM-veckan 2028" }, new DateTime(2028, 8, 12)).Should().Be("I morgon (lördag 12 augusti): din dag i SM-veckan 2028");
+            StaffWeekDigest.Subject(new[] { "A", "B" }, new DateTime(2028, 8, 12)).Should().Be("I morgon (lördag 12 augusti): din dag");
+        }
+
+        [Fact]
+        public void Fotnoten_namnger_kontaktpersonen_med_telefon_och_sager_att_mejlet_kan_vara_gammalt()
+        {
+            var f = StaffWeekDigest.Footer("Anna Ek", "070-123 45 67");
+            f.Should().Contain("Anna Ek").And.Contain("tel:070-123 45 67").And.Contain("kan svara").And.Contain("inaktuellt");
+            StaffWeekDigest.Footer().Should().NotContain("Frågor om uppdraget").And.Contain("inaktuellt");
+            StaffWeekDigest.Footer("<b>x</b>", null).Should().Contain("&lt;b&gt;x&lt;/b&gt;");
+        }
+
+        [Fact]
+        public void En_obesvarad_inbjudan_sager_att_man_inte_svarat_och_lankar_till_svaret()
+        {
+            var lor = new DateTime(2028, 8, 12);
+            var e = new PersonWeekEntry("a9", PersonWeekKind.Assignment, lor, StaffInterval.From(lor, TimeSpan.FromHours(8), TimeSpan.FromHours(12)), null,
+                "Markör (Fält)", 10, null, "Markör", "Fält", "Invited");
+            var week = MyWeekService.ToSchedule(1, "SM", PersonWeek.Build(new[] { e }, lor, lor), null, null, lor.AddDays(-1));
+            var html = StaffWeekDigest.Inner(week, lor, "https://pistol.nu/mitt-schema?p=1", "https://pistol.nu");
+            html.Should().Contain("Du har inte svarat").And.Contain("https://pistol.nu/bemanna?p=10");
+        }
+
+        [Fact]
+        public void Flera_familjer_far_en_rubrik_var()
+        {
+            var lor = new DateTime(2028, 8, 12);
+            var e = new PersonWeekEntry("a1", PersonWeekKind.Assignment, lor, StaffInterval.From(lor, TimeSpan.FromHours(8), TimeSpan.FromHours(9)), null, "X", 10, null, "X", "Fält", "Accepted");
+            var week = MyWeekService.ToSchedule(1, "SM-veckan", PersonWeek.Build(new[] { e }, lor, lor), null, null, lor.AddDays(-1));
+            StaffWeekDigest.Inner(week, lor, "u", heading: true).Should().Contain("<h3").And.Contain("SM-veckan");
+            StaffWeekDigest.Inner(week, lor, "u", heading: false).Should().NotContain("<h3");
+        }
 
         [Fact]
         public void Mejlet_har_bara_dagens_rader_med_tid_roll_plats_och_krock_och_ar_html_sakert()
