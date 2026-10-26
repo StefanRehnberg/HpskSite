@@ -26,6 +26,8 @@ namespace HpskSite.Models.Staffing
         /// <summary>Föreslå bara de som anmält sig som funktionärer (Stefans svar: startlistan tillsammans med funktionärsanmälan är källan).</summary>
         public bool OnlyVolunteers { get; init; } = true;
         public TimeSpan? TravelMargin { get; init; }
+        /// <summary>Förbättringsfasen (flytta förslagets egna uppdrag så att fler luckor fylls). Av bara i test, för att visa att den gör nytta.</summary>
+        public bool Improve { get; init; } = true;
     }
 
     public sealed record ProposedRow(string SlotKey, int MemberId, string Name, string RoleKey, string? ScopeType, string? ScopeKey, DateTime Date, StaffInterval Interval,
@@ -131,7 +133,7 @@ namespace HpskSite.Models.Staffing
 
             // Förbättring: en lucka som ännu saknar folk kan få en person som bara blockeras av ETT av förslagets egna uppdrag — om det uppdraget kan
             // flyttas till någon annan som är ledig. Varje flytt fyller en lucka till utan att tömma en annan; upprepas tills inget mer går (högst 50 varv).
-            for (var pass = 0; pass < 50 && leftBySlot.Count > 0; pass++)
+            for (var pass = 0; options.Improve && pass < 50 && leftBySlot.Count > 0; pass++)
             {
                 var improved = false;
                 foreach (var key in leftBySlot.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList())

@@ -175,6 +175,22 @@ namespace HpskSite.Tests
             StaffingSolver.Validate(new[] { a, b }, new[] { ann, bo }, res).Should().BeEmpty();
         }
 
+        [Fact]
+        public void Forbattringsfasen_fyller_fler_luckor_pa_nagon_instans_och_gor_aldrig_nagot_samre()
+        {
+            var better = 0;
+            for (var seed = 1; seed <= 300; seed++)
+            {
+                var inst = Make(seed);
+                var with = StaffingSolver.Solve(inst.Slots, inst.People);
+                var without = StaffingSolver.Solve(inst.Slots, inst.People, new SolverOptions { Improve = false });
+                StaffingSolver.Validate(inst.Slots, inst.People, with).Should().BeEmpty($"fröet {seed}");
+                (Hours(with) <= Hours(without) + 0.001).Should().BeTrue($"fröet {seed}: förbättringsfasen får aldrig lämna mer obemannat");
+                if (Hours(with) < Hours(without) - 0.001) better++;
+            }
+            better.Should().BeGreaterThan(0, "annars bevisar ingen instans att fasen gör nytta — och den kan tas bort utan att något testas");
+        }
+
         // ---- validatorn måste kunna falla (annars bevisar de andra testerna ingenting) ----
 
         [Fact]
