@@ -90,6 +90,11 @@ namespace HpskSite.Models.Staffing
             new() { Key = "sekretariat", DisplayName = "Sekretariat", PluralName = "Sekretariat",
                     DefaultScopeType = StaffScopeType.All,
                     Needs = new[] { "Startlistor", "Resultatinmatning / dator", "Skrivare", "Priser och medaljer" } },
+            // Alla fyra persontesterna fick skriva Servering som en egen roll (och den hamnade överst, ur bild): en klubbtävling har nästan alltid servering.
+            new() { Key = "servering", DisplayName = "Servering", PluralName = "Servering",
+                    DefaultScopeType = StaffScopeType.All,
+                    Description = "Kaffe, korv och dryck till deltagare och funktionärer.",
+                    Needs = new[] { "Kaffe, korv och dryck", "Disk, bord och engångsmaterial", "Swish eller kontanter för serveringen" } },
             new() { Key = "materielansvarig", DisplayName = "Materielansvarig", PluralName = "Materielansvariga",
                     DefaultScopeType = StaffScopeType.All, IsResponsibleByDefault = true,
                     Description = "Ansvarar för materiel — beställning, transport och återlämning.",

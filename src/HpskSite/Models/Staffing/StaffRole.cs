@@ -265,6 +265,11 @@ namespace HpskSite.Models.Staffing
         /// <summary>Planera dagen: senaste tillämpade förslag som går att ångra (orörda Planerade rader kvar). Null = inget.</summary>
         public Guid? UndoBatchId { get; set; }
         public int UndoRows { get; set; }
+        /// <summary>Planera dagen: "Dagens plan" — stegen härledda ur raderna ovan (<see cref="PlanStepRules"/>). Tom i en familjs gemensamma vy; stegen hör till en del.</summary>
+        public List<PlanStep> PlanSteps { get; set; } = new();
+        /// <summary>Platser (behov minus bemannat, per roll och dag eller pass) — EN räkning på servern som både bandet och sidans rubrik läser.</summary>
+        public int PlacesNeeded { get; set; }
+        public int PlacesMissing { get; set; }
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>

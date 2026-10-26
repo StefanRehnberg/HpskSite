@@ -216,7 +216,8 @@ window.PlaneringBemanning = (function () {
             if (pc.some(p => p.needed > 0)) return pc.reduce((a, p) => a + Math.max(0, (p.needed || 0) - (p.filled || 0)), 0);
             return Math.max(0, needFor(r, c.key) - filledFor(r, c.key));
         };
-        const places = (g.rows || []).reduce((acc, r) => acc + cols.reduce((a, c) => a + missingFor(r, c), 0), 0);
+        // Platserna räknas på servern (GridResponse.PlacesMissing) — EN räkning för rubriken och Dagens plan. JS-räkningen finns kvar bara som reserv för en familjs sammanslagna rutnät.
+        const places = g.placesMissing != null && !g.family ? g.placesMissing : (g.rows || []).reduce((acc, r) => acc + cols.reduce((a, c) => a + missingFor(r, c), 0), 0);
         const holes = (g.rows || []).reduce((a, r) => a + (r.gaps || []).length, 0);
         const parts = [`${g.totalAssigned || 0} uppdrag`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
         if (places) parts.push(`<span class="text-danger fw-semibold" data-plb-missing="${places}">${places} ${places === 1 ? 'plats saknas' : 'platser saknas'}</span>`);
@@ -742,6 +743,106 @@ window.PlaneringBemanning = (function () {
         if (typeof res === 'string') A.showMsg(esc(res), 'danger');
     });
 
+    // ================================================================ Dagens plan (Planera dagen)
+    // Ett band överst i Rutnätet som visar läget i TEXT: vad som är klart och vad som behöver dig. Stegen härleds på servern ur datan (PlanStepRules) — "klart" betyder att datan
+    // säger det, inte att något klickats. Ingenting låses; alla steg går att göra i valfri ordning, och varje knapp öppnar en dialog som redan finns. Öppet när planeringen är ny,
+    // en rad efteråt (valet minns per planering). En liten klubbtävling ser tre rader, inte fem.
+    const PLAN_ACTIONS = {
+        roller: { label: 'Välj roller…', fn: () => ((B.grid.roleChoices || []).length ? openChooseRoles() : openNewRole()) },
+        behov: { label: 'Sätt antal…', changed: 'Ändra…', fn: () => openNeeds() },
+        lage: { label: 'Välj hur ni gör…', changed: 'Ändra…', fn: () => openShooterMode() },
+        skjuttid: { label: 'Skjuttid…', fn: () => openShootTime() },
+        laggin: { label: 'Lägg in flera…', fn: () => openAssignMany() },
+        forslag: { label: 'Fyll med förslag…', fn: () => openProposal() },
+        startlista: { label: 'Bygg om startlistan…', fn: () => openPatrolPlan() },
+        skrivut: { label: 'Skriv ut', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
+    };
+    function planPref() { try { return localStorage.getItem('plbPlan:' + A.ID); } catch (e) { return null; } }
+    function setPlanPref(v) { try { localStorage.setItem('plbPlan:' + A.ID, v); } catch (e) { /* utan lagring ritas bandet om med förvalet */ } }
+    function planHtml(g) {
+        const steps = g.planSteps || [];
+        if (!steps.length || g.family) return '';
+        const pref = planPref();
+        const todo = steps.filter(s => s.state === 'Todo'), next = todo[0];
+        const open = pref === 'open' ? true : pref === 'closed' ? false : steps[0].state === 'Todo';
+        const stateOf = s => s.state === 'Done'
+            ? '<span class="badge text-bg-success fw-normal plb-step-state">klart</span>'
+            : '<span class="badge text-bg-warning fw-normal plb-step-state">behöver dig</span>';
+        const btns = s => (s.actions || []).filter(k => PLAN_ACTIONS[k]).map((k, i) => `<button type="button" class="btn btn-sm ${i === 0 && s.state === 'Todo' && k !== 'skrivut' ? 'btn-primary' : 'btn-outline-secondary'}" data-plb-plan-action="${esc(k)}">${esc(s.state === 'Done' && PLAN_ACTIONS[k].changed ? PLAN_ACTIONS[k].changed : PLAN_ACTIONS[k].label)}</button>`).join(' ');
+        const line = next
+            ? `<b>${todo.length} ${todo.length === 1 ? 'steg kvar' : 'steg kvar'}</b> · Nästa: <b>${esc(next.title)}</b> — ${esc(next.text)}`
+            : '<b>Allt är klart</b> — alla platser är fyllda och inget krockar.';
+        return `<section class="pl-card" id="plbPlan" aria-labelledby="plbPlanH">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+                <h2 class="h6 mb-1" id="plbPlanH">Dagens plan</h2>
+                <button type="button" class="btn btn-link btn-sm p-0" id="plbPlanToggle" data-plb-plan-toggle="${open ? 'closed' : 'open'}" aria-expanded="${open}" aria-controls="plbPlanSteps">${open ? 'Visa som en rad' : 'Visa alla steg'}</button>
+            </div>
+            ${open ? '' : `<p class="mb-0 small" id="plbPlanLine">${line}</p>`}
+            <ol class="list-unstyled mb-0 small" id="plbPlanSteps"${open ? '' : ' hidden'}>${steps.map(s => `<li class="py-2 border-top d-flex flex-wrap gap-2 align-items-center" data-plb-step="${esc(s.key)}">
+                <span class="d-flex gap-2 align-items-start flex-grow-1" style="min-width:14rem">${stateOf(s)}<span><span class="fw-semibold">${esc(s.title)}</span><span class="d-block plb-dim">${esc(s.text)}</span></span></span>
+                <span class="d-flex gap-1 flex-wrap">${btns(s)}</span></li>`).join('')}</ol>
+        </section>`;
+    }
+    document.addEventListener('click', e => {
+        if (!A || !A.isActive()) return;
+        const t = e.target.closest && e.target.closest('[data-plb-plan-toggle]');
+        if (t) { e.preventDefault(); setPlanPref(t.dataset.plbPlanToggle); drawGrid(); const again = $('plbPlanToggle'); if (again) again.focus(); return; }
+        const a = e.target.closest && e.target.closest('[data-plb-plan-action]');
+        if (a && PLAN_ACTIONS[a.dataset.plbPlanAction]) { e.preventDefault(); PLAN_ACTIONS[a.dataset.plbPlanAction].fn(); }
+    });
+
+    // "Vem behövs, och hur många?" — ETT ställe för antalen: en rad per roll, som i ett Excelark. Förut krävdes "Åtgärder → Antal per dag…" per rad (persontesterna gick den vägen
+    // fem gånger). Roller med olika antal per dag, station eller pass redovisas och ändras på raden, så att inget överskrivs i smyg.
+    function openNeeds() {
+        const g = B.grid, cols = (g.columns || []).filter(c => c.key);
+        if (!cols.length) { A.showMsg('Lägg till en dag först — antalen gäller per dag.', 'warning'); return; }
+        const roles = [];
+        (g.rows || []).filter(r => !g.family || r.planningId).forEach(r => {
+            if (r.roleKey === 'tavlingsledning') return;
+            let x = roles.find(y => y.roleKey === r.roleKey && y.planningId === r.planningId);
+            if (!x) roles.push(x = { roleKey: r.roleKey, name: r.roleName, planningId: r.planningId, station: String(r.scopeType || '').toLowerCase() === 'station', rows: [] });
+            x.rows.push(r);
+        });
+        roles.forEach(x => {
+            const vals = x.rows.map(r => r.needed || 0), first = vals[0] || 0;
+            x.value = first;
+            x.uniform = vals.every(v => v === first) && !x.rows.some(r => r.hasOwnStationNeed);
+            x.byPass = x.rows.some(r => Object.values(r.neededByPass || {}).some(v => v > 0));
+            x.byDay = x.rows.some(r => new Set(Object.values(r.neededByDay || {})).size > 1);
+            x.editable = x.uniform && !x.byPass && !x.byDay;
+        });
+        if (!roles.length) { A.showMsg('Välj roller först.', 'warning'); return; }
+        const line = (x, i) => `<tr><th scope="row" class="fw-normal">${esc(x.name)}${x.station ? ' <span class="plb-dim small">per station</span>' : ''}</th>
+            <td style="width:9rem">${x.editable
+                ? `<label class="visually-hidden" for="plbNd${i}">Antal ${esc(x.name)}</label><input type="number" min="0" max="50" class="form-control form-control-sm" id="plbNd${i}" data-nd="${i}" inputmode="numeric" value="${x.value}">`
+                : `<span class="small text-body-secondary">Olika på raderna — ändra där (Åtgärder → Antal per dag…)</span>`}</td></tr>`;
+        A.formModal({
+            title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
+            html: `<p class="pl-help small mb-2">Hur många av varje roll som behövs ${cols.length > 1 ? 'varje dag' : 'den här dagen'}. En roll som gäller stationer räknas per station. Tävlingsledning bemannas av den som skapade planeringen.</p>
+                <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
+                <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
+                <div class="text-danger small" id="plbNdErr" role="alert"></div>`,
+            onOpen: b => {
+                b.querySelector('#plbNdMoreRoles').addEventListener('click', () => { if ((g.roleChoices || []).length) openChooseRoles(); else openNewRole(); });
+                b.querySelector('#plbNdOwnRole').addEventListener('click', () => openNewRole());
+            },
+            onOk: async b => {
+                const changes = [...b.querySelectorAll('[data-nd]')].map(el => ({ x: roles[parseInt(el.dataset.nd, 10)], n: el.value.trim() === '' ? NaN : parseInt(el.value, 10) }))
+                    .filter(c => c.x.editable && c.n !== c.x.value);
+                if (changes.some(c => isNaN(c.n) || c.n < 0 || c.n > 50)) return 'Skriv ett antal mellan 0 och 50.';
+                if (!changes.length) return true;
+                for (const { x, n } of changes) {
+                    const d = await spost('SetRoleNeeds', { roleKey: x.roleKey, scopeKind: x.station ? 'Station' : 'All', scopeKey: '', all: n, days: cols.map(c => ({ date: c.key, count: n })), passes: [] }, x.planningId);
+                    if (!d.success) return `${x.name}: ${d.message || 'Det gick inte att spara.'}`;
+                }
+                await loadGrid(); drawGrid();
+                A.showMsg(`${changes.length} ${changes.length === 1 ? 'roll fick' : 'roller fick'} nytt antal.`, 'success');
+                return true;
+            }
+        });
+    }
+
     function drawGrid() {
         const g = B.grid, cols = g.columns || [];
         A.setHead('Bemanning', gridSummary());
@@ -749,16 +850,19 @@ window.PlaneringBemanning = (function () {
             { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: () => openNewRole() },
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
+            { header: 'Fyll platserna' },
             { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
             !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
+            !g.family && linked() && g.patrolPlanAvailable && { header: 'Startlistan' },
             !g.family && linked() && g.patrolPlanAvailable && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
+            linked() && { header: 'Inställningar' },
             linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
         ]);
 
-        let notes = disciplineLine();
+        let notes = planHtml(g) + disciplineLine();
         // Omgång 3 steg 10: en ny planering väljer sina roller i stället för att mötas av hela katalogen.
         if (g.roleChoicePending && (g.roleChoices || []).length) notes += chooseRolesCard(g);
         if (!linked()) notes += `<p class="pl-help small mb-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen och följer med när den kopplas.</p>`;

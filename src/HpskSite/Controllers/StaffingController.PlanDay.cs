@@ -12,6 +12,39 @@ namespace HpskSite.Controllers
     /// </summary>
     public partial class StaffingController
     {
+        /// <summary>
+        /// Fyller "Dagens plan" och platsräkningen ur rutnätssvaret. Platser = behov minus bemannat per roll och dag (per pass när dagen har flera pass) — samma regel som sidans
+        /// rubrik förut räknade i JS; nu EN räkning här som både bandet och rubriken läser.
+        /// </summary>
+        private static void DerivePlanSteps(GridResponse resp, StaffOwner owner)
+        {
+            var cols = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
+            int needed = 0, missing = 0;
+            foreach (var row in resp.Rows)
+                foreach (var c in cols)
+                {
+                    var pc = row.PassCover.TryGetValue(c.Key, out var l) ? l : new List<GridPassCover>();
+                    if (pc.Any(p => p.Needed > 0)) { needed += pc.Sum(p => p.Needed); missing += pc.Sum(p => Math.Max(0, p.Needed - p.Filled)); }
+                    else
+                    {
+                        var n = row.NeedFor(c.Key);
+                        var filled = row.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0;
+                        needed += n; missing += Math.Max(0, n - filled);
+                    }
+                }
+            resp.PlacesNeeded = needed; resp.PlacesMissing = missing;
+            // Krockar: inom planeringen (samma person på två poster), och över familjen (uppdrag mot annan del, uppdrag mot egen start). En avsikt att tävla är en varning, ingen krock.
+            var startClashes = resp.FamilyClashes.Count(c => c.Kind == FamilyClashRules.KindStart);
+            var allClashes = resp.Clashes.Count + resp.FamilyClashes.Count(c => c.Kind != FamilyClashRules.KindIntent);
+            var facts = new PlanFacts(
+                HasRoles: resp.Rows.Any(r => !string.Equals(r.RoleKey, "tavlingsledning", StringComparison.OrdinalIgnoreCase)),
+                HasNeeds: resp.Rows.Any(r => r.HasNeed),
+                PlacesNeeded: needed, PlacesMissing: missing, Linked: owner.HasCompetition, VolunteersTotal: resp.VolunteersTotal,
+                ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
+                PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes);
+            resp.PlanSteps = PlanStepRules.Derive(facts);
+        }
+
         /// <summary>Skjuttiden som gäller (grenens förval med planeringens egna värden över), och förvalet — så att dialogen kan visa båda.</summary>
         [HttpGet]
         public async Task<IActionResult> GetShootTime(int competitionId)

@@ -40,11 +40,25 @@ namespace HpskSite.Services.Planning
             _scopes = scopes; _files = files; _logger = logger;
         }
 
-        public sealed record PurgeResult(int Plannings, int Files);
+        public sealed record PurgeResult(int Plannings, int Files, int Backups = 0);
 
-        /// <summary>Rensar planeringar som tagits bort för mer än <see cref="RetentionDays"/> dagar sedan.</summary>
+        /// <summary>
+        /// Säkerhetskopiorna av fältets startlista (en rad per ombyggnad, hela listan som JSON med skyttarnas namn och klubbar) behövs bara så länge en ombyggnad kan ångras och
+        /// granskas. De gallras efter <see cref="RetentionDays"/> dagar — de hör till tävlingen och inte till en planering, så planeringsrensningen når dem inte.
+        /// </summary>
+        public int PurgeBackups(DateTime now)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Execute("IF OBJECT_ID('dbo.FaltskyttePatrolBackup') IS NOT NULL DELETE FROM FaltskyttePatrolBackup WHERE CreatedAt < @0", now.ToUniversalTime().AddDays(-RetentionDays));
+        }
+
+        /// <summary>Rensar planeringar som tagits bort för mer än <see cref="RetentionDays"/> dagar sedan, och gamla säkerhetskopior av startlistan.</summary>
         public async Task<PurgeResult> PurgeAsync(DateTime now)
         {
+            var backups = 0;
+            try { backups = PurgeBackups(now); }
+            catch (Exception ex) { _logger.LogError(ex, "Gallringen av startlistans säkerhetskopior föll — försöker igen nästa varv."); }
+            if (backups > 0) _logger.LogInformation("Planeringsrensningen: {Backups} gamla säkerhetskopior av startlistan borttagna.", backups);
             List<int> ids;
             using (var s = _scopes.CreateScope(autoComplete: true))
                 ids = s.Database.Fetch<int>("SELECT Id FROM Planning WHERE DeletedAt IS NOT NULL AND DeletedAt < @0 ORDER BY CASE WHEN ParentPlanningId IS NULL THEN 1 ELSE 0 END, Id",
@@ -56,7 +70,7 @@ namespace HpskSite.Services.Planning
                 catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: rensningen föll — försöker igen nästa varv.", id); }
             }
             if (plannings > 0) _logger.LogInformation("Planeringsrensningen: {Plannings} planeringar och {Files} filer borttagna.", plannings, files);
-            return new PurgeResult(plannings, files);
+            return new PurgeResult(plannings, files, backups);
         }
 
         private async Task<int> PurgeOneAsync(int id)

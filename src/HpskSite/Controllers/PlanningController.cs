@@ -1327,7 +1327,7 @@ namespace HpskSite.Controllers
         {
             if (!await _auth.IsCurrentUserAdminAsync()) return No("Bara sajtadministratören.");
             var r = await HttpContext.RequestServices.GetRequiredService<PlanningPurgeService>().PurgeAsync(ParseDateTime(asOf) ?? DateTime.Now);
-            return Json(new { success = true, plannings = r.Plannings, files = r.Files });
+            return Json(new { success = true, plannings = r.Plannings, files = r.Files, backups = r.Backups });
         }
     }
 }

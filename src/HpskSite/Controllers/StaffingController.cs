@@ -256,6 +256,9 @@ namespace HpskSite.Controllers
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: latest undoable failed for planning {Planning}", pid); }
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
+                    // "Dagens plan": stegen härleds ur det som redan står i svaret — efter rollvalet, så att dolda rader inte räknas.
+                    try { DerivePlanSteps(resp, owner); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Staffing: plan steps failed for planning {Planning}", pid); }
                 }
                 return Json(resp);
             }
