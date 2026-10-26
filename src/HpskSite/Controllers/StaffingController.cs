@@ -248,6 +248,12 @@ namespace HpskSite.Controllers
                     resp.PatrolPlanAvailable = owner.HasCompetition
                         && FunctionaryRoles.FaltFamily.Contains(_competitions.GetSaved(owner.Comp)?.CompetitionType ?? "", StringComparer.OrdinalIgnoreCase)
                         && await HasCompetitionAccessAsync(owner.Comp);
+                    // Stående "Ångra senaste förslaget": en tillämpning går att ångra så länge raderna är orörda, också efter en omladdning (inte bara i en toast).
+                    try
+                    {
+                        if (HttpContext.RequestServices.GetRequiredService<StaffProposalService>().LatestUndoable(owner) is { } u) { resp.UndoBatchId = u.BatchId; resp.UndoRows = u.Rows; }
+                    }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Staffing: latest undoable failed for planning {Planning}", pid); }
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
                 }

@@ -262,6 +262,9 @@ namespace HpskSite.Models.Staffing
         public string? ShooterMode { get; set; }
         /// <summary>Planera dagen steg 3b: planeringen hör till en fälttävling, så startlistan kan byggas runt funktionärerna.</summary>
         public bool PatrolPlanAvailable { get; set; }
+        /// <summary>Planera dagen: senaste tillämpade förslag som går att ångra (orörda Planerade rader kvar). Null = inget.</summary>
+        public Guid? UndoBatchId { get; set; }
+        public int UndoRows { get; set; }
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>

@@ -674,6 +674,9 @@ window.PlaneringBemanning = (function () {
         if (!g.family && linked() && !g.shooterMode && (g.volunteersTotal || 0) > 0)
             notes += `<div class="pl-next" id="plbShooterAsk"><div class="t"><b>Hur gör ni med funktionärer som också skjuter?</b> Fyra sätt att göra — välj ert, så anpassar sig förslagen.</div>
                 <button type="button" class="btn btn-sm btn-primary" data-plb-shootermode>Välj</button></div>`;
+        // Stående "Ångra": senaste tillämpade förslaget går att ångra så länge raderna är orörda — också efter en omladdning.
+        if (g.undoBatchId) notes += `<div class="pl-next" id="plbUndoBar"><div class="t">Senaste förslaget lade in <b>${g.undoRows}</b> ${g.undoRows === 1 ? 'person' : 'personer'}. Du kan ångra det så länge ingen har svarat eller ändrat raderna.</div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-plb-undoprop="${esc(g.undoBatchId)}">Ångra förslaget</button></div>`;
         const vols = g.volunteers || [];
         if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>
             <div class="d-flex gap-1 flex-wrap">${!g.family && linked() ? '<button type="button" class="btn btn-sm btn-primary" data-plb-proposal><i class="bi bi-magic me-1" aria-hidden="true"></i>Fyll med förslag</button>' : ''}

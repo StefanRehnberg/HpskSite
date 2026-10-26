@@ -46,10 +46,12 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<PatrolPlanService> _logger;
 
         public PatrolPlanService(IScopeProvider scopes, UmbracoStartListRepository registrations, ICompetitionStore competitions, PlanningService planning,
-            StaffOwnerResolver owners, ILogger<PatrolPlanService> logger)
+            StaffOwnerResolver owners, ILogger<PatrolPlanService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock)
         {
-            _scopes = scopes; _registrations = registrations; _competitions = competitions; _planning = planning; _owners = owners; _logger = logger;
+            _scopes = scopes; _registrations = registrations; _competitions = competitions; _planning = planning; _owners = owners; _logger = logger; _lock = dbLock;
         }
+
+        private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
 
         // ------------------------------------------------------------ underlaget
 
@@ -277,6 +279,9 @@ namespace HpskSite.Services.Staffing
 
         public async Task<PatrolApplyOutcome> ApplyAsync(StaffOwner owner, PatrolPlanSettings settings, string? fingerprint, bool force, int byMemberId)
         {
+            // Samma lås som förslagen (per tävling): ingen annan skriver bemanning medan startlistan byggs om, och tvärtom.
+            await using var lease = await _lock.TryAcquireAsync(StaffProposalService.LockName(owner), TimeSpan.FromSeconds(10));
+            if (lease == null) return new PatrolApplyOutcome(false, StaffProposalService.BusyMessage, 0, 0, 0);
             var (b, err) = await LoadAsync(owner, settings);
             if (b == null) return new PatrolApplyOutcome(false, err, 0, 0, 0);
             if (!string.Equals(Hash(b.Fingerprint), fingerprint, StringComparison.Ordinal))
@@ -329,6 +334,8 @@ namespace HpskSite.Services.Staffing
         public (bool Ok, string? Message) Undo(StaffOwner owner, int backupId, bool force)
         {
             if (!owner.HasCompetition) return (false, "Ingen tävling.");
+            using var lease = _lock.TryAcquire(StaffProposalService.LockName(owner), TimeSpan.FromSeconds(10));
+            if (lease == null) return (false, StaffProposalService.BusyMessage);
             using var scope = _scopes.CreateScope();
             var db = scope.Database;
             var row = db.FirstOrDefault<PatrolBackupRow>("SELECT * FROM FaltskyttePatrolBackup WHERE Id = @0 AND CompetitionId = @1", backupId, owner.Comp);

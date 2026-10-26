@@ -412,6 +412,7 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
             var (removed, kept) = HttpContext.RequestServices.GetRequiredService<StaffProposalService>().Undo(owner, request.BatchId);
+            if (kept < 0) return Json(new { success = false, message = StaffProposalService.BusyMessage });
             return Json(new { success = true, removed, kept });
         }
     }

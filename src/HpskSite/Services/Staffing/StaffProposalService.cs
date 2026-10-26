@@ -34,12 +34,20 @@ namespace HpskSite.Services.Staffing
         private readonly StaffPassService _pass;
         private readonly StaffingService _staffing;
         private readonly ILogger<StaffProposalService> _logger;
+        private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
 
         public StaffProposalService(IScopeProvider scopes, PlanningService planning, StartWindowReader starts, StaffOwnerResolver owners,
-            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger)
+            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock)
         {
-            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger;
+            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger; _lock = dbLock;
         }
+
+        /// <summary>
+        /// Ett lås för allt som skriver bemanning eller startlista på en tävling ("Planera dagen"): två redaktörer får inte tillämpa samtidigt — båda skulle passera
+        /// fingeravtrycket och ge dubbletter, och en ombyggnad av startlistan raderar starter som förslaget räknat på. Resursnamnet delas av förslag och startlista.
+        /// </summary>
+        public static string LockName(StaffOwner owner) => owner.HasCompetition ? $"planera-dagen:c{owner.Comp}" : $"planera-dagen:p{owner.PlanningId}";
+        public const string BusyMessage = "Någon annan ändrar bemanningen eller startlistan just nu. Försök igen om en stund — inget ändrades.";
 
         /// <summary>Högsta tid för en körning; sedan avbryts den och inget förslag visas.</summary>
         public static readonly TimeSpan MaxRun = TimeSpan.FromSeconds(20);
@@ -157,7 +165,9 @@ namespace HpskSite.Services.Staffing
             var added = new List<(int, string, int)>();
             if (rows.Count == 0) return new ApplyOutcome(false, "Inget att lägga in.", null, added, skipped);
             if (rows.Count > 500) return new ApplyOutcome(false, "Högst 500 rader åt gången.", null, added, skipped);
-            var p = Build(owner, ct);
+            using var lease = _lock.TryAcquire(LockName(owner), TimeSpan.FromSeconds(10));
+            if (lease == null) return new ApplyOutcome(false, BusyMessage, null, added, skipped);
+            var p = Build(owner, ct);   // bygg om UNDER låset: fingeravtrycket jämförs mot det som gäller när ingen annan skriver
             if (!string.Equals(p.Fingerprint, fingerprint, StringComparison.Ordinal))
                 return new ApplyOutcome(false, "Bemanningen eller anmälningarna har ändrats sedan förslaget gjordes. Gör ett nytt förslag — inget lades in.", null, added, skipped);
             if (p.Problems.Count > 0)
@@ -198,15 +208,33 @@ namespace HpskSite.Services.Staffing
             return new ApplyOutcome(true, null, added.Count > 0 ? batch : null, added, skipped);
         }
 
-        /// <summary>Ångrar en tillämpning: tar bort raderna med <paramref name="batchId"/> som fortfarande är Planerade. Antalet borttagna och kvarlämnade.</summary>
+        /// <summary>
+        /// Rader som ett tillämpat förslag lade in och som ingen rört sedan: fortfarande Planerade, och <c>ModifiedDate</c> ligger inom några sekunder från skapandet
+        /// (BatchId sätts direkt efter, utan att röra ModifiedDate). En rad som någon ändrat — tid, roll, kontakt — är inte längre förslagets och tas inte bort.
+        /// </summary>
+        internal static bool UntouchedSinceApply(StaffAssignment a) =>
+            a.Status == StaffAssignmentStatus.Planned && (a.ModifiedDate - a.CreatedDate).Duration() <= TimeSpan.FromSeconds(5);
+
+        /// <summary>Ångrar en tillämpning: tar bort raderna med <paramref name="batchId"/> som fortfarande är Planerade och orörda. Antalet borttagna och kvarlämnade (svarat eller ändrat).</summary>
         public (int Removed, int Kept) Undo(StaffOwner owner, Guid batchId)
         {
+            using var lease = _lock.TryAcquire(LockName(owner), TimeSpan.FromSeconds(10));
+            if (lease == null) return (0, -1);
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var mine = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId = @0 AND " + StaffOwner.Where(1), batchId, owner.P, owner.C);
-            var removable = mine.Where(a => a.Status == StaffAssignmentStatus.Planned).ToList();
+            var removable = mine.Where(UntouchedSinceApply).ToList();
             foreach (var a in removable) db.Execute("DELETE FROM StaffAssignment WHERE Id = @0", a.Id);
             return (removable.Count, mine.Count - removable.Count);
+        }
+
+        /// <summary>Senaste tillämpning som går att ångra (har orörda Planerade rader kvar) — stående, så att Ångra inte försvinner med en toast. Null = ingen.</summary>
+        public (Guid BatchId, int Rows, DateTime At)? LatestUndoable(StaffOwner owner)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var rows = s.Database.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId IS NOT NULL AND " + StaffOwner.Where(0), owner.P, owner.C);
+            var g = rows.Where(UntouchedSinceApply).GroupBy(a => a.BatchId!.Value).Select(x => (BatchId: x.Key, Rows: x.Count(), At: x.Max(a => a.CreatedDate))).OrderByDescending(x => x.At).FirstOrDefault();
+            return g.Rows > 0 ? g : null;
         }
 
         private static string MemberName(Dictionary<int, SolverPerson> people, int id) => people.TryGetValue(id, out var p) ? p.Name : $"Medlem {id}";
