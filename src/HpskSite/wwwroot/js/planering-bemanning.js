@@ -469,12 +469,18 @@ window.PlaneringBemanning = (function () {
             const c = r.change, s = r.settings;
             const lockRows = (r.current || []).map(m => `<label class="list-group-item d-flex gap-2 align-items-center py-1 small">
                 <input class="form-check-input flex-shrink-0 mt-0" type="checkbox" data-pp-lock="${m.patrolMemberId}"${m.locked ? ' checked' : ''} aria-label="Lås ${esc(m.name)}">
-                <span class="fw-semibold">${esc(m.name)}</span><span class="plb-dim">${esc(m.shootingClass)} · patrull ${m.number} kl ${esc(m.time)}</span></label>`).join('');
+                <span class="fw-semibold">${esc(m.name)}</span><span class="plb-dim">${esc(m.shootingClass)} · patrull ${m.number} kl ca ${esc(m.time)}</span></label>`).join('');
+            // Finns en startlista bygger vi inom de grupper som redan finns: var och en med sin egen första start (fältets lista skapas en grupp i taget).
+            const hasGroups = (r.groups || []).length > 0;
+            const groupsHtml = hasGroups ? `<div class="mb-2" id="plbPpGroups"><div class="fw-semibold small mb-1">Grupperna som byggs om — var och en med sin egen första start</div>
+                <ul class="list-unstyled small mb-1">${r.groups.map(g => `<li class="py-1 border-bottom"><b>${esc(g.label || 'Alla')}</b> · första start ${esc(g.firstStart)} · ${g.patrolSize} per patrull · ${g.interval} min mellan · ${g.patrols} ${g.patrols === 1 ? 'patrull' : 'patruller'}</li>`).join('')}</ul>
+                <p class="plb-dim small mb-0">Tiderna per patrull är uppskattningar (gruppens första start + avstånd). Det är gruppens första start som gäller, och ingen flyttas till en annan grupp.</p></div>` : '';
             b.querySelector('#plbPpBody').innerHTML = `
+                ${groupsHtml}
                 <div class="row g-2 mb-2">
-                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpSize">Skyttar per patrull</label><input type="number" min="1" max="12" class="form-control form-control-sm" id="plbPpSize" inputmode="numeric" value="${s.patrolSize}"></div>
+                    ${hasGroups ? '' : `<div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpSize">Skyttar per patrull</label><input type="number" min="1" max="12" class="form-control form-control-sm" id="plbPpSize" inputmode="numeric" value="${s.patrolSize}"></div>
                     <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpInt">Minuter mellan patruller</label><input type="number" min="1" max="120" class="form-control form-control-sm" id="plbPpInt" inputmode="numeric" value="${s.intervalMinutes}"></div>
-                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpFirst">Första start</label><input type="time" class="form-control form-control-sm" id="plbPpFirst" value="${esc((s.firstStart || '').slice(11, 16))}"></div>
+                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpFirst">Första start</label><input type="time" class="form-control form-control-sm" id="plbPpFirst" value="${esc((s.firstStart || '').slice(11, 16))}"></div>`}
                     <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpGap">Minst mellan egna starter</label><input type="number" min="0" max="600" class="form-control form-control-sm" id="plbPpGap" inputmode="numeric" value="${s.gap || ''}" placeholder="min"></div>
                 </div>
                 <label class="d-block small mb-2"><input type="checkbox" class="form-check-input me-1" id="plbPpKeep"${s.keep ? ' checked' : ''}>Behåll de som redan har en tid som passar — flytta bara de som krockar${r.keptFitting ? ` (${r.keptFitting} behålls)` : ''}</label>
@@ -485,14 +491,15 @@ window.PlaneringBemanning = (function () {
                 ${!(r.moves || []).length && !r.unavoidable.length ? `<div class="alert alert-success py-2 small" id="plbPpNothing"><b>Ingen behöver flyttas.</b> Ingen skytt har en start som krockar med ett uppdrag, så startlistan behöver inte ändras.</div>` : ''}
                 ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length})</div>
                     <ul class="list-unstyled small mb-0" style="max-height:24vh;overflow:auto">${r.moves.slice(0, 60).map(m => `<li class="py-1 border-bottom"><span class="fw-semibold">${esc(m.name)}</span> <span class="plb-dim">${esc(m.shootingClass)}</span> —
-                        ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}
+                        ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ca ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ca ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}
                         <span class="d-block plb-dim">${esc(m.why)}</span></li>`).join('')}${r.moves.length > 60 ? `<li class="py-1 plb-dim">…och ${r.moves.length - 60} till</li>` : ''}</ul></div>` : ''}
                 ${r.unavoidable.length ? `<div class="alert alert-warning py-2 small" id="plbPpUnavoidable"><b>Går inte att undvika krock:</b> ${r.unavoidable.map(u => esc(u.name) + ' kl ' + esc(u.time)).join('; ')}. Uppdraget täcker hela dagen — ändra uppdraget eller starten för hand.</div>` : ''}
                 ${r.reservesLeftOut.length ? `<p class="small plb-dim" id="plbPpReserves">Utan start (hoppar in vid lucka): ${r.reservesLeftOut.map(esc).join(', ')}.</p>` : ''}
+                ${(r.ungrouped || []).length ? `<div class="alert alert-warning py-2 small" id="plbPpUngrouped"><b>De här har ingen grupp att gå i:</b> ${r.ungrouped.map(esc).join('; ')}. Deras vapenklass finns inte i någon grupp i startlistan, så de placeras inte. Skapa gruppen under Startlistor först.</div>` : ''}
                 ${r.lockedDropped.length ? `<p class="small text-warning-emphasis">Låsta som inte är anmälda längre och därför tas bort: ${r.lockedDropped.map(esc).join(', ')}.</p>` : ''}
                 ${r.lockedOverflow.length ? `<p class="small text-warning-emphasis">Fick ingen plats i sin patrull och har en egen patrull vid samma tid: ${r.lockedOverflow.map(esc).join(', ')}.</p>` : ''}
                 <details class="mb-2"><summary class="small fw-semibold">Patrullerna (${r.patrols.length})</summary>
-                    <div class="small" id="plbPpPatrols" style="max-height:26vh;overflow:auto">${r.patrols.map(p => `<div class="py-1 border-bottom"><b>Patrull ${p.number}</b> kl ${esc(p.time)} <span class="plb-dim">${esc(p.group || '')}</span><br>${p.members.map(m => esc(m.name)).join(', ')}</div>`).join('')}</div></details>
+                    <div class="small" id="plbPpPatrols" style="max-height:26vh;overflow:auto">${r.patrols.map(p => `<div class="py-1 border-bottom"><b>Patrull ${p.number}</b> kl ca ${esc(p.time)}<span class="plb-dim">${esc(p.group || '')}</span><br>${p.members.map(m => esc(m.name)).join(', ')}</div>`).join('')}</div></details>
                 <details class="mb-2"><summary class="small fw-semibold">Lås skyttar som ska ligga kvar (${(r.current || []).filter(m => m.locked).length} låsta)</summary>
                     ${lockRows ? `<div class="list-group mt-1" id="plbPpLocks" style="max-height:26vh;overflow:auto">${lockRows}</div>` : '<p class="small plb-dim mt-1">Det finns ingen startlista än.</p>'}</details>
                 ${r.undoable ? `<p class="small mb-0"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbPpUndo">Ångra senaste ombyggnaden</button> — startlistan som den var före.</p>` : ''}
