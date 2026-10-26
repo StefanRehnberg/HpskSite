@@ -26,7 +26,7 @@ namespace HpskSite.Services.Planning
             "PlanningTaskEvent", "PlanningTask",
             // Meddelandena före områdena: FK_PlanningMessage_Area (2026-10-25) pekar på området.
             "PlanningMessageMention", "PlanningMessage", "PlanningMessageRead", "PlanningNotifyLog",
-            "PlanningStationResponsible", "PlanningArea",
+            "PlanningStationResponsible", "PlanningShooterMode", "PlanningArea",
             "PlanningMeetingTopic", "PlanningRole",
             "PlanningRequest", "PlanningMember", "PlanningLink", "PlanningActivity",
         };

@@ -66,6 +66,7 @@ namespace HpskSite.Services.Planning
             var copy = db.Single<PlanningRow>("SELECT * FROM Planning WHERE Id = @0", newId);
             copy.DisciplineKey = src.DisciplineKey;
             copy.SignupRoleChoice = src.SignupRoleChoice;
+            copy.ShooterMode = src.ShooterMode;
             copy.ShootBeforeMin = src.ShootBeforeMin; copy.ShootDurationMin = src.ShootDurationMin; copy.ShootAfterMin = src.ShootAfterMin;
             copy.DoneAtMeetingsOnly = src.DoneAtMeetingsOnly;
             copy.GroupName = src.GroupName;

@@ -61,7 +61,7 @@ namespace HpskSite.Controllers
             memberId = c.MemberId, name = c.Name, club = c.Club, shooterClass = c.ShooterClass, isShooter = c.IsShooter,
             starts = c.Starts.Select(s => new { title = s.Title, where = s.Where, time = s.Start.ToString("HH\\:mm"), end = s.End?.ToString("HH\\:mm") }),
             volunteer = c.Volunteer, roleMatch = c.RoleMatch, comment = c.Comment, free = c.Free, tier = (int)c.Tier,
-            assignedToday = c.AssignedToday, alreadyHere = c.AlreadyHere,
+            assignedToday = c.AssignedToday, alreadyHere = c.AlreadyHere, mode = c.Mode,
             conflict = c.Conflict == null ? null : new { kind = c.Conflict.Kind.ToString(), label = c.Conflict.Label, hard = c.Conflict.IsHard, gap = c.Conflict.GapMinutes },
         };
 
@@ -202,6 +202,61 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Kunde inte läsa bemanningen." });
             }
         }
+    }
+
+    public partial class StaffingController
+    {
+        /// <summary>Planeringens förval för funktionärer som skjuter, de fyra lägena med text, och personernas undantag (namn + läge).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetShooterMode(int competitionId)
+        {
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Inställningen hör till planeringen." });
+            var p = _owners.Planning(owner.PlanningId);
+            var overrides = _planning.ShooterModeOverrides(owner.PlanningId);
+            return Json(new
+            {
+                success = true,
+                mode = ShooterModeRules.IsValid(p?.ShooterMode) ? p!.ShooterMode : null,
+                chosen = ShooterModeRules.IsValid(p?.ShooterMode),
+                modes = ShooterMode.All.Select(m => { var (t, h) = ShooterModeRules.Describe(m); return new { key = m, title = t, help = h }; }),
+                overrides = overrides.Select(kv => new { memberId = kv.Key, name = MemberDisplayName(kv.Key) ?? $"Medlem {kv.Key}", mode = kv.Value }),
+            });
+        }
+
+        /// <summary>Sätter planeringens förval. Tomt värde tar bort valet (frågan ställs om).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetShooterMode([FromBody] SetShooterModeRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId)) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Inställningen hör till planeringen." });
+            var mode = string.IsNullOrWhiteSpace(request.Mode) ? null : request.Mode;
+            if (mode != null && !ShooterModeRules.IsValid(mode)) return Json(new { success = false, message = "Okänt läge." });
+            if (request.MemberId is > 0)
+            {
+                // Ett undantag för en person: bara någon som finns i anmälningarna eller bland funktionärerna.
+                var known = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>()
+                    .Find(CandidateQueryOf(owner, null, null, null, null, null, null, false, 200, new[] { request.MemberId.Value })).Candidates.Any();
+                if (!known) return Json(new { success = false, message = "Personen står inte i anmälningarna eller bland funktionärerna." });
+                _planning.SetPersonShooterMode(owner.PlanningId, request.MemberId.Value, mode, viewer.Id);
+            }
+            else _planning.SetShooterMode(owner.PlanningId, mode, viewer.Id);
+            return Json(new { success = true });
+        }
+    }
+
+    /// <summary><c>MemberId</c> satt = ett undantag för den personen (tomt läge tar bort det); annars planeringens förval.</summary>
+    public class SetShooterModeRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? Mode { get; set; }
+        public int? MemberId { get; set; }
     }
 
     public class AssignManyRequest

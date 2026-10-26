@@ -227,6 +227,8 @@ namespace HpskSite.Models.Planning
         /// Planera dagen steg 0 (Stefan 2026-10-26): hur länge en skytt är upptagen av sin egen start — minuter före, skjuttid när slutet inte är
         /// känt, och minuter efter. Null = förvalet för grenen (<see cref="HpskSite.Models.Staffing.ShootTimeRules.Default"/>).
         /// </summary>
+        /// <summary>Planera dagen: hur arrangören gör med funktionärer som också skjuter (<see cref="HpskSite.Models.Staffing.ShooterMode"/>). Null = inte valt.</summary>
+        public string? ShooterMode { get; set; }
         public int? ShootBeforeMin { get; set; }
         public int? ShootDurationMin { get; set; }
         public int? ShootAfterMin { get; set; }

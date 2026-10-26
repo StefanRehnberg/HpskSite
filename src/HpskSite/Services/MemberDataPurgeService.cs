@@ -127,6 +127,8 @@ namespace HpskSite.Services
             ("StaffHelpSignup",              "MemberId"),
             // Omgång 3 steg 9: vilka tävlingar funktionären tänker tävla i (funktionärens egna uppgifter).
             ("PlanningShootIntent",          "MemberId"),
+            // Planera dagen: personens eget läge (skjuter först, reserv …) är en uppgift om personen.
+            ("PlanningShooterMode",          "MemberId"),
 
             // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
             // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.

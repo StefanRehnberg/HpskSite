@@ -44,7 +44,7 @@ namespace HpskSite.Services.Planning
             "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
             "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
             "PlanningArea", "PlanningDocument", "PlanningDocumentCategory", "PlanningDocumentRef",
-            "PlanningDecision", "PlanningDecisionResponse", "PlanningStationResponsible",
+            "PlanningDecision", "PlanningDecisionResponse", "PlanningStationResponsible", "PlanningShooterMode",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>
@@ -66,7 +66,8 @@ namespace HpskSite.Services.Planning
                                                  ("Planning", "ParentPlanningId"), ("Planning", "FamilyRootId"), ("Planning", "HostText"), ("Planning", "GroupName"),
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
                                                  ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId"),
-                                                 ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin") })
+                                                 ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin"),
+                                                 ("Planning", "ShooterMode") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -185,6 +186,33 @@ namespace HpskSite.Services.Planning
             s.Database.Execute("UPDATE Planning SET ShootBeforeMin = @1, ShootDurationMin = @2, ShootAfterMin = @3, UpdatedAt = @4, UpdatedBy = @5 WHERE Id = @0 AND DeletedAt IS NULL",
                 planningId, before, duration, after, Now, byMemberId);
             Bump(s.Database, planningId);
+        }
+
+        /// <summary>Planera dagen: planeringens förval för funktionärer som skjuter. Null = inte valt. Giltigheten prövas av anroparen.</summary>
+        public void SetShooterMode(int planningId, string? mode, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE Planning SET ShooterMode = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL", planningId, mode, Now, byMemberId);
+            Bump(s.Database, planningId);
+        }
+
+        /// <summary>Personernas egna undantag från förvalet (medlem → läge).</summary>
+        public Dictionary<int, string> ShooterModeOverrides(int planningId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<HpskSite.Models.Staffing.PlanningShooterModeRow>("SELECT * FROM PlanningShooterMode WHERE PlanningId = @0", planningId)
+                .ToDictionary(r => r.MemberId, r => r.Mode);
+        }
+
+        /// <summary>Sätter en persons eget läge, eller (null) tar bort undantaget så att förvalet gäller igen.</summary>
+        public void SetPersonShooterMode(int planningId, int memberId, string? mode, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            if (mode == null) { db.Execute("DELETE FROM PlanningShooterMode WHERE PlanningId = @0 AND MemberId = @1", planningId, memberId); return; }
+            var n = db.Execute("UPDATE PlanningShooterMode SET Mode = @2, UpdatedAt = @3, UpdatedBy = @4 WHERE PlanningId = @0 AND MemberId = @1", planningId, memberId, mode, Now, byMemberId);
+            if (n == 0)
+                db.Insert(new HpskSite.Models.Staffing.PlanningShooterModeRow { PlanningId = planningId, MemberId = memberId, Mode = mode, UpdatedAt = Now, UpdatedBy = byMemberId });
         }
 
         public void SetStatus(int planningId, string status, int byMemberId)

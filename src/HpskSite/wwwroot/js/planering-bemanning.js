@@ -347,6 +347,57 @@ window.PlaneringBemanning = (function () {
         });
     }
 
+    // Planera dagen: hur gör ni med funktionärer som också skjuter? Fyra svar i klartext som ett förval för planeringen — och ett eget läge per person.
+    async function openShooterMode() {
+        const r = await sget('GetShooterMode').catch(() => null);
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte läsa inställningen.'), 'danger'); return; }
+        let mode = r.mode || '';
+        const radio = m => `<label class="list-group-item d-flex gap-2 align-items-start"><input class="form-check-input mt-1 flex-shrink-0" type="radio" name="plbSm" value="${esc(m.key)}"${m.key === mode ? ' checked' : ''}>
+            <span><span class="fw-semibold d-block">${esc(m.title)}</span><span class="small plb-dim">${esc(m.help)}</span></span></label>`;
+        const titleOf = k => (r.modes.find(m => m.key === k) || {}).title || k;
+        A.formModal({
+            title: 'Hur gör ni med funktionärer som skjuter?', okLabel: 'Spara', wide: false,
+            html: `<p class="pl-help mb-2">Välj det som passar er. Det är förvalet för alla — en enskild person kan få ett eget läge nedan.</p>
+                <div class="list-group mb-3" role="radiogroup" aria-label="Hur funktionärer som skjuter hanteras">${r.modes.map(radio).join('')}</div>
+                ${(r.overrides || []).length ? `<div class="small fw-semibold mb-1">Egna undantag</div><ul class="list-unstyled small mb-2" id="plbSmOver">${r.overrides.map(o => `<li class="d-flex justify-content-between gap-2 py-1 border-bottom"><span>${esc(o.name)} — ${esc(titleOf(o.mode))}</span><button type="button" class="btn btn-link btn-sm p-0" data-sm-clear="${o.memberId}">Ta bort</button></li>`).join('')}</ul>` : ''}
+                <p class="pl-help small mb-0">Ett eget läge sätter du på personen: öppna personen under Personer eller Veckan.</p>`,
+            onOpen: b => {
+                b.addEventListener('click', async e => {
+                    const c = e.target.closest('[data-sm-clear]'); if (!c) return;
+                    const d = await spost('SetShooterMode', { memberId: parseInt(c.dataset.smClear, 10), mode: '' });
+                    if (d.success) c.closest('li').remove(); else A.showMsg(esc(d.message || 'Det gick inte.'), 'danger');
+                });
+            },
+            onOk: async b => {
+                const sel = b.querySelector('input[name="plbSm"]:checked');
+                if (!sel) return 'Välj ett av alternativen.';
+                const d = await spost('SetShooterMode', { mode: sel.value });
+                if (!d.success) return d.message || 'Det gick inte att spara.';
+                await loadGrid(); drawGrid();
+                return true;
+            }
+        });
+    }
+    // Ett eget läge för en person (Veckan, personens sida).
+    async function openPersonShooterMode(memberId, name) {
+        const r = await sget('GetShooterMode').catch(() => null);
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte läsa inställningen.'), 'danger'); return; }
+        const own = ((r.overrides || []).find(o => o.memberId === memberId) || {}).mode || '';
+        A.formModal({
+            title: 'Hur gör ' + esc(name) + ' som skjutande funktionär?', okLabel: 'Spara', wide: false,
+            html: `<div class="list-group" role="radiogroup">
+                <label class="list-group-item d-flex gap-2"><input class="form-check-input mt-1" type="radio" name="plbPm" value=""${own === '' ? ' checked' : ''}><span><span class="fw-semibold d-block">Som alla andra</span><span class="small plb-dim">Planeringens förval${r.mode ? ': ' + esc((r.modes.find(m => m.key === r.mode) || {}).title || '') : ' (inte valt än)'}.</span></span></label>
+                ${r.modes.map(m => `<label class="list-group-item d-flex gap-2"><input class="form-check-input mt-1" type="radio" name="plbPm" value="${esc(m.key)}"${m.key === own ? ' checked' : ''}><span><span class="fw-semibold d-block">${esc(m.title)}</span><span class="small plb-dim">${esc(m.help)}</span></span></label>`).join('')}</div>`,
+            onOk: async b => {
+                const sel = b.querySelector('input[name="plbPm"]:checked');
+                const d = await spost('SetShooterMode', { memberId, mode: sel ? sel.value : '' });
+                if (!d.success) return d.message || 'Det gick inte att spara.';
+                A.showMsg('Sparat.', 'success');
+                return true;
+            }
+        });
+    }
+
     // Planera dagen steg 0 (Stefan 2026-10-26): hur länge en skytt är upptagen av sin egen start. Förval per gren, ändringsbart här.
     async function openShootTime() {
         const r = await sget('GetShootTime').catch(() => null);
@@ -397,6 +448,7 @@ window.PlaneringBemanning = (function () {
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
+            linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
@@ -406,6 +458,10 @@ window.PlaneringBemanning = (function () {
         // Omgång 3 steg 10: en ny planering väljer sina roller i stället för att mötas av hela katalogen.
         if (g.roleChoicePending && (g.roleChoices || []).length) notes += chooseRolesCard(g);
         if (!linked()) notes += `<p class="pl-help small mb-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Planeringen är inte kopplad till någon tävling än. Bemanningen sparas i planeringen och följer med när den kopplas.</p>`;
+        // Planera dagen: frågan ställs en gång, när det finns både startlista/anmälda och funktionärer, och inget val är gjort.
+        if (!g.family && linked() && !g.shooterMode && (g.volunteersTotal || 0) > 0)
+            notes += `<div class="pl-next" id="plbShooterAsk"><div class="t"><b>Hur gör ni med funktionärer som också skjuter?</b> Fyra sätt att göra — välj ert, så anpassar sig förslagen.</div>
+                <button type="button" class="btn btn-sm btn-primary" data-plb-shootermode>Välj</button></div>`;
         const vols = g.volunteers || [];
         if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>
             <button type="button" class="btn btn-sm btn-warning" data-plb-queue>Visa dem</button></div>`;
@@ -2107,7 +2163,8 @@ window.PlaneringBemanning = (function () {
         A.setHead(d.name, `${d.assignments} ${d.assignments === 1 ? 'uppdrag' : 'uppdrag'}`
             + (d.clashes ? ` · <span class="text-danger fw-semibold">${d.clashes} ${d.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
             + (d.warnings ? ` · <span class="text-warning-emphasis fw-semibold">${d.warnings} ${d.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''));
-        A.setActions([d.isExternal ? { label: 'Koppla till en medlem…', icon: 'bi-link-45deg', fn: () => openWeekLink(d, null) } : { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoWeekLink(d) }]);
+        A.setActions([d.isExternal ? { label: 'Koppla till en medlem…', icon: 'bi-link-45deg', fn: () => openWeekLink(d, null) } : { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoWeekLink(d) },
+            !d.isExternal && d.memberId > 0 && linked() && { label: 'Hur gör hen som skjutande funktionär…', icon: 'bi-bullseye', fn: () => openPersonShooterMode(d.memberId, d.name) }]);
         let h = back;
         const m = d.match;
         if (d.isExternal && m && !m.looksLikeTwoPeople && ((m.candidates || []).length || (m.inPlan || []).length)) {
@@ -2173,10 +2230,11 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
+        if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
+        else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { closeEditor(); nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
         else if (t.hasAttribute('data-plb-add')) openEditor(t);

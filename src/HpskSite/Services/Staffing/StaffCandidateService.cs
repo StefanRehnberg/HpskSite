@@ -15,7 +15,7 @@ namespace HpskSite.Services.Staffing
     /// </summary>
     public sealed record StaffCandidate(int MemberId, string Name, string? Club, string? ShooterClass, IReadOnlyList<CandidateStart> Starts,
         bool IsShooter, bool Volunteer, bool RoleMatch, string? Comment, bool? Free, SlotConflict? Conflict, int AssignedToday,
-        bool AlreadyHere, CandidateTier Tier);
+        bool AlreadyHere, CandidateTier Tier, string Mode = ShooterMode.Coordinated);
 
     public sealed class CandidateQuery
     {
@@ -86,6 +86,9 @@ namespace HpskSite.Services.Staffing
                 }
             }
             var passById = passes.ToDictionary(p => p.Id);
+            // Planera dagen: hur personen förhåller sig till startlistan — planeringens förval, med personens eget undantag över.
+            var planningRow = owner.HasPlanning ? _owners.Planning(owner.PlanningId) : null;
+            var overrides = owner.HasPlanning ? _planning.ShooterModeOverrides(owner.PlanningId) : new Dictionary<int, string>();
 
             var startsByMember = owner.HasCompetition
                 ? _starts.ForCompetition(owner.Comp, includeUnpublished: true).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList())
@@ -134,9 +137,11 @@ namespace HpskSite.Services.Staffing
 
                 // Ledig? Egna starter (med förberedelse och vila), andra uppdrag och tiderna personen anmält sig till.
                 bool? free = null; SlotConflict? conflict = null;
+                var mode = ShooterModeRules.Effective(planningRow?.ShooterMode, overrides.GetValueOrDefault(mid));
                 if (slot is { } sl)
                 {
                     var busy = new List<BusyItem>();
+                    // Alla lägen räknar en start som finns: en reserv som tagit en lucka står i startlistan, och den starten gäller.
                     foreach (var w in startsByMember.GetValueOrDefault(mid) ?? new List<StartWindow>())
                         busy.Add(new BusyItem(BusyKind.Start, shoot.Window(w.Start, w.End),
                             $"egen start {w.Start:HH\\:mm} ({w.Title.ToLowerInvariant()}, {w.Where.Split(" · ")[0].ToLowerInvariant()})"));
@@ -156,7 +161,7 @@ namespace HpskSite.Services.Staffing
                 if (clubId > 0) { try { club = _clubs.GetClubNameById(clubId); } catch { /* utan förening */ } }
                 var tier = CandidateRules.Tier(fit.Volunteers, fit.RoleMatch, free);
                 result.Add(new StaffCandidate(mid, name, club, string.IsNullOrWhiteSpace(classes) ? null : classes, myStarts, regByMember.ContainsKey(mid), fit.Volunteers,
-                    fit.RoleMatch, comment, free, conflict, mineToday.Count, alreadyHere, tier));
+                    fit.RoleMatch, comment, free, conflict, mineToday.Count, alreadyHere, tier, mode));
             }
 
             var ranked = CandidateRules.Rank(result, c => c.Tier, c => c.Name, c => c.MemberId);

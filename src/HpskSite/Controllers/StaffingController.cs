@@ -241,6 +241,8 @@ namespace HpskSite.Controllers
                         }).ToList();
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: family clashes failed for planning {Planning}", pid); }
+                    var sm = _owners.Planning(pid)?.ShooterMode;
+                    resp.ShooterMode = ShooterModeRules.IsValid(sm) ? sm : null;
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
                 }

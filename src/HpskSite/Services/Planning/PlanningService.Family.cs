@@ -267,6 +267,8 @@ namespace HpskSite.Services.Planning
             child.DisciplineKey = string.IsNullOrWhiteSpace(i.DisciplineKey) ? null : i.DisciplineKey;
             child.DoneAtMeetingsOnly = parent.DoneAtMeetingsOnly;
             child.SignupRoleChoice = parent.SignupRoleChoice;
+            child.ShooterMode = parent.ShooterMode;
+            child.ShootBeforeMin = parent.ShootBeforeMin; child.ShootDurationMin = parent.ShootDurationMin; child.ShootAfterMin = parent.ShootAfterMin;
             child.HostClubId = i.HostClubId > 0 ? i.HostClubId : null;
             child.HostRegionId = child.HostClubId.HasValue ? null : (i.HostRegionId > 0 ? i.HostRegionId : null);
             child.HostText = child.HostClubId.HasValue || child.HostRegionId.HasValue ? null : Clean(i.HostText, 200);

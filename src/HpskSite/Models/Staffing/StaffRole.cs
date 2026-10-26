@@ -258,6 +258,8 @@ namespace HpskSite.Models.Staffing
         public int VolunteersTotal { get; set; }
         /// <summary>…och hur många av dem som har ett uppdrag som inte är avböjt.</summary>
         public int VolunteersWithJob { get; set; }
+        /// <summary>Planera dagen: planeringens förval för funktionärer som skjuter (null = inte valt — då ställs frågan).</summary>
+        public string? ShooterMode { get; set; }
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>
