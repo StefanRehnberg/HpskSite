@@ -13,7 +13,11 @@ using Umbraco.Cms.Infrastructure.Scoping;
 
 namespace HpskSite.Services.Staffing
 {
-    public sealed record PatrolPreview(PatrolPlan Plan, string Fingerprint, string? BlockedReason, int ExistingPatrols, int ExistingShooters, int Moved, int Unchanged, int Added, int Removed);
+    /// <summary>En skytt i den nuvarande startlistan, så att arrangören kan låsa de som ska ligga kvar.</summary>
+    public sealed record CurrentPlacement(int PatrolMemberId, int MemberId, string Name, string ShootingClass, int PatrolNumber, DateTime? StartTime, bool Locked);
+
+    public sealed record PatrolPreview(PatrolPlan Plan, string Fingerprint, string? BlockedReason, int ExistingPatrols, int ExistingShooters, int Moved, int Unchanged, int Added, int Removed,
+        List<CurrentPlacement>? Current = null, int KeptFitting = 0);
 
     public sealed record PatrolApplyOutcome(bool Ok, string? Message, int BackupId, int Patrols, int Shooters);
 
@@ -108,7 +112,7 @@ namespace HpskSite.Services.Staffing
                 else if (mode is ShooterMode.Patrol or ShooterMode.ShootFirst) early.Add(mid);
             }
 
-            var fp = new List<string> { $"set:{settings.PatrolSize}/{settings.IntervalMinutes}/{settings.FirstStart:s}/{settings.WeaponGrouping}/{settings.MultiClassGapMinutes}",
+            var fp = new List<string> { $"set:{settings.PatrolSize}/{settings.IntervalMinutes}/{settings.FirstStart:s}/{settings.WeaponGrouping}/{settings.MultiClassGapMinutes}/{settings.KeepFitting}",
                 $"shoot:{shoot.BeforeMinutes}/{shoot.DurationMinutes}/{shoot.AfterMinutes}" };
             fp.AddRange(regs.OrderBy(r => r.MemberId).ThenBy(r => r.MemberClass, StringComparer.Ordinal).Select(r => $"r:{r.MemberId}|{r.MemberClass}"));
             fp.AddRange(patrols.OrderBy(p => p.Id).Select(p => $"p:{p.Id}|{p.PatrolNumber}|{p.StartTime:s}|{p.WeaponGroup}|{p.DepartedAt:s}"));
@@ -127,29 +131,63 @@ namespace HpskSite.Services.Staffing
             }, null);
         }
 
-        private static PatrolPlan PlanOf(Basis b, PatrolPlanSettings settings)
+        /// <summary>
+        /// Planen, och hur många som behölls för att deras nuvarande start redan passar. Låsta ligger alltid kvar; med <see cref="PatrolPlanSettings.KeepFitting"/> gör
+        /// de som har en start utan krock mot eget uppdrag det också — annars skulle en ombyggnad flytta nästan alla för att några få krockar.
+        /// Reserver och de som ska gå tidigt (funktionärspatrull) flyttas aldrig av det här skälet.
+        /// </summary>
+        private static (PatrolPlan Plan, int KeptFitting) PlanOf(Basis b, PatrolPlanSettings settings)
         {
             var patrolById = b.Patrols.ToDictionary(p => p.Id);
-            var locked = b.Members.Where(m => m.Locked && patrolById.TryGetValue(m.PatrolId, out var p) && p.StartTime != null)
-                .Select(m => new LockedPlacement(m.MemberId, m.MemberName, m.ClubName, m.ShootingClass, patrolById[m.PatrolId].StartTime!.Value, patrolById[m.PatrolId].WeaponGroup))
-                .ToList();
-            return FaltskyttePatrolPlanner.Plan(b.Regs, locked, b.Constraints, b.Reserves, settings);
+            LockedPlacement Place(FaltskyttePatrolMember m) =>
+                new(m.MemberId, m.MemberName, m.ClubName, m.ShootingClass, patrolById[m.PatrolId].StartTime!.Value, patrolById[m.PatrolId].WeaponGroup);
+            var placed = b.Members.Where(m => patrolById.TryGetValue(m.PatrolId, out var p) && p.StartTime != null).ToList();
+            var locked = placed.Where(m => m.Locked).Select(Place).ToList();
+            var fitting = settings.KeepFitting
+                ? placed.Where(m => !m.Locked && !b.Reserves.Contains(m.MemberId) && !b.Constraints.IsEarly(m.MemberId)
+                        && !b.Constraints.Blocks(m.MemberId, patrolById[m.PatrolId].StartTime!.Value)).Select(Place).ToList()
+                : new List<LockedPlacement>();
+            return (FaltskyttePatrolPlanner.Plan(b.Regs, locked.Concat(fitting).ToList(), b.Constraints, b.Reserves, settings), fitting.Count);
         }
 
         private static string Hash(IEnumerable<string> parts) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", parts))))[..24];
 
-        /// <summary>Standardinställningar för en tävling: första start 09:00 tävlingsdagen om inget annat sägs.</summary>
-        public PatrolPlanSettings Normalize(int competitionId, int patrolSize, int intervalMinutes, DateTime? firstStart, string? grouping, int gap)
+        /// <summary>
+        /// Inställningarna för en körning. Det som inte anges tas ur dagens startlista när det finns en — största patrullen, vanligaste avståndet mellan
+        /// starterna och första starten — så att en ombyggnad fortsätter på den takt som redan gäller. Finns ingen lista: 6 per patrull, 15 minuter, 09:00 tävlingsdagen.
+        /// </summary>
+        public PatrolPlanSettings Normalize(int competitionId, int patrolSize, int intervalMinutes, DateTime? firstStart, string? grouping, int gap, bool keepFitting = true)
         {
             var date = _competitions.GetSaved(competitionId)?.CompetitionDate?.Date ?? DateTime.Today;
+            int? inferSize = null, inferInterval = null; DateTime? inferFirst = null;
+            if (patrolSize <= 0 || intervalMinutes <= 0 || firstStart == null)
+            {
+                using var s = _scopes.CreateScope(autoComplete: true);
+                var rows = s.Database.Fetch<PatrolSizeRow>("SELECT p.StartTime, (SELECT COUNT(*) FROM FaltskyttePatrolMember m WHERE m.PatrolId = p.Id) AS Members FROM FaltskyttePatrol p WHERE p.CompetitionId = @0 AND p.StartTime IS NOT NULL", competitionId);
+                if (rows.Count > 0)
+                {
+                    inferSize = Math.Clamp(rows.Max(r => r.Members), 1, 12);
+                    inferFirst = rows.Min(r => r.StartTime);
+                    var gaps = rows.Select(r => r.StartTime).Distinct().OrderBy(t => t).Zip(rows.Select(r => r.StartTime).Distinct().OrderBy(t => t).Skip(1), (a, c) => (int)(c - a).TotalMinutes)
+                        .Where(g => g is >= 1 and <= 120).ToList();
+                    if (gaps.Count > 0) inferInterval = gaps.GroupBy(g => g).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).First().Key;
+                }
+            }
             return new PatrolPlanSettings
             {
-                PatrolSize = patrolSize is >= 1 and <= 12 ? patrolSize : 6,
-                IntervalMinutes = intervalMinutes is >= 1 and <= 120 ? intervalMinutes : 15,
-                FirstStart = firstStart ?? date.AddHours(9),
+                PatrolSize = patrolSize is >= 1 and <= 12 ? patrolSize : inferSize ?? 6,
+                IntervalMinutes = intervalMinutes is >= 1 and <= 120 ? intervalMinutes : inferInterval ?? 15,
+                FirstStart = firstStart ?? inferFirst ?? date.AddHours(9),
                 WeaponGrouping = grouping is "MixAll" or "CombineAR" ? grouping : "Separate",
                 MultiClassGapMinutes = gap is > 0 and <= 600 ? gap : 0,
+                KeepFitting = keepFitting,
             };
+        }
+
+        private sealed class PatrolSizeRow
+        {
+            public DateTime StartTime { get; set; }
+            public int Members { get; set; }
         }
 
         // ------------------------------------------------------------ förhandsvisning
@@ -158,7 +196,7 @@ namespace HpskSite.Services.Staffing
         {
             var (b, err) = await LoadAsync(owner, settings);
             if (b == null) return new PatrolPreview(new PatrolPlan(), "", err, 0, 0, 0, 0, 0, 0);
-            var plan = PlanOf(b, settings);
+            var (plan, keptFitting) = PlanOf(b, settings);
 
             // Vad ändras? Jämför per (skytt, klass) före och efter.
             var patrolById = b.Patrols.ToDictionary(p => p.Id);
@@ -174,7 +212,10 @@ namespace HpskSite.Services.Staffing
             string? blocked = null;
             if (b.Published) blocked = "Startlistan är publicerad. Avpublicera den först, eller tvinga fram ombyggnaden.";
             else if (b.Started) blocked = "Någon patrull har redan gått ut. Startlistan bör inte byggas om nu.";
-            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed);
+            var current = b.Members.Where(m => patrolById.ContainsKey(m.PatrolId))
+                .Select(m => new CurrentPlacement(m.Id, m.MemberId, m.MemberName, m.ShootingClass, patrolById[m.PatrolId].PatrolNumber, patrolById[m.PatrolId].StartTime, m.Locked))
+                .OrderBy(c => c.PatrolNumber).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
+            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed, current, keptFitting);
         }
 
         // ------------------------------------------------------------ tillämpa
@@ -188,7 +229,7 @@ namespace HpskSite.Services.Staffing
             if ((b.Published || b.Started) && !force)
                 return new PatrolApplyOutcome(false, b.Published ? "Startlistan är publicerad. Inget ändrades." : "En patrull har redan gått ut. Inget ändrades.", 0, 0, 0);
 
-            var plan = PlanOf(b, settings);
+            var (plan, _) = PlanOf(b, settings);
             if (plan.Patrols.Count == 0) return new PatrolApplyOutcome(false, "Det finns inga skyttar att bygga en startlista av.", 0, 0, 0);
             var lockedKeys = b.Members.Where(m => m.Locked).Select(m => m.MemberId + "|" + HpskSite.Models.ShootingClasses.ToCanonicalName(m.ShootingClass)).ToHashSet();
 

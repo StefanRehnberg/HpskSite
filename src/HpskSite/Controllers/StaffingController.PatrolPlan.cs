@@ -22,7 +22,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Räknar ut en ny startlista och visar vad som skulle ändras. Ingenting sparas.</summary>
         [HttpGet]
-        public async Task<IActionResult> GetPatrolPlan(int competitionId, int patrolSize = 0, int intervalMinutes = 0, string? firstStart = null, string? grouping = null, int gap = 0)
+        public async Task<IActionResult> GetPatrolPlan(int competitionId, int patrolSize = 0, int intervalMinutes = 0, string? firstStart = null, string? grouping = null, int gap = 0, bool keep = true)
         {
             var owner = await PatrolOwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
@@ -30,7 +30,7 @@ namespace HpskSite.Controllers
             {
                 var svc = HttpContext.RequestServices.GetRequiredService<PatrolPlanService>();
                 var first = DateTime.TryParse(firstStart, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var f) ? f : (DateTime?)null;
-                var settings = svc.Normalize(owner.Comp, patrolSize, intervalMinutes, first, grouping, gap);
+                var settings = svc.Normalize(owner.Comp, patrolSize, intervalMinutes, first, grouping, gap, keep);
                 var pv = await svc.PreviewAsync(owner, settings);
                 if (pv.BlockedReason != null && pv.Plan.Patrols.Count == 0 && pv.Fingerprint == "")
                     return Json(new { success = false, message = pv.BlockedReason });
@@ -38,7 +38,8 @@ namespace HpskSite.Controllers
                 return Json(new
                 {
                     success = true, fingerprint = pv.Fingerprint, blocked = pv.BlockedReason,
-                    settings = new { patrolSize = settings.PatrolSize, intervalMinutes = settings.IntervalMinutes, firstStart = settings.FirstStart?.ToString("yyyy-MM-ddTHH:mm"), grouping = settings.WeaponGrouping, gap = settings.MultiClassGapMinutes },
+                    settings = new { patrolSize = settings.PatrolSize, intervalMinutes = settings.IntervalMinutes, firstStart = settings.FirstStart?.ToString("yyyy-MM-ddTHH:mm"), grouping = settings.WeaponGrouping, gap = settings.MultiClassGapMinutes, keep = settings.KeepFitting },
+                    keptFitting = pv.KeptFitting,
                     existing = new { patrols = pv.ExistingPatrols, shooters = pv.ExistingShooters },
                     change = new { moved = pv.Moved, unchanged = pv.Unchanged, added = pv.Added, removed = pv.Removed },
                     patrols = pv.Plan.Patrols.Select(p => new
@@ -47,6 +48,7 @@ namespace HpskSite.Controllers
                         members = p.Members.Select(m => new { memberId = m.MemberId, name = m.Name, club = m.Club, shootingClass = m.ShootingClass }),
                     }),
                     unavoidable = pv.Plan.Unavoidable.Select(u => new { memberId = u.MemberId, name = u.Name, time = Hm(u.StartTime) }),
+                    current = (pv.Current ?? new()).Select(c => new { patrolMemberId = c.PatrolMemberId, memberId = c.MemberId, name = c.Name, shootingClass = c.ShootingClass, number = c.PatrolNumber, time = Hm(c.StartTime), locked = c.Locked }),
                     reservesLeftOut = pv.Plan.ReservesLeftOut,
                     lockedKept = pv.Plan.LockedKept, lockedDropped = pv.Plan.LockedDropped, lockedOverflow = pv.Plan.LockedOverflow,
                     undoable = svc.LatestUndoable(owner),
@@ -73,7 +75,7 @@ namespace HpskSite.Controllers
             {
                 var svc = HttpContext.RequestServices.GetRequiredService<PatrolPlanService>();
                 var first = DateTime.TryParse(request.FirstStart, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var f) ? f : (DateTime?)null;
-                var settings = svc.Normalize(owner.Comp, request.PatrolSize, request.IntervalMinutes, first, request.Grouping, request.Gap);
+                var settings = svc.Normalize(owner.Comp, request.PatrolSize, request.IntervalMinutes, first, request.Grouping, request.Gap, request.Keep);
                 var o = await svc.ApplyAsync(owner, settings, request.Fingerprint, request.Force, viewer.Id);
                 return Json(new { success = o.Ok, message = o.Message, backupId = o.BackupId, patrols = o.Patrols, shooters = o.Shooters });
             }
@@ -130,6 +132,8 @@ namespace HpskSite.Controllers
         public string? FirstStart { get; set; }
         public string? Grouping { get; set; }
         public int Gap { get; set; }
+        /// <summary>Behåll de som redan har en start som passar.</summary>
+        public bool Keep { get; set; } = true;
         /// <summary>Bygg om även när startlistan är publicerad eller en patrull gått ut.</summary>
         public bool Force { get; set; }
     }

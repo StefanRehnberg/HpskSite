@@ -105,6 +105,22 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Ingen_patrull_blir_for_stor_och_de_lasta_tar_plats_i_sin_patrull()
+        {
+            for (var seed = 1; seed <= 60; seed++)
+                Run(Make(seed)).Patrols.Should().OnlyContain(p => p.Members.Count <= S.PatrolSize, $"seed {seed}");
+
+            // Fyra låsta kl 09:00 i en patrull om fyra: de fria fyller inte upp samma patrull, så det blir ingen extra patrull vid samma tid.
+            var regs = Enumerable.Range(1, 8).Select(i => Reg(i)).ToList();
+            var t = D.AddHours(9);
+            var locked = Enumerable.Range(1, 4).Select(i => new LockedPlacement(i, $"Skytt {i:000}", "Klubb", "C1", t, null)).ToList();
+            var plan = FaltskyttePatrolPlanner.Plan(regs, locked, new PatrolConstraints(), new HashSet<int>(), S);
+            plan.Patrols.Where(p => p.StartTime == t).Should().ContainSingle();
+            plan.LockedOverflow.Should().BeEmpty();
+            plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(8);
+        }
+
+        [Fact]
         public void Last_skytt_i_full_patrull_far_en_egen_patrull_vid_samma_tid_och_redovisas()
         {
             var regs = Enumerable.Range(1, 6).Select(i => Reg(i)).ToList();

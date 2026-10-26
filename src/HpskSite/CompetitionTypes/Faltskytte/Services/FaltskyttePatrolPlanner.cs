@@ -13,6 +13,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public DateTime? FirstStart { get; init; }
         public string WeaponGrouping { get; init; } = "Separate";
         public int MultiClassGapMinutes { get; init; }
+        /// <summary>Behåll de som redan har en start som passar (ingen krock med eget uppdrag) — bara de som krockar flyttas. Läses av tjänsten, inte av planeraren.</summary>
+        public bool KeepFitting { get; init; } = true;
     }
 
     public sealed class PatrolPlan
@@ -63,8 +65,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 list.Add(l.StartTime);
             }
 
+            // De låsta tar plats i sina patruller: generatorn fyller bara det som är kvar, så att ingen patrull blir för stor.
+            var taken = keptLocked.GroupBy(l => (FaltskyttePatrolGenerator.GroupKey(l.ShootingClass, settings.WeaponGrouping), l.StartTime)).ToDictionary(g => g.Key, g => g.Count());
+            int occupied(string group, DateTime time) => taken.GetValueOrDefault((group, time));
+
             var gen = new FaltskyttePatrolGenerator().Generate(free, settings.PatrolSize, settings.IntervalMinutes, settings.FirstStart,
-                settings.WeaponGrouping, settings.MultiClassGapMinutes, existing, constraints);
+                settings.WeaponGrouping, settings.MultiClassGapMinutes, existing, constraints, occupied);
             var patrols = gen.Patrols;
             var overflow = new List<string>();
 

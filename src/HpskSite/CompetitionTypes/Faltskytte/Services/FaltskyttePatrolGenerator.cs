@@ -25,7 +25,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             string weaponGrouping = "Separate",
             int multiClassGapMinutes = 0,
             Dictionary<int, List<DateTime>>? existingMemberStartTimes = null,
-            PatrolConstraints? constraints = null)
+            PatrolConstraints? constraints = null,
+            Func<string, DateTime, int>? occupied = null)
         {
             if (patrolSize < 1) patrolSize = 6;
             if (patrolIntervalMinutes < 1) patrolIntervalMinutes = 15;
@@ -93,9 +94,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                 var patrolSlots = new List<List<CompetitionRegistration>>();
 
+                // Platser som redan är upptagna av fasta starter (låsta) räknas mot patrullens storlek.
+                bool Full(int s) => (s < patrolSlots.Count ? patrolSlots[s].Count : 0)
+                    + (occupied?.Invoke(weaponGroup, currentTime.AddMinutes(s * patrolIntervalMinutes)) ?? 0) >= patrolSize;
+
                 int FindNextSlot(int from)
                 {
-                    while (from < patrolSlots.Count && patrolSlots[from].Count >= patrolSize)
+                    while (Full(from))
                         from++;
                     while (patrolSlots.Count <= from)
                         patrolSlots.Add(new List<CompetitionRegistration>());
@@ -113,7 +118,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         if (slotTime > startTime.AddHours(MaxSearchHours)) break;
                         while (patrolSlots.Count <= s)
                             patrolSlots.Add(new List<CompetitionRegistration>());
-                        if (patrolSlots[s].Count >= patrolSize) continue;
+                        if (Full(s)) continue;
 
                         bool ok = true;
                         if (myTimes != null && gapMinutes > 0)

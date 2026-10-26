@@ -403,6 +403,96 @@ window.PlaneringBemanning = (function () {
         if (b && A && A.isActive()) { e.preventDefault(); undoProposal(b.dataset.plbUndoprop); }
     });
 
+    // Planera dagen steg 3b: "Bygg startlistan runt funktionärerna" (fält). Förhandsvisningen sparar inget; du ser vad som flyttas, vilka som inte går att
+    // placera utan krock och vilka reserver som lämnas utan start. Lås de som ska ligga kvar. Tillämpningen tar en backup först och går att ångra.
+    async function openPatrolPlan() {
+        const settings = { patrolSize: '', intervalMinutes: '', firstStart: '', gap: '', keep: true };
+        let r = null;
+        const qs = () => { const q = {}; if (settings.patrolSize) q.patrolSize = settings.patrolSize; if (settings.intervalMinutes) q.intervalMinutes = settings.intervalMinutes;
+            if (settings.firstStart) q.firstStart = settings.firstStart; if (settings.gap) q.gap = settings.gap; if (!settings.keep) q.keep = 'false'; return q; };
+        const fetchPlan = async () => sget('GetPatrolPlan', qs()).catch(() => null);
+        r = await fetchPlan();
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte räkna ut en startlista.'), 'danger'); return; }
+        const draw = b => {
+            const c = r.change, s = r.settings;
+            const lockRows = (r.current || []).map(m => `<label class="list-group-item d-flex gap-2 align-items-center py-1 small">
+                <input class="form-check-input flex-shrink-0 mt-0" type="checkbox" data-pp-lock="${m.patrolMemberId}"${m.locked ? ' checked' : ''} aria-label="Lås ${esc(m.name)}">
+                <span class="fw-semibold">${esc(m.name)}</span><span class="plb-dim">${esc(m.shootingClass)} · patrull ${m.number} kl ${esc(m.time)}</span></label>`).join('');
+            b.querySelector('#plbPpBody').innerHTML = `
+                <div class="row g-2 mb-2">
+                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpSize">Skyttar per patrull</label><input type="number" min="1" max="12" class="form-control form-control-sm" id="plbPpSize" inputmode="numeric" value="${s.patrolSize}"></div>
+                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpInt">Minuter mellan patruller</label><input type="number" min="1" max="120" class="form-control form-control-sm" id="plbPpInt" inputmode="numeric" value="${s.intervalMinutes}"></div>
+                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpFirst">Första start</label><input type="time" class="form-control form-control-sm" id="plbPpFirst" value="${esc((s.firstStart || '').slice(11, 16))}"></div>
+                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpGap">Minst mellan egna starter</label><input type="number" min="0" max="600" class="form-control form-control-sm" id="plbPpGap" inputmode="numeric" value="${s.gap || ''}" placeholder="min"></div>
+                </div>
+                <label class="d-block small mb-2"><input type="checkbox" class="form-check-input me-1" id="plbPpKeep"${s.keep ? ' checked' : ''}>Behåll de som redan har en tid som passar — flytta bara de som krockar${r.keptFitting ? ` (${r.keptFitting} behålls)` : ''}</label>
+                <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="plbPpRecalc">Räkna om</button>
+                ${r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b><label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : ''}
+                <p class="mb-2" id="plbPpSummary"><b>${r.patrols.length} patruller</b>, ${r.patrols.reduce((n, p) => n + p.members.length, 0)} starter. I dag finns ${r.existing.patrols} patruller med ${r.existing.shooters} starter.
+                    ${c.moved} flyttas · ${c.unchanged} ligger kvar · ${c.added} är nya${c.removed ? ` · ${c.removed} tas bort (inte anmälda längre)` : ''}.${r.lockedKept - (r.keptFitting || 0) > 0 ? ` ${r.lockedKept - (r.keptFitting || 0)} låsta ligger kvar på sin tid.` : ''}</p>
+                ${r.unavoidable.length ? `<div class="alert alert-warning py-2 small" id="plbPpUnavoidable"><b>Går inte att undvika krock:</b> ${r.unavoidable.map(u => esc(u.name) + ' kl ' + esc(u.time)).join('; ')}. Uppdraget täcker hela dagen — ändra uppdraget eller starten för hand.</div>` : ''}
+                ${r.reservesLeftOut.length ? `<p class="small plb-dim" id="plbPpReserves">Utan start (hoppar in vid lucka): ${r.reservesLeftOut.map(esc).join(', ')}.</p>` : ''}
+                ${r.lockedDropped.length ? `<p class="small text-warning-emphasis">Låsta som inte är anmälda längre och därför tas bort: ${r.lockedDropped.map(esc).join(', ')}.</p>` : ''}
+                ${r.lockedOverflow.length ? `<p class="small text-warning-emphasis">Fick ingen plats i sin patrull och har en egen patrull vid samma tid: ${r.lockedOverflow.map(esc).join(', ')}.</p>` : ''}
+                <details class="mb-2"><summary class="small fw-semibold">Patrullerna (${r.patrols.length})</summary>
+                    <div class="small" id="plbPpPatrols" style="max-height:26vh;overflow:auto">${r.patrols.map(p => `<div class="py-1 border-bottom"><b>Patrull ${p.number}</b> kl ${esc(p.time)} <span class="plb-dim">${esc(p.group || '')}</span><br>${p.members.map(m => esc(m.name)).join(', ')}</div>`).join('')}</div></details>
+                <details class="mb-2"><summary class="small fw-semibold">Lås skyttar som ska ligga kvar (${(r.current || []).filter(m => m.locked).length} låsta)</summary>
+                    ${lockRows ? `<div class="list-group mt-1" id="plbPpLocks" style="max-height:26vh;overflow:auto">${lockRows}</div>` : '<p class="small plb-dim mt-1">Det finns ingen startlista än.</p>'}</details>
+                ${r.undoable ? `<p class="small mb-0"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbPpUndo">Ångra senaste ombyggnaden</button> — startlistan som den var före.</p>` : ''}
+                <div class="text-danger small" id="plbPpErr" role="alert"></div>`;
+        };
+        const reload = async b => {
+            const v = id => b.querySelector(id) ? b.querySelector(id).value.trim() : '';
+            settings.patrolSize = v('#plbPpSize'); settings.intervalMinutes = v('#plbPpInt'); settings.gap = v('#plbPpGap');
+            if (b.querySelector('#plbPpKeep')) settings.keep = b.querySelector('#plbPpKeep').checked;
+            const t = v('#plbPpFirst'); settings.firstStart = t ? ((r.settings.firstStart || '').slice(0, 10) + 'T' + t) : '';
+            const n = await fetchPlan();
+            if (!n || !n.success) { b.querySelector('#plbPpErr').textContent = (n && n.message) || 'Kunde inte räkna om.'; return; }
+            r = n; draw(b);
+        };
+        A.formModal({
+            title: 'Bygg startlistan runt funktionärerna', okLabel: 'Bygg om startlistan', wide: true,
+            html: `<div class="alert alert-warning py-2 small mb-2"><b>Förhandsvisning — inget är ändrat än.</b> En säkerhetskopia av dagens startlista tas innan något skrivs, och du kan ångra efteråt.</div><div id="plbPpBody"></div>`,
+            onOpen: b => {
+                draw(b);
+                b.addEventListener('click', async e => {
+                    if (e.target.closest('#plbPpRecalc')) { await reload(b); return; }
+                    if (e.target.closest('#plbPpUndo')) {
+                        if (!await A.plConfirm('Ångra ombyggnaden?', 'Startlistan återställs till hur den var före senaste ombyggnaden.', 'Ångra')) return;
+                        let d = await spost('UndoPatrolPlan', { backupId: r.undoable });
+                        if (!d.success && /ändrats/.test(d.message || '') && await A.plConfirm('Startlistan har ändrats sedan', esc(d.message) + '\n\nÅterställ ändå?', 'Återställ ändå'))
+                            d = await spost('UndoPatrolPlan', { backupId: r.undoable, force: true });
+                        if (!d.success) { b.querySelector('#plbPpErr').textContent = d.message || 'Det gick inte att återställa.'; return; }
+                        A.showMsg('Startlistan är återställd.', 'success'); await reload(b);
+                    }
+                });
+                b.addEventListener('change', async e => {
+                    const cb = e.target.closest('[data-pp-lock]'); if (!cb) return;
+                    const d = await spost('SetPatrolLock', { patrolMemberId: parseInt(cb.dataset.ppLock, 10), locked: cb.checked });
+                    if (!d.success) { cb.checked = !cb.checked; b.querySelector('#plbPpErr').textContent = d.message || 'Det gick inte att låsa.'; return; }
+                    await reload(b);
+                });
+            },
+            onOk: async b => {
+                const force = !!(b.querySelector('#plbPpForce') && b.querySelector('#plbPpForce').checked);
+                if (r.blocked && !force) return 'Startlistan är skyddad. Kryssa i "Bygg om ändå" om du verkligen vill.';
+                const s = r.settings;
+                const d = await spost('ApplyPatrolPlan', { fingerprint: r.fingerprint, patrolSize: s.patrolSize, intervalMinutes: s.intervalMinutes, firstStart: s.firstStart, grouping: s.grouping, gap: s.gap, keep: s.keep, force });
+                if (!d.success) return d.message || 'Det gick inte att bygga om.';
+                A.showMsg(`Startlistan är ombyggd: ${d.patrols} patruller, ${d.shooters} starter. Dagens lista är sparad.`
+                    + ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undopatrol="${d.backupId}">Ångra</button>`, 'success');
+                return true;
+            }
+        });
+    }
+    document.addEventListener('click', async e => {
+        const b = e.target.closest && e.target.closest('[data-plb-undopatrol]');
+        if (!b || !A || !A.isActive()) return;
+        e.preventDefault();
+        const d = await spost('UndoPatrolPlan', { backupId: parseInt(b.dataset.plbUndopatrol, 10) }).catch(() => null);
+        A.showMsg(d && d.success ? 'Startlistan är återställd.' : esc((d && d.message) || 'Det gick inte att ångra.'), d && d.success ? 'success' : 'danger');
+    });
+
     // Planera dagen: hur gör ni med funktionärer som också skjuter? Fyra svar i klartext som ett förval för planeringen — och ett eget läge per person.
     async function openShooterMode() {
         const r = await sget('GetShooterMode').catch(() => null);
@@ -505,6 +595,7 @@ window.PlaneringBemanning = (function () {
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
             !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
+            !g.family && linked() && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
             linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
