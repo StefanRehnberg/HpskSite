@@ -415,6 +415,112 @@ namespace HpskSite.Controllers
             if (kept < 0) return Json(new { success = false, message = StaffProposalService.BusyMessage });
             return Json(new { success = true, removed, kept });
         }
+
+        private static DistributionSpec SpecOf(DistributionRequest r) => new((r.RoleKey ?? "").Trim(), (r.MemberIds ?? new()).Where(i => i > 0).Distinct().Take(200).ToList(), r.BlockMinutes);
+
+        /// <summary>
+        /// "Fördela dem åt mig": de namngivna personerna (ur den inklistrade listan) sprids över rollens stationer och dagens block, med tider som inte krockar med deras egna starter
+        /// eller uppdrag. Ingenting sparas. Svaret har varje rad med skäl, de som inte fick någon plats (med skäl), luckor som blev kvar och ett fingeravtryck som Tillämpa skickar tillbaka.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PreviewDistribution([FromBody] DistributionRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.RoleKey) || request.MemberIds == null || request.MemberIds.Count == 0)
+                return Json(new { success = false, message = "Välj en roll och minst en person." });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Fördelning görs i planeringen." });
+            try
+            {
+                var spec = SpecOf(request);
+                using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
+                var svc = HttpContext.RequestServices.GetRequiredService<StaffProposalService>();
+                var p = svc.BuildDistribution(owner, spec, cts.Token);
+                if (p.Problems.Count > 0)
+                {
+                    _logger.LogError("Staffing: fördelningen bröt de hårda villkoren för planering {Planning}: {Problems}", owner.PlanningId, string.Join(" | ", p.Problems));
+                    return Json(new { success = false, message = "Fördelningen kunde inte kontrolleras och visas därför inte. Det är ett fel hos oss — lägg in för hand." });
+                }
+                if (p.Slots.Count == 0)
+                    return Json(new { success = false, message = "Rollen har inget behov som saknar folk. Sätt hur många som behövs, eller välj en annan roll." });
+                var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+                string Iv(StaffInterval i) => $"{i.Start:HH\\:mm}–{i.End:HH\\:mm}";
+                var never = new SolverOptions().NeverProposeRoles.Contains(spec.RoleKey);
+                var placedIds = p.Result.Proposed.Select(r => r.MemberId).ToHashSet();
+                var found = p.People.Select(x => x.MemberId).ToHashSet();
+                return Json(new
+                {
+                    success = true, fingerprint = p.Fingerprint, blockMinutes = Math.Clamp(spec.BlockMinutes <= 0 ? SlotSlicer.DefaultBlockMinutes : spec.BlockMinutes, SlotSlicer.MinBlockMinutes, SlotSlicer.MaxBlockMinutes),
+                    placed = p.Result.Placed, stillMissing = p.Result.StillMissing, needed = p.Slots.Sum(s => s.Missing), safetyRole = never,
+                    rows = p.Result.Proposed.Select(r => new
+                    {
+                        slotKey = r.SlotKey, memberId = r.MemberId, name = r.Name, scope = p.Slots.First(s => s.Key == r.SlotKey).ScopeLabel, role = p.Slots.First(s => s.Key == r.SlotKey).RoleName,
+                        date = r.Date.ToString("yyyy-MM-dd"), dayLabel = r.Date.ToString("ddd d MMM", sv), time = Iv(r.Interval), why = r.Why, warning = r.Warning,
+                    }),
+                    // Personerna som inte fick någon plats, och varför (upptagna hela tiden, eller för många för behovet).
+                    unplaced = p.People.Where(x => !placedIds.Contains(x.MemberId)).Select(x =>
+                    {
+                        // Exakt skäl: kunde personen tagit något block alls? Nej = upptagen under alla (med den första egna starten), ja = blocken fylldes av andra.
+                        var couldTake = p.Slots.Any(s => StaffingRules.FirstConflict(s.Interval, s.Place, x.Busy) is not { IsHard: true });
+                        var own = x.Busy.FirstOrDefault(b => b.Kind == BusyKind.Start)?.Label;
+                        return new { memberId = x.MemberId, name = x.Name,
+                            reason = couldTake ? "De block hen kunde ta fylldes av andra" : $"Är upptagen under alla block som saknar folk{(own != null ? $" ({own})" : "")}" };
+                    }),
+                    unknown = spec.MemberIds.Where(i => !found.Contains(i)).ToList(),
+                    unfilled = p.Result.Unfilled.Select(u => new { slotKey = u.SlotKey, scope = u.ScopeLabel, dayLabel = u.Date.ToString("ddd d MMM", sv), time = Iv(u.Interval), missing = u.Missing, reason = u.Reason }),
+                });
+            }
+            catch (OperationCanceledException) { return Json(new { success = false, message = "Det tog för lång tid att räkna ut en fördelning. Försök igen, eller lägg in för hand." }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: PreviewDistribution failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte räkna ut en fördelning." });
+            }
+        }
+
+        /// <summary>Tillämpar en fördelning (eller delar av den): varje rad prövas på nytt, allt skrivs som Planerat i EN transaktion under ett lås. Ångra med <c>UndoProposal</c>.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyDistribution([FromBody] DistributionRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.RoleKey) || request.Rows == null || request.Rows.Count == 0)
+                return Json(new { success = false, message = "Välj minst en rad." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Fördelning görs i planeringen." });
+            try
+            {
+                var spec = SpecOf(request);
+                using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
+                var svc = HttpContext.RequestServices.GetRequiredService<StaffProposalService>();
+                var o = svc.Apply(owner, request.Rows.Select(r => (r.SlotKey ?? "", r.MemberId)).ToList(), request.Fingerprint, viewer.Id, cts.Token, () => svc.BuildDistribution(owner, spec, cts.Token));
+                return Json(new
+                {
+                    success = o.Ok, message = o.Message, batchId = o.BatchId,
+                    added = o.Added.Select(a => new { memberId = a.MemberId, name = a.Name, id = a.Id }),
+                    skipped = o.Skipped.Select(s => new { memberId = s.MemberId, name = s.Name, reason = s.Reason }),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ApplyDistribution failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte lägga in fördelningen. Inget ändrades." });
+            }
+        }
+    }
+
+    public class DistributionRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? RoleKey { get; set; }
+        public List<int>? MemberIds { get; set; }
+        /// <summary>Hur långa block dagen delas i (60–480 minuter; 0 = förvalet 3 timmar). Har dagen pass används passen.</summary>
+        public int BlockMinutes { get; set; }
+        public string? Fingerprint { get; set; }
+        public List<ApplyProposalRow>? Rows { get; set; }
     }
 
     public class ApplyProposalRequest

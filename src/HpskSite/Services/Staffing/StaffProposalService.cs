@@ -8,8 +8,9 @@ using Umbraco.Cms.Infrastructure.Scoping;
 
 namespace HpskSite.Services.Staffing
 {
+    /// <param name="TimedSlots">Luckor som är block (Fördela): raden skrivs med explicita tider, inte med pass eller heldag.</param>
     public sealed record Proposal(List<SolverSlot> Slots, List<SolverPerson> People, SolverResult Result, string Fingerprint, Dictionary<string, int?> PassOfSlot,
-        List<string> Problems);
+        List<string> Problems, HashSet<string>? TimedSlots = null);
 
     public sealed record ApplyOutcome(bool Ok, string? Message, Guid? BatchId, List<(int MemberId, string Name, int Id)> Added, List<(int MemberId, string Name, string Reason)> Skipped);
 
@@ -24,7 +25,7 @@ namespace HpskSite.Services.Staffing
     /// <item><b>Ångra:</b> raderna delar ett <c>BatchId</c>; <see cref="Undo"/> tar bort dem som fortfarande är Planerade. Inget mejl skickas av tillämpningen.</item>
     /// </list>
     /// </summary>
-    public class StaffProposalService
+    public partial class StaffProposalService
     {
         private readonly IScopeProvider _scopes;
         private readonly PlanningService _planning;
@@ -37,12 +38,13 @@ namespace HpskSite.Services.Staffing
         private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
 
         public StaffProposalService(IScopeProvider scopes, PlanningService planning, StartWindowReader starts, StaffOwnerResolver owners,
-            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock, StaffBusyReader busy)
+            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock, StaffBusyReader busy, StaffCandidateService candidates)
         {
-            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger; _lock = dbLock; _busy = busy;
+            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger; _lock = dbLock; _busy = busy; _candidates = candidates;
         }
 
         private readonly StaffBusyReader _busy;
+        private readonly StaffCandidateService _candidates;
 
         /// <summary>
         /// Ett lås för allt som skriver bemanning eller startlista på en tävling ("Planera dagen"): två redaktörer får inte tillämpa samtidigt — båda skulle passera
@@ -136,16 +138,7 @@ namespace HpskSite.Services.Staffing
                 var name = g.OrderByDescending(x => x.ModifiedDate).First().MemberName;
                 var choices = g.SelectMany(x => ParseChoices(x.SlotsJson)).ToList();
                 var roles = choices.Where(c => c.IsDayChoice && !string.IsNullOrWhiteSpace(c.RoleKey)).Select(c => c.RoleKey!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var busy = new List<BusyItem>();
-                // Egna starter, med förberedelse och vila.
-                foreach (var w in startsBy.GetValueOrDefault(mid) ?? new List<StartWindow>())
-                    busy.Add(new BusyItem(BusyKind.Start, shoot.Window(w.Start, w.End), $"egen start {w.Start:HH\\:mm}"));
-                // Befintliga uppdrag (inte avböjda).
-                foreach (var a in assigns.Where(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)))
-                {
-                    var (d, iv) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passById.TryGetValue(a.PassId.Value, out var p) ? p : null);
-                    if (iv is { } v) busy.Add(new BusyItem(BusyKind.Assignment, v, "annat uppdrag"));
-                }
+                var busy = BusyOf(mid, startsBy, assigns, passById, shoot);   // egna starter + befintliga uppdrag, delat med Fördela
                 // Varje dag i luckorna: har personen anmält sig den dagen, och till vilka tider? Annars är hela dagen upptagen.
                 foreach (var d in dates)
                 {
@@ -159,7 +152,22 @@ namespace HpskSite.Services.Staffing
             return result.OrderBy(p => p.MemberId).ToList();
         }
 
-        public ApplyOutcome Apply(StaffOwner owner, IReadOnlyList<(string SlotKey, int MemberId)> rows, string? fingerprint, int byMemberId, CancellationToken ct = default)
+        /// <summary>Det en person redan är upptagen med: egna starter (med förberedelse och vila) och befintliga uppdrag som inte är avböjda. EN regel för förslag och Fördela.</summary>
+        private static List<BusyItem> BusyOf(int mid, Dictionary<int, List<StartWindow>> startsBy, List<StaffAssignment> assigns, Dictionary<int, StaffPass> passById, ShootTime shoot)
+        {
+            var busy = new List<BusyItem>();
+            foreach (var w in startsBy.GetValueOrDefault(mid) ?? new List<StartWindow>())
+                busy.Add(new BusyItem(BusyKind.Start, shoot.Window(w.Start, w.End), $"egen start {w.Start:HH\\:mm}"));
+            foreach (var a in assigns.Where(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)))
+            {
+                var (_, iv) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passById.TryGetValue(a.PassId.Value, out var p) ? p : null);
+                if (iv is { } v) busy.Add(new BusyItem(BusyKind.Assignment, v, "annat uppdrag"));
+            }
+            return busy;
+        }
+
+        /// <summary>Tillämpar (en del av) ett förslag. <paramref name="build"/> bygger om förslaget under låset — förvalet är "Fyll med förslag"; Fördela skickar sin egen.</summary>
+        public ApplyOutcome Apply(StaffOwner owner, IReadOnlyList<(string SlotKey, int MemberId)> rows, string? fingerprint, int byMemberId, CancellationToken ct = default, Func<Proposal>? build = null)
         {
             var skipped = new List<(int, string, string)>();
             var added = new List<(int, string, int)>();
@@ -167,7 +175,7 @@ namespace HpskSite.Services.Staffing
             if (rows.Count > 500) return new ApplyOutcome(false, "Högst 500 rader åt gången.", null, added, skipped);
             using var lease = _lock.TryAcquire(LockName(owner), TimeSpan.FromSeconds(10));
             if (lease == null) return new ApplyOutcome(false, BusyMessage, null, added, skipped);
-            var p = Build(owner, ct);   // bygg om UNDER låset: fingeravtrycket jämförs mot det som gäller när ingen annan skriver
+            var p = build != null ? build() : Build(owner, ct);   // bygg om UNDER låset: fingeravtrycket jämförs mot det som gäller när ingen annan skriver
             if (!string.Equals(p.Fingerprint, fingerprint, StringComparison.Ordinal))
                 return new ApplyOutcome(false, "Bemanningen eller anmälningarna har ändrats sedan förslaget gjordes. Gör ett nytt förslag — inget lades in.", null, added, skipped);
             if (p.Problems.Count > 0)
@@ -198,6 +206,12 @@ namespace HpskSite.Services.Staffing
                     Id = 0, CompetitionId = 0, MemberId = mid, DisplayName = pr.Name, RoleKey = slot.RoleKey, ScopeType = slot.ScopeType, ScopeKey = slot.ScopeKey,
                     DayDate = slot.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), PassId = passId, Status = StaffAssignmentStatus.Planned,
                 };
+                // Ett block (Fördela) skrivs med sina egna tider — inte som heldag eller pass.
+                if (p.TimedSlots != null && p.TimedSlots.Contains(key))
+                {
+                    req.StartsAt = slot.Interval.Start.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                    req.EndsAt = slot.Interval.End.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                }
                 var id = _staffing.Save(req, owner, byMemberId);
                 if (id == 0) { skipped.Add((mid, pr.Name, "Kunde inte spara.")); continue; }
                 scope.Database.Execute("UPDATE StaffAssignment SET BatchId = @0 WHERE Id = @1", batch, id);
