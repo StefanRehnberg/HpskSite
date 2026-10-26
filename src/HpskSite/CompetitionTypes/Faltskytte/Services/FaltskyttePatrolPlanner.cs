@@ -6,6 +6,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     /// <summary>En skytt vars patrull och tid ligger fast (lås). Bygger om-körningen runt den, aldrig över den.</summary>
     public sealed record LockedPlacement(int MemberId, string Name, string Club, string ShootingClass, DateTime StartTime, string? WeaponGroup);
 
+    /// <summary>
+    /// En grupp patruller som den ser ut i dagens startlista: etiketten ("B+C", "A+R"), vilka vapenklasser den rymmer (tom = alla), gruppens EGEN första start
+    /// och avstånd mellan patrullerna. Fältets startlista skapas en grupp i taget med egen första start — patrullernas tider är uppskattningar
+    /// (första start + avstånd × ordning), inte tider som hålls. Ombyggnaden håller sig därför inom gruppen.
+    /// </summary>
+    public sealed record PatrolGroupSpec(string Label, IReadOnlyCollection<string> WeaponCodes, DateTime FirstStart, int IntervalMinutes, int PatrolSize, int PatrolCount);
+
     public sealed class PatrolPlanSettings
     {
         public int PatrolSize { get; init; } = 6;
@@ -29,6 +36,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public List<string> LockedDropped { get; init; } = new();
         /// <summary>Låsta som inte fick plats i en patrull på sin tid, så en egen patrull lades vid samma tid.</summary>
         public List<string> LockedOverflow { get; init; } = new();
+        /// <summary>Anmälda vars vapenklass inte finns i någon befintlig grupp — de placeras inte, och redovisas ("Namn (klass)").</summary>
+        public List<string> Ungrouped { get; init; } = new();
     }
 
     /// <summary>
@@ -46,8 +55,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private static string Key(int memberId, string? cls) => memberId + "|" + ShootingClasses.ToCanonicalName(cls);
 
         public static PatrolPlan Plan(IReadOnlyList<CompetitionRegistration> registrations, IReadOnlyCollection<LockedPlacement> locked,
-            PatrolConstraints constraints, ISet<int> reserves, PatrolPlanSettings settings)
+            PatrolConstraints constraints, ISet<int> reserves, PatrolPlanSettings settings, IReadOnlyList<PatrolGroupSpec>? groups = null)
         {
+            if (groups is { Count: > 0 }) return PlanByGroups(registrations, locked, constraints, reserves, settings, groups);
             var lockedByKey = new Dictionary<string, LockedPlacement>();
             foreach (var l in locked) lockedByKey[Key(l.MemberId, l.ShootingClass)] = l;
             var regKeys = registrations.Select(r => Key(r.MemberId, r.MemberClass)).ToHashSet();
@@ -104,6 +114,91 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 LockedKept = keptLocked.Count,
                 LockedDropped = dropped,
                 LockedOverflow = overflow,
+            };
+        }
+
+        /// <summary>Rymmer gruppen klassen? Etiketten bär vapengruppens kod ("C", "A_Opt") — för magnumfält klassens id ("M1"). Tom lista = alla.</summary>
+        private static bool Accepts(PatrolGroupSpec g, string? cls)
+        {
+            if (g.WeaponCodes.Count == 0) return true;
+            var sc = ShootingClasses.GetById(cls ?? "") ?? ShootingClasses.GetByName(cls ?? "");
+            return g.WeaponCodes.Contains(ShootingClasses.GetWeaponClassCode(cls), StringComparer.OrdinalIgnoreCase)
+                || (!string.IsNullOrEmpty(cls) && g.WeaponCodes.Contains(cls, StringComparer.OrdinalIgnoreCase))
+                || (sc != null && g.WeaponCodes.Contains(sc.Id, StringComparer.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Ombyggnad inom de grupper som redan finns: varje grupp byggs med SIN första start, sitt avstånd och sin patrullstorlek; en skytt flyttas aldrig till en annan
+        /// grupp. Anmälda utan grupp redovisas. Låsta (och de som redan har en passande start) ligger kvar i sin grupp på sin tid.
+        /// </summary>
+        private static PatrolPlan PlanByGroups(IReadOnlyList<CompetitionRegistration> registrations, IReadOnlyCollection<LockedPlacement> locked,
+            PatrolConstraints constraints, ISet<int> reserves, PatrolPlanSettings settings, IReadOnlyList<PatrolGroupSpec> groupSpecs)
+        {
+            var groups = groupSpecs.OrderBy(g => g.FirstStart).ThenBy(g => g.Label, StringComparer.Ordinal).ToList();
+            var lockedByKey = new Dictionary<string, LockedPlacement>();
+            foreach (var l in locked) lockedByKey[Key(l.MemberId, l.ShootingClass)] = l;
+            var regKeys = registrations.Select(r => Key(r.MemberId, r.MemberClass)).ToHashSet();
+            var keptLocked = lockedByKey.Where(kv => regKeys.Contains(kv.Key)).Select(kv => kv.Value).ToList();
+            var dropped = lockedByKey.Where(kv => !regKeys.Contains(kv.Key)).Select(kv => kv.Value.Name).OrderBy(n => n).ToList();
+            var reserveRegs = registrations.Where(r => reserves.Contains(r.MemberId) && !lockedByKey.ContainsKey(Key(r.MemberId, r.MemberClass))).ToList();
+
+            PatrolGroupSpec? GroupOfLocked(LockedPlacement l) => groups.FirstOrDefault(g => g.Label == (l.WeaponGroup ?? "")) ?? groups.FirstOrDefault(g => Accepts(g, l.ShootingClass));
+            PatrolGroupSpec? GroupOfReg(CompetitionRegistration r) => groups.FirstOrDefault(g => Accepts(g, r.MemberClass));
+
+            var free = registrations.Where(r => !reserves.Contains(r.MemberId) && !lockedByKey.ContainsKey(Key(r.MemberId, r.MemberClass))).ToList();
+            var ungrouped = free.Where(r => GroupOfReg(r) == null).Select(r => $"{r.MemberName ?? $"Medlem {r.MemberId}"} ({ShootingClasses.DisplayName(r.MemberClass)})").Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+            // Tider som personer redan har (låsta, och det som placeras i tidigare grupper) — mellanrumskontrollen för den som skjuter i flera klasser.
+            var memberTimes = new Dictionary<int, List<DateTime>>();
+            void Note(int id, DateTime t) { if (!memberTimes.TryGetValue(id, out var l)) memberTimes[id] = l = new List<DateTime>(); l.Add(t); }
+            foreach (var l in keptLocked) Note(l.MemberId, l.StartTime);
+
+            var allPatrols = new List<(FaltskytteGeneratedPatrol P, int GroupIdx)>();
+            var unavoidable = new List<FaltskytteUnavoidable>();
+            var overflow = new List<string>();
+            for (var gi = 0; gi < groups.Count; gi++)
+            {
+                var g = groups[gi];
+                var lockedG = keptLocked.Where(l => GroupOfLocked(l) == g).OrderBy(l => l.StartTime).ThenBy(l => l.Name, StringComparer.Ordinal).ToList();
+                var freeG = free.Where(r => GroupOfReg(r) == g).ToList();
+                var taken = lockedG.GroupBy(l => l.StartTime).ToDictionary(x => x.Key, x => x.Count());
+                var gen = new FaltskyttePatrolGenerator().Generate(freeG, g.PatrolSize, g.IntervalMinutes, g.FirstStart, "MixAll", settings.MultiClassGapMinutes,
+                    memberTimes.ToDictionary(kv => kv.Key, kv => new List<DateTime>(kv.Value)), constraints, (_, t) => taken.GetValueOrDefault(t));
+                var patrols = gen.Patrols;
+                foreach (var p in patrols) p.WeaponGroup = g.Label;
+                unavoidable.AddRange(gen.Unavoidable);
+                foreach (var p in patrols) foreach (var m in p.Members) Note(m.MemberId, p.StartTime ?? g.FirstStart);
+
+                foreach (var l in lockedG)
+                {
+                    var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && p.Members.Count < g.PatrolSize);
+                    if (target == null)
+                    {
+                        if (patrols.Any(p => p.StartTime == l.StartTime)) overflow.Add(l.Name);
+                        target = new FaltskytteGeneratedPatrol { StartTime = l.StartTime, WeaponGroup = g.Label };
+                        patrols.Add(target);
+                    }
+                    target.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = l.MemberId, Name = l.Name, Club = l.Club, ShootingClass = l.ShootingClass });
+                }
+                allPatrols.AddRange(patrols.Select(p => (p, gi)));
+            }
+
+            var order = allPatrols.OrderBy(x => x.P.StartTime).ThenBy(x => x.GroupIdx).Select(x => x.P).ToList();
+            for (var i = 0; i < order.Count; i++)
+            {
+                order[i].PatrolNumber = i + 1;
+                for (var m = 0; m < order[i].Members.Count; m++) order[i].Members[m].Position = m + 1;
+            }
+
+            return new PatrolPlan
+            {
+                Patrols = order,
+                Unavoidable = unavoidable,
+                ReservesLeftOut = reserveRegs.Select(r => r.MemberName ?? $"Medlem {r.MemberId}").Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList(),
+                LockedKept = keptLocked.Count,
+                LockedDropped = dropped,
+                LockedOverflow = overflow,
+                Ungrouped = ungrouped,
             };
         }
     }

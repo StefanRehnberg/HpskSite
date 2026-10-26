@@ -324,7 +324,7 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
             if (!owner.HasPlanning) return Json(new { success = false, message = "Förslag görs i planeringen." });
-            if (_planning.Family(owner.PlanningId).Count > 1) return Json(new { success = false, message = "Förslag görs i en del i taget. Öppna delen och försök där." });
+            // Förslag görs för EN planering (en del, eller en fristående) — luckorna är den planeringens, upptagen-tiden läses över hela familjen.
             try
             {
                 using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
@@ -383,7 +383,7 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning || _planning.Family(owner.PlanningId).Count > 1) return Json(new { success = false, message = "Förslag görs i en del i taget." });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Förslag görs i planeringen." });
             try
             {
                 using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);

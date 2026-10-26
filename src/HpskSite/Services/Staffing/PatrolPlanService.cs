@@ -17,7 +17,7 @@ namespace HpskSite.Services.Staffing
     public sealed record CurrentPlacement(int PatrolMemberId, int MemberId, string Name, string ShootingClass, int PatrolNumber, DateTime? StartTime, bool Locked);
 
     public sealed record PatrolPreview(PatrolPlan Plan, string Fingerprint, string? BlockedReason, int ExistingPatrols, int ExistingShooters, int Moved, int Unchanged, int Added, int Removed,
-        List<CurrentPlacement>? Current = null, int KeptFitting = 0, List<PatrolMove>? Moves = null);
+        List<CurrentPlacement>? Current = null, int KeptFitting = 0, List<PatrolMove>? Moves = null, List<PatrolGroupSpec>? Groups = null);
 
     /// <summary>En skytts förändring i förhandsvisningen: <c>Kind</c> = moved | added | removed, från och till (patrull och tid) och skälet i klartext.</summary>
     public sealed record PatrolMove(string Kind, int MemberId, string Name, string ShootingClass, int? FromPatrol, DateTime? FromTime, int? ToPatrol, DateTime? ToTime, string Why);
@@ -150,7 +150,28 @@ namespace HpskSite.Services.Staffing
                 ? placed.Where(m => !m.Locked && !b.Reserves.Contains(m.MemberId) && !b.Constraints.IsEarly(m.MemberId)
                         && !b.Constraints.Blocks(m.MemberId, patrolById[m.PatrolId].StartTime!.Value)).Select(Place).ToList()
                 : new List<LockedPlacement>();
-            return (FaltskyttePatrolPlanner.Plan(b.Regs, locked.Concat(fitting).ToList(), b.Constraints, b.Reserves, settings), fitting.Count);
+            return (FaltskyttePatrolPlanner.Plan(b.Regs, locked.Concat(fitting).ToList(), b.Constraints, b.Reserves, settings, GroupsOf(b, settings)), fitting.Count);
+        }
+
+        /// <summary>
+        /// Grupperna i dagens startlista, med var och ens egen första start, avstånd och patrullstorlek — så som de skapades (en körning per grupp, med egen första start).
+        /// Tiderna per patrull är uppskattningar; det som gäller är gruppens första start. Ingen startlista än = inga grupper (då används inställningarna).
+        /// </summary>
+        private static List<PatrolGroupSpec> GroupsOf(Basis b, PatrolPlanSettings settings)
+        {
+            var result = new List<PatrolGroupSpec>();
+            var membersByPatrol = b.Members.GroupBy(m => m.PatrolId).ToDictionary(g => g.Key, g => g.Count());
+            foreach (var g in b.Patrols.Where(p => p.StartTime != null).GroupBy(p => p.WeaponGroup ?? ""))
+            {
+                var times = g.Select(p => p.StartTime!.Value).Distinct().OrderBy(t => t).ToList();
+                var gaps = times.Zip(times.Skip(1), (a, c) => (int)(c - a).TotalMinutes).Where(x => x is >= 1 and <= 120).ToList();
+                var interval = gaps.Count > 0 ? gaps.GroupBy(x => x).OrderByDescending(x => x.Count()).ThenBy(x => x.Key).First().Key : settings.IntervalMinutes;
+                var size = Math.Clamp(g.Max(p => membersByPatrol.GetValueOrDefault(p.Id)), 1, 12);
+                var codes = g.Key.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(c => !string.Equals(c, "Alla", StringComparison.OrdinalIgnoreCase) && !string.Equals(c, "MixAll", StringComparison.OrdinalIgnoreCase)).ToList();
+                result.Add(new PatrolGroupSpec(g.Key, codes, times[0], interval, size, g.Count()));
+            }
+            return result;
         }
 
         private static string Hash(IEnumerable<string> parts) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", parts))))[..24];
@@ -249,7 +270,7 @@ namespace HpskSite.Services.Staffing
             var current = b.Members.Where(m => patrolById.ContainsKey(m.PatrolId))
                 .Select(m => new CurrentPlacement(m.Id, m.MemberId, m.MemberName, m.ShootingClass, patrolById[m.PatrolId].PatrolNumber, patrolById[m.PatrolId].StartTime, m.Locked))
                 .OrderBy(c => c.PatrolNumber).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
-            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed, current, keptFitting, moves);
+            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed, current, keptFitting, moves, GroupsOf(b, settings));
         }
 
         // ------------------------------------------------------------ tillämpa

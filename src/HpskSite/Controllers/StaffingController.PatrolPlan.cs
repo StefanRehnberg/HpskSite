@@ -51,6 +51,8 @@ namespace HpskSite.Controllers
                     current = (pv.Current ?? new()).Select(c => new { patrolMemberId = c.PatrolMemberId, memberId = c.MemberId, name = c.Name, shootingClass = c.ShootingClass, number = c.PatrolNumber, time = Hm(c.StartTime), locked = c.Locked }),
                     moves = (pv.Moves ?? new()).Select(m => new { kind = m.Kind, memberId = m.MemberId, name = m.Name, shootingClass = m.ShootingClass, fromPatrol = m.FromPatrol, fromTime = Hm(m.FromTime), toPatrol = m.ToPatrol, toTime = Hm(m.ToTime), why = m.Why }),
                     published = pv.BlockedReason != null,
+                    groups = (pv.Groups ?? new()).Select(g => new { label = g.Label, firstStart = g.FirstStart.ToString("HH\\:mm"), interval = g.IntervalMinutes, patrolSize = g.PatrolSize, patrols = g.PatrolCount }),
+                    ungrouped = pv.Plan.Ungrouped,
                     reservesLeftOut = pv.Plan.ReservesLeftOut,
                     lockedKept = pv.Plan.LockedKept, lockedDropped = pv.Plan.LockedDropped, lockedOverflow = pv.Plan.LockedOverflow,
                     undoable = svc.LatestUndoable(owner),

@@ -120,6 +120,83 @@ namespace HpskSite.Tests
             plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(8);
         }
 
+        // ── Grupper: fältets startlista skapas en grupp i taget med egen första start (B+C kl 09, A kl 13). Tiderna per patrull är uppskattningar. ──
+        private static readonly List<PatrolGroupSpec> Groups = new()
+        {
+            new("B+C", new[] { "B", "C" }, D.AddHours(9), 10, 5, 4),
+            new("A", new[] { "A" }, D.AddHours(13), 15, 4, 3),
+        };
+
+        private static List<CompetitionRegistration> Mixed(int bc, int a) =>
+            Enumerable.Range(1, bc).Select(i => Reg(i, i % 2 == 0 ? "B1" : "C2")).Concat(Enumerable.Range(100, a).Select(i => Reg(i, "A2"))).ToList();
+
+        [Fact]
+        public void Varje_grupp_byggs_med_sin_egen_forsta_start_och_inget_flyttar_mellan_grupper()
+        {
+            var plan = FaltskyttePatrolPlanner.Plan(Mixed(12, 7), new List<LockedPlacement>(), new PatrolConstraints(), new HashSet<int>(), S, Groups);
+            var bc = plan.Patrols.Where(p => p.WeaponGroup == "B+C").ToList();
+            var a = plan.Patrols.Where(p => p.WeaponGroup == "A").ToList();
+            bc.Min(p => p.StartTime).Should().Be(D.AddHours(9));
+            a.Min(p => p.StartTime).Should().Be(D.AddHours(13));
+            bc.Should().OnlyContain(p => p.Members.Count <= 5);
+            a.Should().OnlyContain(p => p.Members.Count <= 4);
+            bc.SelectMany(p => p.Members).Select(m => m.MemberId).Should().OnlyContain(id => id < 100);
+            a.SelectMany(p => p.Members).Select(m => m.MemberId).Should().OnlyContain(id => id >= 100);
+            plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(19);
+            plan.Ungrouped.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Den_som_kroockar_flyttas_inom_sin_grupp_och_ingen_hamnar_i_en_annan()
+        {
+            // Skytt 1 (grupp B+C) har ett uppdrag 08–15: gruppens första start 09:00 krockar, så hen får en senare patrull i SAMMA grupp, aldrig i A.
+            var c = new PatrolConstraints { Jobs = new Dictionary<int, List<StaffInterval>> { [1] = new() { Iv(8, 12) } } };
+            var plan = FaltskyttePatrolPlanner.Plan(Mixed(12, 7), new List<LockedPlacement>(), c, new HashSet<int>(), S, Groups);
+            var p1 = plan.Patrols.Single(p => p.Members.Any(m => m.MemberId == 1));
+            p1.WeaponGroup.Should().Be("B+C");
+            c.Blocks(1, p1.StartTime!.Value).Should().BeFalse();
+            p1.StartTime!.Value.Should().BeAfter(D.AddHours(9));
+        }
+
+        [Fact]
+        public void Anmalda_utan_grupp_placeras_inte_utan_redovisas_med_namn_och_klass()
+        {
+            var onlyBc = new List<PatrolGroupSpec> { Groups[0] };
+            var plan = FaltskyttePatrolPlanner.Plan(Mixed(4, 2), new List<LockedPlacement>(), new PatrolConstraints(), new HashSet<int>(), S, onlyBc);
+            plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(4);
+            plan.Ungrouped.Should().HaveCount(2);
+            plan.Ungrouped.Should().OnlyContain(s => s.Contains("Skytt 10"));
+        }
+
+        [Fact]
+        public void Lasta_ligger_kvar_i_sin_grupp_pa_sin_tid_och_tar_plats_i_patrullen()
+        {
+            var t = D.AddHours(13).AddMinutes(15);
+            var locked = new List<LockedPlacement> { new(100, "Skytt 100", "Klubb", "A2", t, "A"), new(101, "Skytt 101", "Klubb", "A2", t, "A") };
+            var plan = FaltskyttePatrolPlanner.Plan(Mixed(0, 8), locked, new PatrolConstraints(), new HashSet<int>(), S, new List<PatrolGroupSpec> { Groups[1] });
+            plan.Patrols.Where(p => p.StartTime == t).Should().ContainSingle().Which.Members.Select(m => m.MemberId).Should().Contain(new[] { 100, 101 });
+            plan.Patrols.Should().OnlyContain(p => p.Members.Count <= 4);
+            plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(8);
+        }
+
+        [Fact]
+        public void Egenskap_grupper_slumpade_instanser_ingen_hamnar_i_fel_grupp_eller_krockar()
+        {
+            for (var seed = 1; seed <= 60; seed++)
+            {
+                var inst = Make(seed);
+                var plan = FaltskyttePatrolPlanner.Plan(inst.Regs, new List<LockedPlacement>(), inst.C, inst.Reserves, S,
+                    new List<PatrolGroupSpec> { new("B+C", new[] { "B", "C" }, D.AddHours(9), 10, 5, 1) });
+                var placed = plan.Patrols.SelectMany(p => p.Members).Select(m => m.MemberId).OrderBy(x => x).ToList();
+                placed.Should().Equal(inst.Regs.Where(r => !inst.Reserves.Contains(r.MemberId)).Select(r => r.MemberId).OrderBy(x => x), $"seed {seed}");
+                plan.Patrols.Should().OnlyContain(p => p.WeaponGroup == "B+C" && p.Members.Count <= 5, $"seed {seed}");
+                var unavoidable = plan.Unavoidable.Select(u => u.MemberId).ToHashSet();
+                foreach (var p in plan.Patrols)
+                    foreach (var m in p.Members.Where(m => !unavoidable.Contains(m.MemberId)))
+                        inst.C.Blocks(m.MemberId, p.StartTime!.Value).Should().BeFalse($"seed {seed}: {m.Name}");
+            }
+        }
+
         [Fact]
         public void Last_skytt_i_full_patrull_far_en_egen_patrull_vid_samma_tid_och_redovisas()
         {

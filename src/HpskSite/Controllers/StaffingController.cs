@@ -243,9 +243,11 @@ namespace HpskSite.Controllers
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: family clashes failed for planning {Planning}", pid); }
                     var sm = _owners.Planning(pid)?.ShooterMode;
                     resp.ShooterMode = ShooterModeRules.IsValid(sm) ? sm : null;
-                    // "Bygg startlistan runt funktionärerna" finns bara när planeringen hör till en fälttävling.
+                    // "Bygg startlistan runt funktionärerna" finns bara när planeringen hör till en fälttävling, och bara för den som också har tävlingens
+                    // personalbehörighet (samma regel som ändpunkterna, PatrolOwnerAsync) — annars visas ett val som svarar "Ingen behörighet" först efter klicket.
                     resp.PatrolPlanAvailable = owner.HasCompetition
-                        && FunctionaryRoles.FaltFamily.Contains(_competitions.GetSaved(owner.Comp)?.CompetitionType ?? "", StringComparer.OrdinalIgnoreCase);
+                        && FunctionaryRoles.FaltFamily.Contains(_competitions.GetSaved(owner.Comp)?.CompetitionType ?? "", StringComparer.OrdinalIgnoreCase)
+                        && await HasCompetitionAccessAsync(owner.Comp);
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
                 }
