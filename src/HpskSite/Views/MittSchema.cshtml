@@ -10,7 +10,8 @@
     var single = ViewData["Schedule"] as MySchedule;
     var all = ViewData["Schedules"] as List<MySchedule> ?? new List<MySchedule>();
     var weeks = ViewData["Weeks"] as List<MySchedule> ?? new List<MySchedule>();
-    var planningMeetings = ViewData["PlanningMeetings"] as List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting> ?? new List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting>();
+    var ledParts = ViewData["LedParts"] as List<(int Id, string Name)> ?? new List<(int Id, string Name)>();
+    var planningMeetings =ViewData["PlanningMeetings"] as List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting> ?? new List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting>();
 }
 
 <div class="container mt-4 mb-5">
@@ -87,6 +88,23 @@
                 b.disabled = false;
             });
             </script>
+        }
+
+        @* Skjutledare och stationschef: "Din del" — uppdragen i delen de leder, med Hitta ersättare (ReplacementAccessRules). Ritas av
+           skriptet; servern prövar rätten vid varje anrop. Markup-only: ingen `is {` i @if. *@
+        @if (ledParts.Count > 0)
+        {
+            <div class="card mt-3 d-print-none" id="ledPart" data-parts="@string.Join(",", ledParts.Select(x => x.Id))">
+                <div class="card-header fw-semibold"><i class="bi bi-people me-1"></i>Din del@(ledParts.Count == 1 ? ": " + ledParts[0].Name : "")</div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Du leder den här delen. Har någon i den tackat nej, eller saknas, kan du hitta en ersättare bland dem som anmält sig till dagen.</p>
+                    <div id="ledPartList" aria-live="polite"><span class="text-muted small">Hämtar…</span></div>
+                </div>
+            </div>
+            <script>
+                window.hpskLedPart = { token: '@Antiforgery.GetAndStoreTokens(Context).RequestToken', parts: [@string.Join(",", ledParts.Select(x => x.Id))] };
+            </script>
+            <script src="~/js/mitt-schema-din-del.js" asp-append-version="true"></script>
         }
 
         @* Notiser BELOW the timeline: the page is called Mitt schema, so the schedule is what the

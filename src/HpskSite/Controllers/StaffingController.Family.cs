@@ -326,13 +326,14 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetReplacementCandidates(int assignmentId)
         {
-            var owner = await RowOwnerAsync(_staffing.OwnerOf(assignmentId));
-            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            var (owner, byLeader) = await ReplaceOwnerAsync(assignmentId, null);
+            if (owner == null) return Json(new { success = false, message = byLeader.Refusal ?? "Ingen behörighet" });
             try
             {
                 var viewer = await ResolveViewerAsync();
+                // En ledare ser bara det den leder: i andra delar visas "uppdrag i en annan del" i stället för vad personen gör där.
                 var (t, list, err) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>()
-                    .Candidates(assignmentId, pid => viewer != null && _planning.CanEditStaffingIn(pid, viewer.Id));
+                    .Candidates(assignmentId, pid => viewer != null && (byLeader.IsLeader ? pid == owner.PlanningId : _planning.CanEditStaffingIn(pid, viewer.Id)));
                 if (err != null || t == null) return Json(new { success = false, message = err ?? "Uppdraget hittades inte." });
                 return Json(new
                 {
@@ -354,9 +355,9 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> ReplaceAssignmentHolder([FromBody] ReplaceHolderRequest request)
         {
             if (request == null || request.Id <= 0 || request.MemberId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
+            var (owner, byLeader) = await ReplaceOwnerAsync(request.Id, request.MemberId);
             var viewer = await ResolveViewerAsync();
-            if (owner == null || viewer == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (owner == null || viewer == null) return Json(new { success = false, message = byLeader.Refusal ?? "Ingen behörighet" });
             try
             {
                 var r = _staffing.ReplaceHolder(request.Id, owner, request.MemberId);
@@ -369,6 +370,61 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Staffing: ReplaceAssignmentHolder failed for {Id}", request.Id);
                 return Json(new { success = false, message = "Kunde inte lämna över uppdraget." });
             }
+        }
+    }
+
+    public partial class StaffingController
+    {
+        /// <summary>
+        /// Mitt schema, "Din del": uppdragen i en del som den som leder den kan lämna över. Bara den som har en ledarroll (skjutledare,
+        /// stationschef) i just den planeringen får listan — den visar vem som har vilket uppdrag och om hen tackat nej.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyPartAssignments(int partId)
+        {
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null || partId <= 0 || !_staffing.LedPlanningIds(viewer.Id).Contains(partId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var rows = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().PartAssignments(partId, viewer.Id);
+                return Json(new { success = true, rows = rows.Select(r => new { id = r.AssignmentId, holder = r.Holder, role = r.RoleName, when = r.When, status = r.Status, open = r.Open }) });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetMyPartAssignments failed for part {Part}", partId);
+                return Json(new { success = false, message = "Kunde inte läsa uppdragen i din del." });
+            }
+        }
+
+        /// <summary>Hur rätten att lämna över uppdraget kom till: av en ledare (skjutledare/stationschef i delen), eller av den som bemannar.</summary>
+        private readonly record struct ReplaceAccess(bool IsLeader, string? Refusal);
+
+        /// <summary>
+        /// Den som bemannar delen (<c>RowOwnerAsync</c>) får som förut. Annars kan en skjutledare eller stationschef i just den delen
+        /// (<see cref="ReplacementAccessRules"/>). <paramref name="newMemberId"/> är null vid läsning av listan; vid överlämning prövas att
+        /// den nya personen finns i poolen — en ledare ska inte kunna lägga en uppdrag på vilken medlem som helst.
+        /// </summary>
+        private async Task<(StaffOwner? Owner, ReplaceAccess Access)> ReplaceOwnerAsync(int assignmentId, int? newMemberId)
+        {
+            var raw = _staffing.OwnerOf(assignmentId);
+            var editor = await RowOwnerAsync(raw);
+            if (editor != null) return (editor, new ReplaceAccess(false, null));
+            if (raw is not { HasPlanning: true }) return (null, new ReplaceAccess(false, null));
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return (null, new ReplaceAccess(false, null));
+            var row = _staffing.GetById(assignmentId);
+            if (row == null) return (null, new ReplaceAccess(false, null));
+
+            var leads = _staffing.LedPlanningIds(viewer.Id).Contains(raw.PlanningId);
+            bool? inPool = null;
+            if (leads && newMemberId is > 0)
+            {
+                var (_, list, _) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().Candidates(assignmentId);
+                inPool = list.Any(c => c.MemberId == newMemberId.Value);
+            }
+            var refusal = ReplacementAccessRules.Refusal(leads, row.RoleKey, row.HasAdminAccess, row.MemberId == viewer.Id, inPool);
+            return refusal == null ? (raw, new ReplaceAccess(true, null)) : (null, new ReplaceAccess(false, leads ? refusal : null));
         }
     }
 

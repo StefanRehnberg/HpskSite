@@ -72,6 +72,16 @@ namespace HpskSite.Controllers
                 var week = _week.Get(memberId.Value, p);
                 if (week == null) return NotFound();
                 ViewData["Schedule"] = week;
+                // "Din del": delarna i familjen där medlemmen är skjutledare eller stationschef — där finns "Hitta ersättare".
+                try
+                {
+                    var sp = HttpContext.RequestServices;
+                    var led = sp.GetRequiredService<HpskSite.Services.Staffing.StaffingService>().LedPlanningIds(memberId.Value);
+                    if (led.Count > 0)
+                        ViewData["LedParts"] = sp.GetRequiredService<HpskSite.Services.Planning.PlanningService>().Family(p)
+                            .Where(f => led.Contains(f.Id)).Select(f => (f.Id, f.Name)).ToList();
+                }
+                catch { /* sidan klarar sig utan "Din del" */ }
                 ViewData["Mode"] = "single";
                 ViewData["Title"] = $"Mitt schema — {week.CompName}";
                 return View("MittSchema", rootNode);

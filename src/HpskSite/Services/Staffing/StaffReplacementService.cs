@@ -105,6 +105,41 @@ namespace HpskSite.Services.Staffing
             return (target, ReplacementRules.Rank(result), null);
         }
 
+        /// <summary>En rad i ledarens lista: ett uppdrag i delen som går att lämna över. <see cref="Open"/> = ingen har det eller personen har tackat nej.</summary>
+        public sealed record PartRow(int AssignmentId, string Holder, string RoleName, string When, string Status, bool Open);
+
+        /// <summary>
+        /// Uppdragen i <paramref name="planningId"/> som en ledare där kan lämna över: kommande dagar, utan behörighet och inte ledarens egna
+        /// (<see cref="ReplacementAccessRules.Refusal"/>). Avböjda och tomma först — det är dem man letar ersättare till.
+        /// </summary>
+        public List<PartRow> PartAssignments(int planningId, int viewerMemberId)
+        {
+            List<StaffAssignment> rows; Dictionary<int, StaffPass> passes;
+            using (var s = _scopes.CreateScope(autoComplete: true))
+            {
+                var db = s.Database;
+                rows = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE PlanningId = @0", planningId);
+                var passIds = rows.Where(r => r.PassId is > 0).Select(r => r.PassId!.Value).Distinct().ToList();
+                passes = passIds.Count == 0 ? new() : db.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE Id IN (@ids)", new { ids = passIds }).ToDictionary(p => p.Id);
+            }
+            var owner = _owners.ForPlanning(planningId);
+            var sv = CultureInfo.GetCultureInfo("sv-SE");
+            var today = HpskSite.Services.Hosting.SwedishTime.Now.Date;
+            var result = new List<(DateTime Date, PartRow Row)>();
+            foreach (var a in rows)
+            {
+                if (ReplacementAccessRules.Refusal(true, a.RoleKey, a.HasAdminAccess, a.MemberId == viewerMemberId && viewerMemberId > 0, null) != null) continue;
+                var (date, interval) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passes.TryGetValue(a.PassId.Value, out var ps) ? ps : null);
+                if (date == null || date.Value.Date < today) continue;
+                var dayText = date.Value.ToString("dddd d MMMM", sv);
+                var when = interval is { AllDay: false } iv ? $"{dayText} {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : $"{dayText} hela dagen";
+                var roleName = owner == null ? a.RoleKey : _roles.NameFor(owner, _owners.Discipline(owner), a.RoleKey);
+                var open = a.MemberId is not > 0 || a.Status == StaffAssignmentStatus.Declined;
+                result.Add((date.Value.Date, new PartRow(a.Id, string.IsNullOrWhiteSpace(a.DisplayName) ? "Ingen utsedd" : a.DisplayName, roleName, when, a.Status ?? "", open)));
+            }
+            return result.OrderByDescending(x => x.Row.Open).ThenBy(x => x.Date).ThenBy(x => x.Row.RoleName).Select(x => x.Row).Take(100).ToList();
+        }
+
         /// <summary>Aviserar den som tar över (push och mejl). Returnerar om något gick iväg. Anropas efter att överlämningen sparats.</summary>
         public async Task<bool> NotifyAsync(StaffAssignment row, string? oldName, int? oldMemberId, int byMemberId)
         {
@@ -161,7 +196,7 @@ namespace HpskSite.Services.Staffing
         /// </summary>
         public async Task NotifyDeclinedAsync(int assignmentId, int declinedByMemberId)
         {
-            StaffAssignment? a; List<int> conveners; int rootId;
+            StaffAssignment? a; List<int> conveners, leaders; int rootId;
             using (var s = _scopes.CreateScope(autoComplete: true))
             {
                 var db = s.Database;
@@ -173,9 +208,13 @@ namespace HpskSite.Services.Staffing
                 var pids = string.Join(",", new[] { a.PlanningId.Value, rootId }.Distinct());
                 conveners = db.Fetch<int>($"SELECT DISTINCT MemberId FROM PlanningMember WHERE PlanningId IN ({pids}) AND Access = @0 AND RemovedAt IS NULL AND ViaCompetition = 0 AND MemberId > 0",
                     HpskSite.Models.Planning.PlanningAccessLevel.Owner);
+                // Skjutledare och stationschef i uppdragets del (ReplacementAccessRules) — de som står på banan och kan lämna över.
+                leaders = db.Fetch<int>("SELECT DISTINCT MemberId FROM StaffAssignment WHERE PlanningId = @0 AND MemberId > 0 AND RoleKey IN (@1, @2) AND Status <> @3",
+                    a.PlanningId.Value, ReplacementAccessRules.SkjutledareRole, ReplacementAccessRules.StationschefRole, StaffAssignmentStatus.Declined);
             }
             conveners.Remove(declinedByMemberId);
-            if (conveners.Count == 0) return;
+            leaders.RemoveAll(l => l == declinedByMemberId || conveners.Contains(l));   // en sammankallande som också är ledare får EN avisering
+            if (conveners.Count == 0 && leaders.Count == 0) return;
             var owner = _owners.ForPlanning(a.PlanningId.Value);
             if (owner == null) return;
             var who = _members.GetById(declinedByMemberId);
@@ -184,11 +223,14 @@ namespace HpskSite.Services.Staffing
             var when = date == null ? "" : date.Value.ToString("dddd d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
                 + (interval is { AllDay: false } iv ? $" {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : " hela dagen");
             var planningName = _owners.Name(owner);
-            var url = $"{_links.SiteUrl}/tavlingsplanering/{rootId}#vy=bemanning&del=veckan&person={Uri.EscapeDataString("m:" + declinedByMemberId)}";
+            var convenerUrl = $"{_links.SiteUrl}/tavlingsplanering/{rootId}#vy=bemanning&del=veckan&person={Uri.EscapeDataString("m:" + declinedByMemberId)}";
             var replyTo = who != null && !string.IsNullOrWhiteSpace(who.Email)
                 ? MailReplyTo.To(who.Email, who.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
-            foreach (var c in conveners)
+            var leaderUrl = $"{_links.SiteUrl}/mitt-schema?p={rootId}";
+            foreach (var c in conveners.Concat(leaders))
             {
+                var isLeader = leaders.Contains(c);
+                var url = isLeader ? leaderUrl : convenerUrl;
                 if (!ClaimOnce(c, $"declined-{assignmentId}")) continue;
                 var body = $"{a.DisplayName} kan inte: {roleName}{(when.Length > 0 ? ", " + when : "")} i {planningName}. Hitta en ersättare.";
                 try { await _push.SendToMemberAsync(c, "Någon kan inte komma", body, url, $"declined-{assignmentId}"); }
@@ -200,7 +242,7 @@ namespace HpskSite.Services.Staffing
                     + $"<p>{PlanningNotifier.Button("Hitta ersättare", url)}</p>"
                     + ContactHtml(who);
                 await _email.SendPlanningMailAsync(m.Email, $"{a.DisplayName} kan inte: {roleName} {when}".Trim(),
-                    PlanningNotifier.Page(m.Name ?? "", planningName, inner, "Du får det här mejlet för att du är sammankallande för planeringen."), replyTo);
+                    PlanningNotifier.Page(m.Name ?? "", planningName, inner, isLeader ? "Du får det här mejlet för att du leder delen." : "Du får det här mejlet för att du är sammankallande för planeringen."), replyTo);
             }
         }
 

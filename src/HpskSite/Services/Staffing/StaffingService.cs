@@ -105,6 +105,19 @@ namespace HpskSite.Services.Staffing
             return CarriesFamilyGrant(scope.Database, owner);
         }
 
+        /// <summary>
+        /// Planeringarna (delarna) där medlemmen har en ledarroll — skjutledare eller stationschef — och inte tackat nej. Det är den
+        /// rätt att hitta ersättare som <see cref="ReplacementAccessRules"/> ger "för sin del".
+        /// </summary>
+        public List<int> LedPlanningIds(int memberId)
+        {
+            if (memberId <= 0) return new List<int>();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<int>(@"SELECT DISTINCT a.PlanningId FROM StaffAssignment a JOIN Planning p ON p.Id = a.PlanningId AND p.DeletedAt IS NULL
+                                               WHERE a.MemberId = @0 AND a.RoleKey IN (@1, @2) AND a.Status <> @3",
+                memberId, ReplacementAccessRules.SkjutledareRole, ReplacementAccessRules.StationschefRole, StaffAssignmentStatus.Declined);
+        }
+
         /// <summary>Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.</summary>
         private static bool CarriesFamilyGrant(NPoco.IDatabase db, StaffOwner owner) =>
             owner.HasPlanning && !owner.HasCompetition
