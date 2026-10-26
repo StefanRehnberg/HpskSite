@@ -65,7 +65,8 @@ namespace HpskSite.Services.Planning
                                                  ("PlanningMessage", "AreaId"), ("PlanningDocumentCategory", "AreaId"),
                                                  ("Planning", "ParentPlanningId"), ("Planning", "FamilyRootId"), ("Planning", "HostText"), ("Planning", "GroupName"),
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
-                                                 ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId") })
+                                                 ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId"),
+                                                 ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -171,6 +172,18 @@ namespace HpskSite.Services.Planning
             using var s = _scopes.CreateScope(autoComplete: true);
             s.Database.Execute("UPDATE Planning SET SignupRoleChoice = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL",
                 planningId, value, Now, byMemberId);
+            Bump(s.Database, planningId);
+        }
+
+        /// <summary>
+        /// Planera dagen steg 0: planeringens skjuttid (minuter före / skjuttid / minuter efter). Null = förvalet för grenen. Giltigheten
+        /// prövas av <see cref="HpskSite.Models.Staffing.ShootTimeRules.Validate"/> innan anropet.
+        /// </summary>
+        public void SetShootTime(int planningId, int? before, int? duration, int? after, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE Planning SET ShootBeforeMin = @1, ShootDurationMin = @2, ShootAfterMin = @3, UpdatedAt = @4, UpdatedBy = @5 WHERE Id = @0 AND DeletedAt IS NULL",
+                planningId, before, duration, after, Now, byMemberId);
             Bump(s.Database, planningId);
         }
 

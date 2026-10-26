@@ -130,15 +130,17 @@ namespace HpskSite.Services.Staffing
                 {
                     try
                     {
+                        // Planera dagen steg 0: skjuttiden hör till grenen (och planeringen), inte en konstant på 2 h.
+                        var shoot = _owners.ShootTime(t.PlanningId);
                         foreach (var item in _schedule.GetSchedule(mid, t.CompetitionId).Days.SelectMany(d => d.Items)
                                      .Where(i => i.Kind == ScheduleItemKind.Skytte && i.StartsAt != null))
                         {
                             var st = item.StartsAt!.Value;
                             var guessed = item.EndsAt == null || item.EndsAt <= st;
-                            var en = guessed ? st + ShootIntentService.EstimatedStart : item.EndsAt!.Value;
+                            var en = guessed ? st + shoot.Duration : item.EndsAt!.Value;
                             entries[startKey].Add(new PersonWeekEntry(
-                                $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, StaffInterval.FromMoments(st, en), Venue(t.CompetitionId),
-                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + (int)ShootIntentService.EstimatedStart.TotalHours + " h)" : "–" + en.ToString("HH:mm"))}",
+                                $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, shoot.Window(st, item.EndsAt), Venue(t.CompetitionId),
+                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
                                 null, t.CompetitionId));
                         }
                     }

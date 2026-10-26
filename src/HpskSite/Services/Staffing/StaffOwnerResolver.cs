@@ -71,6 +71,18 @@ namespace HpskSite.Services.Staffing
             return row;
         }
 
+        /// <summary>
+        /// Hur länge en skytt är upptagen av sin egen start i den här planeringen: grenens förval med planeringens egna värden över
+        /// (<see cref="ShootTimeRules.Resolve"/>). EN källa för veckan, krockarna, kandidatlistan och förslagen.
+        /// </summary>
+        public ShootTime ShootTime(int planningId)
+        {
+            var p = Planning(planningId);
+            var owner = ForPlanning(planningId);
+            var discipline = owner != null ? Discipline(owner) : p?.DisciplineKey;
+            return ShootTimeRules.Resolve(discipline, p?.ShootBeforeMin, p?.ShootDurationMin, p?.ShootAfterMin);
+        }
+
         /// <summary>Grenen: tävlingens när planeringen är kopplad, annars planeringens egen.</summary>
         public string Discipline(StaffOwner owner)
         {

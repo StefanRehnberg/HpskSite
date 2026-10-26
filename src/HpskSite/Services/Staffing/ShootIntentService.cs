@@ -25,9 +25,6 @@ namespace HpskSite.Services.Staffing
         private readonly RoleCatalogService _roles;
         private readonly ILogger<ShootIntentService> _logger;
 
-        /// <summary>En start utan sluttid antas ta så här lång tid (fältets rundor saknar sluttid i schemat).</summary>
-        public static readonly TimeSpan EstimatedStart = TimeSpan.FromHours(2);
-
         public ShootIntentService(IScopeProvider scopes, PlanningService planning, HpskSite.Services.Competitions.ICompetitionStore competitions,
             MyScheduleService schedule, StaffOwnerResolver owners, RoleCatalogService roles, ILogger<ShootIntentService> logger)
         {
@@ -171,14 +168,16 @@ namespace HpskSite.Services.Staffing
                 {
                     try
                     {
+                        var shoot = _owners.ShootTime(t.PlanningId);   // Planera dagen steg 0: skjuttid per gren, inte 2 h för alla
                         foreach (var item in _schedule.GetSchedule(mid, t.CompetitionId).Days.SelectMany(d => d.Items)
                                      .Where(i => i.Kind == ScheduleItemKind.Skytte && i.StartsAt != null))
                         {
                             var st = item.StartsAt!.Value;
-                            var en = item.EndsAt is DateTime e && e > st ? e : st + EstimatedStart;
+                            var win = shoot.Window(st, item.EndsAt);
+                            var en = item.EndsAt is DateTime e && e > st ? e : st + shoot.Duration;
                             var guessed = item.EndsAt == null || item.EndsAt <= st;
-                            starts.Add(new FamilyClashRules.Start("m:" + mid, t.CompetitionId, st.Date, (st.TimeOfDay, en.TimeOfDay),
-                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + (int)EstimatedStart.TotalHours + " h)" : "–" + en.ToString("HH:mm"))}"));
+                            starts.Add(new FamilyClashRules.Start("m:" + mid, t.CompetitionId, st.Date, (win.Start.TimeOfDay, win.End.TimeOfDay),
+                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}"));
                         }
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Krockar: schemat för medlem {Member} i tävling {Comp} gick inte att läsa.", mid, t.CompetitionId); }

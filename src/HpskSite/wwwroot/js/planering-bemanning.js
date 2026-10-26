@@ -239,6 +239,40 @@ window.PlaneringBemanning = (function () {
             onOk: body => saveRoleChoice(body)
         });
     }
+    // Planera dagen steg 0 (Stefan 2026-10-26): hur länge en skytt är upptagen av sin egen start. Förval per gren, ändringsbart här.
+    async function openShootTime() {
+        const r = await sget('GetShootTime').catch(() => null);
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Skjuttiden kunde inte läsas.'), 'danger'); return; }
+        const d = r.defaults || {};
+        A.formModal({
+            title: 'Skjuttid', okLabel: 'Spara', wide: false,
+            html: `<p class="pl-help mb-2">Så här länge räknar vi att en skytt är upptagen av sin egen start. Det används för att se när någon som både skjuter och jobbar inte hinner med uppdraget — och av förslagen.</p>
+                <div class="mb-2"><label class="form-label mb-0" for="plbStBefore">Minuter före starten <span class="plb-dim small">(förberedelse, vapenkontroll)</span></label>
+                    <input type="number" min="0" max="720" class="form-control" id="plbStBefore" inputmode="numeric" style="max-width:140px" value="${r.before}"></div>
+                <div class="mb-2"><label class="form-label mb-0" for="plbStDur">Så länge tar skjutningen <span class="plb-dim small">(minuter; används när slutet inte är känt, som i fält)</span></label>
+                    <input type="number" min="1" max="720" class="form-control" id="plbStDur" inputmode="numeric" style="max-width:140px" value="${r.duration}"></div>
+                <div class="mb-2"><label class="form-label mb-0" for="plbStAfter">Minuter efter <span class="plb-dim small">(vila och förflyttning)</span></label>
+                    <input type="number" min="0" max="720" class="form-control" id="plbStAfter" inputmode="numeric" style="max-width:140px" value="${r.after}"></div>
+                <p class="pl-help small mb-0">Förval för den här grenen: ${d.before} min före, ${d.duration} min skjutning, ${d.after} min efter.${r.isOwn ? ' <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbStReset">Använd förvalet</button>' : ''}</p>`,
+            onOpen: b => {
+                const rs = b.querySelector('#plbStReset');
+                if (rs) rs.addEventListener('click', () => {
+                    b.querySelector('#plbStBefore').value = d.before; b.querySelector('#plbStDur').value = d.duration; b.querySelector('#plbStAfter').value = d.after;
+                });
+            },
+            onOk: async b => {
+                const n = id => { const v = b.querySelector(id).value.trim(); return v === '' ? null : parseInt(v, 10); };
+                const before = n('#plbStBefore'), duration = n('#plbStDur'), after = n('#plbStAfter');
+                if ([before, duration, after].some(v => v !== null && isNaN(v))) return 'Skriv minuter som tal.';
+                const same = before === d.before && duration === d.duration && after === d.after;
+                const res = await spost('SetShootTime', { before, duration, after, reset: same });
+                if (!res.success) return res.message || 'Skjuttiden kunde inte sparas.';
+                await loadGrid(); drawGrid();
+                A.showMsg('Skjuttiden är sparad. Krockarna räknas om.', 'success');
+                return true;
+            }
+        });
+    }
     document.addEventListener('click', async e => {
         if (!A || !A.isActive() || !e.target.closest('[data-plb-saveroles]')) return;
         e.preventDefault();
@@ -254,6 +288,7 @@ window.PlaneringBemanning = (function () {
             { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: () => openNewRole() },
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
+            linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
         ]);

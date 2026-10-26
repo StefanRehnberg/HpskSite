@@ -223,6 +223,13 @@ namespace HpskSite.Models.Planning
         /// Null = huvudplaneringens tävling (P4). Regeln: <see cref="PlanningFamilyRules.StaffingCompetition"/>.
         /// </summary>
         public int? StaffsForCompetitionId { get; set; }
+        /// <summary>
+        /// Planera dagen steg 0 (Stefan 2026-10-26): hur länge en skytt är upptagen av sin egen start — minuter före, skjuttid när slutet inte är
+        /// känt, och minuter efter. Null = förvalet för grenen (<see cref="HpskSite.Models.Staffing.ShootTimeRules.Default"/>).
+        /// </summary>
+        public int? ShootBeforeMin { get; set; }
+        public int? ShootDurationMin { get; set; }
+        public int? ShootAfterMin { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CreatedBy { get; set; }
         public DateTime UpdatedAt { get; set; }
