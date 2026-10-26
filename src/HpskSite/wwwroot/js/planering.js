@@ -524,10 +524,10 @@
         const compStep = competitionNextStep();
         if (compStep) steps.push(`<div class="pl-next${compStep.warn ? ' warn' : ''}" id="plCompNext"><div class="t"><b>Tävlingen:</b> ${compStep.text}</div>
             <a class="btn ${compStep.warn ? 'btn-primary' : 'btn-outline-primary'}" href="#vy=tavling" data-pl-go="tavling">${esc(compStep.button || 'Tävlingen')}</a></div>`);
-        // Bemanningen: persontesterna fick "Lägg in förberedelserna" som enda nästa steg och hittade aldrig Bemanning (långt ner i menyn). "Dagens plan" i Bemanning
+        // Bemanningen: persontesterna fick "Lägg in förberedelserna" som enda nästa steg och hittade aldrig Bemanning (långt ner i menyn). Bandet "Bemanningen steg för steg" i Bemanning
         // visar vad som saknas; den här raden pekar dit. Bara den som får ändra.
         if (p.me.canEdit) steps.push(`<div class="pl-next" id="plStaffNext"><div class="t"><b>Bemanning:</b> vilka som behövs, vilka som står var och vad som saknas.</div>
-            <a class="btn btn-outline-primary" href="#vy=bemanning" data-pl-go="bemanning">Dagens plan</a></div>`);
+            <a class="btn btn-outline-primary" href="#vy=bemanning" data-pl-go="bemanning">Bemanningen steg för steg</a></div>`);
         const upcoming = (MEET ? MEET.meetings : []).filter(m => m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) >= new Date())
             .sort((a, b) => parseDT(a.startsAt) - parseDT(b.startsAt));
         if (upcoming.length) {

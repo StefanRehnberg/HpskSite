@@ -560,6 +560,7 @@ window.PlaneringBemanning = (function () {
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte räkna ut en startlista.'), 'danger'); return; }
         const draw = b => {
             const c = r.change, s = r.settings;
+            lastMoved = (r.moves || []).filter(m => m.kind !== 'removed');
             const lockRows = (r.current || []).map(m => `<label class="list-group-item d-flex gap-2 align-items-center py-1 small">
                 <input class="form-check-input flex-shrink-0 mt-0" type="checkbox" data-pp-lock="${m.patrolMemberId}"${m.locked ? ' checked' : ''} aria-label="Lås ${esc(m.name)}">
                 <span class="fw-semibold">${esc(m.name)}</span><span class="plb-dim">${esc(m.shootingClass)} · patrull ${m.number} kl ca ${esc(m.time)}</span></label>`).join('');
@@ -568,21 +569,23 @@ window.PlaneringBemanning = (function () {
             const groupsHtml = hasGroups ? `<div class="mb-2" id="plbPpGroups"><div class="fw-semibold small mb-1">Grupperna som byggs om — var och en med sin egen första start</div>
                 <ul class="list-unstyled small mb-1">${r.groups.map(g => `<li class="py-1 border-bottom"><b>${esc(g.label || 'Alla')}</b> · första start ${esc(g.firstStart)} · ${g.patrolSize} per patrull · ${g.interval} min mellan · ${g.patrols} ${g.patrols === 1 ? 'patrull' : 'patruller'}</li>`).join('')}</ul>
                 <p class="plb-dim small mb-0">Tiderna per patrull är uppskattningar (gruppens första start + avstånd). Det är gruppens första start som gäller, och ingen flyttas till en annan grupp.</p></div>` : '';
+            // Skyddet ligger överst: kryssrutan måste synas utan att man rullar i dialogen (persontest 6: den låg gömd under de synliga raderna).
+            const blockedHtml = r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : '';
             b.querySelector('#plbPpBody').innerHTML = `
+                ${blockedHtml}
                 ${groupsHtml}
                 <div class="row g-2 mb-2">
                     ${hasGroups ? '' : `<div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpSize">Skyttar per patrull</label><input type="number" min="1" max="12" class="form-control form-control-sm" id="plbPpSize" inputmode="numeric" value="${s.patrolSize}"></div>
                     <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpInt">Minuter mellan patruller</label><input type="number" min="1" max="120" class="form-control form-control-sm" id="plbPpInt" inputmode="numeric" value="${s.intervalMinutes}"></div>
                     <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpFirst">Första start</label><input type="time" class="form-control form-control-sm" id="plbPpFirst" value="${esc((s.firstStart || '').slice(11, 16))}"></div>`}
-                    <div class="col-6 col-md-3"><label class="form-label mb-0 small" for="plbPpGap">Minst mellan egna starter</label><input type="number" min="0" max="600" class="form-control form-control-sm" id="plbPpGap" inputmode="numeric" value="${s.gap || ''}" placeholder="min"></div>
+                    <div class="col-12 col-md-6"><label class="form-label mb-0 small" for="plbPpGap">Minuter mellan starterna för den som skjuter i flera klasser</label><input type="number" min="0" max="600" class="form-control form-control-sm" id="plbPpGap" inputmode="numeric" value="${s.gap || ''}" aria-describedby="plbPpGapHelp" style="max-width:8rem"><div class="plb-dim small" id="plbPpGapHelp">Lämna tomt om ingen skjuter i flera klasser.</div></div>
                 </div>
                 <label class="d-block small mb-2"><input type="checkbox" class="form-check-input me-1" id="plbPpKeep"${s.keep ? ' checked' : ''}>Behåll de som redan har en tid som passar — flytta bara de som krockar${r.keptFitting ? ` (${r.keptFitting} behålls)` : ''}</label>
                 <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="plbPpRecalc">Räkna om</button>
-                ${r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : ''}
                 <p class="mb-2" id="plbPpSummary"><b>${r.patrols.length} patruller</b>, ${r.patrols.reduce((n, p) => n + p.members.length, 0)} starter. I dag finns ${r.existing.patrols} patruller med ${r.existing.shooters} starter.
                     ${c.moved} flyttas · ${c.unchanged} ligger kvar · ${c.added} är nya${c.removed ? ` · ${c.removed} tas bort (inte anmälda längre)` : ''}.${r.lockedKept - (r.keptFitting || 0) > 0 ? ` ${r.lockedKept - (r.keptFitting || 0)} låsta ligger kvar på sin tid.` : ''}</p>
                 ${!(r.moves || []).length && !r.unavoidable.length ? `<div class="alert alert-success py-2 small" id="plbPpNothing"><b>Ingen behöver flyttas.</b> Ingen skytt har en start som krockar med ett uppdrag, så startlistan behöver inte ändras.</div>` : ''}
-                ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length})</div>
+                ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length}) <button type="button" class="btn btn-link btn-sm p-0 align-baseline fw-normal" data-plb-copymoves>Kopiera som lista att ringa efter</button></div>
                     <ul class="list-unstyled small mb-0" style="max-height:24vh;overflow:auto">${r.moves.slice(0, 60).map(m => `<li class="py-1 border-bottom"><span class="fw-semibold">${esc(m.name)}</span> <span class="plb-dim">${esc(m.shootingClass)}</span> —
                         ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ca ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ca ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}
                         <span class="d-block plb-dim">${esc(m.why)}</span></li>`).join('')}${r.moves.length > 60 ? `<li class="py-1 plb-dim">…och ${r.moves.length - 60} till</li>` : ''}</ul></div>` : ''}
@@ -620,7 +623,7 @@ window.PlaneringBemanning = (function () {
                         if (!d.success && /ändrats/.test(d.message || '') && await A.plConfirm('Startlistan har ändrats sedan', esc(d.message) + '\n\nÅterställ ändå?', 'Återställ ändå'))
                             d = await spost('UndoPatrolPlan', { backupId: r.undoable, force: true });
                         if (!d.success) { b.querySelector('#plbPpErr').textContent = d.message || 'Det gick inte att återställa.'; return; }
-                        A.showMsg('Startlistan är återställd.', 'success'); await reload(b);
+                        A.showMsg('Startlistan är återställd.', 'success'); await loadGrid(); drawGrid(); await reload(b);
                     }
                 });
                 b.addEventListener('change', async e => {
@@ -632,12 +635,18 @@ window.PlaneringBemanning = (function () {
             },
             onOk: async b => {
                 const force = !!(b.querySelector('#plbPpForce') && b.querySelector('#plbPpForce').checked);
-                if (r.blocked && !force) return 'Startlistan är skyddad. Kryssa i "Bygg om ändå" om du verkligen vill.';
+                if (r.blocked && !force) {
+                    const f = b.querySelector('#plbPpForce');
+                    if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); }
+                    return 'Startlistan är skyddad. Kryssa i "Bygg om ändå" om du verkligen vill.';
+                }
                 const s = r.settings;
                 const d = await spost('ApplyPatrolPlan', { fingerprint: r.fingerprint, patrolSize: s.patrolSize, intervalMinutes: s.intervalMinutes, firstStart: s.firstStart, grouping: s.grouping, gap: s.gap, keep: s.keep, force });
                 if (!d.success) return d.message || 'Det gick inte att bygga om.';
+                await loadGrid(); drawGrid();   // stegets status och krocklistan ska visa det nya läget direkt
                 A.showMsg(`Startlistan är ombyggd: ${d.patrols} patruller, ${d.shooters} starter. Dagens lista är sparad.`
-                    + ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undopatrol="${d.backupId}">Ångra</button>`, 'success');
+                    + ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undopatrol="${d.backupId}">Ångra</button>`
+                    + (lastMoved.length ? ` · <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-copymoves>Kopiera listan över de ${lastMoved.length} som fick ny tid</button>` : ''), 'success');
                 return true;
             }
         });
@@ -647,7 +656,19 @@ window.PlaneringBemanning = (function () {
         if (!b || !A || !A.isActive()) return;
         e.preventDefault();
         const d = await spost('UndoPatrolPlan', { backupId: parseInt(b.dataset.plbUndopatrol, 10) }).catch(() => null);
+        if (d && d.success) { await loadGrid(); drawGrid(); }   // annars står "klart" kvar och ångra ser ut att inte ha hänt något
         A.showMsg(d && d.success ? 'Startlistan är återställd.' : esc((d && d.message) || 'Det gick inte att ångra.'), d && d.success ? 'success' : 'danger');
+    });
+    // De som fick ny tid får inget mejl — arrangören ringer dem. Listan är namn, klass och ny tid, som text att klistra in eller skriva ut.
+    let lastMoved = [];
+    const movedText = ms => ms.map(m => `${m.name} (${m.shootingClass}): patrull ${m.toPatrol} kl ca ${m.toTime}`).join('\n');
+    document.addEventListener('click', async e => {
+        const b = e.target.closest && e.target.closest('[data-plb-copymoves]');
+        if (!b || !A || !A.isActive()) return;
+        e.preventDefault();
+        const ms = lastMoved;
+        try { await navigator.clipboard.writeText(movedText(ms)); A.showMsg(`Listan över ${ms.length} skyttar med ny tid är kopierad. Klistra in den i ett mejl eller ett dokument.`, 'success'); }
+        catch (err) { A.showMsg('Kunde inte kopiera. Så här ser listan ut:<br>' + esc(movedText(ms)).replace(/\n/g, '<br>'), 'warning'); }
     });
 
     // Planera dagen: hur gör ni med funktionärer som också skjuter? Fyra svar i klartext som ett förval för planeringen — och ett eget läge per person.
@@ -743,7 +764,7 @@ window.PlaneringBemanning = (function () {
         if (typeof res === 'string') A.showMsg(esc(res), 'danger');
     });
 
-    // ================================================================ Dagens plan (Planera dagen)
+    // ================================================================ Bemanningen steg för steg (bandet; internt "Planera dagen")
     // Ett band överst i Rutnätet som visar läget i TEXT: vad som är klart och vad som behöver dig. Stegen härleds på servern ur datan (PlanStepRules) — "klart" betyder att datan
     // säger det, inte att något klickats. Ingenting låses; alla steg går att göra i valfri ordning, och varje knapp öppnar en dialog som redan finns. Öppet när planeringen är ny,
     // en rad efteråt (valet minns per planering). En liten klubbtävling ser tre rader, inte fem.
@@ -774,7 +795,7 @@ window.PlaneringBemanning = (function () {
             : '<b>Allt är klart</b> — alla platser är fyllda och inget krockar.';
         return `<section class="pl-card" id="plbPlan" aria-labelledby="plbPlanH">
             <div class="d-flex justify-content-between align-items-start gap-2">
-                <h2 class="h6 mb-1" id="plbPlanH">Dagens plan</h2>
+                <h2 class="h6 mb-1" id="plbPlanH">Bemanningen steg för steg</h2>
                 <button type="button" class="btn btn-link btn-sm p-0" id="plbPlanToggle" data-plb-plan-toggle="${open ? 'closed' : 'open'}" aria-expanded="${open}" aria-controls="plbPlanSteps">${open ? 'Visa som en rad' : 'Visa alla steg'}</button>
             </div>
             ${open ? '' : `<p class="mb-0 small" id="plbPlanLine">${line}</p>`}
