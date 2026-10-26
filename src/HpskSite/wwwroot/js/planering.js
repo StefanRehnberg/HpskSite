@@ -165,6 +165,13 @@
             } finally { ok.disabled = false; }
         };
         if (wasOpen) { if (onOpen) onOpen(fresh); return modal; }
+        // Fokus tillbaka dit man kom ifrån när dialogen stängs (annars hamnar tangentbordsanvändaren överst på sidan); är utlösaren borta (ett menyval) går fokus till Åtgärder.
+        const opener = document.activeElement;
+        m.addEventListener('hidden.bs.modal', function back() {
+            m.removeEventListener('hidden.bs.modal', back);
+            const t = opener && opener.isConnected && opener !== document.body && opener.getClientRects().length ? opener : document.querySelector('#plActions [data-bs-toggle="dropdown"], #plActions button');
+            if (t && typeof t.focus === 'function') t.focus();
+        });
         modal.show();
         if (onOpen) m.addEventListener('shown.bs.modal', function h() { m.removeEventListener('shown.bs.modal', h); onOpen($('plFormBody')); });
         return modal;

@@ -301,11 +301,17 @@ window.PlaneringBemanning = (function () {
                     const { x } = cur();
                     const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
                     const known = !!(from && to);
+                    // Hela listan ritas om vid varje kryss: bevara vilken ruta som hade fokus och hur långt listan var rullad, annars börjar tangentbordsanvändaren om överst.
+                    const listEl = b.querySelector('#plbMnList');
+                    const focusedMn = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.mn : null;
+                    const scrolled = listEl.scrollTop;
                     b.querySelector('#plbMnList').innerHTML = cands.length ? cands.map((c, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}">
                         <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mn="${c.memberId}"${sel.has(c.memberId) ? ' checked' : ''}${c.alreadyHere ? ' disabled' : ''}>
                         <span><span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, known)}${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
                         ${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</span></label>`).join('')
                         : '<div class="list-group-item small plb-dim">Ingen i listan. Slå av reglaget för att se alla anmälda.</div>';
+                    listEl.scrollTop = scrolled;
+                    if (focusedMn) { const again = listEl.querySelector(`[data-mn="${focusedMn}"]`); if (again) again.focus({ preventScroll: true }); }
                     b.querySelector('#plbMnCount').textContent = `${sel.size} markerade · ${cands.length} i listan${cands.length >= 200 ? ' (de första 200)' : ''} · ${rowLabel(x)}`;
                 };
                 const load = async () => {

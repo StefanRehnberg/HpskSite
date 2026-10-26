@@ -37,10 +37,12 @@ namespace HpskSite.Services.Staffing
         private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
 
         public StaffProposalService(IScopeProvider scopes, PlanningService planning, StartWindowReader starts, StaffOwnerResolver owners,
-            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock)
+            StaffingGridService grid, StaffPassService pass, StaffingService staffing, ILogger<StaffProposalService> logger, HpskSite.Services.Hosting.DatabaseLock dbLock, StaffBusyReader busy)
         {
-            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger; _lock = dbLock;
+            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _grid = grid; _pass = pass; _staffing = staffing; _logger = logger; _lock = dbLock; _busy = busy;
         }
+
+        private readonly StaffBusyReader _busy;
 
         /// <summary>
         /// Ett lås för allt som skriver bemanning eller startlista på en tävling ("Planera dagen"): två redaktörer får inte tillämpa samtidigt — båda skulle passera
@@ -120,9 +122,7 @@ namespace HpskSite.Services.Staffing
             }
             var passById = allPasses.ToDictionary(p => p.Id);
             var shoot = owner.HasPlanning ? _owners.ShootTime(owner.PlanningId) : ShootTimeRules.Default(_owners.Discipline(owner));
-            var startsBy = owner.HasCompetition
-                ? _starts.ForCompetition(owner.Comp, includeUnpublished: true).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList())
-                : new Dictionary<int, List<StartWindow>>();
+            var startsBy = _busy.StartsByMember(owner);   // över alla tävlingar familjen bemannar
 
             fp.Add("shoot:" + $"{shoot.BeforeMinutes}/{shoot.DurationMinutes}/{shoot.AfterMinutes}");
             fp.AddRange(assigns.OrderBy(a => a.Id).Select(a => $"a:{a.Id}|{a.MemberId}|{a.Status}|{a.RoleKey}|{a.ScopeKey}|{a.StartsAt:s}|{a.EndsAt:s}|{a.PassId}|{a.DayDate:d}"));

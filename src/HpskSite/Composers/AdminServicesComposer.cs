@@ -442,6 +442,8 @@ namespace HpskSite.Composers
             // Planera dagen: alla starter i en tävling med EN läsning (fält-patruller, precisionens skjutlag).
             builder.Services.AddScoped<HpskSite.Services.Staffing.StartWindowReader>();
             // Planera dagen: kandidatlistan (anmälda skyttar + funktionärsanmälningar, med starter och ledighet).
+            // Planera dagen: var finns personens egna starter — över alla tävlingar familjen bemannar (förslag och kandidatlista delar läsningen).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffBusyReader>();
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffCandidateService>();
             // Planera dagen: Fyll med förslag (luckfyllaren) och tillämpa/ångra.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffProposalService>();

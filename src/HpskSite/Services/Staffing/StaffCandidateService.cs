@@ -54,10 +54,12 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<StaffCandidateService> _logger;
 
         public StaffCandidateService(IScopeProvider scopes, PlanningService planning, StartWindowReader starts, StaffOwnerResolver owners,
-            RoleCatalogService roles, HpskSite.Services.ClubService clubs, ILogger<StaffCandidateService> logger)
+            RoleCatalogService roles, HpskSite.Services.ClubService clubs, ILogger<StaffCandidateService> logger, StaffBusyReader busy)
         {
-            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _roles = roles; _clubs = clubs; _logger = logger;
+            _scopes = scopes; _planning = planning; _starts = starts; _owners = owners; _roles = roles; _clubs = clubs; _logger = logger; _busy = busy;
         }
+
+        private readonly StaffBusyReader _busy;
 
         private sealed class RegRow { public int MemberId { get; set; } public string? MemberName { get; set; } public int ClubId { get; set; } public string? ClassKey { get; set; } }
 
@@ -90,9 +92,8 @@ namespace HpskSite.Services.Staffing
             var planningRow = owner.HasPlanning ? _owners.Planning(owner.PlanningId) : null;
             var overrides = owner.HasPlanning ? _planning.ShooterModeOverrides(owner.PlanningId) : new Dictionary<int, string>();
 
-            var startsByMember = owner.HasCompetition
-                ? _starts.ForCompetition(owner.Comp, includeUnpublished: true).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList())
-                : new Dictionary<int, List<StartWindow>>();
+            // Starterna över ALLA tävlingar familjens planeringar bemannar (en funktionär kan skjuta i systertävlingen) — samma läsning som förslagen.
+            var startsByMember = _busy.StartsByMember(owner);
             var regByMember = regs.GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.ToList());
             var signupByMember = signups.GroupBy(x => x.MemberId).ToDictionary(g => g.Key, g => g.ToList());
 
