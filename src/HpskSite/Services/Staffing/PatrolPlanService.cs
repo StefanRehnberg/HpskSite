@@ -17,7 +17,10 @@ namespace HpskSite.Services.Staffing
     public sealed record CurrentPlacement(int PatrolMemberId, int MemberId, string Name, string ShootingClass, int PatrolNumber, DateTime? StartTime, bool Locked);
 
     public sealed record PatrolPreview(PatrolPlan Plan, string Fingerprint, string? BlockedReason, int ExistingPatrols, int ExistingShooters, int Moved, int Unchanged, int Added, int Removed,
-        List<CurrentPlacement>? Current = null, int KeptFitting = 0);
+        List<CurrentPlacement>? Current = null, int KeptFitting = 0, List<PatrolMove>? Moves = null);
+
+    /// <summary>En skytts förändring i förhandsvisningen: <c>Kind</c> = moved | added | removed, från och till (patrull och tid) och skälet i klartext.</summary>
+    public sealed record PatrolMove(string Kind, int MemberId, string Name, string ShootingClass, int? FromPatrol, DateTime? FromTime, int? ToPatrol, DateTime? ToTime, string Why);
 
     public sealed record PatrolApplyOutcome(bool Ok, string? Message, int BackupId, int Patrols, int Shooters);
 
@@ -201,13 +204,44 @@ namespace HpskSite.Services.Staffing
             // Vad ändras? Jämför per (skytt, klass) före och efter.
             var patrolById = b.Patrols.ToDictionary(p => p.Id);
             string K(int id, string cls) => id + "|" + HpskSite.Models.ShootingClasses.ToCanonicalName(cls);
-            var before = b.Members.Where(m => patrolById.ContainsKey(m.PatrolId)).GroupBy(m => K(m.MemberId, m.ShootingClass))
-                .ToDictionary(g => g.Key, g => patrolById[g.First().PatrolId].StartTime);
-            var after = plan.Patrols.SelectMany(p => p.Members.Select(m => (Key: K(m.MemberId, m.ShootingClass), p.StartTime))).GroupBy(x => x.Key).ToDictionary(g => g.Key, g => g.First().StartTime);
+            var beforeRows = b.Members.Where(m => patrolById.ContainsKey(m.PatrolId)).GroupBy(m => K(m.MemberId, m.ShootingClass))
+                .ToDictionary(g => g.Key, g => (M: g.First(), P: patrolById[g.First().PatrolId]));
+            var afterRows = plan.Patrols.SelectMany(p => p.Members.Select(m => (Key: K(m.MemberId, m.ShootingClass), M: m, P: p))).GroupBy(x => x.Key)
+                .ToDictionary(g => g.Key, g => (g.First().M, g.First().P));
+            var before = beforeRows.ToDictionary(kv => kv.Key, kv => kv.Value.P.StartTime);
+            var after = afterRows.ToDictionary(kv => kv.Key, kv => kv.Value.P.StartTime);
             var unchanged = after.Count(kv => before.TryGetValue(kv.Key, out var t) && t == kv.Value);
             var moved = after.Count(kv => before.TryGetValue(kv.Key, out var t) && t != kv.Value);
             var added = after.Count(kv => !before.ContainsKey(kv.Key));
             var removed = before.Count(kv => !after.ContainsKey(kv.Key));
+
+            // Vilka, från vad till vad, och varför — så att arrangören ser exakt vem som berörs innan något skrivs.
+            string Why(int memberId, DateTime? oldStart)
+            {
+                if (oldStart != null && b.Constraints.Jobs.TryGetValue(memberId, out var js))
+                {
+                    var win = b.Constraints.Shoot.Window(oldStart.Value, null);
+                    foreach (var j in js)
+                        if (j.Overlaps(win))
+                            return j.AllDay ? "har ett uppdrag hela dagen" : $"har ett uppdrag {j.Start:HH\\:mm}–{j.End:HH\\:mm} som krockar med starten {oldStart:HH\\:mm}";
+                }
+                if (b.Reserves.Contains(memberId)) return "är reserv och får ingen fast start";
+                if (b.Constraints.IsEarly(memberId)) return "ska gå tidigt (funktionärspatrull eller skjuter först)";
+                return settings.KeepFitting ? "flyttas för att få plats" : "startlistan byggs om från noll";
+            }
+            var moves = new List<PatrolMove>();
+            foreach (var kv in afterRows.OrderBy(k => k.Value.P.StartTime).ThenBy(k => k.Value.M.Name, StringComparer.Ordinal))
+            {
+                if (beforeRows.TryGetValue(kv.Key, out var old))
+                {
+                    if (old.P.StartTime != kv.Value.P.StartTime)
+                        moves.Add(new PatrolMove("moved", kv.Value.M.MemberId, kv.Value.M.Name, kv.Value.M.ShootingClass, old.P.PatrolNumber, old.P.StartTime, kv.Value.P.PatrolNumber, kv.Value.P.StartTime, Why(kv.Value.M.MemberId, old.P.StartTime)));
+                }
+                else moves.Add(new PatrolMove("added", kv.Value.M.MemberId, kv.Value.M.Name, kv.Value.M.ShootingClass, null, null, kv.Value.P.PatrolNumber, kv.Value.P.StartTime, "ny anmälan"));
+            }
+            foreach (var kv in beforeRows.Where(k => !afterRows.ContainsKey(k.Key)).OrderBy(k => k.Value.P.StartTime))
+                moves.Add(new PatrolMove("removed", kv.Value.M.MemberId, kv.Value.M.MemberName, kv.Value.M.ShootingClass, kv.Value.P.PatrolNumber, kv.Value.P.StartTime, null, null,
+                    b.Reserves.Contains(kv.Value.M.MemberId) ? "är reserv och får ingen fast start" : "är inte anmäld längre"));
 
             string? blocked = null;
             if (b.Published) blocked = "Startlistan är publicerad. Avpublicera den först, eller tvinga fram ombyggnaden.";
@@ -215,7 +249,7 @@ namespace HpskSite.Services.Staffing
             var current = b.Members.Where(m => patrolById.ContainsKey(m.PatrolId))
                 .Select(m => new CurrentPlacement(m.Id, m.MemberId, m.MemberName, m.ShootingClass, patrolById[m.PatrolId].PatrolNumber, patrolById[m.PatrolId].StartTime, m.Locked))
                 .OrderBy(c => c.PatrolNumber).ThenBy(c => c.Name, StringComparer.Ordinal).ToList();
-            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed, current, keptFitting);
+            return new PatrolPreview(plan, Hash(b.Fingerprint), blocked, b.Patrols.Count, b.Members.Count, moved, unchanged, added, removed, current, keptFitting, moves);
         }
 
         // ------------------------------------------------------------ tillämpa

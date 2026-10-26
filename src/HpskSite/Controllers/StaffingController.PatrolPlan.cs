@@ -49,6 +49,8 @@ namespace HpskSite.Controllers
                     }),
                     unavoidable = pv.Plan.Unavoidable.Select(u => new { memberId = u.MemberId, name = u.Name, time = Hm(u.StartTime) }),
                     current = (pv.Current ?? new()).Select(c => new { patrolMemberId = c.PatrolMemberId, memberId = c.MemberId, name = c.Name, shootingClass = c.ShootingClass, number = c.PatrolNumber, time = Hm(c.StartTime), locked = c.Locked }),
+                    moves = (pv.Moves ?? new()).Select(m => new { kind = m.Kind, memberId = m.MemberId, name = m.Name, shootingClass = m.ShootingClass, fromPatrol = m.FromPatrol, fromTime = Hm(m.FromTime), toPatrol = m.ToPatrol, toTime = Hm(m.ToTime), why = m.Why }),
+                    published = pv.BlockedReason != null,
                     reservesLeftOut = pv.Plan.ReservesLeftOut,
                     lockedKept = pv.Plan.LockedKept, lockedDropped = pv.Plan.LockedDropped, lockedOverflow = pv.Plan.LockedOverflow,
                     undoable = svc.LatestUndoable(owner),

@@ -280,6 +280,13 @@ window.PlaneringBemanning = (function () {
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnFree">Markera alla lediga</button>
                     <span class="small plb-dim" id="plbMnCount" aria-live="polite"></span>
                 </div>
+                <div class="mb-2"><button type="button" class="btn btn-sm btn-outline-primary" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Klistra in en namnlista…</button></div>
+                <div class="border rounded p-2 mb-2" id="plbMnPaste" style="display:none">
+                    <label class="form-label small mb-1" for="plbMnPasteText">Ett namn per rad. Har pappret klass, patrull eller starttid efter ett | hjälper det när flera heter lika.</label>
+                    <textarea class="form-control form-control-sm mb-1" id="plbMnPasteText" rows="5" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
+                    <button type="button" class="btn btn-sm btn-primary" id="plbMnPasteGo">Hitta personerna</button>
+                    <div class="small mt-2" id="plbMnPasteRes" aria-live="polite"></div>
+                </div>
                 <div class="list-group plb-many-list" id="plbMnList" style="max-height:40vh;overflow:auto"><div class="list-group-item small plb-dim">Hämtar…</div></div>
                 <div class="pl-help small mt-2 mb-0">Utan tid gäller uppdraget hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
                 <div class="text-danger small mt-1" id="plbMnErr" role="alert"></div>`,
@@ -320,6 +327,46 @@ window.PlaneringBemanning = (function () {
                     paint();
                 });
                 b.querySelector('#plbMnFree').addEventListener('click', () => { cands.filter(c => c.free !== false && !c.alreadyHere).forEach(c => sel.add(c.memberId)); paint(); });
+
+                // Klistra in en namnlista: raderna matchas mot anmälda och funktionärer. De som hittas markeras; flera med samma namn får ett val; resten redovisas.
+                const pasteBtn = b.querySelector('#plbMnPasteBtn'), pasteBox = b.querySelector('#plbMnPaste'), res = b.querySelector('#plbMnPasteRes');
+                const who = p => `${esc(p.name)}${p.club ? ' · ' + esc(p.club) : ''}${p.shooterClass ? ' · ' + esc(p.shooterClass) : ''}${p.starts ? ' · skjuter ' + esc(p.starts) : ''}`;
+                pasteBtn.addEventListener('click', () => {
+                    const open = pasteBox.style.display === 'none';
+                    pasteBox.style.display = open ? 'block' : 'none'; pasteBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    if (open) b.querySelector('#plbMnPasteText').focus();
+                });
+                b.querySelector('#plbMnPasteGo').addEventListener('click', async () => {
+                    const text = b.querySelector('#plbMnPasteText').value;
+                    if (!text.trim()) { res.innerHTML = '<span class="text-danger">Klistra in minst ett namn.</span>'; return; }
+                    res.textContent = 'Letar…';
+                    const d = await spost('MatchNameList', { text }, rows[parseInt(b.querySelector('#plbMnRow').value, 10)].r.planningId).catch(() => null);
+                    if (!d || !d.success) { res.innerHTML = `<span class="text-danger">${esc((d && d.message) || 'Kunde inte läsa namnlistan.')}</span>`; return; }
+                    const items = d.items || [];
+                    const by = s => items.filter(i => i.status === s);
+                    by('Matched').forEach(i => sel.add(i.chosen.memberId));
+                    const rowsHtml = [];
+                    const okHtml = by('Matched').map(i => `<li class="py-1 border-bottom"><span class="text-success" aria-hidden="true">✓</span> ${who(i.chosen)}</li>`);
+                    by('Ambiguous').forEach((i, k) => rowsHtml.push(`<li class="py-1 border-bottom"><label class="d-block fw-semibold" for="plbMnAmb${k}">${esc(i.query)} — flera heter så, vilken?</label>
+                        <select class="form-select form-select-sm" id="plbMnAmb${k}" data-mnp-amb><option value="">Välj…</option>${i.options.map(o => `<option value="${o.memberId}">${who(o).replace(/<[^>]+>/g, '')}</option>`).join('')}</select></li>`));
+                    by('Suggested').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom"><label><input type="checkbox" class="form-check-input me-1" data-mnp-sug="${i.chosen.memberId}">${esc(i.query)} — menar du <b>${esc(i.chosen.name)}</b>${i.chosen.club ? ' (' + esc(i.chosen.club) + ')' : ''}${i.chosen.starts ? ', skjuter ' + esc(i.chosen.starts) : ''}?</label></li>`));
+                    by('NotFound').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom text-danger">✗ ${esc(i.query)} — hittades inte bland de anmälda${(i.options || []).length ? `<span class="d-block plb-dim">Liknande: ${i.options.map(o => esc(o.name)).join(', ')}</span>` : ''}</li>`));
+                    by('Duplicate').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom plb-dim">${esc(i.query)} — står redan tidigare i listan</li>`));
+                    res.innerHTML = `<p class="mb-1" id="plbMnPasteSum"><b>${by('Matched').length} av ${items.length}</b> hittades och är markerade${by('Ambiguous').length ? ` · <b>${by('Ambiguous').length}</b> behöver ditt val` : ''}${by('Suggested').length ? ` · ${by('Suggested').length} nästan` : ''}${by('NotFound').length ? ` · <span class="text-danger">${by('NotFound').length} hittades inte</span>` : ''}.${d.truncated ? ' Bara de första 200 raderna lästes.' : ''}</p>
+                        ${rowsHtml.length ? `<div class="fw-semibold mb-1" id="plbMnPasteAttn">Det här behöver du titta på</div><ul class="list-unstyled mb-2" style="max-height:24vh;overflow:auto">${rowsHtml.join('')}</ul>` : ''}
+                        ${okHtml.length ? `<details><summary>De ${okHtml.length} som hittades och är markerade</summary><ul class="list-unstyled mb-0" style="max-height:20vh;overflow:auto">${okHtml.join('')}</ul></details>` : ''}`;
+                    paint();
+                });
+                res.addEventListener('change', e => {
+                    const sg = e.target.closest('[data-mnp-sug]');
+                    if (sg) { const id = parseInt(sg.dataset.mnpSug, 10); if (sg.checked) sel.add(id); else sel.delete(id); paint(); return; }
+                    const am = e.target.closest('[data-mnp-amb]');
+                    if (am) {
+                        if (am._id) sel.delete(am._id);
+                        am._id = parseInt(am.value, 10) || 0; if (am._id) sel.add(am._id);
+                        paint();
+                    }
+                });
                 load();
             },
             onOk: async b => {
@@ -427,9 +474,13 @@ window.PlaneringBemanning = (function () {
                 </div>
                 <label class="d-block small mb-2"><input type="checkbox" class="form-check-input me-1" id="plbPpKeep"${s.keep ? ' checked' : ''}>Behåll de som redan har en tid som passar — flytta bara de som krockar${r.keptFitting ? ` (${r.keptFitting} behålls)` : ''}</label>
                 <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="plbPpRecalc">Räkna om</button>
-                ${r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b><label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : ''}
+                ${r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : ''}
                 <p class="mb-2" id="plbPpSummary"><b>${r.patrols.length} patruller</b>, ${r.patrols.reduce((n, p) => n + p.members.length, 0)} starter. I dag finns ${r.existing.patrols} patruller med ${r.existing.shooters} starter.
                     ${c.moved} flyttas · ${c.unchanged} ligger kvar · ${c.added} är nya${c.removed ? ` · ${c.removed} tas bort (inte anmälda längre)` : ''}.${r.lockedKept - (r.keptFitting || 0) > 0 ? ` ${r.lockedKept - (r.keptFitting || 0)} låsta ligger kvar på sin tid.` : ''}</p>
+                ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length})</div>
+                    <ul class="list-unstyled small mb-0" style="max-height:24vh;overflow:auto">${r.moves.slice(0, 60).map(m => `<li class="py-1 border-bottom"><span class="fw-semibold">${esc(m.name)}</span> <span class="plb-dim">${esc(m.shootingClass)}</span> —
+                        ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}
+                        <span class="d-block plb-dim">${esc(m.why)}</span></li>`).join('')}${r.moves.length > 60 ? `<li class="py-1 plb-dim">…och ${r.moves.length - 60} till</li>` : ''}</ul></div>` : ''}
                 ${r.unavoidable.length ? `<div class="alert alert-warning py-2 small" id="plbPpUnavoidable"><b>Går inte att undvika krock:</b> ${r.unavoidable.map(u => esc(u.name) + ' kl ' + esc(u.time)).join('; ')}. Uppdraget täcker hela dagen — ändra uppdraget eller starten för hand.</div>` : ''}
                 ${r.reservesLeftOut.length ? `<p class="small plb-dim" id="plbPpReserves">Utan start (hoppar in vid lucka): ${r.reservesLeftOut.map(esc).join(', ')}.</p>` : ''}
                 ${r.lockedDropped.length ? `<p class="small text-warning-emphasis">Låsta som inte är anmälda längre och därför tas bort: ${r.lockedDropped.map(esc).join(', ')}.</p>` : ''}
@@ -595,7 +646,7 @@ window.PlaneringBemanning = (function () {
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
             !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
-            !g.family && linked() && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
+            !g.family && linked() && g.patrolPlanAvailable && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
             linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
@@ -793,6 +844,7 @@ window.PlaneringBemanning = (function () {
             <div class="small fw-semibold mb-1" id="plbEdHead"></div>
             <label class="visually-hidden" for="plbEdName">Person</label>
             <input type="text" class="form-control form-control-sm mb-1" id="plbEdName" autocomplete="off" placeholder="Sök medlem eller skriv ett namn">
+            <div class="small mb-1 p-1 border rounded bg-body-tertiary" id="plbEdChosen" style="display:none" aria-live="polite"></div>
             <div class="list-group mb-1" id="plbEdSuggest" style="display:none"></div>
             <div id="plbEdCandBox" class="mb-1" style="display:none">
                 <div class="form-check form-switch small mb-1"><input class="form-check-input" type="checkbox" id="plbEdOnlyVol" role="switch"><label class="form-check-label" for="plbEdOnlyVol">Bara de som anmält sig som funktionärer</label></div>
@@ -811,6 +863,7 @@ window.PlaneringBemanning = (function () {
         const name = $('plbEdName');
         name.addEventListener('input', () => {
             if (B.editing) B.editing.memberId = 0;
+            hideChosen();
             const q = name.value.trim();
             clearTimeout(searchTimer);
             // Kandidatlistan (anmälda och funktionärer) filtreras på det som skrivs; den vanliga medlemssökningen tar över när den inte hittar.
@@ -819,7 +872,8 @@ window.PlaneringBemanning = (function () {
             searchTimer = setTimeout(() => edSearch(q), 200);
         });
         // Tiderna avgör vem som är ledig: räkna om när ett klockslag är skrivet klart.
-        ['plbEdFrom', 'plbEdTo'].forEach(id => $(id).addEventListener('change', () => refreshCandidates(0)));
+        // En vald person ligger kvar (listan börjar inte om); ändras tiden prövas hen på nytt mot den nya tiden.
+        ['plbEdFrom', 'plbEdTo'].forEach(id => $(id).addEventListener('change', () => { if (B.editing && B.editing.memberId) recheckChosen(); else refreshCandidates(0); }));
         $('plbEdOnlyVol').addEventListener('change', e => { if (B.editing) B.editing.onlyVol = e.target.checked; B.onlyVolPref = e.target.checked; refreshCandidates(0); });
         $('plbEdCands').addEventListener('click', e => {
             const b = e.target.closest('[data-cand]'); if (!b || !B.editing) return;
@@ -828,6 +882,7 @@ window.PlaneringBemanning = (function () {
             name.value = c.name;
             $('plbEdErr').textContent = c.free === false ? `${c.name} är upptagen: ${c.conflict ? c.conflict.label : 'samtidigt'}. Enter lägger in ändå.` : '';
             hideSuggest();
+            showChosen(c);
             $('plbEdFrom').focus();
         });
         const keys = e => {
@@ -845,9 +900,33 @@ window.PlaneringBemanning = (function () {
             B.editing.memberId = m.memberId;
             name.value = m.memberName;
             hideSuggest();
+            showChosen({ name: m.memberName, club: m.clubName, starts: [] });
             $('plbEdFrom').focus();
         });
         return ed;
+    }
+    // Den valda personen står kvar med det som skiljer henne från andra med samma namn: klubb, klass och när hen skjuter.
+    function showChosen(c) {
+        const box = $('plbEdChosen'); if (!box) return;
+        const sub = candSub(c);
+        box.innerHTML = `<b>Vald:</b> ${esc(c.name)}${sub ? ` <span class="plb-dim">· ${esc(sub)}</span>` : ''} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdChange">Byt person</button>`;
+        box.style.display = 'block';
+        $('plbEdCandBox').style.display = 'none';
+        const ch = $('plbEdChange');
+        if (ch) ch.addEventListener('click', () => { if (B.editing) B.editing.memberId = 0; hideChosen(); $('plbEdName').focus(); $('plbEdName').select(); refreshCandidates(0); });
+        placeEditor();
+    }
+    function hideChosen() { const b = $('plbEdChosen'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }
+    // Tiden ändrades för en vald person: fråga om just hen är ledig på den nya tiden.
+    async function recheckChosen() {
+        const ed = B.editing; if (!ed || !ed.memberId) return;
+        const from = normTime($('plbEdFrom').value), to = normTime($('plbEdTo').value);
+        if (!(ed.col.key && from && to)) { $('plbEdErr').textContent = ''; return; }
+        const qs = { planningId: ed.row.planningId || A.ID, roleKey: ed.row.roleKey, date: ed.col.key, scopeKey: ed.row.scopeKey || '', take: 200, from, to, q: $('plbEdName').value.trim() };
+        let r; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
+        if (!B.editing || B.editing.memberId !== ed.memberId) return;
+        const c = r && r.success ? (r.candidates || []).find(x => x.memberId === ed.memberId) : null;
+        $('plbEdErr').textContent = c && c.free === false ? `${c.name} är upptagen: ${c.conflict ? c.conflict.label : 'samtidigt'}. Enter lägger in ändå.` : '';
     }
     function hideSuggest() { const b = $('plbEdSuggest'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }
 
@@ -876,6 +955,7 @@ window.PlaneringBemanning = (function () {
     }
     async function loadCandidates() {
         const ed = B.editing; if (!ed || !$('plbEdCands')) return;
+        if (ed.memberId) return;   // en vald person ligger kvar — listan börjar inte om
         const seq = (B.candSeq = (B.candSeq || 0) + 1);
         const from = normTime($('plbEdFrom').value), to = normTime($('plbEdTo').value);
         const slotKnown = !!(ed.col.key && from && to);
@@ -915,7 +995,7 @@ window.PlaneringBemanning = (function () {
         const pt = B.grid.family ? partOf(row) : null;
         $('plbEdHead').textContent = (pt ? (pt.isShared ? 'Gemensamt' : pt.name) + ' · ' : '') + row.roleName + ' · ' + (col.key ? col.label : 'Utan dag');
         $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = ''; $('plbEdErr').textContent = '';
-        hideSuggest();
+        hideSuggest(); hideChosen();
         ed.style.display = 'block';
         const cell = (btn.closest('td') || btn).getBoundingClientRect();
         const w = Math.min(330, window.innerWidth - 16);

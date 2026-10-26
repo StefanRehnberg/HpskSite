@@ -143,8 +143,12 @@ namespace HpskSite.Services.Staffing
                     var busy = new List<BusyItem>();
                     // Alla lägen räknar en start som finns: en reserv som tagit en lucka står i startlistan, och den starten gäller.
                     foreach (var w in startsByMember.GetValueOrDefault(mid) ?? new List<StartWindow>())
-                        busy.Add(new BusyItem(BusyKind.Start, shoot.Window(w.Start, w.End),
-                            $"egen start {w.Start:HH\\:mm} ({w.Title.ToLowerInvariant()}, {w.Where.Split(" · ")[0].ToLowerInvariant()})"));
+                    {
+                        var win = shoot.Window(w.Start, w.End);
+                        // Fönstret säger varför en uppdragstid krockar: förberedelsen före och vilan efter räknas in, inte bara starttiden.
+                        busy.Add(new BusyItem(BusyKind.Start, win,
+                            $"egen start {w.Start:HH\\:mm} ({w.Title.ToLowerInvariant()}, {w.Where.Split(" · ")[0].ToLowerInvariant()}) — upptagen {win.Start:HH\\:mm}–{win.End:HH\\:mm}"));
+                    }
                     foreach (var m in mineToday.Where(m => m.Iv is { } && !(alreadyHere && string.Equals(m.A.RoleKey, q.RoleKey, StringComparison.OrdinalIgnoreCase) && string.Equals(m.A.ScopeKey ?? "", q.ScopeKey ?? "", StringComparison.OrdinalIgnoreCase))))
                     {
                         var iv = m.Iv!.Value;

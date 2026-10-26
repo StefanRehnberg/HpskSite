@@ -160,6 +160,59 @@ namespace HpskSite.Controllers
     public partial class StaffingController
     {
         /// <summary>
+        /// "Klistra in en namnlista" (Lägg in flera): en rad per person — namn, gärna med klass, patrull eller starttid efter ett | — matchas mot poolen
+        /// (anmälda och funktionärer). Ren läsning: ingen läggs in; svaret säger per rad om personen hittades, om flera heter lika (med val) eller inte hittades.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MatchNameList([FromBody] MatchNameListRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || string.IsNullOrWhiteSpace(request.Text))
+                return Json(new { success = false, message = "Klistra in minst ett namn." });
+            if (request.Text.Length > 20000) return Json(new { success = false, message = "Listan är för lång. Högst 200 rader." });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            try
+            {
+                var pool = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>()
+                    .Find(new CandidateQuery { Owner = owner, Take = 5000 }).Candidates
+                    .Select(c => new MatchPerson(c.MemberId, c.Name, c.Club, c.ShooterClass, c.Starts.Select(s => s.Start.ToString("HH\\:mm")).Distinct().ToList()))
+                    .ToList();
+                var lines = request.Text.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+                var matches = NameListMatcher.Match(lines, pool);
+                object P(MatchPerson p) => new
+                {
+                    memberId = p.MemberId, name = p.Name, club = p.Club, shooterClass = p.Class,
+                    starts = string.Join(", ", p.StartTimes),
+                };
+                return Json(new
+                {
+                    success = true,
+                    truncated = lines.Count(l => !string.IsNullOrWhiteSpace(l)) > NameListMatcher.MaxLines,
+                    items = matches.Select(m => new
+                    {
+                        line = m.Line, query = m.Query, status = m.Status.ToString(),
+                        chosen = m.Chosen == null ? null : P(m.Chosen), options = m.Options.Select(P),
+                    }),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: MatchNameList failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte läsa namnlistan." });
+            }
+        }
+    }
+
+    public class MatchNameListRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? Text { get; set; }
+    }
+
+    public partial class StaffingController
+    {
+        /// <summary>
         /// Bemanningen SKRIVSKYDDAD för den som är med i planeringen men inte får ändra (Stefans svar efter persontestet: "Deltar ska kunna se
         /// bemanningen"). Bara det en kollega behöver veta: roll, station, dag, tid, namn och förening — aldrig telefon, e-post, anteckningar,
         /// status (en som tackat nej syns inte), behörighet eller kollegers egna starter. Den som får ändra läser det vanliga rutnätet.
