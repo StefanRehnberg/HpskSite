@@ -83,9 +83,15 @@ namespace HpskSite.Services.Staffing
             public string? Status { get; set; }
         }
 
+        /// <summary>
+        /// Får startlistan läsas? Publicerad: alla. Opublicerad: bara planeraren (<c>includeUnpublished</c>). Medlemmens egna ytor (Mitt schema)
+        /// ber aldrig om det opublicerade — en startlista som inte släppts ska inte synas i någons schema.
+        /// </summary>
+        internal static bool MayRead(bool published, bool includeUnpublished) => published || includeUnpublished;
+
         private List<StartWindow> Falt(int competitionId, bool published, bool includeUnpublished)
         {
-            if (!published && !includeUnpublished) return new();
+            if (!MayRead(published, includeUnpublished)) return new();
             List<PatrolRow> rows;
             using (var s = _scopes.CreateScope(autoComplete: true))
                 rows = s.Database.Fetch<PatrolRow>(@"

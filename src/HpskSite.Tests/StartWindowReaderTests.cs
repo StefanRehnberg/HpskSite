@@ -27,6 +27,14 @@ namespace HpskSite.Tests
         public void Okanda_eller_felaktiga_tider_ar_okanda_aldrig_gissade(string? s)
             => StartWindowReader.ParseTime(s).Should().BeNull();
 
+        [Theory]
+        [InlineData(true, false, true)]
+        [InlineData(true, true, true)]
+        [InlineData(false, true, true)]
+        [InlineData(false, false, false)]
+        public void En_opublicerad_startlista_ses_bara_av_planeraren(bool published, bool includeUnpublished, bool expected)
+            => StartWindowReader.MayRead(published, includeUnpublished).Should().Be(expected);
+
         [Fact]
         public void Datum_ar_aaaa_mm_dd_och_inget_annat()
         {
