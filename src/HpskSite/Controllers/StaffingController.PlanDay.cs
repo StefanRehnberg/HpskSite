@@ -20,17 +20,23 @@ namespace HpskSite.Controllers
         {
             var cols = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
             int needed = 0, missing = 0;
+            var perRole = new Dictionary<string, (int Needed, int Missing)>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in resp.Rows)
                 foreach (var c in cols)
                 {
+                    int n, m;
                     var pc = row.PassCover.TryGetValue(c.Key, out var l) ? l : new List<GridPassCover>();
-                    if (pc.Any(p => p.Needed > 0)) { needed += pc.Sum(p => p.Needed); missing += pc.Sum(p => Math.Max(0, p.Needed - p.Filled)); }
+                    if (pc.Any(p => p.Needed > 0)) { n = pc.Sum(p => p.Needed); m = pc.Sum(p => Math.Max(0, p.Needed - p.Filled)); }
                     else
                     {
-                        var n = row.NeedFor(c.Key);
+                        n = row.NeedFor(c.Key);
                         var filled = row.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0;
-                        needed += n; missing += Math.Max(0, n - filled);
+                        m = Math.Max(0, n - filled);
                     }
+                    needed += n; missing += m;
+                    var key = row.RoleName ?? row.RoleKey;
+                    var cur = perRole.TryGetValue(key, out var x) ? x : (0, 0);
+                    perRole[key] = (cur.Item1 + n, cur.Item2 + m);
                 }
             resp.PlacesNeeded = needed; resp.PlacesMissing = missing;
             // Krockar: inom planeringen (samma person på två poster), och över familjen (uppdrag mot annan del, uppdrag mot egen start). En avsikt att tävla är en varning, ingen krock.
@@ -41,7 +47,8 @@ namespace HpskSite.Controllers
                 HasNeeds: resp.Rows.Any(r => r.HasNeed),
                 PlacesNeeded: needed, PlacesMissing: missing, Linked: owner.HasCompetition, VolunteersTotal: resp.VolunteersTotal,
                 ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
-                PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes);
+                PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes,
+                ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList());
             resp.PlanSteps = PlanStepRules.Derive(facts);
         }
 
@@ -469,7 +476,7 @@ namespace HpskSite.Controllers
                 var spec = SpecOf(request);
                 using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
                 var svc = HttpContext.RequestServices.GetRequiredService<StaffProposalService>();
-                var p = svc.BuildDistribution(owner, spec, cts.Token);
+                var (p, chosenBlock) = svc.BuildDistributionBest(owner, spec, cts.Token);
                 if (p.Problems.Count > 0)
                 {
                     _logger.LogError("Staffing: fördelningen bröt de hårda villkoren för planering {Planning}: {Problems}", owner.PlanningId, string.Join(" | ", p.Problems));
@@ -484,7 +491,7 @@ namespace HpskSite.Controllers
                 var found = p.People.Select(x => x.MemberId).ToHashSet();
                 return Json(new
                 {
-                    success = true, fingerprint = p.Fingerprint, blockMinutes = Math.Clamp(spec.BlockMinutes <= 0 ? SlotSlicer.DefaultBlockMinutes : spec.BlockMinutes, SlotSlicer.MinBlockMinutes, SlotSlicer.MaxBlockMinutes),
+                    success = true, fingerprint = p.Fingerprint, blockMinutes = chosenBlock, autoBlock = spec.BlockMinutes <= 0,
                     placed = p.Result.Placed, stillMissing = p.Result.StillMissing, needed = p.Slots.Sum(s => s.Missing), safetyRole = never,
                     rows = p.Result.Proposed.Select(r => new
                     {
@@ -550,7 +557,7 @@ namespace HpskSite.Controllers
         public int CompetitionId { get; set; }
         public string? RoleKey { get; set; }
         public List<int>? MemberIds { get; set; }
-        /// <summary>Hur långa block dagen delas i (60–480 minuter; 0 = förvalet 3 timmar). Har dagen pass används passen.</summary>
+        /// <summary>Hur långa block dagen delas i (60–480 minuter; 0 = välj åt användaren: 3, 2 eller 1,5 timme, det som placerar flest). Har dagen pass används passen.</summary>
         public int BlockMinutes { get; set; }
         public string? Fingerprint { get; set; }
         public List<ApplyProposalRow>? Rows { get; set; }

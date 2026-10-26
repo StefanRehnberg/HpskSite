@@ -14,6 +14,37 @@ namespace HpskSite.Services.Staffing
         /// Hade luckan varit hela dagen skulle den som skjuter 11:30 inte kunna placeras alls. Har dagen pass används passens tider (och passens behov) som förut.
         /// Behovet gäller per block: en station som behöver 1 markör får en per block. Det som redan står i blocket räknas av. Ingenting lagras; allt räknas om vid varje anrop.
         /// </summary>
+        /// <summary>Blocklängderna som prövas när användaren inte valt någon (BlockMinutes 0), längst först.</summary>
+        public static readonly int[] AutoBlockMinutes = { 180, 120, 90 };
+
+        /// <summary>Det bättre av två fördelningar: fler personer placerade först, sedan fler tider fyllda. Lika = det första (längre block) behålls.</summary>
+        public static bool IsBetterDistribution(int personsA, int placedA, int personsB, int placedB) => personsA > personsB || (personsA == personsB && placedA > placedB);
+
+        /// <summary>
+        /// Persontest 6b: standardblocken på 3 timmar lämnade 3 av 12 utan plats och förslaget sa inte att kortare block hjälper. Är <c>BlockMinutes</c> 0 prövas <see cref="AutoBlockMinutes"/>
+        /// och den som placerar flest personer (sedan flest tider) väljs, och stannar så fort alla namngivna är placerade. Ett valt värde används som det är. Svaret bär blocklängden som valdes,
+        /// så att "Lägg in" bygger om exakt samma förslag.
+        /// </summary>
+        public (Proposal Proposal, int BlockMinutes) BuildDistributionBest(StaffOwner owner, DistributionSpec spec, CancellationToken ct = default)
+        {
+            if (spec.BlockMinutes > 0)
+            {
+                var one = Math.Clamp(spec.BlockMinutes, SlotSlicer.MinBlockMinutes, SlotSlicer.MaxBlockMinutes);
+                return (BuildDistribution(owner, spec with { BlockMinutes = one }, ct), one);
+            }
+            (Proposal P, int Block, int Persons)? best = null;
+            foreach (var b in AutoBlockMinutes)
+            {
+                ct.ThrowIfCancellationRequested();
+                var p = BuildDistribution(owner, spec with { BlockMinutes = b }, ct);
+                if (p.Problems.Count > 0 || p.Slots.Count == 0) return (p, b);   // felet/avsaknaden ser likadan ut för alla blocklängder
+                var persons = p.Result.Proposed.Select(r => r.MemberId).Distinct().Count();
+                if (best == null || IsBetterDistribution(persons, p.Result.Placed, best.Value.Persons, best.Value.P.Result.Placed)) best = (p, b, persons);
+                if (persons >= p.People.Count) break;   // alla namngivna har en plats — längre block är bättre, prova inte kortare
+            }
+            return (best!.Value.P, best.Value.Block);
+        }
+
         public Proposal BuildDistribution(StaffOwner owner, DistributionSpec spec, CancellationToken ct = default)
         {
             var discipline = _owners.Discipline(owner);

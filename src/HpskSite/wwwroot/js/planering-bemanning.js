@@ -221,7 +221,8 @@ window.PlaneringBemanning = (function () {
         const holes = (g.rows || []).reduce((a, r) => a + (r.gaps || []).length, 0);
         const parts = [`${g.totalAssigned || 0} uppdrag`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
         if (places) parts.push(`<span class="text-danger fw-semibold" data-plb-missing="${places}">${places} ${places === 1 ? 'plats saknas' : 'platser saknas'}</span>`);
-        if (holes) parts.push(`<span class="text-danger fw-semibold">${holes} ${holes === 1 ? 'lucka' : 'luckor'} i tiden</span>`);
+        // "Lucka" = en stund mellan två uppdrag på samma post då ingen står där (persontest 6b: ordet förklarades ingenstans).
+        if (holes) parts.push(`<span class="text-danger fw-semibold" title="Tider då ingen står på posten, mellan två uppdrag samma dag">${holes} ${holes === 1 ? 'obemannad tid' : 'obemannade tider'} mellan uppdragen</span>`);
         if (g.volunteersTotal > 0) {
             parts.push(`<span data-plb-volunteers="${g.volunteersWithJob || 0}/${g.volunteersTotal}">${g.volunteersWithJob || 0} av ${g.volunteersTotal} anmälda funktionärer har uppdrag</span>`);
         }
@@ -255,7 +256,7 @@ window.PlaneringBemanning = (function () {
     function openChooseRoles() {
         A.formModal({
             title: 'Välj roller', okLabel: 'Spara rollerna',
-            html: `<p class="pl-help small">Kryssa i de funktioner planeringen ska bemanna. En roll som har folk står kvar.</p>${roleChoiceList(B.grid, 'plbRm')}`,
+            html: `<p class="pl-help small">Kryssa i de funktioner planeringen ska bemanna. En roll som har folk står kvar. Hur många du behöver av varje anger du i nästa steg.</p>${roleChoiceList(B.grid, 'plbRm')}`,
             onOk: body => saveRoleChoice(body)
         });
     }
@@ -280,12 +281,12 @@ window.PlaneringBemanning = (function () {
         let cands = [];
         const sel = new Set();
         A.formModal({
-            title: 'Lägg in flera', okLabel: 'Lägg in', wide: true,
+            title: 'Lägg in flera', okLabel: 'Lägg in de markerade', wide: true,
             html: `<div class="row g-2 mb-2">
                     <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
                     <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}"${k === startDay ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
-                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnFrom">Från</label><input type="text" class="form-control form-control-sm" id="plbMnFrom" data-hpsk-time inputmode="decimal" placeholder="8"></div>
-                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnTo">Till</label><input type="text" class="form-control form-control-sm" id="plbMnTo" data-hpsk-time inputmode="decimal" placeholder="12"></div>
+                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnFrom">Från klockan</label><input type="text" class="form-control form-control-sm" id="plbMnFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8"></div>
+                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnTo">Till klockan</label><input type="text" class="form-control form-control-sm" id="plbMnTo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 12"></div>
                 </div>
                 <div class="d-flex flex-wrap gap-3 align-items-center mb-1">
                     <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnVol" role="switch"><label class="form-check-label" for="plbMnVol">Bara de som anmält sig som funktionärer</label></div>
@@ -296,7 +297,7 @@ window.PlaneringBemanning = (function () {
                 <div class="mb-2"><button type="button" class="btn btn-sm btn-outline-primary" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Klistra in en namnlista…</button></div>
                 <div class="border rounded p-2 mb-2" id="plbMnPaste" style="display:none">
                     <label class="form-label small mb-1" for="plbMnPasteText">Ett namn per rad. Har pappret klass, patrull eller starttid efter ett | hjälper det när flera heter lika.</label>
-                    <textarea class="form-control form-control-sm mb-1" id="plbMnPasteText" rows="5" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
+                    <textarea class="form-control form-control-sm mb-1" id="plbMnPasteText" rows="4" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
                     <button type="button" class="btn btn-sm btn-primary" id="plbMnPasteGo">Hitta personerna</button>
                     <div class="small mt-2" id="plbMnPasteRes" aria-live="polite"></div>
                 </div>
@@ -306,8 +307,11 @@ window.PlaneringBemanning = (function () {
             onOpen: b => {
                 let timer = null;
                 const cur = () => ({ x: rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c: cols[parseInt(b.querySelector('#plbMnDay').value, 10)] });
+                // Rollen som läggs in syns vid knappen och följer valet överst (persontest 6b: den förvalda rollen var fel och märktes inte).
+                const roleNote = () => { const el = b.querySelector('#plbMnAsRole'); if (el) el.innerHTML = `De läggs in som <b>${esc(cur().x.r.roleName)}</b>. Fel roll? Byt under "Roll och station" överst.`; };
                 const paint = () => {
                     const { x } = cur();
+                    roleNote();
                     const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
                     const known = !!(from && to);
                     // Hela listan ritas om vid varje kryss: bevara vilken ruta som hade fokus och hur långt listan var rullad, annars börjar tangentbordsanvändaren om överst.
@@ -356,6 +360,7 @@ window.PlaneringBemanning = (function () {
                     if (open) b.querySelector('#plbMnPasteText').focus();
                 });
                 if (opts.paste) pasteBtn.click();
+                b.querySelector('#plbMnPasteText').addEventListener('paste', () => setTimeout(() => { if (b.querySelector('#plbMnPasteText').value.trim()) b.querySelector('#plbMnPasteGo').click(); }, 50));
                 b.querySelector('#plbMnPasteGo').addEventListener('click', async () => {
                     const text = b.querySelector('#plbMnPasteText').value;
                     if (!text.trim()) { res.innerHTML = '<span class="text-danger">Klistra in minst ett namn.</span>'; return; }
@@ -376,7 +381,8 @@ window.PlaneringBemanning = (function () {
                         ${rowsHtml.length ? `<div class="fw-semibold mb-1" id="plbMnPasteAttn">Det här behöver du titta på</div><ul class="list-unstyled mb-2" style="max-height:24vh;overflow:auto">${rowsHtml.join('')}</ul>` : ''}
                         ${okHtml.length ? `<details><summary>De ${okHtml.length} som hittades och är markerade</summary><ul class="list-unstyled mb-0" style="max-height:20vh;overflow:auto">${okHtml.join('')}</ul></details>` : ''}
                         <div class="mt-2 p-2 border rounded bg-body-tertiary" id="plbMnDistBox"><button type="button" class="btn btn-sm btn-primary" id="plbMnDistribute">Fördela dem åt mig…</button>
-                            <span class="d-block small plb-dim mt-1">Sprider de markerade över rollens stationer och dagens block, med tider som inte krockar med deras egna starter. Du ser förslaget först — inget läggs in förrän du bekräftar.</span></div>`;
+                            <span class="d-block small mt-1" id="plbMnAsRole"></span>
+                            <span class="d-block small plb-dim mt-1">Sprider de markerade över stationerna, med tider som inte krockar med deras egna starter. Du ser förslaget först — inget läggs in förrän du bekräftar.</span></div>`;
                     paint();
                 });
                 res.addEventListener('click', e => {
@@ -425,7 +431,7 @@ window.PlaneringBemanning = (function () {
     // Planera dagen: "Fördela dem åt mig". De namngivna personerna (ur den inklistrade listan) sprids över rollens stationer och dagens block med tider som inte krockar med deras
     // egna starter. Förslaget visas först (inget är inlagt), du kryssar bort det du inte vill ha, och allt kan ångras. Öppnas ur "Lägg in flera" och ersätter då dess innehåll.
     async function openDistribution({ roleKey, roleName, planningId, memberIds }) {
-        let r = null, blockMinutes = 180;
+        let r = null, blockMinutes = 0;   // 0 = servern väljer åt användaren (3, 2 eller 1,5 timme: det som placerar flest)
         const sel = new Set();
         const fetchPlan = () => spost('PreviewDistribution', { roleKey, memberIds, blockMinutes }, planningId).catch(() => null);
         const stationNo = s => { const m = /(\d+)/.exec(s || ''); return m ? parseInt(m[1], 10) : 0; };
@@ -438,20 +444,21 @@ window.PlaneringBemanning = (function () {
                 <span><span class="fw-semibold">${esc(x.scope || x.role)}</span> · ${esc(x.dayLabel)} ${esc(x.time)} — <span class="fw-semibold">${esc(x.name)}</span>
                 <span class="d-block plb-dim">${esc(x.why)}</span>${x.warning ? `<span class="d-block text-warning-emphasis">${esc(x.warning)}</span>` : ''}</span></label>`;
             body.innerHTML = `
-                <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> fick en plats${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} fick ingen (se nedan)</span>` : ''} ·
-                    ${r.placed} av ${r.needed} platser fylls · <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats blir kvar utan folk' : 'platser blir kvar utan folk'}</span>.
-                    <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} förslag är markerade. En "plats" är ett block på en station — inte en person.</span></p>
+                <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> fick uppdrag${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} fick inget (se nedan)</span>` : ''} ·
+                    de är fördelade på ${new Set(r.rows.map(x => x.scope)).size} ${new Set(r.rows.map(x => x.scope)).size === 1 ? 'station' : 'stationer'} · efteråt saknas fortfarande folk på <span class="${r.stillMissing ? 'fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'tid' : 'tider'}</span>.
+                    <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} uppdrag är markerade. En "tid" är en station under ett par timmar, till exempel Station 3 kl 08–11 — det kan behövas flera personer på samma tid.</span></p>
                 ${(r.unplaced || []).length ? `<details class="mb-2" id="plbDsUnplaced" open><summary class="fw-semibold small">Fick ingen plats (${r.unplaced.length}) — och varför</summary>
                     <ul class="list-unstyled small mb-0">${r.unplaced.map(u => `<li class="py-1 border-bottom">${esc(u.name)} <span class="plb-dim">— ${esc(u.reason)}</span></li>`).join('')}</ul></details>` : ''}
                 <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
-                    <div><label class="form-label small mb-0" for="plbDsBlock">Så långa block delas dagen i</label>
-                        <select class="form-select form-select-sm" id="plbDsBlock">${[120, 180, 240].map(m => `<option value="${m}"${m === r.blockMinutes ? ' selected' : ''}>${m / 60} timmar</option>`).join('')}</select></div>
+                    <div><label class="form-label small mb-0" for="plbDsBlock">Så länge står varje person åt gången</label>
+                        <select class="form-select form-select-sm" id="plbDsBlock"><option value="0"${blockMinutes === 0 ? ' selected' : ''}>Välj åt mig (rekommenderas)</option>${[90, 120, 180, 240].map(m => `<option value="${m}"${blockMinutes === m ? ' selected' : ''}>${m / 60} timmar</option>`).join('')}</select></div>
+                    <span class="small plb-dim align-self-center" id="plbDsBlockNote">${blockMinutes === 0 ? `Valde ${r.blockMinutes / 60} timmar${r.blockMinutes < 180 ? ' — kortare än vanligt, så att fler av dina namn får plats' : ''}.` : ''}</span>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbDsRecalc">Räkna om</button>
                 </div>
                 ${r.safetyRole ? `<div class="alert alert-warning py-2 small">${esc(roleName)} är en säkerhetsroll (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</div>` : ''}
                 ${r.rows.length ? `<div class="list-group mb-2 plb-many-list" id="plbDsList" style="max-height:34vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Ingen kunde placeras.</p>'}
                 ${(r.unknown || []).length ? `<p class="small text-danger mb-2">${r.unknown.length} ${r.unknown.length === 1 ? 'person finns' : 'personer finns'} inte bland anmälda eller funktionärer och ${r.unknown.length === 1 ? 'togs' : 'togs'} inte med.</p>` : ''}
-                ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Blir kvar utan folk (${r.unfilled.length})</div>
+                ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Tider som fortfarande saknar folk (${r.unfilled.length})</div>
                     <ul class="list-unstyled small mb-0">${r.unfilled.slice(0, 20).map(u => `<li class="py-1 border-bottom">${esc(u.scope || '')} · ${esc(u.dayLabel)} ${esc(u.time)} — saknas ${u.missing} <span class="plb-dim">(${esc(u.reason)})</span></li>`).join('')}${r.unfilled.length > 20 ? `<li class="py-1 plb-dim">…och ${r.unfilled.length - 20} till</li>` : ''}</ul></div>` : ''}
                 <div class="text-danger small" id="plbDsErr" role="alert"></div>`;
         };
@@ -462,7 +469,7 @@ window.PlaneringBemanning = (function () {
             draw(b);
         };
         A.formModal({
-            title: 'Fördela dem åt mig', okLabel: 'Lägg in de markerade', wide: true,
+            title: 'Fördela dem åt mig', okLabel: 'Lägg in förslaget', wide: true,
             html: `<div class="alert alert-warning py-2 small mb-2" id="plbDsBanner"><b>Förslag — inget är inlagt än.</b> Ingen funktionär ser något och ingen får något mejl förrän du lagt in och skickat förfrågan.</div><div id="plbDsBody"></div>`,
             onOpen: b => {
                 b.addEventListener('change', e => {
@@ -473,7 +480,7 @@ window.PlaneringBemanning = (function () {
                 });
                 b.addEventListener('click', async e => {
                     if (!e.target.closest('#plbDsRecalc')) return;
-                    blockMinutes = parseInt(b.querySelector('#plbDsBlock').value, 10) || 180; await load(b);
+                    const v = parseInt(b.querySelector('#plbDsBlock').value, 10); blockMinutes = isNaN(v) ? 0 : v; await load(b);
                 });
                 load(b);
             },
@@ -570,7 +577,9 @@ window.PlaneringBemanning = (function () {
                 <ul class="list-unstyled small mb-1">${r.groups.map(g => `<li class="py-1 border-bottom"><b>${esc(g.label || 'Alla')}</b> · första start ${esc(g.firstStart)} · ${g.patrolSize} per patrull · ${g.interval} min mellan · ${g.patrols} ${g.patrols === 1 ? 'patrull' : 'patruller'}</li>`).join('')}</ul>
                 <p class="plb-dim small mb-0">Tiderna per patrull är uppskattningar (gruppens första start + avstånd). Det är gruppens första start som gäller, och ingen flyttas till en annan grupp.</p></div>` : '';
             // Skyddet ligger överst: kryssrutan måste synas utan att man rullar i dialogen (persontest 6: den låg gömd under de synliga raderna).
-            const blockedHtml = r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : '';
+            // Skyddsrutan visas bara när något faktiskt skulle ändras — annars skrämmer den i onödan (persontest 6b).
+            const willChange = (c.moved || 0) + (c.added || 0) + (c.removed || 0) > 0;
+            const blockedHtml = r.blocked && willChange ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : '';
             b.querySelector('#plbPpBody').innerHTML = `
                 ${blockedHtml}
                 ${groupsHtml}
@@ -635,6 +644,7 @@ window.PlaneringBemanning = (function () {
             },
             onOk: async b => {
                 const force = !!(b.querySelector('#plbPpForce') && b.querySelector('#plbPpForce').checked);
+                if (!r.blocked ? false : !((r.change.moved || 0) + (r.change.added || 0) + (r.change.removed || 0))) return 'Ingen behöver flyttas — startlistan behöver inte ändras.';
                 if (r.blocked && !force) {
                     const f = b.querySelector('#plbPpForce');
                     if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); }
@@ -833,18 +843,28 @@ window.PlaneringBemanning = (function () {
             x.editable = x.uniform && !x.byPass && !x.byDay;
         });
         if (!roles.length) { A.showMsg('Välj roller först.', 'warning'); return; }
-        const line = (x, i) => `<tr><th scope="row" class="fw-normal">${esc(x.name)}${x.station ? ' <span class="plb-dim small">per station</span>' : ''}</th>
-            <td style="width:9rem">${x.editable
-                ? `<label class="visually-hidden" for="plbNd${i}">Antal ${esc(x.name)}</label><input type="number" min="0" max="50" class="form-control form-control-sm" id="plbNd${i}" data-nd="${i}" inputmode="numeric" value="${x.value}">`
+        // Persontest 6b: "8" skrevs för åtta stationer och blev 64 platser — "per station" stod i andra meningen. Nu står det vid själva fältet, och summan räknas live.
+        const line = (x, i) => `<tr><th scope="row" class="fw-normal">${esc(x.name)}${x.station ? ' <span class="plb-dim small d-block">på varje station</span>' : ''}</th>
+            <td>${x.editable
+                ? `<label class="visually-hidden" for="plbNd${i}">Antal ${esc(x.name)}${x.station ? ' på varje station' : ''}</label><div class="d-flex align-items-center gap-2 flex-wrap"><input type="number" min="0" max="50" class="form-control form-control-sm" style="width:5.5rem" id="plbNd${i}" data-nd="${i}" inputmode="numeric" value="${x.value}">${x.station ? '<span class="small">på varje station</span>' : ''}</div><div class="small plb-dim" id="plbNdSum${i}" aria-live="polite">${sumHint(x, x.value)}</div>`
                 : `<span class="small text-body-secondary">Olika på raderna — ändra där (Åtgärder → Antal per dag…)</span>`}</td></tr>`;
+        const stationWord = n => `${n} ${n === 1 ? 'station' : 'stationer'}`;
+        const sumHint = (x, n) => {
+            if (isNaN(n) || n === 0 || !x.station || x.rows.length < 2) return '';
+            const warn = n > 3 ? ` <b class="text-danger">Det är många per station — menar du ${n} på varje station?</b>` : '';
+            return `${n} på varje station × ${stationWord(x.rows.length)} = ${n * x.rows.length} platser.${warn}`;
+        };
         A.formModal({
             title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
-            html: `<p class="pl-help small mb-2">Hur många av varje roll som behövs ${cols.length > 1 ? 'varje dag' : 'den här dagen'}. En roll som gäller stationer räknas per station. Tävlingsledning bemannas av den som skapade planeringen.</p>
+            html: `<p class="pl-help small mb-2">${cols.length > 1 ? 'Hur många som behövs varje dag, av varje roll.' : 'Hur många som behövs av varje roll.'} <b>Gäller rollen stationer</b> skriver du hur många på varje station — en ansvarig och en markör på varje station betyder 1 och 1. Tävlingsledning bemannas av den som skapade planeringen.</p>
                 <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
                 <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
                 <div class="text-danger small" id="plbNdErr" role="alert"></div>`,
             onOpen: b => {
+                const sums = () => b.querySelectorAll('[data-nd]').forEach(el => { const i = parseInt(el.dataset.nd, 10), s = b.querySelector('#plbNdSum' + i); if (s) s.innerHTML = sumHint(roles[i], el.value.trim() === '' ? NaN : parseInt(el.value, 10)); });
+                b.addEventListener('input', e => { if (e.target.closest('[data-nd]')) sums(); });
+                sums();
                 b.querySelector('#plbNdMoreRoles').addEventListener('click', () => { if ((g.roleChoices || []).length) openChooseRoles(); else openNewRole(); });
                 b.querySelector('#plbNdOwnRole').addEventListener('click', () => openNewRole());
             },
@@ -1666,7 +1686,7 @@ window.PlaneringBemanning = (function () {
             { label: 'E-postlista…', icon: 'bi-envelope', fn: openEmailList },
         ]);
         const m = B.meta || {};
-        let notes = '';
+        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>lägga in folk</b>? Gå till <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnät</button> och välj <b>Lägg in flera</b>.</p>`;
         if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att få ett uppdrag. De väntar på att du fördelar rollerna.</div>
             ${B.show === 'queue' ? '' : '<button type="button" class="btn btn-sm btn-warning" data-plb-show="queue">Visa dem</button>'}</div>`;
         if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till ett uppdrag — platsen behöver fyllas.</div>
@@ -2459,7 +2479,8 @@ window.PlaneringBemanning = (function () {
                 <td class="text-end">${A.rowMenu([{ label: 'Ändra…', fn: () => openSlot(s) }, { divider: true }, { label: 'Ta bort…', danger: true, fn: () => deleteSlot(s) }])}</td></tr>`).join('')}</tbody></table></div>`
             : '<p class="pl-help mb-0">Inget utöver rollerna.</p>';
         const volunteers = (B.people || []).filter(p => !!p.volunteer).length, un = (B.meta && B.meta.unassignedVolunteerCount) || 0;
-        area().innerHTML = `<div class="pl-card"><h2>1. Vilka får anmäla sig?</h2>
+        area().innerHTML = `<p class="pl-help small mb-2" id="plbFindHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Det här är för att <b>bjuda in</b> klubbar och medlemmar att anmäla sig som funktionärer. Har du namnen själv? Lägg in dem i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnät</button> med <b>Lägg in flera</b>.</p>
+            <div class="pl-card"><h2>1. Vilka får anmäla sig?</h2>
                 <p class="pl-help">Medlemmar i de klubbar och kretsar du väljer kan anmäla sig. Andra kan du fortfarande sätta in själv i rutnätet.</p>
                 <div class="mb-2">${chips || '<span class="pl-help">Ingen vald än.</span>'}</div>
                 ${sugg ? `<div class="d-flex gap-1 flex-wrap mb-2">${sugg}</div>` : ''}

@@ -17,7 +17,10 @@ namespace HpskSite.Models.Staffing
 
     /// <summary>Fakta om planeringen som stegen härleds ur — alla läses ur samma rutnätssvar, ingenting lagras.</summary>
     public sealed record PlanFacts(bool HasRoles, bool HasNeeds, int PlacesNeeded, int PlacesMissing, bool Linked, int VolunteersTotal, string? ShooterModeTitle,
-        bool PatrolPlanAvailable, int StartClashes, int Clashes);
+        bool PatrolPlanAvailable, int StartClashes, int Clashes, IReadOnlyList<RolePlaces>? ByRole = null);
+
+    /// <summary>Platser per roll (summerat över dagar och stationer) — så att stegen kan säga VILKA roller som saknar folk, och så att ett orimligt antal (8 på varje av åtta stationer) syns som en siffra på sin rad.</summary>
+    public sealed record RolePlaces(string Name, int Needed, int Missing);
 
     /// <summary>
     /// Planera dagen: <b>"Dagens plan"</b> — ett band överst i Bemanning som visar läget i text. Ren funktion; ingen databas, ingen klocka. Reglerna (Expertgruppen 2026-10-26):
@@ -31,8 +34,16 @@ namespace HpskSite.Models.Staffing
     /// </summary>
     public static class PlanStepRules
     {
+        /// <summary>"Sekretariat 2, Servering 3, Stationschef 8" — högst sex roller, resten som "m.fl.". Tom när uppdelningen saknas.</summary>
+        private static string RoleList(IEnumerable<(string Name, int N)> items)
+        {
+            var l = items.Where(i => i.N > 0).ToList();
+            return string.Join(", ", l.Take(6).Select(i => $"{i.Name} {i.N}")) + (l.Count > 6 ? " m.fl." : "");
+        }
+
         public static List<PlanStep> Derive(PlanFacts f)
         {
+            var byRole = f.ByRole ?? Array.Empty<RolePlaces>();
             var steps = new List<PlanStep>();
 
             // 1. Roller och behov — alltid.
@@ -41,7 +52,8 @@ namespace HpskSite.Models.Staffing
             else if (!f.HasNeeds)
                 steps.Add(new("behov", "Vem behövs, och hur många?", PlanStepState.Todo, "Rollerna är valda. Sätt hur många som behövs av varje.", new[] { "behov" }));
             else
-                steps.Add(new("behov", "Vem behövs, och hur många?", PlanStepState.Done, $"{f.PlacesNeeded} {(f.PlacesNeeded == 1 ? "plats" : "platser")} behövs", new[] { "behov" }));
+                steps.Add(new("behov", "Vem behövs, och hur många?", PlanStepState.Done,
+                    $"{f.PlacesNeeded} {(f.PlacesNeeded == 1 ? "plats" : "platser")} behövs" + (byRole.Count > 1 ? ": " + RoleList(byRole.Select(r => (r.Name, r.Needed))) : ""), new[] { "behov" }));
 
             // 2. Funktionärer som skjuter — bara när tävlingen är kopplad och det finns funktionärer eller en fältstartlista att passa ihop med.
             if (f.Linked && (f.VolunteersTotal > 0 || f.PatrolPlanAvailable))
@@ -57,7 +69,8 @@ namespace HpskSite.Models.Staffing
                 var actions = f.VolunteersTotal > 0 ? new[] { "laggin", "forslag" } : new[] { "laggin" };
                 steps.Add(f.PlacesMissing == 0
                     ? new("fyll", "Fyll platserna", PlanStepState.Done, "Alla platser är fyllda", actions)
-                    : new("fyll", "Fyll platserna", PlanStepState.Todo, $"{f.PlacesMissing} av {f.PlacesNeeded} {(f.PlacesNeeded == 1 ? "plats" : "platser")} saknar folk", actions));
+                    : new("fyll", "Fyll platserna", PlanStepState.Todo, $"{f.PlacesMissing} av {f.PlacesNeeded} {(f.PlacesNeeded == 1 ? "plats" : "platser")} saknar folk"
+                        + (byRole.Any(r => r.Missing > 0) ? ": " + RoleList(byRole.OrderByDescending(r => r.Missing).Select(r => (r.Name, r.Missing))) : ""), actions));
             }
 
             // 4. Startlistan — bara fält, och bara för den som får bygga om den.

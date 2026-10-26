@@ -117,6 +117,32 @@ namespace HpskSite.Tests
             }
         }
 
+        // Persontest 6b: "8 på varje av åtta stationer" blev 64 platser och steget visade grön bock på siffran. Nu syns varje rolls summa på stegets rad, så en orimlig rad syns.
+        [Fact]
+        public void Behovssteget_visar_platserna_per_roll_sa_att_en_orimlig_siffra_syns()
+        {
+            var by = new[] { new RolePlaces("Sekretariat", 2, 2), new RolePlaces("Servering", 3, 3), new RolePlaces("Stationsmarkör", 64, 64) };
+            var f = Facts(needed: 69, missing: 69) with { ByRole = by };
+            Step(f, "behov").Text.Should().Contain("69 platser behövs").And.Contain("Stationsmarkör 64").And.Contain("Servering 3");
+        }
+
+        [Fact]
+        public void Fyllsteget_sager_vilka_roller_som_saknar_folk_storst_brist_forst()
+        {
+            var by = new[] { new RolePlaces("Sekretariat", 2, 2), new RolePlaces("Stationschef", 8, 8), new RolePlaces("Servering", 3, 0) };
+            var f = Facts(needed: 13, missing: 10) with { ByRole = by };
+            var text = Step(f, "fyll").Text;
+            text.Should().Contain("10 av 13 platser saknar folk").And.Contain("Stationschef 8, Sekretariat 2");
+            text.Should().NotContain("Servering", "en fylld roll saknar inget");
+        }
+
+        [Fact]
+        public void Utan_uppdelning_per_roll_ar_texten_som_forut()
+        {
+            Step(Facts(needed: 12, missing: 5), "fyll").Text.Should().Be("5 av 12 platser saknar folk");
+            Step(Facts(needed: 12), "behov").Text.Should().Be("12 platser behövs");
+        }
+
         [Fact]
         public void Next_pekar_pa_forsta_Todo_i_ordning()
         {

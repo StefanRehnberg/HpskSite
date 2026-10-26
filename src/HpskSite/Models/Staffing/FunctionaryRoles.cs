@@ -148,11 +148,11 @@ namespace HpskSite.Models.Staffing
         {
             new() { Key = "stationschef", DisplayName = "Stationschef", PluralName = "Stationschefer",
                     DefaultScopeType = StaffScopeType.Station, IsResponsibleByDefault = true,
-                    Description = "Ansvarar för en station (tilldelas idag via Stationer-fliken; konvergerar hit).",
+                    Description = "Är ansvarig på en station under tävlingsdagen — en per station.",
                     Needs = new[] { "Stationskort / QR", "Tidur", "Figurer och markering", "Säkerhetsvinklar" } },
             new() { Key = "stationsmarkor", DisplayName = "Stationsmarkör", PluralName = "Stationsmarkörer",
                     DefaultScopeType = StaffScopeType.Station, SupportsTargetRange = true,
-                    Description = "Flera per station vid behov; markerar figurer.",
+                    Description = "Hjälper till på en station och markerar figurer — en eller flera per station.",
                     Needs = new[] { "Markeringsutrustning", "Protokoll", "Skärmar" } },
             new() { Key = "startledare", DisplayName = "Startledare (utsläpp)", PluralName = "Startledare (utsläpp)",
                     DefaultScopeType = StaffScopeType.All, Description = "Släpper ut patruller från starten.",

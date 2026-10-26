@@ -115,7 +115,7 @@
         const el = $('plMsg'); if (!el) return;
         el.innerHTML = text ? `<div class="alert alert-${kind || 'success'} alert-dismissible fade show" role="alert">${text}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button></div>` : '';
-        if (text) el.scrollIntoView({ block: 'nearest' });
+        if (text) { el.dataset.v = typeof view === 'string' ? view : ''; el.dataset.t = String(Date.now()); el.scrollIntoView({ block: 'nearest' }); }
     }
     function failMsg(r, fallback) { showMsg(esc((r && r.message) || fallback || 'Det gick inte.'), 'danger'); }
 
@@ -394,6 +394,8 @@
         view = allowed.includes(v) ? v : 'oversikt';
         if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
         if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
+        // Ett "sparat"-meddelande hör till sidan där det visades: byter man sida efter att ha läst det ska det inte följa med (persontest 6b: "har jag sparat nu?").
+        { const pm = $('plMsg'); if (pm && pm.dataset.v !== undefined && pm.dataset.v !== view && Date.now() - (parseInt(pm.dataset.t, 10) || 0) > 3000) { pm.innerHTML = ''; delete pm.dataset.v; } }
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
@@ -3781,9 +3783,9 @@
                 <td class="text-end">${menu}</td></tr>`;
         }).join('');
         return `<div class="pl-card p-0" id="plStRows"><div class="pl-cardh px-3 pt-3 d-block"><h2>Stationerna</h2>
-                <p class="pl-help small mb-2">En rad per station: vem som är ansvarig för att utforma den, om den är utformad och godkänd, och de öppna uppgifterna.</p></div>
+                <p class="pl-help small mb-2">En rad per station: vem som är ansvarig för att utforma den, om den är utformad och godkänd, och de öppna uppgifterna. Vem som står på stationen under tävlingsdagen (stationschef, markör) lägger du in i Bemanning.</p></div>
             <div class="table-responsive"><table class="table align-middle mb-0">
-            <thead><tr><th class="ps-3">Station</th><th class="d-none d-md-table-cell">Ansvarig</th><th class="d-none d-md-table-cell">Utformad</th>
+            <thead><tr><th class="ps-3">Station</th><th class="d-none d-md-table-cell">Ansvarig för utformningen</th><th class="d-none d-md-table-cell">Utformad</th>
                 <th class="d-none d-md-table-cell">Godkänd</th><th class="d-none d-md-table-cell">Uppgifter</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
     }
 
