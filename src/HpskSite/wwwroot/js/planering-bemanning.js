@@ -386,7 +386,7 @@ window.PlaneringBemanning = (function () {
                 const clashes = d.skipped.filter(s => s.clash), others = d.skipped.filter(s => !s.clash);
                 let forced = 0;
                 if (clashes.length && await A.plConfirm(`${clashes.length} ${clashes.length === 1 ? 'person är' : 'personer är'} upptagna`,
-                    clashes.slice(0, 6).map(s => `${s.name}: ${s.reason}`).join('\n') + (clashes.length > 6 ? `\n…och ${clashes.length - 6} till` : '') + '\n\nLägg in dem ändå?', 'Lägg in ändå')) {
+                    clashes.slice(0, 6).map(s => `${s.name}: ${s.reason}`).join('\n') + (clashes.length > 6 ? `\n…och ${clashes.length - 6} till` : '') + (added ? `\n\nDe andra ${added} är redan inlagda.` : '') + '\n\nLägg in dem ändå? Väljer du Avbryt lämnas de utanför.', 'Lägg in ändå')) {
                     const f = await spost('AssignMany', Object.assign({}, body, { memberIds: clashes.map(s => s.memberId), force: true }), x.r.planningId);
                     if (f.success) { forced = f.added.length; added += forced; }
                 }
@@ -482,6 +482,7 @@ window.PlaneringBemanning = (function () {
                 ${r.blocked ? `<div class="alert alert-danger py-2 small" id="plbPpBlocked" role="alert"><b>${esc(r.blocked)}</b>${r.published ? '<span class="d-block fw-normal mt-1">Publicerad betyder att skyttarna kan se sina starttider på sajten. Bygger du om listan ser de de nya tiderna nästa gång de tittar — ingen får något mejl om ändringen, så de som flyttas behöver du själv säga till.</span>' : ''}<label class="d-block mt-1"><input type="checkbox" class="form-check-input me-1" id="plbPpForce">Bygg om ändå</label></div>` : ''}
                 <p class="mb-2" id="plbPpSummary"><b>${r.patrols.length} patruller</b>, ${r.patrols.reduce((n, p) => n + p.members.length, 0)} starter. I dag finns ${r.existing.patrols} patruller med ${r.existing.shooters} starter.
                     ${c.moved} flyttas · ${c.unchanged} ligger kvar · ${c.added} är nya${c.removed ? ` · ${c.removed} tas bort (inte anmälda längre)` : ''}.${r.lockedKept - (r.keptFitting || 0) > 0 ? ` ${r.lockedKept - (r.keptFitting || 0)} låsta ligger kvar på sin tid.` : ''}</p>
+                ${!(r.moves || []).length && !r.unavoidable.length ? `<div class="alert alert-success py-2 small" id="plbPpNothing"><b>Ingen behöver flyttas.</b> Ingen skytt har en start som krockar med ett uppdrag, så startlistan behöver inte ändras.</div>` : ''}
                 ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length})</div>
                     <ul class="list-unstyled small mb-0" style="max-height:24vh;overflow:auto">${r.moves.slice(0, 60).map(m => `<li class="py-1 border-bottom"><span class="fw-semibold">${esc(m.name)}</span> <span class="plb-dim">${esc(m.shootingClass)}</span> —
                         ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}

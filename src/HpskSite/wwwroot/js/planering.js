@@ -130,7 +130,10 @@
             let answered = false;
             const modal = bootstrap.Modal.getOrCreateInstance(m);
             ok.onclick = () => { answered = true; modal.hide(); };
-            m.addEventListener('hidden.bs.modal', function h() { m.removeEventListener('hidden.bs.modal', h); resolve(answered); });
+            m.addEventListener('hidden.bs.modal', function h() { m.removeEventListener('hidden.bs.modal', h); m.style.zIndex = ''; resolve(answered); });
+            // Öppnas rutan ovanpå en annan dialog (Lägg in flera) hamnar den annars bakom den och ser ut som att sidan hängt sig: lägg den överst, med egen fond.
+            m.style.zIndex = '1080';
+            m.addEventListener('shown.bs.modal', () => { const bd = document.querySelectorAll('.modal-backdrop'); if (bd.length) bd[bd.length - 1].style.zIndex = '1075'; }, { once: true });
             modal.show();
         });
     }
