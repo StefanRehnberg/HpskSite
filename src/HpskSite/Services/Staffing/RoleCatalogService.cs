@@ -91,7 +91,7 @@ namespace HpskSite.Services.Staffing
                 if (!MatchesDiscipline(c, discipline)) continue;
                 var role = ToRole(c);
                 if (byKey.TryGetValue(c.RoleKey, out var idx))
-                    merged[idx] = role;      // override: same key, arrangör's own name
+                    merged[idx] = Inherit(role, merged[idx]);      // override: same key, arrangör's own name
                 else
                 {
                     byKey[c.RoleKey] = merged.Count;
@@ -452,6 +452,22 @@ namespace HpskSite.Services.Staffing
         }
 
         private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        /// <summary>
+        /// En rad som bara bär namnet (eller dolde rollen och sedan togs fram igen, "Välj roller") ärver det den inte säger själv från den
+        /// inbyggda: stationsrollens plats, markörens tavelintervall, vad som behövs. Utan det tappade en vald Stationschef sin station — och
+        /// rutnätet visade EN rad "0/8" i stället för en rad per station (persontestet, scenario 6). Egna värden på raden gäller alltid.
+        /// </summary>
+        internal static FunctionaryRole Inherit(FunctionaryRole row, FunctionaryRole builtIn)
+        {
+            if (string.IsNullOrEmpty(row.DefaultScopeType)) row.DefaultScopeType = builtIn.DefaultScopeType;
+            row.SupportsTargetRange |= builtIn.SupportsTargetRange;
+            row.SupportsFunctionTitle |= builtIn.SupportsFunctionTitle;
+            row.IsResponsibleByDefault |= builtIn.IsResponsibleByDefault;
+            if (string.IsNullOrEmpty(row.Description)) row.Description = builtIn.Description;
+            if (row.Needs.Length == 0) row.Needs = builtIn.Needs;
+            return row;
+        }
 
         private static FunctionaryRole ToRole(StaffRole r)
         {
