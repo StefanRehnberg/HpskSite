@@ -83,5 +83,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// frees for a late registration. Requires add-status-to-faltskyttepatrolmember.sql.
         /// </summary>
         public string? Status { get; set; }
+
+        /// <summary>
+        /// Planera dagen: skyttens patrull och tid ligger fast. Startlistan byggs om runt den (aldrig flyttad av en ombyggnad). Sätts av den som får
+        /// ändra bemanningen. Requires add-startlist-locks-and-backup.sql.
+        /// </summary>
+        public bool Locked { get; set; }
     }
 }

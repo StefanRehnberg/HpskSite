@@ -45,6 +45,7 @@ namespace HpskSite.Services.Planning
             "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
             "PlanningArea", "PlanningDocument", "PlanningDocumentCategory", "PlanningDocumentRef",
             "PlanningDecision", "PlanningDecisionResponse", "PlanningStationResponsible", "PlanningShooterMode",
+            "FaltskyttePatrolBackup",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>
@@ -67,7 +68,7 @@ namespace HpskSite.Services.Planning
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
                                                  ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId"),
                                                  ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin"),
-                                                 ("Planning", "ShooterMode"), ("StaffAssignment", "BatchId") })
+                                                 ("Planning", "ShooterMode"), ("StaffAssignment", "BatchId"), ("FaltskyttePatrolMember", "Locked") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;

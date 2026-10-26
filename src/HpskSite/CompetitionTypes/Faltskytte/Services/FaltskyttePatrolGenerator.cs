@@ -6,6 +6,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 {
     public class FaltskyttePatrolGenerator
     {
+        /// <summary>Så många platser (patruller) söks igenom för en skytt innan det räknas som omöjligt — hindrar en oändlig sökning.</summary>
+        public const int MaxSlotsSearched = 600;
+
         /// <summary>
         /// Generates patrols from competition registrations.
         /// Respects multiClassGapMinutes between patrols for multi-class shooters,
@@ -18,7 +21,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             DateTime? firstStartTime,
             string weaponGrouping = "Separate",
             int multiClassGapMinutes = 0,
-            Dictionary<int, List<DateTime>>? existingMemberStartTimes = null)
+            Dictionary<int, List<DateTime>>? existingMemberStartTimes = null,
+            PatrolConstraints? constraints = null)
         {
             if (patrolSize < 1) patrolSize = 6;
             if (patrolIntervalMinutes < 1) patrolIntervalMinutes = 15;
@@ -59,6 +63,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // Identify members that appear more than once (across all registrations or have existing times)
             var memberRegCount = registrations.GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.Count());
             bool NeedsGap(int memberId) => gapMinutes > 0 && (memberRegCount.GetValueOrDefault(memberId, 0) > 1 || memberTimes.ContainsKey(memberId));
+            // Planera dagen: den som har uppdrag (eller ska gå tidigt) placeras som de som behöver mellanrum — i tur och ordning, på första plats som passar.
+            bool Constrained(int memberId) => NeedsGap(memberId) || (constraints?.IsConstrained(memberId) ?? false);
+            var unavoidable = new List<FaltskytteUnavoidable>();
 
             var patrols = new List<FaltskytteGeneratedPatrol>();
             int patrolNumber = 1;
@@ -70,12 +77,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var weaponGroup = group.Key;
 
                 // Split: unconstrained first (fill normally), then constrained (need gap check)
-                var unconstrained = allMembers.Where(r => !NeedsGap(r.MemberId)).ToList();
-                var constrained = allMembers.Where(r => NeedsGap(r.MemberId)).ToList();
+                var unconstrained = allMembers.Where(r => !Constrained(r.MemberId)).ToList();
+                var constrained = allMembers.Where(r => Constrained(r.MemberId)).ToList();
 
-                // Sort constrained by weapon priority so first weapon class goes early
+                // Sort constrained by weapon priority so first weapon class goes early. De som ska gå tidigt (funktionärspatrull, skjuter först)
+                // placeras allra först i sin grupp, så de får de första platserna som passar.
                 constrained = constrained
-                    .OrderBy(r => GetGroupSortOrder(GetWeaponGroup(r.MemberClass)))
+                    .OrderBy(r => constraints?.IsEarly(r.MemberId) == true ? 0 : 1)
+                    .ThenBy(r => GetGroupSortOrder(GetWeaponGroup(r.MemberClass)))
                     .ThenBy(r => r.MemberName)
                     .ToList();
 
@@ -103,7 +112,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var myTimes = memberTimes.TryGetValue(reg.MemberId, out var t) ? t : null;
 
                     int bestSlot = -1;
-                    for (int s = 0; ; s++)
+                    for (int s = 0; s <= MaxSlotsSearched; s++)
                     {
                         while (patrolSlots.Count <= s)
                             patrolSlots.Add(new List<CompetitionRegistration>());
@@ -111,7 +120,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                         var slotTime = currentTime.AddMinutes(s * patrolIntervalMinutes);
                         bool ok = true;
-                        if (myTimes != null)
+                        if (myTimes != null && gapMinutes > 0)
                         {
                             foreach (var et in myTimes)
                             {
@@ -119,7 +128,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                                 { ok = false; break; }
                             }
                         }
+                        if (ok && constraints != null && constraints.Blocks(reg.MemberId, slotTime)) ok = false;
                         if (ok) { bestSlot = s; break; }
+                    }
+                    if (bestSlot < 0)
+                    {
+                        // Ingen plats går att få utan krock (uppdraget täcker hela dagen): första lediga plats, och det redovisas — aldrig tyst.
+                        bestSlot = FindNextSlot(0);
+                        unavoidable.Add(new FaltskytteUnavoidable { MemberId = reg.MemberId, Name = reg.MemberName ?? "Okänd", StartTime = currentTime.AddMinutes(bestSlot * patrolIntervalMinutes) });
                     }
 
                     patrolSlots[bestSlot].Add(reg);
@@ -161,6 +177,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             return new FaltskyttePatrolGenerationResult
             {
                 Patrols = patrols,
+                Unavoidable = unavoidable,
                 TotalPatrols = patrols.Count,
                 TotalShooters = registrations.Count,
                 Message = $"{patrols.Count} patruller skapade med {registrations.Count} starter."
@@ -182,9 +199,41 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
     // ── Generation result models ────────────────────────────────
 
+    /// <summary>En skytt som inte gick att placera utan krock mot ett uppdrag (uppdraget täcker alla platser).</summary>
+    public class FaltskytteUnavoidable
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
+        public DateTime StartTime { get; set; }
+    }
+
+    /// <summary>
+    /// Planera dagen: det startlistan ska bygga runt. <see cref="Jobs"/> = personens uppdrag (upptagen tid); <see cref="Shoot"/> = hur länge en start tar
+    /// (före, skjuttid, efter); <see cref="Early"/> = de som ska gå tidigt i sin grupp (funktionärspatrull, skjuter först).
+    /// </summary>
+    public sealed class PatrolConstraints
+    {
+        public IReadOnlyDictionary<int, List<HpskSite.Models.Staffing.StaffInterval>> Jobs { get; init; } = new Dictionary<int, List<HpskSite.Models.Staffing.StaffInterval>>();
+        public HpskSite.Models.Staffing.ShootTime Shoot { get; init; } = HpskSite.Models.Staffing.ShootTimeRules.Default("Faltskytte");
+        public ISet<int> Early { get; init; } = new HashSet<int>();
+
+        public bool IsConstrained(int memberId) => Jobs.ContainsKey(memberId) || Early.Contains(memberId);
+        public bool IsEarly(int memberId) => Early.Contains(memberId);
+
+        /// <summary>Hindrar ett uppdrag att personen startar vid <paramref name="startTime"/>? Fönstret är förberedelse + skjuttid + vila.</summary>
+        public bool Blocks(int memberId, DateTime startTime)
+        {
+            if (!Jobs.TryGetValue(memberId, out var jobs)) return false;
+            var window = Shoot.Window(startTime, null);
+            return jobs.Any(j => j.Overlaps(window));
+        }
+    }
+
     public class FaltskyttePatrolGenerationResult
     {
         public List<FaltskytteGeneratedPatrol> Patrols { get; set; } = new();
+        /// <summary>Skyttar som inte gick att placera utan krock mot ett uppdrag. Tom = ingen krock kvar.</summary>
+        public List<FaltskytteUnavoidable> Unavoidable { get; set; } = new();
         public int TotalPatrols { get; set; }
         public int TotalShooters { get; set; }
         public string Message { get; set; } = "";
