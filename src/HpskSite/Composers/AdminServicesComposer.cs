@@ -445,6 +445,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffCandidateService>();
             // Planera dagen: Fyll med förslag (luckfyllaren) och tillämpa/ångra.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffProposalService>();
+            // Planera dagen steg 3b: bygg fältets startlista runt funktionärerna (förhandsvisa, tillämpa med backup, ångra).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.PatrolPlanService>();
             // Omgång 3 steg 9: funktionärernas tävlingsavsikter och krockarna över hela familjen (veckan).
             builder.Services.AddScoped<HpskSite.Services.Staffing.ShootIntentService>();
             // Steg 3: personens vecka över familjen (PersonWeek).
