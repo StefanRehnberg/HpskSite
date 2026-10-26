@@ -274,13 +274,20 @@
         if (e.target.closest('.dropdown')) return; // radens Åtgärder öppnar sin meny, inte mötet
         e.preventDefault(); goMeeting(parseInt(a.dataset.plOpenMeeting, 10));
     });
-    window.addEventListener('hashchange', () => { if (!RAIL_ONLY) render(hashView() || 'oversikt'); });
-    window.addEventListener('popstate', () => { if (!RAIL_ONLY) render(hashView() || 'oversikt'); });
+    // Ett "sparat"-meddelande hör till sidan där det visades: byter ANVÄNDAREN sida (länk, bakåt, adressfältet) ska det inte följa med (persontest 6b: "har jag sparat nu?").
+    // Bara användarens byten — ett meddelande som sätts och följs av ett programmatiskt sidbyte (ny tävling skapad) ska stå kvar, oavsett hur lång tid det tar.
+    function dropStaleMsg(next) {
+        const pm = $('plMsg');
+        if (pm && pm.dataset.v !== undefined && pm.dataset.v !== (VIEW_ALIAS[next] || next || 'oversikt')) { pm.innerHTML = ''; delete pm.dataset.v; }
+    }
+    window.addEventListener('hashchange', () => { if (!RAIL_ONLY) { dropStaleMsg(hashView()); render(hashView() || 'oversikt'); } });
+    window.addEventListener('popstate', () => { if (!RAIL_ONLY) { dropStaleMsg(hashView()); render(hashView() || 'oversikt'); } });
     document.addEventListener('click', e => {
         if (RAIL_ONLY) return; // vanliga länkar till planeringens sida
         const a = e.target.closest('[data-pl-go]'); if (!a) return;
         e.preventDefault();
         if (a.dataset.plFilter) tkFilter = a.dataset.plFilter;
+        dropStaleMsg(a.dataset.plGo);
         go(a.dataset.plGo);
     });
 
@@ -394,8 +401,6 @@
         view = allowed.includes(v) ? v : 'oversikt';
         if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
         if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
-        // Ett "sparat"-meddelande hör till sidan där det visades: byter man sida efter att ha läst det ska det inte följa med (persontest 6b: "har jag sparat nu?").
-        { const pm = $('plMsg'); if (pm && pm.dataset.v !== undefined && pm.dataset.v !== view && Date.now() - (parseInt(pm.dataset.t, 10) || 0) > 3000) { pm.innerHTML = ''; delete pm.dataset.v; } }
         rowFns = [];
         renderRail();
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
