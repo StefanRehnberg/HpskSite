@@ -9,6 +9,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <summary>Så många platser (patruller) söks igenom för en skytt innan det räknas som omöjligt — hindrar en oändlig sökning.</summary>
         public const int MaxSlotsSearched = 600;
 
+        /// <summary>Hur många timmar efter första starten en plats får ligga — en start dagen efter är aldrig ett svar på en krock.</summary>
+        public const int MaxSearchHours = 14;
+
         /// <summary>
         /// Generates patrols from competition registrations.
         /// Respects multiClassGapMinutes between patrols for multi-class shooters,
@@ -99,26 +102,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     return from;
                 }
 
-                // Place unconstrained shooters first
-                foreach (var reg in unconstrained)
-                {
-                    var slot = FindNextSlot(0);
-                    patrolSlots[slot].Add(reg);
-                }
-
-                // Place constrained shooters respecting time gap
-                foreach (var reg in constrained)
+                void PlaceConstrained(CompetitionRegistration reg)
                 {
                     var myTimes = memberTimes.TryGetValue(reg.MemberId, out var t) ? t : null;
 
                     int bestSlot = -1;
                     for (int s = 0; s <= MaxSlotsSearched; s++)
                     {
+                        var slotTime = currentTime.AddMinutes(s * patrolIntervalMinutes);
+                        if (slotTime > startTime.AddHours(MaxSearchHours)) break;
                         while (patrolSlots.Count <= s)
                             patrolSlots.Add(new List<CompetitionRegistration>());
                         if (patrolSlots[s].Count >= patrolSize) continue;
 
-                        var slotTime = currentTime.AddMinutes(s * patrolIntervalMinutes);
                         bool ok = true;
                         if (myTimes != null && gapMinutes > 0)
                         {
@@ -146,6 +142,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         memberTimes[reg.MemberId] = new List<DateTime>();
                     memberTimes[reg.MemberId].Add(placedTime);
                 }
+
+                // De som ska gå tidigt får de första platserna (före alla andra), sedan fylls resten normalt, sist övriga med uppdrag eller mellanrum.
+                foreach (var reg in constrained.Where(r => constraints?.IsEarly(r.MemberId) == true))
+                    PlaceConstrained(reg);
+
+                foreach (var reg in unconstrained)
+                {
+                    var slot = FindNextSlot(0);
+                    patrolSlots[slot].Add(reg);
+                }
+
+                foreach (var reg in constrained.Where(r => constraints?.IsEarly(r.MemberId) != true))
+                    PlaceConstrained(reg);
 
                 // Convert non-empty slots to patrols
                 for (int s = 0; s < patrolSlots.Count; s++)
