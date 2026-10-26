@@ -144,7 +144,7 @@ namespace HpskSite.Services.Staffing
                                     var en = guessed ? st + shoot.Duration : item.EndsAt!.Value;
                                     entries[startKey].Add(new PersonWeekEntry(
                                         $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, shoot.Window(st, item.EndsAt), Venue(t.CompetitionId),
-                                        $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
+                                        $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}{shoot.WindowText(st, item.EndsAt)}",
                                         null, t.CompetitionId));
                                 }
                             }
@@ -158,7 +158,7 @@ namespace HpskSite.Services.Staffing
                                 var en = w.End ?? w.Start + shoot.Duration;
                                 entries[startKey].Add(new PersonWeekEntry(
                                     $"s:{t.CompetitionId}:{w.SourceKey}", PersonWeekKind.Start, w.Start.Date, shoot.Window(w.Start, w.End), Venue(t.CompetitionId),
-                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
+                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}{shoot.WindowText(w.Start, w.End)}",
                                     null, t.CompetitionId));
                             }
                     }

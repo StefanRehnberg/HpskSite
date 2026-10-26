@@ -184,7 +184,7 @@ namespace HpskSite.Services.Staffing
                                 var win = shoot.Window(w.Start, w.End);
                                 var en = w.End ?? w.Start + shoot.Duration;
                                 starts.Add(new FamilyClashRules.Start("m:" + mid, t.CompetitionId, w.Start.Date, (win.Start.TimeOfDay, win.End.TimeOfDay),
-                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(w.End == null ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}"));
+                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(w.End == null ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}{shoot.WindowText(w.Start, w.End)}"));
                             }
                             continue;
                         }
@@ -196,7 +196,7 @@ namespace HpskSite.Services.Staffing
                             var en = item.EndsAt is DateTime e && e > st ? e : st + shoot.Duration;
                             var guessed = item.EndsAt == null || item.EndsAt <= st;
                             starts.Add(new FamilyClashRules.Start("m:" + mid, t.CompetitionId, st.Date, (win.Start.TimeOfDay, win.End.TimeOfDay),
-                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}"));
+                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}{shoot.WindowText(st, item.EndsAt)}"));
                         }
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Krockar: schemat för medlem {Member} i tävling {Comp} gick inte att läsa.", mid, t.CompetitionId); }

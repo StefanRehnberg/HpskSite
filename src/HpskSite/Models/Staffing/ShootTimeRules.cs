@@ -25,6 +25,13 @@ namespace HpskSite.Models.Staffing
             return new StaffInterval(start - Before, end + After, AllDay: false);
         }
 
+        /// <summary>" — upptagen 08:15–12:30": fönstret en start upptar, med förberedelse före och vila efter. Läggs efter en krocktext så att den går att förstå.</summary>
+        public string WindowText(DateTime start, DateTime? knownEnd)
+        {
+            var w = Window(start, knownEnd);
+            return $" — upptagen {w.Start:HH\\:mm}–{w.End:HH\\:mm}";
+        }
+
         /// <summary>"3 h", "2 h 30 min", "45 min" — så som en människa säger skjuttiden.</summary>
         public static string Text(int minutes) =>
             minutes % 60 == 0 ? $"{minutes / 60} h" : minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60} min";

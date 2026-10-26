@@ -252,7 +252,8 @@ window.PlaneringBemanning = (function () {
     }
     // Planera dagen steg 1: "Lägg in flera" — välj roll/station, dag och tid en gång, kryssa i personerna. Varje person prövas på servern:
     // upptagna hoppas över (och erbjuds sedan "lägg in ändå"), de som redan står där läggs inte in igen. Planerat läge — ingen får något mejl.
-    async function openAssignMany() {
+    async function openAssignMany(opts) {
+        opts = opts || {};
         const rows = (B.grid.rows || []).map((r, i) => ({ r, i })).filter(x => !B.grid.family || x.r.planningId);
         const cols = (B.grid.columns || []).filter(c => c.key);
         if (!rows.length) { A.showMsg('Lägg till en roll först.', 'warning'); return; }
@@ -264,13 +265,16 @@ window.PlaneringBemanning = (function () {
         let startIdx = 0, best = 0;
         rows.forEach((x, k) => { const s = shortage(x); if (s > best) { best = s; startIdx = k; } });
         if (best === 0) startIdx = Math.max(0, rows.findIndex(x => x.r.roleKey !== 'tavlingsledning'));
+        // Kommer man från rutan vid en cell: samma roll, station och dag som där.
+        if (opts.row) { const k = rows.findIndex(x => x.r.roleKey === opts.row.roleKey && (x.r.scopeKey || '') === (opts.row.scopeKey || '') && x.r.planningId === opts.row.planningId); if (k >= 0) startIdx = k; }
+        const startDay = opts.col ? Math.max(0, cols.findIndex(c => c.key === opts.col.key)) : 0;
         let cands = [];
         const sel = new Set();
         A.formModal({
             title: 'Lägg in flera', okLabel: 'Lägg in', wide: true,
             html: `<div class="row g-2 mb-2">
                     <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
-                    <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}">${esc(c.label)}</option>`).join('')}</select></div>
+                    <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}"${k === startDay ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
                     <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnFrom">Från</label><input type="text" class="form-control form-control-sm" id="plbMnFrom" data-hpsk-time inputmode="decimal" placeholder="8"></div>
                     <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnTo">Till</label><input type="text" class="form-control form-control-sm" id="plbMnTo" data-hpsk-time inputmode="decimal" placeholder="12"></div>
                 </div>
@@ -336,6 +340,7 @@ window.PlaneringBemanning = (function () {
                     pasteBox.style.display = open ? 'block' : 'none'; pasteBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
                     if (open) b.querySelector('#plbMnPasteText').focus();
                 });
+                if (opts.paste) pasteBtn.click();
                 b.querySelector('#plbMnPasteGo').addEventListener('click', async () => {
                     const text = b.querySelector('#plbMnPasteText').value;
                     if (!text.trim()) { res.innerHTML = '<span class="text-danger">Klistra in minst ett namn.</span>'; return; }
@@ -844,6 +849,7 @@ window.PlaneringBemanning = (function () {
             <div class="small fw-semibold mb-1" id="plbEdHead"></div>
             <label class="visually-hidden" for="plbEdName">Person</label>
             <input type="text" class="form-control form-control-sm mb-1" id="plbEdName" autocomplete="off" placeholder="Sök medlem eller skriv ett namn">
+            <div class="small mb-1"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdPaste">Har du en lista med namn? Klistra in den</button></div>
             <div class="small mb-1 p-1 border rounded bg-body-tertiary" id="plbEdChosen" style="display:none" aria-live="polite"></div>
             <div class="list-group mb-1" id="plbEdSuggest" style="display:none"></div>
             <div id="plbEdCandBox" class="mb-1" style="display:none">
@@ -862,7 +868,7 @@ window.PlaneringBemanning = (function () {
         document.body.appendChild(ed);
         const name = $('plbEdName');
         name.addEventListener('input', () => {
-            if (B.editing) B.editing.memberId = 0;
+            if (B.editing) { B.editing.memberId = 0; B.editing.allowText = false; }
             hideChosen();
             const q = name.value.trim();
             clearTimeout(searchTimer);
@@ -893,6 +899,8 @@ window.PlaneringBemanning = (function () {
         $('plbEdFrom').addEventListener('keydown', keys);
         $('plbEdTo').addEventListener('keydown', keys);
         $('plbEdSave').addEventListener('click', edCommit);
+        // Många namn på en gång: samma roll, station och dag, men i "Lägg in flera" med inklistringen öppen.
+        $('plbEdPaste').addEventListener('click', () => { const e = B.editing; if (!e) return; closeEditor(); openAssignMany({ paste: true, row: e.row, col: e.col }); });
         $('plbEdClose').addEventListener('click', closeEditor);
         $('plbEdSuggest').addEventListener('click', e => {
             const b = e.target.closest('[data-i]'); if (!b || !B.editing) return;
@@ -1040,6 +1048,15 @@ window.PlaneringBemanning = (function () {
         const err = $('plbEdErr'); err.textContent = '';
         const name = $('plbEdName').value.trim();
         if (!name) { closeEditor(); return; }
+        // Ett skrivet namn utan valt val: stämmer det med EN anmäld eller medlem väljs hen; flera = välj; ingen = bekräfta att det blir ren text.
+        if (!ed.memberId) {
+            const nm = name.toLowerCase();
+            const ids = [...new Set([...(ed.cands || []).map(c => [c.memberId, c.name]), ...(ed.list || []).map(m => [m.memberId, m.memberName])]
+                .filter(h => h[1] && h[1].toLowerCase() === nm).map(h => h[0]))];
+            if (ids.length === 1) ed.memberId = ids[0];
+            else if (ids.length > 1) { err.textContent = 'Flera heter så — klicka på rätt person i listan.'; return; }
+            else if (!ed.allowText) { ed.allowText = true; err.textContent = 'Ingen anmäld eller medlem heter så. Tryck Enter igen för att lägga in namnet som text — personen får då ingen kallelse och krocken med egen start kontrolleras inte.'; return; }
+        }
         const from = window.hpskNormalizeTime ? window.hpskNormalizeTime($('plbEdFrom').value) : $('plbEdFrom').value.trim();
         const to = window.hpskNormalizeTime ? window.hpskNormalizeTime($('plbEdTo').value) : $('plbEdTo').value.trim();
         if (from === null || to === null) { err.textContent = 'Skriv klockslaget till exempel 8 eller 8:30.'; return; }
@@ -1060,7 +1077,7 @@ window.PlaneringBemanning = (function () {
                 return;
             }
             if (!d.success) { err.textContent = d.message || 'Det gick inte att spara.'; return; }
-            ed.allowDup = false; ed.memberId = 0;
+            ed.allowDup = false; ed.memberId = 0; ed.allowText = false;
             $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = '';
             await loadGrid();
             const keep = { roleKey: ed.row.roleKey, scopeKey: ed.row.scopeKey || '', colKey: ed.col.key, pid: ed.row.planningId };
