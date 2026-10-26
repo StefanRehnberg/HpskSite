@@ -56,6 +56,8 @@ namespace HpskSite.Models.Staffing
         /// <summary>Omgång 3 (K3): byts vid varje överlämning, så att svarslänkar som gick till den förra personen slutar
         /// gälla (<see cref="StaffingInviteToken"/> v2). Null = raden har aldrig lämnats över; v1-länkarna gäller.</summary>
         public Guid? InviteNonce { get; set; }
+        /// <summary>Planera dagen: raden lades in av ett tillämpat förslag; alla rader från samma tillämpning delar id och kan ångras tillsammans. Null = för hand.</summary>
+        public Guid? BatchId { get; set; }
 
         public int AssignedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }

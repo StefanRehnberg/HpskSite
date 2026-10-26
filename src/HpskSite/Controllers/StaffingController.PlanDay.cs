@@ -259,6 +259,129 @@ namespace HpskSite.Controllers
         public int? MemberId { get; set; }
     }
 
+    public partial class StaffingController
+    {
+        /// <summary>
+        /// "Fyll med förslag": räknar ut ett förslag på hur luckorna kan fyllas — ingenting sparas. Svaret har förslaget (varje rad med skäl), de luckor som
+        /// inte gick att fylla (med skäl) och ett fingeravtryck som Tillämpa skickar tillbaka.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetProposal(int competitionId)
+        {
+            var owner = await OwnerAsync(competitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning) return Json(new { success = false, message = "Förslag görs i planeringen." });
+            if (_planning.Family(owner.PlanningId).Count > 1) return Json(new { success = false, message = "Förslag görs i en del i taget. Öppna delen och försök där." });
+            try
+            {
+                using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
+                var p = HttpContext.RequestServices.GetRequiredService<StaffProposalService>().Build(owner, cts.Token);
+                if (p.Problems.Count > 0)
+                {
+                    _logger.LogError("Staffing: förslaget bröt de hårda villkoren för planering {Planning}: {Problems}", owner.PlanningId, string.Join(" | ", p.Problems));
+                    return Json(new { success = false, message = "Förslaget kunde inte kontrolleras och visas därför inte. Det är ett fel hos oss — försök igen eller lägg in för hand." });
+                }
+                string Iv(StaffInterval i) => i.AllDay ? "hela dagen" : $"{i.Start:HH\\:mm}–{i.End:HH\\:mm}";
+                var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+                return Json(new
+                {
+                    success = true, fingerprint = p.Fingerprint,
+                    placed = p.Result.Placed,
+                    // Det som förslaget inte kan fylla (för få lediga) skiljs från det som en människa ska utse (säkerhetsroller).
+                    stillMissing = p.Result.Unfilled.Where(u => !new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey)).Sum(u => u.Missing),
+                    humanMissing = p.Result.Unfilled.Where(u => new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey)).Sum(u => u.Missing),
+                    needed = p.Slots.Where(s => !new SolverOptions().NeverProposeRoles.Contains(s.RoleKey)).Sum(s => s.Missing),
+                    volunteers = p.People.Count,
+                    rows = p.Result.Proposed.Select(r => new
+                    {
+                        slotKey = r.SlotKey, memberId = r.MemberId, name = r.Name, role = p.Slots.First(s => s.Key == r.SlotKey).RoleName,
+                        scope = p.Slots.First(s => s.Key == r.SlotKey).ScopeLabel, date = r.Date.ToString("yyyy-MM-dd"), dayLabel = r.Date.ToString("ddd d MMM", sv),
+                        time = Iv(r.Interval), why = r.Why, warning = r.Warning,
+                    }),
+                    unfilled = p.Result.Unfilled.Select(u => new
+                    {
+                        slotKey = u.SlotKey, role = u.RoleName, scope = u.ScopeLabel, dayLabel = u.Date.ToString("ddd d MMM", sv), time = Iv(u.Interval),
+                        missing = u.Missing, reason = u.Reason, human = new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey),
+                    }),
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                return Json(new { success = false, message = "Det tog för lång tid att räkna ut ett förslag. Lägg in för hand, eller försök igen." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetProposal failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte räkna ut ett förslag." });
+            }
+        }
+
+        /// <summary>
+        /// Tillämpar ett förslag (eller delar av det): varje rad prövas på nytt, allt skrivs i EN transaktion som Planerat — ingen får något mejl.
+        /// Har underlaget ändrats sedan förslaget gjordes (<c>Fingerprint</c>) avvisas allt.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyProposal([FromBody] ApplyProposalRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || request.Rows == null || request.Rows.Count == 0)
+                return Json(new { success = false, message = "Välj minst en rad." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            if (!owner.HasPlanning || _planning.Family(owner.PlanningId).Count > 1) return Json(new { success = false, message = "Förslag görs i en del i taget." });
+            try
+            {
+                using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
+                var o = HttpContext.RequestServices.GetRequiredService<StaffProposalService>()
+                    .Apply(owner, request.Rows.Select(r => (r.SlotKey ?? "", r.MemberId)).ToList(), request.Fingerprint, viewer.Id, cts.Token);
+                return Json(new
+                {
+                    success = o.Ok, message = o.Message, batchId = o.BatchId,
+                    added = o.Added.Select(a => new { memberId = a.MemberId, name = a.Name, id = a.Id }),
+                    skipped = o.Skipped.Select(s => new { memberId = s.MemberId, name = s.Name, reason = s.Reason }),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: ApplyProposal failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte lägga in förslaget. Inget ändrades." });
+            }
+        }
+
+        /// <summary>Ångrar en tillämpning: tar bort raderna som fortfarande är Planerade (de som hunnit få svar står kvar och räknas).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UndoProposal([FromBody] UndoProposalRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || request.BatchId == Guid.Empty) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            var (removed, kept) = HttpContext.RequestServices.GetRequiredService<StaffProposalService>().Undo(owner, request.BatchId);
+            return Json(new { success = true, removed, kept });
+        }
+    }
+
+    public class ApplyProposalRequest
+    {
+        public int CompetitionId { get; set; }
+        public string? Fingerprint { get; set; }
+        public List<ApplyProposalRow>? Rows { get; set; }
+    }
+
+    public class ApplyProposalRow
+    {
+        public string? SlotKey { get; set; }
+        public int MemberId { get; set; }
+    }
+
+    public class UndoProposalRequest
+    {
+        public int CompetitionId { get; set; }
+        public Guid BatchId { get; set; }
+    }
+
     public class AssignManyRequest
     {
         public int CompetitionId { get; set; }

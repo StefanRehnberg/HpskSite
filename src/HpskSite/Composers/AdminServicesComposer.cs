@@ -443,6 +443,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StartWindowReader>();
             // Planera dagen: kandidatlistan (anmälda skyttar + funktionärsanmälningar, med starter och ledighet).
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffCandidateService>();
+            // Planera dagen: Fyll med förslag (luckfyllaren) och tillämpa/ångra.
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffProposalService>();
             // Omgång 3 steg 9: funktionärernas tävlingsavsikter och krockarna över hela familjen (veckan).
             builder.Services.AddScoped<HpskSite.Services.Staffing.ShootIntentService>();
             // Steg 3: personens vecka över familjen (PersonWeek).

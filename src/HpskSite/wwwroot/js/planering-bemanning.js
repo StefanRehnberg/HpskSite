@@ -347,6 +347,62 @@ window.PlaneringBemanning = (function () {
         });
     }
 
+    // Planera dagen steg 3: "Fyll med förslag". Förslaget räknas ut men sparas inte — det visas här, du kryssar bort det du inte vill ha och trycker Lägg in.
+    // Allt läggs in som Planerat i EN omgång (inget mejl), och går att ångra så länge ingen hunnit svara.
+    async function openProposal() {
+        A.showMsg('Räknar ut ett förslag…', 'info');
+        const r = await sget('GetProposal').catch(() => null);
+        if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte räkna ut ett förslag.'), 'danger'); return; }
+        if (!r.rows.length && !r.unfilled.length) { A.showMsg('Alla platser är redan fyllda — det finns inget att föreslå.', 'success'); return; }
+        const sel = new Set(r.rows.map((x, i) => i));
+        const rowHtml = (x, i) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small${x.warning ? ' plb-cand-busy' : ''}">
+            <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-pr="${i}" checked>
+            <span><span class="fw-semibold">${esc(x.name)}</span> — ${esc(x.role)}${x.scope ? ' · ' + esc(x.scope) : ''}, ${esc(x.dayLabel)} ${esc(x.time)}
+            <span class="d-block plb-dim">${esc(x.why)}</span>${x.warning ? `<span class="d-block text-warning-emphasis">${esc(x.warning)}</span>` : ''}</span></label>`;
+        const unHtml = u => `<li class="py-1 border-bottom small"><span class="fw-semibold">${esc(u.role)}${u.scope ? ' · ' + esc(u.scope) : ''}</span>, ${esc(u.dayLabel)} ${esc(u.time)} — saknas <b>${u.missing}</b>
+            <span class="d-block plb-dim">${esc(u.reason)}</span></li>`;
+        const humans = r.unfilled.filter(u => u.human), open = r.unfilled.filter(u => !u.human);
+        A.formModal({
+            title: 'Förslag på bemanning', okLabel: 'Lägg in de markerade', wide: true,
+            html: `<div class="alert alert-warning py-2 small mb-2" id="plbPrBanner"><b>Förslag — inget är inlagt än.</b> Ingen funktionär ser något och ingen får något mejl förrän du lagt in och skickat förfrågan.</div>
+                <p class="mb-2" id="plbPrSummary"></p>
+                ${r.rows.length ? `<div class="list-group mb-3 plb-many-list" id="plbPrList" style="max-height:34vh;overflow:auto">${r.rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Det finns ingen som kan läggas in just nu.</p>'}
+                ${open.length ? `<div class="fw-semibold small mb-1" id="plbPrOpenHead">Det här gick inte att fylla</div><ul class="list-unstyled mb-2" id="plbPrOpen">${open.map(unHtml).join('')}</ul>` : ''}
+                ${humans.length ? `<div class="fw-semibold small mb-1">Utses av en människa</div><ul class="list-unstyled mb-2" id="plbPrHuman">${humans.map(unHtml).join('')}</ul>
+                    <p class="pl-help small">Skjutledare och stationschef är säkerhetsroller (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</p>` : ''}
+                <div class="text-danger small" id="plbPrErr" role="alert"></div>`,
+            onOpen: b => {
+                const sum = () => {
+                    b.querySelector('#plbPrSummary').innerHTML = `${sel.size} av ${r.rows.length} förslag markerade · ${r.placed} av ${r.needed} platser kan fyllas · <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats saknas' : 'platser saknas'} efter förslaget</span>${r.humanMissing ? ` · ${r.humanMissing} ${r.humanMissing === 1 ? 'plats' : 'platser'} utses av dig` : ''}.`;
+                };
+                sum();
+                const list = b.querySelector('#plbPrList');
+                if (list) list.addEventListener('change', e => { const cb = e.target.closest('[data-pr]'); if (!cb) return; const i = parseInt(cb.dataset.pr, 10); if (cb.checked) sel.add(i); else sel.delete(i); sum(); });
+            },
+            onOk: async b => {
+                if (!sel.size) return 'Markera minst ett förslag.';
+                const body = { fingerprint: r.fingerprint, rows: [...sel].sort((a, c) => a - c).map(i => ({ slotKey: r.rows[i].slotKey, memberId: r.rows[i].memberId })) };
+                const d = await spost('ApplyProposal', body);
+                if (!d.success) return d.message || 'Det gick inte att lägga in.';
+                await loadGrid(); drawGrid();
+                const skip = (d.skipped || []).length;
+                A.showMsg(`${d.added.length} ${d.added.length === 1 ? 'person lades' : 'personer lades'} in som Planerade. Ingen har fått något mejl än.${skip ? ` ${skip} hoppades över: ${d.skipped.slice(0, 3).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}.` : ''}`
+                    + (d.batchId ? ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undoprop="${esc(d.batchId)}">Ångra</button>` : ''), 'success');
+                return true;
+            }
+        });
+    }
+    async function undoProposal(batchId) {
+        const d = await spost('UndoProposal', { batchId }).catch(() => null);
+        if (!d || !d.success) { A.showMsg(esc((d && d.message) || 'Det gick inte att ångra.'), 'danger'); return; }
+        await loadGrid(); drawGrid();
+        A.showMsg(`${d.removed} ${d.removed === 1 ? 'uppdrag togs' : 'uppdrag togs'} bort.${d.kept ? ` ${d.kept} står kvar eftersom de hunnit få svar eller ändrats.` : ''}`, 'success');
+    }
+    document.addEventListener('click', e => {
+        const b = e.target.closest && e.target.closest('[data-plb-undoprop]');
+        if (b && A && A.isActive()) { e.preventDefault(); undoProposal(b.dataset.plbUndoprop); }
+    });
+
     // Planera dagen: hur gör ni med funktionärer som också skjuter? Fyra svar i klartext som ett förval för planeringen — och ett eget läge per person.
     async function openShooterMode() {
         const r = await sget('GetShooterMode').catch(() => null);
@@ -448,6 +504,7 @@ window.PlaneringBemanning = (function () {
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
+            !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
             linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
@@ -464,7 +521,8 @@ window.PlaneringBemanning = (function () {
                 <button type="button" class="btn btn-sm btn-primary" data-plb-shootermode>Välj</button></div>`;
         const vols = g.volunteers || [];
         if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>
-            <button type="button" class="btn btn-sm btn-warning" data-plb-queue>Visa dem</button></div>`;
+            <div class="d-flex gap-1 flex-wrap">${!g.family && linked() ? '<button type="button" class="btn btn-sm btn-primary" data-plb-proposal><i class="bi bi-magic me-1" aria-hidden="true"></i>Fyll med förslag</button>' : ''}
+            <button type="button" class="btn btn-sm btn-warning" data-plb-queue>Visa dem</button></div></div>`;
         const clashes = g.clashes || [];
         if (clashes.length) notes += `<div class="alert alert-danger py-2 small"><div class="fw-semibold mb-1"><i class="bi bi-exclamation-octagon me-1" aria-hidden="true"></i>Samma person på två poster samtidigt</div>`
             + clashes.slice(0, 8).map(c => `<div>· <button type="button" class="btn btn-link p-0 align-baseline fw-semibold" data-plb-person="${esc(c.personKey)}">${esc(c.name)}</button> — ${esc(c.a)} och ${esc(c.b)}${c.dateKey ? ` <span class="text-body-secondary">(${esc(dayLabel(c.dateKey))})</span>` : ''}</div>`).join('')
@@ -2230,10 +2288,11 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
+        if (t.hasAttribute('data-plb-proposal')) openProposal();
+        else if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
         else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { closeEditor(); nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
