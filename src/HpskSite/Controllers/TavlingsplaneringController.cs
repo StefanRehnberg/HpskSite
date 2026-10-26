@@ -95,6 +95,8 @@ namespace HpskSite.Controllers
                 return Redirect(vy switch
                 {
                     "bemanning" => $"/tavlingsplanering/{linked.Id}#vy=bemanning",
+                    // Från Startlistor i Hantera tävlingen: öppnar "Bygg startlistan runt funktionärerna" direkt.
+                    "startlista" => $"/tavlingsplanering/{linked.Id}#vy=bemanning&oppna=startlista",
                     "dagsprogram" => $"/tavlingsplanering/{linked.Id}/dagsprogram",
                     _ => $"/tavlingsplanering/{linked.Id}",
                 });

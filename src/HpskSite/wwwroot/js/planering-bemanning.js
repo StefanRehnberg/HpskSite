@@ -133,7 +133,15 @@ window.PlaneringBemanning = (function () {
         const body = $('plBody');
         body.innerHTML = switchHtml(p) + '<div id="plbArea">' + A.spinner() + '</div>';
         try {
-            if (p === 'rutnat') { await loadGrid(); if (seq !== B.seq) return; drawGrid(); }
+            if (p === 'rutnat') {
+                await loadGrid(); if (seq !== B.seq) return; drawGrid();
+                // Länk från Startlistor i Hantera tävlingen (#vy=bemanning&oppna=startlista): öppna startlistedialogen direkt, en gång.
+                if (hp().get('oppna') === 'startlista') {
+                    history.replaceState(null, '', '#vy=bemanning');
+                    if (B.grid && B.grid.patrolPlanAvailable && !B.grid.family) openPatrolPlan();
+                    else A.showMsg('Startlistan kan inte byggas om härifrån: planeringen är inte kopplad till en fälttävling, eller så saknar du tävlingens personalbehörighet.', 'warning');
+                }
+            }
             else if (p === 'personer') { await loadPeople(); if (seq !== B.seq) return; pk ? drawPerson(pk) : drawPeople(); }
             else if (p === 'veckan') { await (pk ? drawWeekPerson(pk, seq) : drawWeek(seq)); }
             else { await loadPeople(); if (seq !== B.seq) return; await drawFind(seq); }
@@ -363,7 +371,7 @@ window.PlaneringBemanning = (function () {
                     by('Suggested').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom"><label><input type="checkbox" class="form-check-input me-1" data-mnp-sug="${i.chosen.memberId}">${esc(i.query)} — menar du <b>${esc(i.chosen.name)}</b>${i.chosen.club ? ' (' + esc(i.chosen.club) + ')' : ''}${i.chosen.starts ? ', skjuter ' + esc(i.chosen.starts) : ''}?</label></li>`));
                     by('NotFound').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom text-danger">✗ ${esc(i.query)} — hittades inte bland de anmälda${(i.options || []).length ? `<span class="d-block plb-dim">Liknande: ${i.options.map(o => esc(o.name)).join(', ')}</span>` : ''}</li>`));
                     by('Duplicate').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom plb-dim">${esc(i.query)} — står redan tidigare i listan</li>`));
-                    res.innerHTML = `<p class="mb-1" id="plbMnPasteSum"><b>${by('Matched').length} av ${items.length}</b> hittades och är markerade${by('Ambiguous').length ? ` · <b>${by('Ambiguous').length}</b> behöver ditt val` : ''}${by('Suggested').length ? ` · ${by('Suggested').length} nästan` : ''}${by('NotFound').length ? ` · <span class="text-danger">${by('NotFound').length} hittades inte</span>` : ''}.${d.truncated ? ' Bara de första 200 raderna lästes.' : ''}</p>
+                    res.innerHTML = `<p class="mb-1" id="plbMnPasteSum"><b>${by('Matched').length} av ${items.length}</b> hittades och är markerade${by('Ambiguous').length ? ` · <b>${by('Ambiguous').length}</b> behöver ditt val` : ''}${by('Suggested').length ? ` · ${by('Suggested').length} nästan` : ''}${by('NotFound').length ? ` · <span class="text-danger">${by('NotFound').length} hittades inte</span>` : ''}. <span class="fw-semibold">Totalt ${sel.size} markerade</span> (tidigare inklistringar ligger kvar).${d.truncated ? ' Bara de första 200 raderna lästes.' : ''}</p>
                         ${rowsHtml.length ? `<div class="fw-semibold mb-1" id="plbMnPasteAttn">Det här behöver du titta på</div><ul class="list-unstyled mb-2" style="max-height:24vh;overflow:auto">${rowsHtml.join('')}</ul>` : ''}
                         ${okHtml.length ? `<details><summary>De ${okHtml.length} som hittades och är markerade</summary><ul class="list-unstyled mb-0" style="max-height:20vh;overflow:auto">${okHtml.join('')}</ul></details>` : ''}
                         <div class="mt-2 p-2 border rounded bg-body-tertiary" id="plbMnDistBox"><button type="button" class="btn btn-sm btn-primary" id="plbMnDistribute">Fördela dem åt mig…</button>
@@ -429,8 +437,11 @@ window.PlaneringBemanning = (function () {
                 <span><span class="fw-semibold">${esc(x.scope || x.role)}</span> · ${esc(x.dayLabel)} ${esc(x.time)} — <span class="fw-semibold">${esc(x.name)}</span>
                 <span class="d-block plb-dim">${esc(x.why)}</span>${x.warning ? `<span class="d-block text-warning-emphasis">${esc(x.warning)}</span>` : ''}</span></label>`;
             body.innerHTML = `
-                <p class="mb-2" id="plbDsSummary"><b>${sel.size} av ${r.rows.length}</b> förslag markerade · ${r.placed} av ${r.needed} platser kan fyllas ·
-                    <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats blir kvar utan folk' : 'platser blir kvar utan folk'}</span>.</p>
+                <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> fick en plats${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} fick ingen (se nedan)</span>` : ''} ·
+                    ${r.placed} av ${r.needed} platser fylls · <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats blir kvar utan folk' : 'platser blir kvar utan folk'}</span>.
+                    <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} förslag är markerade. En "plats" är ett block på en station — inte en person.</span></p>
+                ${(r.unplaced || []).length ? `<details class="mb-2" id="plbDsUnplaced" open><summary class="fw-semibold small">Fick ingen plats (${r.unplaced.length}) — och varför</summary>
+                    <ul class="list-unstyled small mb-0">${r.unplaced.map(u => `<li class="py-1 border-bottom">${esc(u.name)} <span class="plb-dim">— ${esc(u.reason)}</span></li>`).join('')}</ul></details>` : ''}
                 <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
                     <div><label class="form-label small mb-0" for="plbDsBlock">Så långa block delas dagen i</label>
                         <select class="form-select form-select-sm" id="plbDsBlock">${[120, 180, 240].map(m => `<option value="${m}"${m === r.blockMinutes ? ' selected' : ''}>${m / 60} timmar</option>`).join('')}</select></div>
@@ -438,8 +449,6 @@ window.PlaneringBemanning = (function () {
                 </div>
                 ${r.safetyRole ? `<div class="alert alert-warning py-2 small">${esc(roleName)} är en säkerhetsroll (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</div>` : ''}
                 ${r.rows.length ? `<div class="list-group mb-2 plb-many-list" id="plbDsList" style="max-height:34vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Ingen kunde placeras.</p>'}
-                ${(r.unplaced || []).length ? `<div class="mb-2" id="plbDsUnplaced"><div class="fw-semibold small mb-1">Fick ingen plats (${r.unplaced.length})</div>
-                    <ul class="list-unstyled small mb-0">${r.unplaced.map(u => `<li class="py-1 border-bottom">${esc(u.name)} <span class="plb-dim">— ${esc(u.reason)}</span></li>`).join('')}</ul></div>` : ''}
                 ${(r.unknown || []).length ? `<p class="small text-danger mb-2">${r.unknown.length} ${r.unknown.length === 1 ? 'person finns' : 'personer finns'} inte bland anmälda eller funktionärer och ${r.unknown.length === 1 ? 'togs' : 'togs'} inte med.</p>` : ''}
                 ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Blir kvar utan folk (${r.unfilled.length})</div>
                     <ul class="list-unstyled small mb-0">${r.unfilled.slice(0, 20).map(u => `<li class="py-1 border-bottom">${esc(u.scope || '')} · ${esc(u.dayLabel)} ${esc(u.time)} — saknas ${u.missing} <span class="plb-dim">(${esc(u.reason)})</span></li>`).join('')}${r.unfilled.length > 20 ? `<li class="py-1 plb-dim">…och ${r.unfilled.length - 20} till</li>` : ''}</ul></div>` : ''}
@@ -475,7 +484,7 @@ window.PlaneringBemanning = (function () {
                 if (!d.success) return d.message || 'Det gick inte att lägga in.';
                 await loadGrid(); drawGrid();
                 const skip = (d.skipped || []).length;
-                A.showMsg(`${d.added.length} ${d.added.length === 1 ? 'plats fylldes' : 'platser fylldes'} som Planerade. Ingen har fått något mejl än.${skip ? ` ${skip} hoppades över: ${d.skipped.slice(0, 3).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}.` : ''}`
+                A.showMsg(`${d.added.length} ${d.added.length === 1 ? 'plats fylldes' : 'platser fylldes'} som Planerade — de står inlagda men ingen har fått någon förfrågan än, och inget mejl har gått iväg.${skip ? ` ${skip} hoppades över: ${d.skipped.slice(0, 3).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}.` : ''}`
                     + (d.batchId ? ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undoprop="${esc(d.batchId)}">Ångra</button>` : ''), 'success');
                 return true;
             }

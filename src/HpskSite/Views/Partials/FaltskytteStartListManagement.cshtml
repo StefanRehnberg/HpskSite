@@ -1,4 +1,5 @@
-﻿@await Html.PartialAsync("_ShootingClassesBootstrap")
+﻿@inject HpskSite.Services.Planning.PlanningService PlanningSvc
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
  * Fältskytte Patrol Management
  * Full CRUD for patrols and shooters, with publish mechanism.
@@ -58,6 +59,14 @@
                     <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
                         <i class="bi bi-plus-circle me-1"></i>Skapa patrull
                     </button>
+                    @* Planera dagen: startlistan byggs om runt funktionärernas uppdrag (förhandsvisning, säkerhetskopia, ångra). Dialogen bor i planeringens Bemanning och öppnas direkt
+                       härifrån; planeringen och tävlingen prövar själva vem som får göra det. Visas bara när tävlingen har en planering. *@
+                    @if (int.TryParse(competitionId, out var compIdForPlanning) && PlanningSvc.ForCompetition(compIdForPlanning) != null)
+                    {
+                        <a class="btn btn-outline-secondary btn-sm" href="/tavlingsplanering?c=@competitionId&vy=startlista" title="Bygg om startlistan så att ingen skjuter när hen står på sin station — du ser förslaget först och kan ångra">
+                            <i class="bi bi-diagram-2 me-1"></i>Bygg om runt funktionärerna…
+                        </a>
+                    }
                     @* Starter's OPERATOR screen (send-off / hold / DNS at the line) — pad-optimised,
                        staff-only. The public read-only wall is the "Visa patrullista" page. *@
                     <a class="btn btn-success btn-sm" href="/startledare/@competitionId" target="_blank" title="Öppna startledarvyn — skicka iväg patruller, håll kvar, markera DNS">
