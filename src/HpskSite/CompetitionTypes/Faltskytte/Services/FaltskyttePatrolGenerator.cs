@@ -193,6 +193,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             };
         }
 
+        /// <summary>Vilken grupp en skytt hamnar i vid given gruppering — samma regel som <see cref="Generate"/> grupperar efter.</summary>
+        public static string GroupKey(string shootingClass, string weaponGrouping)
+        {
+            if (weaponGrouping == "MixAll") return "Alla";
+            var wg = GetWeaponGroup(shootingClass);
+            if (weaponGrouping == "CombineAR") return (wg == "A" || wg == "R") ? "A+R" : wg;
+            return wg;
+        }
+
         private static string GetWeaponGroup(string shootingClass)
         {
             // No substring fallback — that would mis-categorize A_opt_X as plain A.
