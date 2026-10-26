@@ -41,7 +41,12 @@ namespace HpskSite.Services.Staffing
             IReadOnlyList<PersonWeekDay> Days);
 
         /// <summary>Alla personer med uppdrag eller avsikt i familjen. <paramref name="onlyKey"/> = en persons vecka, med starterna.</summary>
-        public List<Person> Build(int planningId, string? onlyKey = null)
+        public const int MaxStartsInList = 80;
+
+        /// <summary>Räknas egna starter med i en lista med <paramref name="people"/> personer (<c>withStarts</c>)? Annars bara när en person öppnas.</summary>
+        public static bool StartsFitInList(int people) => people <= MaxStartsInList;
+
+        public List<Person> Build(int planningId, string? onlyKey = null, bool withStarts = false)
         {
             var family = _planning.Family(planningId);
             if (family.Count == 0) return new();
@@ -112,9 +117,15 @@ namespace HpskSite.Services.Staffing
                     list.Add(new PersonWeekEntry($"i{i.Id}:{d:yyyyMMdd}", PersonWeekKind.Intent, d, null, null, label, null, t.CompetitionId > 0 ? t.CompetitionId : null));
             }
 
-            // Egna starter: bara för en enskild medlem — Mitt schema läses per medlem och tävling.
-            if (onlyKey != null && StaffPersonKey.MemberIdOf(onlyKey) is > 0 and var mid && entries.ContainsKey(onlyKey))
+            // Egna starter: för en enskild medlem (Mitt schema läses per medlem och tävling), eller — med withStarts — för alla i listan
+            // så länge de är högst MaxStartsInList (varje medlem kostar en schemaläsning). Persontestet scenario 6: tävlingsledaren
+            // ska se vilka som jobbar när de själva skjuter utan att öppna trettio personer en och en.
+            var startKeys = onlyKey != null ? (entries.ContainsKey(onlyKey) ? new List<string> { onlyKey } : new List<string>())
+                : withStarts && entries.Count <= MaxStartsInList ? entries.Keys.ToList() : new List<string>();
+            foreach (var startKey in startKeys)
             {
+                var mid = StaffPersonKey.MemberIdOf(startKey);
+                if (mid <= 0) continue;
                 foreach (var t in targets.Where(t => t.CompetitionId > 0 && t.From != null))
                 {
                     try
@@ -125,7 +136,7 @@ namespace HpskSite.Services.Staffing
                             var st = item.StartsAt!.Value;
                             var guessed = item.EndsAt == null || item.EndsAt <= st;
                             var en = guessed ? st + ShootIntentService.EstimatedStart : item.EndsAt!.Value;
-                            entries[onlyKey].Add(new PersonWeekEntry(
+                            entries[startKey].Add(new PersonWeekEntry(
                                 $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, StaffInterval.FromMoments(st, en), Venue(t.CompetitionId),
                                 $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + (int)ShootIntentService.EstimatedStart.TotalHours + " h)" : "–" + en.ToString("HH:mm"))}",
                                 null, t.CompetitionId));

@@ -119,10 +119,11 @@ namespace HpskSite.Controllers
             if (root == null) return err!;
             try
             {
-                var people = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId);
+                var people = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, null, withStarts: true);
                 return Json(new
                 {
                     success = true,
+                    startsIncluded = FamilyWeekService.StartsFitInList(people.Count),
                     people = people.Select(p => new
                     {
                         key = p.Key, name = p.Name, memberId = p.MemberId, isExternal = p.IsExternal,

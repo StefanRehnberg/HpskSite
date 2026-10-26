@@ -49,6 +49,9 @@ window.PlaneringBemanning = (function () {
     // Servern ger varje dels egna, oförändrade rutnät; här läggs de ihop till samma form som ett enskilt rutnät
     // (columns = familjens dagar, rows = alla delars rader i delordning), så ritningen är densamma.
     const family = () => !!(A && A.S() && A.S().planning && (A.S().planning.subPlannings || []).length);
+    // Veckan (personens dag med egna starter och krockar) hör till en familj — och till varje planering som hör ihop med en tävling:
+    // där finns startlistan, och "jobbar hen när hen själv ska skjuta?" är frågan (persontestet, scenario 6). Servern läser veckan för en ensam planering.
+    const weekTab = () => family() || !!(A && A.S() && A.S().planning && A.S().planning.competition);
     function familyGrid(f) {
         const g = { family: true, columns: f.columns || [], rows: [], parts: [], hiddenParts: f.hiddenParts || 0, familyClashes: f.familyClashes || [],
             clashes: [], volunteers: [], unreachable: [], totalAssigned: 0, externalCount: 0, roleChoices: [], roleChoicePending: false };
@@ -99,7 +102,7 @@ window.PlaneringBemanning = (function () {
 
     // ---------------------------------------------------------------- adressen
     function hp() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
-    function part() { const d = hp().get('del'); return d === 'personer' || d === 'hitta' || (d === 'veckan' && family()) ? d : 'rutnat'; }
+    function part() { const d = hp().get('del'); return d === 'personer' || d === 'hitta' || (d === 'veckan' && weekTab()) ? d : 'rutnat'; }
     function personKeyParam() { return part() === 'personer' || part() === 'veckan' ? (hp().get('person') || '') : ''; }
     function nav(del, person) {
         let h = '#vy=bemanning';
@@ -141,7 +144,7 @@ window.PlaneringBemanning = (function () {
     function switchHtml(p) {
         const b = (k, l) => `<button type="button" class="btn ${p === k ? 'btn-primary' : 'btn-outline-primary'}" data-plb-part="${k}" aria-pressed="${p === k}">${l}</button>`;
         // Steg 3: i en huvudplanering med delar visar "Veckan" varje persons dag för dag över alla delar.
-        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${family() ? b('veckan', 'Veckan') : ''}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
+        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${weekTab() ? b('veckan', 'Veckan') : ''}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
     }
 
     // Omgång 2 steg 4: grenen väljs när planeringen skapas och styr bara vilka roller som föreslås — därför står den här,
@@ -1813,6 +1816,7 @@ window.PlaneringBemanning = (function () {
         if (seq !== B.seq) return;
         if (!d.success) throw new Error(d.message || 'Veckan kunde inte läsas.');
         B.week = d.people || [];
+        B.weekStarts = !!d.startsIncluded;
         paintWeek();
     }
     function weekRows() {
@@ -1829,7 +1833,7 @@ window.PlaneringBemanning = (function () {
         const list = B.week || [], hard = list.filter(p => p.clashes > 0).length;
         A.setHead('Bemanning', `${list.length} ${list.length === 1 ? 'person' : 'personer'}` + (hard ? ` · <span class="text-danger fw-semibold">${hard} med krock</span>` : ''));
         A.setActions([]);
-        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. Egna starter räknas först när du öppnar personen.</p>
+        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. ${B.weekStarts ? 'Krock betyder att någon jobbar medan hen själv ska skjuta, eller har två uppdrag på samma tid.' : 'Egna starter räknas först när du öppnar personen.'}</p>
             <label class="visually-hidden" for="plbwQ">Sök person</label>
             <input type="search" class="form-control mb-2" id="plbwQ" placeholder="Sök person" autocomplete="off" value="${esc(B.wq || '')}">
             <div class="border rounded" id="plbwRows">${weekRows()}</div>`;
