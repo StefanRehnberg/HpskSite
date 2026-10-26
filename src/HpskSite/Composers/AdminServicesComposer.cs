@@ -439,6 +439,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffHelpService>();
             // Big-comp staffing: shift/pass model + crew needs + coverage matrix. Run create-staff-pass-tables.sql.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffPassService>();
+            // Planera dagen: alla starter i en tävling med EN läsning (fält-patruller, precisionens skjutlag).
+            builder.Services.AddScoped<HpskSite.Services.Staffing.StartWindowReader>();
             // Omgång 3 steg 9: funktionärernas tävlingsavsikter och krockarna över hela familjen (veckan).
             builder.Services.AddScoped<HpskSite.Services.Staffing.ShootIntentService>();
             // Steg 3: personens vecka över familjen (PersonWeek).

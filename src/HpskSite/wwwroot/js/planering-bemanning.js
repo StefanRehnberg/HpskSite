@@ -1851,7 +1851,7 @@ window.PlaneringBemanning = (function () {
         if (seq !== B.seq) return;
         if (!d.success) throw new Error(d.message || 'Veckan kunde inte läsas.');
         B.week = d.people || [];
-        B.weekStarts = !!d.startsIncluded;
+        B.weekStarts = d.startsIncluded !== false;
         paintWeek();
     }
     function weekRows() {

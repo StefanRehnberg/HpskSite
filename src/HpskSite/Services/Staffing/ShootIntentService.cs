@@ -21,14 +21,15 @@ namespace HpskSite.Services.Staffing
         private readonly PlanningService _planning;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly MyScheduleService _schedule;
+        private readonly StartWindowReader _starts;
         private readonly StaffOwnerResolver _owners;
         private readonly RoleCatalogService _roles;
         private readonly ILogger<ShootIntentService> _logger;
 
         public ShootIntentService(IScopeProvider scopes, PlanningService planning, HpskSite.Services.Competitions.ICompetitionStore competitions,
-            MyScheduleService schedule, StaffOwnerResolver owners, RoleCatalogService roles, ILogger<ShootIntentService> logger)
+            MyScheduleService schedule, StartWindowReader starts, StaffOwnerResolver owners, RoleCatalogService roles, ILogger<ShootIntentService> logger)
         {
-            _scopes = scopes; _planning = planning; _competitions = competitions; _schedule = schedule; _owners = owners; _roles = roles; _logger = logger;
+            _scopes = scopes; _planning = planning; _competitions = competitions; _schedule = schedule; _starts = starts; _owners = owners; _roles = roles; _logger = logger;
         }
 
         /// <summary>En tävling i veckan: en planering i familjen, med den kopplade tävlingens namn och datum när den finns.</summary>
@@ -164,11 +165,29 @@ namespace HpskSite.Services.Staffing
                 // Bara medlemmar som har ett uppdrag under tävlingens dagar — schemat läses per medlem.
                 var members = slots.Where(sl => sl.PersonKey.StartsWith("m:") && sl.Date >= t.From!.Value && sl.Date <= (t.To ?? t.From).Value)
                     .Select(sl => int.Parse(sl.PersonKey[2..], CultureInfo.InvariantCulture)).Distinct();
-                foreach (var mid in members)
+                var shoot = _owners.ShootTime(t.PlanningId);   // Planera dagen steg 0: skjuttid per gren, inte 2 h för alla
+                var memberList = members.ToList();
+                if (memberList.Count == 0) continue;
+                // Planera dagen steg 1: starterna i fält och precision läses med EN läsning per tävling, även en startlista som inte släppts —
+                // krockarna är planerarens. Övriga grenar (springskytte): en schemaläsning per medlem som förut.
+                Dictionary<int, List<StartWindow>>? byMember = null;
+                try { if (_starts.Covers(t.CompetitionId)) byMember = _starts.ForCompetition(t.CompetitionId, includeUnpublished: true).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList()); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Krockar: starterna i tävling {Comp} gick inte att läsa.", t.CompetitionId); }
+                foreach (var mid in memberList)
                 {
                     try
                     {
-                        var shoot = _owners.ShootTime(t.PlanningId);   // Planera dagen steg 0: skjuttid per gren, inte 2 h för alla
+                        if (byMember != null)
+                        {
+                            foreach (var w in byMember.GetValueOrDefault(mid) ?? new List<StartWindow>())
+                            {
+                                var win = shoot.Window(w.Start, w.End);
+                                var en = w.End ?? w.Start + shoot.Duration;
+                                starts.Add(new FamilyClashRules.Start("m:" + mid, t.CompetitionId, w.Start.Date, (win.Start.TimeOfDay, win.End.TimeOfDay),
+                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(w.End == null ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}"));
+                            }
+                            continue;
+                        }
                         foreach (var item in _schedule.GetSchedule(mid, t.CompetitionId).Days.SelectMany(d => d.Items)
                                      .Where(i => i.Kind == ScheduleItemKind.Skytte && i.StartsAt != null))
                         {

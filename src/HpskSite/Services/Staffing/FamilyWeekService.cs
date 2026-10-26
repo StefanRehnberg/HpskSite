@@ -24,29 +24,29 @@ namespace HpskSite.Services.Staffing
         private readonly PlanningService _planning;
         private readonly ShootIntentService _intents;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly StartWindowReader _starts;
         private readonly MyScheduleService _schedule;
         private readonly StaffOwnerResolver _owners;
         private readonly RoleCatalogService _roles;
         private readonly ILogger<FamilyWeekService> _logger;
 
         public FamilyWeekService(IScopeProvider scopes, PlanningService planning, ShootIntentService intents,
-            HpskSite.Services.Competitions.ICompetitionStore competitions, MyScheduleService schedule, StaffOwnerResolver owners,
-            RoleCatalogService roles, ILogger<FamilyWeekService> logger)
+            HpskSite.Services.Competitions.ICompetitionStore competitions, StartWindowReader starts, MyScheduleService schedule,
+            StaffOwnerResolver owners, RoleCatalogService roles, ILogger<FamilyWeekService> logger)
         {
-            _scopes = scopes; _planning = planning; _intents = intents; _competitions = competitions; _schedule = schedule;
+            _scopes = scopes; _planning = planning; _intents = intents; _competitions = competitions; _starts = starts; _schedule = schedule;
             _owners = owners; _roles = roles; _logger = logger;
         }
 
         public sealed record Person(string Key, string Name, int MemberId, bool IsExternal, int Assignments, int Clashes, int Warnings,
             IReadOnlyList<PersonWeekDay> Days);
 
-        /// <summary>Alla personer med uppdrag eller avsikt i familjen. <paramref name="onlyKey"/> = en persons vecka, med starterna.</summary>
-        public const int MaxStartsInList = 80;
-
-        /// <summary>Räknas egna starter med i en lista med <paramref name="people"/> personer (<c>withStarts</c>)? Annars bara när en person öppnas.</summary>
-        public static bool StartsFitInList(int people) => people <= MaxStartsInList;
-
-        public List<Person> Build(int planningId, string? onlyKey = null, bool withStarts = false)
+        /// <summary>
+        /// Alla personer med uppdrag eller avsikt i familjen. <paramref name="onlyKey"/> = en persons vecka, med starterna.
+        /// <paramref name="withStarts"/> = starterna räknas med för alla i listan. <paramref name="includeUnpublishedStarts"/> = planeraren ser
+        /// även en startlista som ännu inte publicerats (aldrig sant för medlemmens egen vecka).
+        /// </summary>
+        public List<Person> Build(int planningId, string? onlyKey = null, bool withStarts = false, bool includeUnpublishedStarts = false)
         {
             var family = _planning.Family(planningId);
             if (family.Count == 0) return new();
@@ -117,36 +117,53 @@ namespace HpskSite.Services.Staffing
                     list.Add(new PersonWeekEntry($"i{i.Id}:{d:yyyyMMdd}", PersonWeekKind.Intent, d, null, null, label, null, t.CompetitionId > 0 ? t.CompetitionId : null));
             }
 
-            // Egna starter: för en enskild medlem (Mitt schema läses per medlem och tävling), eller — med withStarts — för alla i listan
-            // så länge de är högst MaxStartsInList (varje medlem kostar en schemaläsning). Persontestet scenario 6: tävlingsledaren
-            // ska se vilka som jobbar när de själva skjuter utan att öppna trettio personer en och en.
+            // Egna starter: för en enskild medlem, eller — med withStarts — för alla i listan. Planera dagen (Expertgruppen K2): starterna
+            // läses med EN läsning per tävling (StartWindowReader) i stället för en schemaläsning per medlem, så det finns inget tak.
+            // Publicerat bara, om inte planeraren ber om mer: Mitt schema ska aldrig visa en startlista som inte släppts.
             var startKeys = onlyKey != null ? (entries.ContainsKey(onlyKey) ? new List<string> { onlyKey } : new List<string>())
-                : withStarts && entries.Count <= MaxStartsInList ? entries.Keys.ToList() : new List<string>();
-            foreach (var startKey in startKeys)
-            {
-                var mid = StaffPersonKey.MemberIdOf(startKey);
-                if (mid <= 0) continue;
+                : withStarts ? entries.Keys.ToList() : new List<string>();
+            startKeys = startKeys.Where(k => StaffPersonKey.MemberIdOf(k) > 0).ToList();
+            if (startKeys.Count > 0)
                 foreach (var t in targets.Where(t => t.CompetitionId > 0 && t.From != null))
                 {
                     try
                     {
                         // Planera dagen steg 0: skjuttiden hör till grenen (och planeringen), inte en konstant på 2 h.
                         var shoot = _owners.ShootTime(t.PlanningId);
-                        foreach (var item in _schedule.GetSchedule(mid, t.CompetitionId).Days.SelectMany(d => d.Items)
-                                     .Where(i => i.Kind == ScheduleItemKind.Skytte && i.StartsAt != null))
+                        if (!_starts.Covers(t.CompetitionId))
                         {
-                            var st = item.StartsAt!.Value;
-                            var guessed = item.EndsAt == null || item.EndsAt <= st;
-                            var en = guessed ? st + shoot.Duration : item.EndsAt!.Value;
-                            entries[startKey].Add(new PersonWeekEntry(
-                                $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, shoot.Window(st, item.EndsAt), Venue(t.CompetitionId),
-                                $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
-                                null, t.CompetitionId));
+                            // Grenar utanför verktyget (springskytte): som förut, en schemaläsning per medlem — bara det publicerade.
+                            foreach (var startKey in startKeys)
+                            {
+                                var mid = StaffPersonKey.MemberIdOf(startKey);
+                                foreach (var item in _schedule.GetSchedule(mid, t.CompetitionId).Days.SelectMany(d => d.Items)
+                                             .Where(i => i.Kind == ScheduleItemKind.Skytte && i.StartsAt != null))
+                                {
+                                    var st = item.StartsAt!.Value;
+                                    var guessed = item.EndsAt == null || item.EndsAt <= st;
+                                    var en = guessed ? st + shoot.Duration : item.EndsAt!.Value;
+                                    entries[startKey].Add(new PersonWeekEntry(
+                                        $"s:{t.CompetitionId}:{item.SourceKey}", PersonWeekKind.Start, st.Date, shoot.Window(st, item.EndsAt), Venue(t.CompetitionId),
+                                        $"egen start i {t.Name}: {item.Title} {st:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
+                                        null, t.CompetitionId));
+                                }
+                            }
+                            continue;
                         }
+                        var byMember = _starts.ForCompetition(t.CompetitionId, includeUnpublishedStarts).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList());
+                        foreach (var startKey in startKeys)
+                            foreach (var w in byMember.GetValueOrDefault(StaffPersonKey.MemberIdOf(startKey)) ?? new List<StartWindow>())
+                            {
+                                var guessed = w.End == null;
+                                var en = w.End ?? w.Start + shoot.Duration;
+                                entries[startKey].Add(new PersonWeekEntry(
+                                    $"s:{t.CompetitionId}:{w.SourceKey}", PersonWeekKind.Start, w.Start.Date, shoot.Window(w.Start, w.End), Venue(t.CompetitionId),
+                                    $"egen start i {t.Name}: {w.Title} {w.Start:HH\\:mm}{(guessed ? " (ca " + ShootTime.Text(shoot.DurationMinutes) + ")" : "–" + en.ToString("HH:mm"))}",
+                                    null, t.CompetitionId));
+                            }
                     }
-                    catch (Exception ex) { _logger.LogWarning(ex, "Veckan: schemat för medlem {Member} i tävling {Comp} gick inte att läsa.", mid, t.CompetitionId); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Veckan: starterna i tävling {Comp} gick inte att läsa.", t.CompetitionId); }
                 }
-            }
 
             var sv = StringComparer.Create(CultureInfo.GetCultureInfo("sv-SE"), true);
             var result = new List<Person>();

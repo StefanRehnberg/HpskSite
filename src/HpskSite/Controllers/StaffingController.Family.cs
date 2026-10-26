@@ -119,11 +119,11 @@ namespace HpskSite.Controllers
             if (root == null) return err!;
             try
             {
-                var people = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, null, withStarts: true);
+                var people = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, null, withStarts: true, includeUnpublishedStarts: true);
                 return Json(new
                 {
                     success = true,
-                    startsIncluded = FamilyWeekService.StartsFitInList(people.Count),
+                    startsIncluded = true,
                     people = people.Select(p => new
                     {
                         key = p.Key, name = p.Name, memberId = p.MemberId, isExternal = p.IsExternal,
@@ -184,7 +184,7 @@ namespace HpskSite.Controllers
             if (string.IsNullOrWhiteSpace(personKey)) return Json(new { success = false, message = "Ogiltig förfrågan" });
             try
             {
-                var p = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, personKey).FirstOrDefault();
+                var p = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, personKey, includeUnpublishedStarts: true).FirstOrDefault();
                 if (p == null) return Json(new { success = false, message = "Personen har inget uppdrag i veckan." });
                 object? match = null;
                 if (p.IsExternal)
