@@ -907,6 +907,7 @@ window.PlaneringBemanning = (function () {
     }
     // Den valda personen står kvar med det som skiljer henne från andra med samma namn: klubb, klass och när hen skjuter.
     function showChosen(c) {
+        clearTimeout(searchTimer); clearTimeout(candTimer);   // en sökning som var på väg när personen valdes ska inte öppna en lista efteråt
         const box = $('plbEdChosen'); if (!box) return;
         const sub = candSub(c);
         box.innerHTML = `<b>Vald:</b> ${esc(c.name)}${sub ? ` <span class="plb-dim">· ${esc(sub)}</span>` : ''} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdChange">Byt person</button>`;
@@ -1025,7 +1026,7 @@ window.PlaneringBemanning = (function () {
     async function edSearch(q) {
         try {
             const d = await sget('SearchMembers', { query: q });
-            const box = $('plbEdSuggest'); if (!box || !B.editing) return;
+            const box = $('plbEdSuggest'); if (!box || !B.editing || B.editing.memberId) return;   // en vald person ligger kvar — sökningen får inte öppna listan igen
             const list = (d && d.success && d.members) ? d.members.slice(0, 8) : [];
             B.editing.list = list;
             box.innerHTML = list.length
