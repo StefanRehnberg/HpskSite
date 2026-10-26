@@ -354,6 +354,7 @@ namespace HpskSite.Controllers
                     // Same builder as the screen. A print that renders its own shape is how paper stopped
                     // resembling the plan the organiser actually built.
                     model.Grid = _grid.BuildGrid(owner, model.Discipline, 0);
+                    FillStarts(model, owner);
                 }
                 if (model.ShowForberedelser) model.Work = _work.Build(c, canEdit: false);
                 if (model.ShowDagsprogram)
@@ -363,6 +364,29 @@ namespace HpskSite.Controllers
                 }
             }
             return View("TavlingsplaneringBlad", model);
+        }
+
+        /// <summary>
+        /// Planera dagen: pappret visar när de som jobbar själva skjuter, och märker de uppdrag som krockar med en egen start. Bara planerarens
+        /// blad (den här vägen kräver behörighet till bemanningen) — en kollega ser inte när en annan funktionär skjuter. Ett fel här får inte fälla bladet.
+        /// </summary>
+        private void FillStarts(HpskSite.Models.Staffing.PlaneringBladModel model, HpskSite.Models.Staffing.StaffOwner owner)
+        {
+            try
+            {
+                if (!owner.HasCompetition) return;
+                var sp = HttpContext.RequestServices;
+                model.Starts = sp.GetRequiredService<HpskSite.Services.Staffing.StartWindowReader>().ForCompetition(owner.Comp, includeUnpublished: true)
+                    .Select(w => new HpskSite.Models.Staffing.PlaneringBladStart(w.MemberId, w.Start.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                        w.Start.ToString("HH\\:mm"), $"{w.Title.ToLowerInvariant()}, {w.Where.Split(" · ")[0].ToLowerInvariant()}")).ToList();
+                if (owner.PlanningIdOrNull is int pid && pid > 0)
+                    model.StartClashes = sp.GetRequiredService<HpskSite.Services.Staffing.ShootIntentService>().Clashes(pid).Where(c => c.Kind == "start")
+                        .Select(c => new HpskSite.Models.Staffing.GridClash
+                        {
+                            PersonKey = c.PersonKey, Name = c.Name, DateKey = c.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), A = c.A, B = c.B, Kind = c.Kind,
+                        }).ToList();
+            }
+            catch { /* bladet klarar sig utan starterna */ }
         }
 
         /// <summary>

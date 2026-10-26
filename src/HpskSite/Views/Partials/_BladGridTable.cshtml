@@ -1,0 +1,60 @@
+@model HpskSite.Models.Staffing.PlaneringBladGridVm
+@* Rutnätstabellen på "vem gör vad"-bladet: samma form för hela rutnätet och för en station i taget. Bara markup — ingen logik utöver
+   uppslagen i modellen (Razor: inga `is {` i @if, och en partial får inte ha kod som byggs av en annan vy). *@
+<table class="grid">
+    <thead>
+        <tr>
+            <th class="rolecol">@Model.FirstColumn</th>
+            @foreach (var col in Model.Cols)
+            {
+                <th>
+                    @col.Label
+                    @if (!string.IsNullOrEmpty(col.DayLabel)) { <div class="daylabel">@col.DayLabel</div> }
+                    @if (col.Kind != "Tavlingsdag" && !string.IsNullOrEmpty(col.KindLabel)) { <div class="muted daylabel">@col.KindLabel</div> }
+                </th>
+            }
+        </tr>
+    </thead>
+    <tbody>
+    @foreach (var row in Model.Rows)
+    {
+        <tr>
+            <td class="rolecol">
+                @row.RoleName
+                @if (!string.IsNullOrEmpty(row.ScopeLabel) && Model.FirstColumn == "Funktion") { <div class="muted daylabel">@row.ScopeLabel</div> }
+            </td>
+            @foreach (var col in Model.Cols)
+            {
+                @* Den som tackat nej gör inte uppdraget — pappret säger vem som står där, och "saknas" när ingen gör det. *@
+                var cell = (row.Cells.TryGetValue(col.Key, out var list) ? list : new List<HpskSite.Models.Staffing.GridEntry>())
+                    .Where(x => !string.Equals(x.Status, HpskSite.Models.Staffing.StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
+                <td>
+                    @foreach (var e in cell)
+                    {
+                        var clash = Model.Blad.HasStartClash(e, row, col.Key);
+                        <div class="person@(clash ? " clash" : "")">
+                            @if (e.IsResponsible) { <span class="resp">★</span> }
+                            <span class="pname">@e.DisplayName</span>
+                            @if (!string.IsNullOrEmpty(e.ClubName)) { <span class="club">@e.ClubName</span> }
+                            @if (!string.IsNullOrEmpty(e.TimeLabel)) { <span class="tid">@e.TimeLabel</span> }
+                            @foreach (var s in Model.Blad.StartsFor(e.MemberId, col.Key))
+                            {
+                                <span class="start">skjuter @s.Time (@s.Text)</span>
+                            }
+                            @if (clash) { <span class="clashnote">⚠ krockar med egen start</span> }
+                        </div>
+                        @if (!string.IsNullOrEmpty(e.Note))
+                        {
+                            <div class="note">@e.Note</div>
+                        }
+                    }
+                    @if (!cell.Any() && row.NeedFor(col.Key) > 0)
+                    {
+                        <div class="gap">— saknas @row.NeedFor(col.Key)</div>
+                    }
+                </td>
+            }
+        </tr>
+    }
+    </tbody>
+</table>

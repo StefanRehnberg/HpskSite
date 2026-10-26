@@ -23,6 +23,12 @@
     var gridRows = grid?.Rows?.Where(r => r.Filled > 0 || r.HasNeed).ToList()
                    ?? new List<HpskSite.Models.Staffing.GridRow>();
     var unreachable = grid?.Unreachable ?? new List<string>();
+    // Stationsrollerna grupperas per station (1, 2, 3 … i talordning); övriga roller ligger kvar i det vanliga rutnätet.
+    var stationGroups = gridRows.Where(r => string.Equals(r.ScopeType, HpskSite.Models.Staffing.StaffScopeType.Station, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(r.ScopeKey))
+        .GroupBy(r => r.ScopeKey!)
+        .OrderBy(g => int.TryParse(g.Key, out var sn) ? sn : int.MaxValue).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+    var otherRows = gridRows.Where(r => !(string.Equals(r.ScopeType, HpskSite.Models.Staffing.StaffScopeType.Station, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(r.ScopeKey))).ToList();
 }
 <!DOCTYPE html>
 <html lang="sv">
@@ -64,6 +70,9 @@
         .person .tid { color: #333; font-size: .74rem; margin-left: .25rem; white-space: nowrap; }
         .note { color: #777; font-size: .7rem; margin: 0 0 3px 0; }
         .gap { color: #c00; font-size: .78rem; }
+        .person .start { display: block; color: #444; font-size: .74rem; }
+        .person.clash { border-left: 3px solid #c00; padding-left: 4px; }
+        .person .clashnote { display: block; color: #c00; font-size: .74rem; font-weight: 600; }
         .small-note { font-size: .78rem; margin-top: .4rem; }
         @@media print {
             .no-print { display: none !important; }
@@ -128,55 +137,17 @@
             }
             else
             {
-                <table class="grid">
-                    <thead>
-                        <tr>
-                            <th class="rolecol">Funktion</th>
-                            @foreach (var col in gridCols)
-                            {
-                                <th>
-                                    @col.Label
-                                    @if (!string.IsNullOrEmpty(col.DayLabel)) { <div class="daylabel">@col.DayLabel</div> }
-                                    @if (col.Kind != "Tavlingsdag" && !string.IsNullOrEmpty(col.KindLabel)) { <div class="muted daylabel">@col.KindLabel</div> }
-                                </th>
-                            }
-                        </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var row in gridRows)
-                    {
-                        <tr>
-                            <td class="rolecol">
-                                @row.RoleName
-                                @if (!string.IsNullOrEmpty(row.ScopeLabel)) { <div class="muted daylabel">@row.ScopeLabel</div> }
-                            </td>
-                            @foreach (var col in gridCols)
-                            {
-                                var cell = row.Cells.TryGetValue(col.Key, out var list) ? list : new List<HpskSite.Models.Staffing.GridEntry>();
-                                <td>
-                                    @foreach (var e in cell)
-                                    {
-                                        <div class="person">
-                                            @if (e.IsResponsible) { <span class="resp">★</span> }
-                                            <span class="pname">@e.DisplayName</span>
-                                            @if (!string.IsNullOrEmpty(e.ClubName)) { <span class="club">@e.ClubName</span> }
-                                            @if (!string.IsNullOrEmpty(e.TimeLabel)) { <span class="tid">@e.TimeLabel</span> }
-                                        </div>
-                                        @if (!string.IsNullOrEmpty(e.Note))
-                                        {
-                                            <div class="note">@e.Note</div>
-                                        }
-                                    }
-                                    @if (!cell.Any() && row.NeedFor(col.Key) > 0)
-                                    {
-                                        <div class="gap">— saknas @row.NeedFor(col.Key)</div>
-                                    }
-                                </td>
-                            }
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+                @* Planera dagen: raderna utan station som ett rutnät, och varje station för sig med chef och markör bredvid varandra — så som
+                   pappret används ute på banan. Starttiden för den som själv skjuter står vid namnet. *@
+                @if (otherRows.Any())
+                {
+                    @await Html.PartialAsync("~/Views/Partials/_BladGridTable.cshtml", new HpskSite.Models.Staffing.PlaneringBladGridVm(Model, gridCols, otherRows, "Funktion"))
+                }
+                @foreach (var st in stationGroups)
+                {
+                    <h3>Station @st.Key</h3>
+                    @await Html.PartialAsync("~/Views/Partials/_BladGridTable.cshtml", new HpskSite.Models.Staffing.PlaneringBladGridVm(Model, gridCols, st.ToList(), "Roll"))
+                }
 
                 @if (unreachable.Any())
                 {

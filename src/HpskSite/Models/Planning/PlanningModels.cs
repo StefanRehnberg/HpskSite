@@ -100,7 +100,7 @@ namespace HpskSite.Models.Planning
             Owner => "Leder gruppen. Kan dessutom ändra vem som är med och deras nivå, byta ut den som inte kan vara med längre, dela ut områden, koppla planeringen till tävlingen, arkivera och ta bort planeringen. Ge det till en eller två personer — inte till alla.",
             Editor => "Som Deltar, och kan dessutom bjuda in fler, sköta bemanningen, områdena och stationerna, ändra andras uppgifter och ändra planeringens namn och datum. Läser också delplaneringarna.",
             Follower => "Läser allt, även meddelandena, men skriver inte och svarar inte på mötestider. För den som vill hålla sig informerad, till exempel förbundets kontaktperson.",
-            _ => "Skriver meddelanden, svarar på mötestider, föreslår och bokar möten, skapar uppgifter och lägger till dokument. Bemanningen sköts av dem som kan ändra. Det vanliga — välj det för de flesta.",
+            _ => "Skriver meddelanden, svarar på mötestider, föreslår och bokar möten, skapar uppgifter och lägger till dokument. Ser bemanningen men lägger inte in folk i den — det gör de som kan ändra. Det vanliga — välj det för de flesta.",
         };
 
         public static int Rank(string? v) => v switch { Owner => 4, Editor => 3, Participant => 2, Follower => 1, _ => 0 };

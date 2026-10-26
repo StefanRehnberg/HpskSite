@@ -402,6 +402,10 @@ namespace HpskSite.Services.Staffing
                     .Where(p => p.Volunteer != null && p.Assignments.Count == 0)
                     .Select(p => new GridVolunteer { Key = p.Key, Name = p.DisplayName, Summary = p.Volunteer?.SlotsSummary })
                     .ToList();
+                resp.VolunteersTotal = people.People.Count(p => p.Volunteer != null);
+                // "Har uppdrag" = ett uppdrag som inte är avböjt: den som tackat nej har inget uppdrag längre.
+                resp.VolunteersWithJob = people.People.Count(p => p.Volunteer != null
+                    && p.Assignments.Any(a => !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)));
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: volunteer strip failed for {Comp}", competitionId); }
 

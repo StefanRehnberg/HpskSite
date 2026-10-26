@@ -403,10 +403,32 @@
                 <p class="mb-2">Bemanningen — funktionärerna och deras pass — sköts av ${leads.length
                     ? leads.map(p => `<b>${esc(p.name)}</b>`).join(', ').replace(/, ([^,]*)$/, ' och $1')
                     : 'den som kan ändra planeringen'}. Hör av dig till ${leads.length === 1 ? 'hen' : 'någon av dem'} om du vill hjälpa till eller ändra något.</p>
-                <p class="pl-help small mb-0">Den som kan ändra planeringen ser hela bemanningen.</p></div>
+                <p class="pl-help small mb-0">Du kan se bemanningen nedan. Den som kan ändra planeringen lägger in och ändrar.</p></div>
+            <div class="pl-card" id="stfOverview"><h2>Hela bemanningen</h2><p class="pl-help mb-0">Hämtar…</p></div>
             <div class="pl-card"><h2>Dina uppdrag</h2>
                 ${mine.length ? `<ul class="mb-2">${mine.map(d => `<li>${esc(d)}</li>`).join('')}</ul>` : '<p class="mb-2">Du har inga uppdrag i bemanningen.</p>'}
                 <a class="btn btn-outline-secondary btn-sm" href="/mina-uppdrag">Mina uppdrag</a></div>`;
+        loadStaffingOverview();
+    }
+
+    // Planera dagen: den som är med men inte får ändra ser bemanningen skrivskyddat — roll, dag, tid, namn och förening, inget mer.
+    async function loadStaffingOverview() {
+        const box = $('stfOverview'); if (!box) return;
+        let r;
+        try { r = await req('/umbraco/surface/Staffing/GetStaffingOverview?planningId=' + ID + '&competitionId=0', { headers: { Accept: 'application/json' } }); } catch (e) { r = null; }
+        if (!$('stfOverview')) return;
+        if (!r || !r.success) { box.innerHTML = '<h2>Hela bemanningen</h2><p class="pl-help mb-0">Bemanningen kunde inte läsas just nu.</p>'; return; }
+        const cols = r.columns || [], rows = r.rows || [];
+        if (!rows.length) { box.innerHTML = '<h2>Hela bemanningen</h2><p class="mb-0">Ingen är inlagd än.</p>'; return; }
+        const cell = (row, c) => {
+            const list = (row.cells || {})[c.key] || [];
+            const need = (row.needed || {})[c.key] || 0, filled = (row.filled || {})[c.key] || 0;
+            return list.map(e => `<div>${e.responsible ? '<i class="bi bi-star-fill text-warning me-1" aria-hidden="true"></i>' : ''}<span class="fw-semibold">${esc(e.name)}</span>${e.club ? ` <span class="text-body-secondary small">${esc(e.club)}</span>` : ''}${e.time ? ` <span class="badge text-bg-light border fw-normal">${esc(e.time)}</span>` : ''}</div>`).join('')
+                + (need > filled ? `<div class="small text-danger">saknas ${need - filled}</div>` : '');
+        };
+        box.innerHTML = `<h2>Hela bemanningen</h2>${r.missing ? `<p class="small text-danger mb-2">${r.missing} ${r.missing === 1 ? 'plats saknas' : 'platser saknas'}.</p>` : ''}
+            <div class="table-responsive"><table class="table table-sm align-top mb-0" id="stfOverviewTable"><thead><tr><th scope="col">Roll</th>${cols.map(c => `<th scope="col">${esc(c.label)}${c.dayLabel ? `<div class="small fw-normal text-body-secondary">${esc(c.dayLabel)}</div>` : ''}</th>`).join('')}</tr></thead>
+            <tbody>${rows.map(row => `<tr><th scope="row">${esc(row.roleName)}${row.scopeLabel ? `<div class="small fw-normal text-body-secondary">${esc(row.scopeLabel)}</div>` : ''}</th>${cols.map(c => `<td>${cell(row, c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     }
 
     // Det bemanningens del (planering-bemanning.js) får av skalet: samma anrop, dialoger och meddelanden.

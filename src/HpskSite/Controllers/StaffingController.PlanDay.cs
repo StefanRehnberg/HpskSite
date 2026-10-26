@@ -157,6 +157,53 @@ namespace HpskSite.Controllers
         }
     }
 
+    public partial class StaffingController
+    {
+        /// <summary>
+        /// Bemanningen SKRIVSKYDDAD för den som är med i planeringen men inte får ändra (Stefans svar efter persontestet: "Deltar ska kunna se
+        /// bemanningen"). Bara det en kollega behöver veta: roll, station, dag, tid, namn och förening — aldrig telefon, e-post, anteckningar,
+        /// status (en som tackat nej syns inte), behörighet eller kollegers egna starter. Den som får ändra läser det vanliga rutnätet.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetStaffingOverview(int competitionId)
+        {
+            var pid = PlanningIdFromRequest();
+            var viewer = await ResolveViewerAsync();
+            if (pid <= 0 || viewer == null) return Json(new { success = false, message = "Ingen behörighet" });
+            var me = _planning.ParticipantForMember(pid, viewer.Id);
+            if (me is not { IsActive: true }) return Json(new { success = false, message = "Ingen behörighet" });
+            var owner = _owners.ForPlanning(pid);
+            if (owner == null) return Json(new { success = false, message = "Planeringen finns inte." });
+            try
+            {
+                var g = _grid.BuildGrid(owner, _owners.Discipline(owner), viewer.Id);
+                var cols = g.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
+                var rows = g.Rows.Where(r => r.Cells.Values.Any(l => l.Any(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))) || r.HasNeed)
+                    .Select(r => new
+                    {
+                        roleName = r.RoleName, scopeLabel = r.ScopeLabel,
+                        cells = r.Cells.ToDictionary(kv => kv.Key, kv => kv.Value
+                            .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
+                            .Select(e => new { name = e.DisplayName, club = e.ClubName, time = e.TimeLabel, responsible = e.IsResponsible }).ToList()),
+                        needed = cols.ToDictionary(c => c.Key, c => r.NeedFor(c.Key)),
+                        filled = cols.ToDictionary(c => c.Key, c => r.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0),
+                    }).ToList();
+                var missing = g.Rows.Sum(r => cols.Sum(c => Math.Max(0, r.NeedFor(c.Key) - (r.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0))));
+                return Json(new
+                {
+                    success = true,
+                    columns = cols.Select(c => new { key = c.Key, label = c.Label, dayLabel = c.DayLabel, timeLabel = c.TimeLabel }),
+                    rows, missing,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: GetStaffingOverview failed for planning {Planning}", pid);
+                return Json(new { success = false, message = "Kunde inte läsa bemanningen." });
+            }
+        }
+    }
+
     public class AssignManyRequest
     {
         public int CompetitionId { get; set; }

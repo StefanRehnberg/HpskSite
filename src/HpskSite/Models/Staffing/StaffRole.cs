@@ -254,6 +254,10 @@ namespace HpskSite.Models.Staffing
         public List<string> Unreachable { get; set; } = new();
         /// <summary>Volunteered, nothing assigned yet — surfaced as a strip above the grid.</summary>
         public List<GridVolunteer> Volunteers { get; set; } = new();
+        /// <summary>Planera dagen: hur många som anmält sig som funktionärer alls — så att "3 av 12 har uppdrag" går att säga.</summary>
+        public int VolunteersTotal { get; set; }
+        /// <summary>…och hur många av dem som har ett uppdrag som inte är avböjt.</summary>
+        public int VolunteersWithJob { get; set; }
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>

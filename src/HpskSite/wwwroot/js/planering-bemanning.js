@@ -64,6 +64,8 @@ window.PlaneringBemanning = (function () {
             g.externalCount += pg.externalCount || 0;
             (pg.unreachable || []).forEach(n => { if (g.unreachable.indexOf(n) < 0) g.unreachable.push(n); });
             g.volunteers = g.volunteers.concat(pg.volunteers || []);
+            g.volunteersTotal = (g.volunteersTotal || 0) + (pg.volunteersTotal || 0);
+            g.volunteersWithJob = (g.volunteersWithJob || 0) + (pg.volunteersWithJob || 0);
             g.clashes = g.clashes.concat(pg.clashes || []);
             (pg.rows || []).forEach(r => { r.partIndex = pi; r.planningId = r.planningId || p.planningId; g.rows.push(r); });
         });
@@ -199,12 +201,21 @@ window.PlaneringBemanning = (function () {
 
     function gridSummary() {
         const g = B.grid, cols = (g.columns || []).filter(c => c.key);
-        const passShort = r => cols.filter(c => (((r.passCover || {})[c.key]) || []).some(p => p.needed > 0 && p.filled < p.needed)).length;
-        const short = (g.rows || []).reduce((acc, r) => acc + cols.filter(c => { const n = needFor(r, c.key); return n > 0 && filledFor(r, c.key) < n; }).length + passShort(r), 0);
+        // Planera dagen (persontestet): "11 rutor saknar folk" räknade rader, inte personer — tävlingsledaren räknade själv ut att det saknades 14.
+        // Nu räknas PLATSER: behov minus bemannat per roll och dag (per pass när dagen har flera pass).
+        const missingFor = (r, c) => {
+            const pc = ((r.passCover || {})[c.key]) || [];
+            if (pc.some(p => p.needed > 0)) return pc.reduce((a, p) => a + Math.max(0, (p.needed || 0) - (p.filled || 0)), 0);
+            return Math.max(0, needFor(r, c.key) - filledFor(r, c.key));
+        };
+        const places = (g.rows || []).reduce((acc, r) => acc + cols.reduce((a, c) => a + missingFor(r, c), 0), 0);
         const holes = (g.rows || []).reduce((a, r) => a + (r.gaps || []).length, 0);
         const parts = [`${g.totalAssigned || 0} uppdrag`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
-        if (short) parts.push(`<span class="text-danger fw-semibold">${short} ${short === 1 ? 'ruta saknar' : 'rutor saknar'} folk</span>`);
+        if (places) parts.push(`<span class="text-danger fw-semibold" data-plb-missing="${places}">${places} ${places === 1 ? 'plats saknas' : 'platser saknas'}</span>`);
         if (holes) parts.push(`<span class="text-danger fw-semibold">${holes} ${holes === 1 ? 'lucka' : 'luckor'} i tiden</span>`);
+        if (g.volunteersTotal > 0) {
+            parts.push(`<span data-plb-volunteers="${g.volunteersWithJob || 0}/${g.volunteersTotal}">${g.volunteersWithJob || 0} av ${g.volunteersTotal} anmälda funktionärer har uppdrag</span>`);
+        }
         return parts.join(' · ');
     }
 
@@ -239,6 +250,103 @@ window.PlaneringBemanning = (function () {
             onOk: body => saveRoleChoice(body)
         });
     }
+    // Planera dagen steg 1: "Lägg in flera" — välj roll/station, dag och tid en gång, kryssa i personerna. Varje person prövas på servern:
+    // upptagna hoppas över (och erbjuds sedan "lägg in ändå"), de som redan står där läggs inte in igen. Planerat läge — ingen får något mejl.
+    async function openAssignMany() {
+        const rows = (B.grid.rows || []).map((r, i) => ({ r, i })).filter(x => !B.grid.family || x.r.planningId);
+        const cols = (B.grid.columns || []).filter(c => c.key);
+        if (!rows.length) { A.showMsg('Lägg till en roll först.', 'warning'); return; }
+        if (!cols.length) { A.showMsg('Lägg till en dag först.', 'warning'); return; }
+        const rowLabel = x => `${x.r.roleName}${x.r.scopeLabel ? ' · ' + x.r.scopeLabel : ''}`;
+        // Förvald rad: den med störst brist (behov minus bemannat över dagarna) — det är dit man vill lägga folk. Annars första raden som inte
+        // är Tävlingsledning (den bemannas av den som skapade planeringen).
+        const shortage = x => cols.reduce((a, c) => a + Math.max(0, needFor(x.r, c.key) - filledFor(x.r, c.key)), 0);
+        let startIdx = 0, best = 0;
+        rows.forEach((x, k) => { const s = shortage(x); if (s > best) { best = s; startIdx = k; } });
+        if (best === 0) startIdx = Math.max(0, rows.findIndex(x => x.r.roleKey !== 'tavlingsledning'));
+        let cands = [];
+        const sel = new Set();
+        A.formModal({
+            title: 'Lägg in flera', okLabel: 'Lägg in', wide: true,
+            html: `<div class="row g-2 mb-2">
+                    <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
+                    <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}">${esc(c.label)}</option>`).join('')}</select></div>
+                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnFrom">Från</label><input type="text" class="form-control form-control-sm" id="plbMnFrom" data-hpsk-time inputmode="decimal" placeholder="8"></div>
+                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnTo">Till</label><input type="text" class="form-control form-control-sm" id="plbMnTo" data-hpsk-time inputmode="decimal" placeholder="12"></div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 align-items-center mb-1">
+                    <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnVol" role="switch"><label class="form-check-label" for="plbMnVol">Bara de som anmält sig som funktionärer</label></div>
+                    <input type="search" class="form-control form-control-sm" id="plbMnQ" placeholder="Sök namn" style="max-width:200px" autocomplete="off" aria-label="Sök namn">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnFree">Markera alla lediga</button>
+                    <span class="small plb-dim" id="plbMnCount" aria-live="polite"></span>
+                </div>
+                <div class="list-group plb-many-list" id="plbMnList" style="max-height:40vh;overflow:auto"><div class="list-group-item small plb-dim">Hämtar…</div></div>
+                <div class="pl-help small mt-2 mb-0">Utan tid gäller uppdraget hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
+                <div class="text-danger small mt-1" id="plbMnErr" role="alert"></div>`,
+            onOpen: b => {
+                let timer = null;
+                const cur = () => ({ x: rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c: cols[parseInt(b.querySelector('#plbMnDay').value, 10)] });
+                const paint = () => {
+                    const { x } = cur();
+                    const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
+                    const known = !!(from && to);
+                    b.querySelector('#plbMnList').innerHTML = cands.length ? cands.map((c, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}">
+                        <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mn="${c.memberId}"${sel.has(c.memberId) ? ' checked' : ''}${c.alreadyHere ? ' disabled' : ''}>
+                        <span><span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, known)}${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
+                        ${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</span></label>`).join('')
+                        : '<div class="list-group-item small plb-dim">Ingen i listan. Slå av reglaget för att se alla anmälda.</div>';
+                    b.querySelector('#plbMnCount').textContent = `${sel.size} markerade · ${cands.length} i listan${cands.length >= 200 ? ' (de första 200)' : ''} · ${rowLabel(x)}`;
+                };
+                const load = async () => {
+                    const { x, c } = cur();
+                    const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
+                    const qs = { planningId: x.r.planningId || A.ID, roleKey: x.r.roleKey, date: c.key, scopeKey: x.r.scopeKey || '', take: 200,
+                        onlyVolunteers: b.querySelector('#plbMnVol').checked ? 'true' : 'false' };
+                    if (from && to) { qs.from = from; qs.to = to; }
+                    const q = b.querySelector('#plbMnQ').value.trim(); if (q) qs.q = q;
+                    let r; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
+                    if (!r || !r.success) { b.querySelector('#plbMnList').innerHTML = `<div class="list-group-item small text-danger">${esc((r && r.message) || 'Kunde inte läsa kandidaterna.')}</div>`; return; }
+                    if (!b._first) { b._first = true; if (r.volunteers > 0) { b.querySelector('#plbMnVol').checked = true; return load(); } }
+                    cands = r.candidates || [];
+                    paint();
+                };
+                const later = ms => { clearTimeout(timer); timer = setTimeout(load, ms); };
+                ['#plbMnRow', '#plbMnDay', '#plbMnVol'].forEach(s => b.querySelector(s).addEventListener('change', () => later(0)));
+                ['#plbMnFrom', '#plbMnTo'].forEach(s => b.querySelector(s).addEventListener('change', () => later(0)));
+                b.querySelector('#plbMnQ').addEventListener('input', () => later(250));
+                b.querySelector('#plbMnList').addEventListener('change', e => {
+                    const cb = e.target.closest('[data-mn]'); if (!cb) return;
+                    const id = parseInt(cb.dataset.mn, 10); if (cb.checked) sel.add(id); else sel.delete(id);
+                    paint();
+                });
+                b.querySelector('#plbMnFree').addEventListener('click', () => { cands.filter(c => c.free !== false && !c.alreadyHere).forEach(c => sel.add(c.memberId)); paint(); });
+                load();
+            },
+            onOk: async b => {
+                const x = rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c = cols[parseInt(b.querySelector('#plbMnDay').value, 10)];
+                const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
+                if (from === null || to === null) return 'Skriv klockslagen till exempel 8 eller 8:30.';
+                if (!sel.size) return 'Kryssa i minst en person.';
+                const body = { roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null, date: c.key, from: from || null, to: to || null, memberIds: [...sel] };
+                const d = await spost('AssignMany', body, x.r.planningId);
+                if (!d.success) return d.message || 'Det gick inte att lägga in.';
+                let added = d.added.length;
+                const clashes = d.skipped.filter(s => s.clash), others = d.skipped.filter(s => !s.clash);
+                let forced = 0;
+                if (clashes.length && await A.plConfirm(`${clashes.length} ${clashes.length === 1 ? 'person är' : 'personer är'} upptagna`,
+                    clashes.slice(0, 6).map(s => `${s.name}: ${s.reason}`).join('\n') + (clashes.length > 6 ? `\n…och ${clashes.length - 6} till` : '') + '\n\nLägg in dem ändå?', 'Lägg in ändå')) {
+                    const f = await spost('AssignMany', Object.assign({}, body, { memberIds: clashes.map(s => s.memberId), force: true }), x.r.planningId);
+                    if (f.success) { forced = f.added.length; added += forced; }
+                }
+                await loadGrid(); drawGrid();
+                const left = clashes.length - forced + others.length;
+                A.showMsg(`${added} ${added === 1 ? 'person lades' : 'personer lades'} in${forced ? ` (${forced} trots att de var upptagna)` : ''}.`
+                    + (left ? ` ${left} hoppades över: ${[...clashes.slice(forced), ...others].slice(0, 4).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}${left > 4 ? '…' : ''}.` : ''), left ? 'warning' : 'success');
+                return true;
+            }
+        });
+    }
+
     // Planera dagen steg 0 (Stefan 2026-10-26): hur länge en skytt är upptagen av sin egen start. Förval per gren, ändringsbart här.
     async function openShootTime() {
         const r = await sget('GetShootTime').catch(() => null);
@@ -288,6 +396,7 @@ window.PlaneringBemanning = (function () {
             { label: 'Lägg till en roll…', icon: 'bi-plus-lg', fn: () => openNewRole() },
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
+            { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
             linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
@@ -390,7 +499,7 @@ window.PlaneringBemanning = (function () {
                     cls += ' plb-short';
                     tally += `<div class="plb-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>ingen ${holes.map(x => esc(x.from) + '–' + esc(x.to)).join(', ')}</div>`;
                 }
-                h += `<td class="${cls}">${entries.map(entryHtml).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button></td>`;
+                h += `<td class="${cls}">${entries.map(e => entryHtml(e, row, c.key)).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button></td>`;
             });
             return h + '</tr>';
         };
@@ -431,14 +540,28 @@ window.PlaneringBemanning = (function () {
         wireRowOrder();
     }
 
-    function entryHtml(e) {
-        return `<div class="plb-entry"><button type="button" class="plb-person" data-plb-person="${esc(keyOf(e))}" title="Visa ${esc(e.displayName)}${e.clubName ? ', ' + esc(e.clubName) : ''}">`
+    // Planera dagen (persontestet): krocken med personens egen start ska synas VID rutan, inte bara i en gul ruta högst upp. Servern ger
+    // krockarna som text ("Stationsmarkör 12:00–14:00 (…)" mot "egen start i …"); vi hittar den som hör till just den här raden.
+    function startClashFor(e, row, dateKey) {
+        const list = (B.grid.familyClashes || []).filter(c => c.kind === 'start' && c.personKey === keyOf(e) && c.dateKey === dateKey);
+        for (const c of list) {
+            const mine = /^egen start/.test(c.a || '') ? c.b : c.a, theirs = mine === c.a ? c.b : c.a;
+            if (!mine || !row || mine.indexOf(row.roleName) !== 0) continue;
+            if (e.timeLabel ? mine.indexOf(e.timeLabel) < 0 : mine.indexOf('hela dagen') < 0) continue;
+            return theirs;
+        }
+        return null;
+    }
+    function entryHtml(e, row, dateKey) {
+        const clash = startClashFor(e, row, dateKey);
+        return `<div class="plb-entry${clash ? ' plb-entry-clash' : ''}"><button type="button" class="plb-person" data-plb-person="${esc(keyOf(e))}" title="Visa ${esc(e.displayName)}${e.clubName ? ', ' + esc(e.clubName) : ''}">`
             + (e.isResponsible ? '<i class="bi bi-star-fill text-warning" title="Ansvarig" aria-label="Ansvarig"></i>' : '')
             + `<span class="plb-name${e.isExternal ? ' text-warning-emphasis' : ''}">${esc(e.displayName)}</span>`
             + (e.clubName ? `<span class="plb-club">${esc(e.clubName)}</span>` : '')
             + (e.timeLabel ? `<span class="badge text-bg-light border fw-normal plb-time">${esc(e.timeLabel)}</span>` : '')
             // Omgång 3 (K8): en gul rad som säger vad det gäller, i stället för en röd triangel som såg ut som ett fel.
             + (e.isExternal && !e.hasContact ? '<span class="plb-nocontact">saknar konto och e-post</span>' : '')
+            + (clash ? `<span class="plb-startclash"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>${esc(clash.replace(/^egen start i [^:]*: /, 'skjuter själv '))}</span>` : '')
             + '</button>'
             + (e.readOnly ? '' : `<button type="button" class="plb-mini" data-plb-move="${e.id}" title="Flytta ${esc(e.displayName)} till en annan dag" aria-label="Flytta till en annan dag"><i class="bi bi-arrow-left-right" aria-hidden="true"></i></button>`
                 + `<button type="button" class="plb-mini text-danger" data-plb-del="${e.id}" title="Ta bort ${esc(e.displayName)} från rutan" aria-label="Ta bort från rutan">&times;</button>`)
@@ -466,6 +589,10 @@ window.PlaneringBemanning = (function () {
             <label class="visually-hidden" for="plbEdName">Person</label>
             <input type="text" class="form-control form-control-sm mb-1" id="plbEdName" autocomplete="off" placeholder="Sök medlem eller skriv ett namn">
             <div class="list-group mb-1" id="plbEdSuggest" style="display:none"></div>
+            <div id="plbEdCandBox" class="mb-1" style="display:none">
+                <div class="form-check form-switch small mb-1"><input class="form-check-input" type="checkbox" id="plbEdOnlyVol" role="switch"><label class="form-check-label" for="plbEdOnlyVol">Bara de som anmält sig som funktionärer</label></div>
+                <div class="list-group plb-cands" id="plbEdCands" aria-label="Förslag på personer"></div>
+            </div>
             <div class="d-flex gap-1 mb-1">
                 <input type="text" class="form-control form-control-sm" id="plbEdFrom" data-hpsk-time inputmode="decimal" placeholder="från, t.ex. 8" aria-label="Från klockan">
                 <input type="text" class="form-control form-control-sm" id="plbEdTo" data-hpsk-time inputmode="decimal" placeholder="till" aria-label="Till klockan">
@@ -481,8 +608,22 @@ window.PlaneringBemanning = (function () {
             if (B.editing) B.editing.memberId = 0;
             const q = name.value.trim();
             clearTimeout(searchTimer);
+            // Kandidatlistan (anmälda och funktionärer) filtreras på det som skrivs; den vanliga medlemssökningen tar över när den inte hittar.
+            refreshCandidates(120);
             if (q.length < 2) { hideSuggest(); return; }
             searchTimer = setTimeout(() => edSearch(q), 200);
+        });
+        // Tiderna avgör vem som är ledig: räkna om när ett klockslag är skrivet klart.
+        ['plbEdFrom', 'plbEdTo'].forEach(id => $(id).addEventListener('change', () => refreshCandidates(0)));
+        $('plbEdOnlyVol').addEventListener('change', e => { if (B.editing) B.editing.onlyVol = e.target.checked; B.onlyVolPref = e.target.checked; refreshCandidates(0); });
+        $('plbEdCands').addEventListener('click', e => {
+            const b = e.target.closest('[data-cand]'); if (!b || !B.editing) return;
+            const c = (B.editing.cands || [])[parseInt(b.dataset.cand, 10)]; if (!c) return;
+            B.editing.memberId = c.memberId;
+            name.value = c.name;
+            $('plbEdErr').textContent = c.free === false ? `${c.name} är upptagen: ${c.conflict ? c.conflict.label : 'samtidigt'}. Enter lägger in ändå.` : '';
+            hideSuggest();
+            $('plbEdFrom').focus();
         });
         const keys = e => {
             if (e.key === 'Enter') { e.preventDefault(); edCommit(); }
@@ -504,12 +645,68 @@ window.PlaneringBemanning = (function () {
         return ed;
     }
     function hideSuggest() { const b = $('plbEdSuggest'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }
+
+    // ---- kandidatlistan i rutan (Planera dagen steg 1): anmälda funktionärer och skyttar, med start och ledighet ----
+    const normTime = v => window.hpskNormalizeTime ? window.hpskNormalizeTime(v) : (v || '').trim();
+    function candBadges(c, slotKnown) {
+        const b = [];
+        if (c.alreadyHere) b.push('<span class="badge text-bg-info fw-normal">Står redan här</span>');
+        if (c.volunteer) b.push('<span class="badge text-bg-success fw-normal">Anmäld funktionär</span>');
+        if (c.free === false) b.push('<span class="badge text-bg-warning fw-normal">Upptagen</span>');
+        else if (c.free === true && slotKnown) b.push('<span class="badge text-bg-light border fw-normal">Ledig</span>');
+        return b.join(' ');
+    }
+    function candSub(c) {
+        const parts = [];
+        const s = (c.starts || [])[0];
+        if (s) parts.push(`skjuter ${s.time}${s.where ? ' · ' + s.where.split(' · ')[0].toLowerCase() : ''}${c.shooterClass ? ' · ' + c.shooterClass : ''}`);
+        else if (c.shooterClass) parts.push('klass ' + c.shooterClass);
+        if (c.club) parts.push(c.club);
+        return parts.join(' · ');
+    }
+    let candTimer = null;
+    function refreshCandidates(delay) {
+        clearTimeout(candTimer);
+        candTimer = setTimeout(loadCandidates, delay || 0);
+    }
+    async function loadCandidates() {
+        const ed = B.editing; if (!ed || !$('plbEdCands')) return;
+        const seq = (B.candSeq = (B.candSeq || 0) + 1);
+        const from = normTime($('plbEdFrom').value), to = normTime($('plbEdTo').value);
+        const slotKnown = !!(ed.col.key && from && to);
+        const typed = ed.memberId ? '' : $('plbEdName').value.trim();
+        const qs = { planningId: ed.row.planningId || A.ID, roleKey: ed.row.roleKey, date: ed.col.key || '', scopeKey: ed.row.scopeKey || '', take: 8,
+            onlyVolunteers: ed.onlyVol ? 'true' : 'false' };
+        if (slotKnown) { qs.from = from; qs.to = to; }
+        if (typed) qs.q = typed;
+        let r;
+        try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
+        if (seq !== B.candSeq || !B.editing) return;
+        const box = $('plbEdCandBox');
+        if (!r || !r.success || (!r.shooters && !r.volunteers)) { box.style.display = 'none'; return; }
+        // Första gången: finns det någon som anmält sig som funktionär är det dem man vill se först.
+        if (ed.onlyVol == null) {
+            ed.onlyVol = B.onlyVolPref != null ? B.onlyVolPref : r.volunteers > 0;
+            if (ed.onlyVol) return loadCandidates();
+        }
+        $('plbEdOnlyVol').checked = !!ed.onlyVol;
+        ed.cands = r.candidates || [];
+        const list = $('plbEdCands');
+        list.innerHTML = ed.cands.length
+            ? ed.cands.map((c, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}" data-cand="${i}">
+                <span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, slotKnown)}
+                ${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
+                ${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</button>`).join('')
+            : `<div class="list-group-item small plb-dim">${typed ? 'Ingen i listan heter så.' : (ed.onlyVol ? 'Ingen har anmält sig som funktionär den dagen.' : 'Ingen i anmälningarna.')}${ed.onlyVol ? ' Slå av reglaget för att se alla anmälda.' : ''}</div>`;
+        box.style.display = 'block';
+        placeEditor();
+    }
     function openEditor(btn) {
         const row = (B.grid.rows || [])[parseInt(btn.dataset.plbAdd, 10)];
         const col = (B.grid.columns || [])[parseInt(btn.dataset.col, 10)];
         if (!row || !col) return;
         const ed = ensureEditor();
-        B.editing = { row, col, memberId: 0, list: [] };
+        B.editing = { row, col, memberId: 0, list: [], cands: [], onlyVol: B.onlyVolPref != null ? B.onlyVolPref : null };
         const pt = B.grid.family ? partOf(row) : null;
         $('plbEdHead').textContent = (pt ? (pt.isShared ? 'Gemensamt' : pt.name) + ' · ' : '') + row.roleName + ' · ' + (col.key ? col.label : 'Utan dag');
         $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = ''; $('plbEdErr').textContent = '';
@@ -518,15 +715,25 @@ window.PlaneringBemanning = (function () {
         const cell = (btn.closest('td') || btn).getBoundingClientRect();
         const w = Math.min(330, window.innerWidth - 16);
         ed.style.width = w + 'px';
-        let top = cell.bottom + 4, left = cell.left;
-        if (top + ed.offsetHeight > window.innerHeight - 8) top = Math.max(8, cell.top - ed.offsetHeight - 4);
-        if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
-        ed.style.top = top + 'px'; ed.style.left = left + 'px';
+        B.editing.anchor = { top: cell.top, bottom: cell.bottom, left: cell.left, w };
+        placeEditor();
         $('plbEdName').focus();
+        $('plbEdCandBox').style.display = 'none';
+        refreshCandidates(0);
+    }
+    // Rutan ligger under cellen; får den inte plats (kandidatlistan gör den hög) hamnar den ovanför, annars längst ned i fönstret.
+    function placeEditor() {
+        const ed = $('plbEditor'), a = B.editing && B.editing.anchor; if (!ed || !a) return;
+        const h = ed.offsetHeight;
+        let top = a.bottom + 4, left = a.left;
+        if (top + h > window.innerHeight - 8) top = a.top - h - 4 >= 8 ? a.top - h - 4 : Math.max(8, window.innerHeight - h - 8);
+        if (left + a.w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - a.w - 8);
+        ed.style.top = top + 'px'; ed.style.left = left + 'px';
     }
     function closeEditor() {
         const ed = $('plbEditor');
         if (ed) ed.style.display = 'none';
+        clearTimeout(candTimer);
         B.editing = null;
         hideSuggest();
     }

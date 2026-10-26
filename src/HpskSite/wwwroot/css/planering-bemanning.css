@@ -30,6 +30,10 @@
 }
 .plb-nocontact { display: block; font-size: .72rem; color: var(--bs-warning-text-emphasis); background: var(--bs-warning-bg-subtle);
     border-radius: 3px; padding: 0 .3rem; white-space: nowrap; }
+/* Krock med personens egen start — vid själva rutan (Planera dagen). */
+.plb-startclash { display: block; font-size: .74rem; color: var(--bs-danger-text-emphasis); background: var(--bs-danger-bg-subtle);
+    border-radius: 3px; padding: 0 .3rem; white-space: normal; text-align: left; }
+.plb-entry-clash { border-left: 3px solid var(--bs-danger); padding-left: .25rem; }
 .plb-grid thead .plb-rolecol { z-index: 4; font-weight: 600; }
 /* En öppen radmeny ligger i en låst cell, och varje låst cell är en egen staplingsnivå: utan det här hamnar
    menyn under nästa rads rollcell och går inte att klicka på (sviten fann det). */
@@ -69,6 +73,9 @@
 /* Rutans snabbinmatning ligger över sidan, vid rutan (inte i en dialog — nästa namn ska gå att skriva direkt). */
 .plb-editor { position: fixed; z-index: 1060; display: none; }
 .plb-editor .list-group { max-height: 240px; overflow: auto; }
+.plb-editor .plb-cands { max-height: 220px; }
+.plb-cand { white-space: normal; text-align: left; }
+.plb-cand-busy { background: var(--bs-warning-bg-subtle); }
 
 .plb-org th { background: var(--bs-tertiary-bg); }
 
