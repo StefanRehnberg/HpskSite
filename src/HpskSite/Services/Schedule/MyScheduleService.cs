@@ -790,8 +790,8 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
         /// </summary>
         private string ResolveRoleName(int competitionId, string discipline, string roleKey, string? functionTitle)
         {
-            var owner = _owners.ForCompetition(competitionId);   // null = ingen planering, och då finns inga uppdrag att namnge
-            var name = owner == null ? roleKey : _roles.NameFor(owner, discipline, roleKey);
+            var owner = _owners.ForCompetition(competitionId);   // null = ingen planering: ett äldre uppdrag som väntar på att planeringen startas
+            var name = owner == null ? HpskSite.Services.Staffing.RoleCatalogService.BuiltInNameFor(discipline, roleKey) : _roles.NameFor(owner, discipline, roleKey);
             if (string.IsNullOrWhiteSpace(name)) name = roleKey;
             return string.IsNullOrWhiteSpace(functionTitle) ? name : $"{name} — {functionTitle}";
         }

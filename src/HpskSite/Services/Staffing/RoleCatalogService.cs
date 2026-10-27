@@ -115,6 +115,13 @@ namespace HpskSite.Services.Staffing
             return null;
         }
 
+        /// <summary>
+        /// Namnet på en INBYGGD roll utan ägare — för ett äldre uppdrag på en tävling som ännu inte har en planering (bemanningen ägs av en planering; raden väntar på att den startas och tas in).
+        /// Arrangörens egna roller hör till planeringen och finns inte här: de visas med nyckeln tills planeringen startats.
+        /// </summary>
+        public static string BuiltInNameFor(string? discipline, string? roleKey) =>
+            FunctionaryRoles.ForDiscipline(discipline).FirstOrDefault(r => string.Equals(r.Key, roleKey, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? roleKey ?? "";
+
         /// <summary>Display name for a role key, falling back to the key itself (never empty).</summary>
         public string NameFor(StaffOwner owner, string? discipline, string? roleKey)
             => Resolve(owner, discipline, roleKey)?.DisplayName ?? roleKey ?? "";
