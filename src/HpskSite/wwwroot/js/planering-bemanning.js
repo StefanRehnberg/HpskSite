@@ -892,7 +892,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
             html: `<p class="pl-help small mb-2">${cols.length > 1 ? 'Hur många som behövs varje dag, av varje roll.' : 'Hur många som behövs av varje roll.'} <b>Gäller rollen stationer</b> skriver du hur många på varje station — en ansvarig och en markör på varje station betyder 1 och 1. Tävlingsledning bemannas av den som skapade planeringen.</p>
-                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in som egna uppdrag med klockslag (till exempel 08–11, 11–14 och 14–17). Då räknas platsen som fylld när någon står där, och du ser om det blir ett hål mellan två.</p>
+                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in som egna namn i samma ruta, var och en med klockslag (till exempel 08–11, 11–14 och 14–17). Då räknas platsen som fylld när någon står där, och du ser om det blir ett hål mellan två.</p>
                 <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
                 <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
