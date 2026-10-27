@@ -5,6 +5,7 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
     var today = DateTime.Today;
@@ -18,7 +19,8 @@
             .Where(p => p.ClubId == clubId)
             // Trädets ordning bland syskon, så tävlingar med samma datum står som förut.
             .OrderBy(p => p.ParentId).ThenBy(p => p.SortOrder)
-            .Select(p => Umbraco.Content(p.Id))
+            // Tabelläget har inga riktiga noder (Umbraco.Content ger null) — den virtuella noden ur lagringen.
+            .Select(p => PageNodes.PageNode(p))
             .Where(n => n != null)
             .Cast<IPublishedContent>()
             .ToList()
