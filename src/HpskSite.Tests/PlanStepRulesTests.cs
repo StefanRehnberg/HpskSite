@@ -12,8 +12,8 @@ namespace HpskSite.Tests
     public class PlanStepRulesTests
     {
         private static PlanFacts Facts(bool roles = true, bool needs = true, int needed = 24, int missing = 0, bool linked = true, int vols = 0, string? mode = null,
-            bool falt = false, int startClashes = 0, int clashes = 0, int assignedPeople = 12, int withStart = 5, int assignedTotal = 0, int unsent = 0)
-            => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes, null, assignedPeople, withStart, assignedTotal, unsent);
+            bool falt = false, int startClashes = 0, int clashes = 0, int assignedPeople = 12, int withStart = 5, int assignedTotal = 0, int unsent = 0, int unlinked = 0)
+            => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes, null, assignedPeople, withStart, assignedTotal, unsent, 0, unlinked);
 
         private static PlanStep Step(PlanFacts f, string key) => PlanStepRules.Derive(f).Single(s => s.Key == key);
 
@@ -101,7 +101,21 @@ namespace HpskSite.Tests
         public void Gron_startlista_sager_hur_manga_som_kontrollerats()
         {
             Step(Facts(falt: true, assignedPeople: 12, withStart: 5, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 med uppdrag som också skjuter krockar med sin egen start");
-            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 med uppdrag skjuter i tävlingen");
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 medlemmarna med uppdrag skjuter i tävlingen");
+        }
+
+        // Anders (persontest 11): en fritextperson har ingen identitet att matcha en start mot. Texten får inte påstå att hen kontrollerats, och steget är inte grönt.
+        [Fact]
+        public void Fritextpersoner_raknas_inte_som_kontrollerade_och_stoppar_det_garna()
+        {
+            var s = Step(Facts(falt: true, assignedPeople: 40, withStart: 5, unlinked: 9, mode: "x"), "startlista");
+            s.State.Should().Be(PlanStepState.Todo);
+            s.Text.Should().Contain("Ingen av de 5 med uppdrag som också skjuter krockar").And.Contain("9 namn är inte kopplade till en medlem och går inte att kontrollera");
+            s.Actions.Should().Equal("koppla", "startlista");
+            // Bara fritext: ingenting har kontrollerats, och texten påstår inget om dem.
+            var only = Step(Facts(falt: true, assignedPeople: 3, withStart: 0, unlinked: 3, mode: "x"), "startlista");
+            only.Text.Should().NotContain("Ingen av de").And.Contain("3 namn är inte kopplade");
+            Step(Facts(falt: true, assignedPeople: 1, withStart: 0, unlinked: 1, mode: "x"), "startlista").Text.Should().Contain("1 namn är inte kopplat till en medlem och går inte att kontrollera");
         }
 
         // Persontest 8: hon hittade aldrig var man skickar förfrågan till de inlagda.

@@ -200,6 +200,13 @@ namespace HpskSite.Services.Planning
             int OverdueTasks, string? NextMilestoneTitle, DateTime? NextMilestoneDue, string? NextMeetingTitle, DateTime? NextMeetingAt,
             DateTime? ChangedAt, bool MemberIsParticipant, string? DisciplineKey, int? HostClubId, int? HostRegionId, string? HostText);
 
+        /// <summary>
+        /// Kolumnen "Sammankallande" i Delplaneringar. <paramref name="ownOnly"/> är delens ledare som INTE också leder huvudplaneringen; är den listan tom men delen har en ledare
+        /// är det huvudplaneringens egen — då står det så, i stället för ett streck som läses som "ingen".
+        /// </summary>
+        public static string ConvenersText(IReadOnlyList<string> ownOnly, bool partHasOwners) =>
+            ownOnly.Count > 0 ? string.Join(", ", ownOnly) : partHasOwners ? "Som huvudplaneringen" : "";
+
         /// <summary>Delplaneringarnas läge, för huvudplaneringens Översikt. Bara siffror och namn — innehållet läses i delplaneringen.</summary>
         public List<SubPlanningSummary> SubPlannings(int planningId, int memberId)
         {
@@ -214,6 +221,9 @@ namespace HpskSite.Services.Planning
                 var conv = db.Fetch<string>(@"SELECT m.DisplayName FROM PlanningMember m WHERE m.PlanningId = @0 AND m.RemovedAt IS NULL AND m.Access = N'Owner'
                     AND NOT EXISTS (SELECT 1 FROM PlanningMember pm WHERE pm.PlanningId = @1 AND pm.MemberId = m.MemberId AND pm.RemovedAt IS NULL AND pm.Access = N'Owner')
                     ORDER BY m.DisplayName", k.Id, planningId);
+                // Anders (persontest 11): ägde samma person huvudplaneringen och delen blev listan tom och kolumnen "—". Då är delens ledare "som huvudplaneringen".
+                var hasOwners = conv.Count > 0 || db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMember WHERE PlanningId = @0 AND RemovedAt IS NULL AND Access = N'Owner'", k.Id) > 0;
+                var convText = ConvenersText(conv, hasOwners);
                 var tasks = db.Fetch<PlanningTaskRow>("SELECT * FROM PlanningTask WHERE PlanningId = @0 AND DeletedAt IS NULL", k.Id);
                 var open = tasks.Where(t => PlanningTaskStatus.IsOpen(t.Status)).ToList();
                 var ms = open.Where(t => t.IsMilestone && t.DueDate.HasValue).OrderBy(t => t.DueDate).FirstOrDefault();
@@ -221,7 +231,7 @@ namespace HpskSite.Services.Planning
                     AND Status = N'Scheduled' AND StartsAt >= @1 ORDER BY StartsAt", k.Id, Now);
                 var changed = db.ExecuteScalar<DateTime?>("SELECT ChangedAt FROM PlanningActivity WHERE PlanningId = @0", k.Id);
                 var mine = memberId > 0 && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMember WHERE PlanningId = @0 AND MemberId = @1 AND RemovedAt IS NULL", k.Id, memberId) > 0;
-                list.Add(new SubPlanningSummary(k.Id, k.Name, k.Status, string.Join(", ", conv), open.Count, tasks.Count,
+                list.Add(new SubPlanningSummary(k.Id, k.Name, k.Status, convText, open.Count, tasks.Count,
                     open.Count(t => t.DueDate.HasValue && t.DueDate.Value.Date < today), ms?.Title, ms?.DueDate,
                     meet?.Title, meet?.StartsAt, changed, mine, k.DisciplineKey, k.HostClubId, k.HostRegionId, k.HostText));
             }

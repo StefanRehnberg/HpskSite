@@ -655,7 +655,8 @@ namespace HpskSite.Services.Planning
             var responsible = db.Fetch<PlanningStationResponsibleRow>("SELECT * FROM PlanningStationResponsible WHERE PlanningId = @0", planningId)
                 .ToDictionary(r => r.Station);
             var active = db.Fetch<int>("SELECT Id FROM PlanningMember WHERE PlanningId = @0 AND RemovedAt IS NULL", planningId).ToHashSet();
-            var have = db.Fetch<string>($"SELECT ScopeKey FROM PlanningTask WHERE PlanningId IN ({familyIds}) AND ScopeType = N'Station' AND DeletedAt IS NULL")
+            // "Sätt upp"-uppgifterna (SeedSetupTasks) räknas inte: de ska varken hindra eller ersätta "Bygg station N".
+            var have = db.Fetch<string>($"SELECT ScopeKey FROM PlanningTask WHERE PlanningId IN ({familyIds}) AND ScopeType = N'Station' AND DeletedAt IS NULL AND (SourceKey IS NULL OR SourceKey NOT LIKE N'setup:%')")
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             PlanningAreaRow? area = null;
             var sort = 0;
@@ -679,6 +680,45 @@ namespace HpskSite.Services.Planning
                     "En banläggare godkänner station för station, sedan stationerna som helhet (under Stationerna i planeringen).",
                     null, null, PlanningTaskSource.Station, "course", NextTaskSort(db, planningId, fallback.Id) + 1, byParticipantId, now);
                 t.IsMilestone = true;
+                db.Insert(t);
+                TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, null, null, false, now);
+                added++;
+            }
+            if (added > 0) Bump(db, planningId);
+            return added;
+        }
+
+        /// <summary>Titeln på uppgiften som visar att en station är uppsatt på plats (utförd = uppsatt). Se <see cref="SeedSetupTasks"/>.</summary>
+        public const string SetupTaskPrefix = "Sätt upp station ";
+
+        /// <summary>
+        /// <b>Valfri</b> uppgift "Sätt upp station N" per station (Anders, persontest 11: "Uppsatt" saknades som status). Uppsatt = uppgiften är utförd; ansvarig, sista dag och påminnelser kommer med
+        /// uppgiften, och inget nytt fält eller någon ny tabell behövs. Ligger i samma område som "Bygg station N" men har egen <c>SourceKey</c> (<c>setup:N</c>), så de två hindrar inte varandra.
+        /// Läggs bara in på begäran — en klubb med tio stationer ska inte få tio extra uppgifter utan att vilja det.
+        /// </summary>
+        public int SeedSetupTasks(int planningId, int stationCount, int byParticipantId)
+        {
+            if (stationCount <= 0) return 0;
+            if (StationOwnerId(planningId) != planningId) return 0;
+            var now = Now;
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var db = s.Database;
+            var family = StationFamily(db, planningId);
+            var familyIds = family.Count == 0 ? planningId.ToString() : string.Join(",", family.Select(f => f.Id));
+            var responsible = db.Fetch<PlanningStationResponsibleRow>("SELECT * FROM PlanningStationResponsible WHERE PlanningId = @0", planningId).ToDictionary(r => r.Station);
+            var active = db.Fetch<int>("SELECT Id FROM PlanningMember WHERE PlanningId = @0 AND RemovedAt IS NULL", planningId).ToHashSet();
+            var have = db.Fetch<string>($"SELECT ScopeKey FROM PlanningTask WHERE PlanningId IN ({familyIds}) AND ScopeType = N'Station' AND SourceKey LIKE N'setup:%' AND DeletedAt IS NULL")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            PlanningAreaRow? area = null;
+            var sort = 0;
+            var added = 0;
+            for (var n = 1; n <= Math.Min(stationCount, PlanningStations.Max); n++)
+            {
+                if (have.Contains(n.ToString())) continue;
+                if (area == null) { area = EnsureArea(db, planningId, PrepTemplates.BuildCourseArea, byParticipantId, now); sort = NextTaskSort(db, planningId, area.Id); }
+                var t = NewTask(planningId, area.Id, SetupTaskPrefix + n, null, null, null, PlanningTaskSource.Station, "setup:" + n, ++sort, byParticipantId, now);
+                t.ScopeType = "Station"; t.ScopeKey = n.ToString();
+                if (responsible.TryGetValue(n, out var r) && r.ParticipantId is int pid && active.Contains(pid)) t.AssigneeParticipantId = pid;
                 db.Insert(t);
                 TaskEvent(db, t, PlanningTaskEventKind.Created, byParticipantId, null, t.Status, null, null, false, now);
                 added++;

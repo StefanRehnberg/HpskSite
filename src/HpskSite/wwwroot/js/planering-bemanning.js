@@ -814,6 +814,7 @@ window.PlaneringBemanning = (function () {
         laggin: { label: 'Lägg in flera…', fn: () => openAssignMany() },
         forslag: { label: 'Fyll med förslag…', fn: () => openProposal() },
         skicka: { label: 'Skicka förfrågan…', fn: () => openSendRequests() },
+        koppla: { label: 'Koppla till medlemmar…', fn: () => openMatch() },
         startlista: { label: 'Bygg om startlistan…', fn: () => openPatrolPlan() },
         skrivut: { label: 'Skriv ut', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
     };

@@ -478,6 +478,8 @@
             // Hela planen på papper: bemanning, förberedelser och (när planeringen är kopplad) dagsprogrammet.
             S.me.canEdit && !TOKEN && { label: 'Skriv ut hela planen', icon: 'bi-printer',
                 fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
+            // Lägesrapporten (Anders, persontest 11): bara när planeringen har delplaneringar — den lilla planeringen får ingen ny rad.
+            (S.planning.subPlannings || []).length && !TOKEN && { label: 'Lägesrapport…', icon: 'bi-clipboard-data', fn: openStatusReport },
             // Omgång 3 steg 10: delar som inte visas förrän de behövs.
             ...partActions(),
             // Stefan 2026-10-25: en delplanering skapas HÄR, direkt — för en gren, en tävling eller en förening som sköter en del.
@@ -2171,6 +2173,15 @@
         await reloadTasks(); rerender();
         showMsg(r.added ? `${r.added} uppgifter lades till.` : 'Alla stationer har redan en uppgift.', r.added ? 'success' : 'info');
     }
+    // Valfritt: "Sätt upp station N" per station. Uppsatt = uppgiften är utförd. Ligger bara i Stationernas Åtgärder och läggs aldrig in av sig själv.
+    async function seedSetup() {
+        const n = TASKS.stationCount || 0;
+        if (!await plConfirm('En "Sätt upp"-uppgift per station?', `"Sätt upp station 1" … "Sätt upp station ${n}" läggs i området Bygga banan, så att ni ser vilka stationer som står på plats. Den som är ansvarig för en station får dess uppgift. Det är valfritt — hoppa över det om ni inte behöver följa upp uppsättningen.`, 'Lägg till')) return;
+        const r = await post('SeedSetupTasks', {});
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+        showMsg(r.added ? `${r.added} uppgifter lades till.` : 'Alla stationer har redan en "Sätt upp"-uppgift.', r.added ? 'success' : 'info');
+    }
     function openPaste(presetArea) {
         let ready = false;
         formModal({
@@ -3680,6 +3691,7 @@
             whole && { label: 'Ge stationer en ansvarig…', icon: 'bi-person-check', fn: () => openResponsible(null) },
             whole && { label: 'Ändra antalet stationer…', icon: 'bi-123', fn: openStationCount },
             TASKS && TASKS.canManageAreas && { label: 'En uppgift per station', icon: 'bi-signpost-split', fn: seedStations },
+            TASKS && TASKS.canManageAreas && { label: 'En "Sätt upp"-uppgift per station', icon: 'bi-flag', fn: seedSetup },
             (c.canEdit || canAttach) && { divider: true },
             c.canEdit && { label: 'Begär godkännande av helheten…', icon: 'bi-patch-check', fn: () => { location.href = c.url; } },
             canAttach && { label: comp.attached ? 'Uppdatera tävlingens stationer' : 'Anslut stationerna till tävlingen', icon: 'bi-box-arrow-in-right', fn: attachStations },
@@ -4010,11 +4022,41 @@
             `<li class="py-1" data-week-day="${esc(k)}"><b>${esc(fmtDay(k))}</b> · ${days.get(k).map(w => esc(w.name) + (w.intents ? ` <span class="pl-help">(${w.intents} funktionärer tänker tävla)</span>` : '')).join(', ')}</li>`).join('')}</ul>`;
     }
 
+    // Lägesrapporten: EN yta för "hur ligger vi till?" — en mening överst, en rad per del, milstolparna per månad. Skrivskyddad, räknas vid öppnandet, och går att skriva ut.
+    async function openStatusReport() {
+        const r = await get('FamilyStatus').catch(() => null);
+        if (!r || !r.success) { showMsg(esc((r && r.message) || 'Lägesrapporten kunde inte läsas.'), 'danger'); return; }
+        const body = `<p class="fw-semibold mb-2" id="plStatusHeadline">${esc(r.headline)}</p>
+            <h3 class="h6 mb-1">Per del</h3>
+            <ul class="list-unstyled mb-3" id="plStatusParts">${r.parts.map(p => `<li class="py-1 border-bottom"><b>${esc(p.name)}</b><span class="d-block small${p.overdue ? ' text-danger' : ''}">${esc(p.line)}</span></li>`).join('')}</ul>
+            <h3 class="h6 mb-1">Milstolpar</h3>
+            ${r.months.length ? r.months.map(g => `<div class="mb-2"><div class="fw-semibold small">${esc(g.label)}</div><ul class="list-unstyled small mb-0">${g.items.map(m =>
+                `<li class="py-1">${esc(m.due)} — ${esc(m.title)} <span class="pl-help">· ${esc(m.part)}</span>${m.overdue ? ' <span class="text-danger">försenad</span>' : ''}</li>`).join('')}</ul></div>`).join('')
+                : '<p class="pl-help small">Inga öppna milstolpar.</p>'}`;
+        formModal({
+            title: 'Lägesrapport', okLabel: 'Skriv ut', cancelLabel: 'Stäng', wide: true,
+            html: body + '<p class="pl-help small mt-3 mb-0">Rapporten räknas när du öppnar den och bygger bara på det som redan står i planeringen. Titlar visas bara för delar du själv får läsa.</p>',
+            onOk: () => {
+                const w = window.open('', '_blank');
+                if (!w) return 'Fönstret blockerades. Tillåt popup-fönster, eller skriv ut den här sidan.';
+                w.document.write(`<!doctype html><html lang="sv"><head><meta charset="utf-8"><title>Lägesrapport – ${esc(r.title)}</title><style>body{font:14px/1.4 system-ui,sans-serif;margin:24px;color:#000}h1{font-size:20px}h3{font-size:15px;margin:16px 0 4px}ul{list-style:none;padding:0;margin:0}li{padding:3px 0}.d{display:block;font-size:13px}</style></head><body><h1>Lägesrapport – ${esc(r.title)}</h1>${body.replace(/class="[^"]*"/g, '')}<script>window.onload=function(){window.print();}<\/script></body></html>`);
+                w.document.close();
+                return true;
+            }
+        });
+    }
+
     function subPlanningsCardHtml() {
         const list = S.planning.subPlannings || [];
         if (!list.length) return '';
+        // Summan över delarna (Anders, persontest 11): en rad längst ned, bara när det finns mer än en del.
+        const sum = k => list.reduce((a, s) => a + (s[k] || 0), 0);
+        const totalRow = list.length > 1
+            ? `<tfoot><tr class="fw-semibold" id="plSubTotal"><td class="ps-3">Totalt i delarna</td><td class="d-none d-md-table-cell"></td>
+                <td>${sum('openTasks')} öppna <span class="pl-help small fw-normal">av ${sum('tasks')}</span>${sum('overdue') ? `<div class="small text-danger fw-normal">${sum('overdue')} försenade</div>` : ''}</td><td class="d-none d-md-table-cell"></td></tr></tfoot>` : '';
         return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2>
-                ${S.me.canCreateSub && !TOKEN ? '<button type="button" class="btn btn-outline-primary btn-sm" data-sub-new="1"><i class="bi bi-plus-lg me-1"></i>Ny delplanering…</button>' : ''}</div>
+                <span class="d-flex gap-2 flex-wrap">${!TOKEN ? '<button type="button" class="btn btn-outline-secondary btn-sm" data-sub-status="1"><i class="bi bi-clipboard-data me-1"></i>Lägesrapport…</button>' : ''}
+                ${S.me.canCreateSub && !TOKEN ? '<button type="button" class="btn btn-outline-primary btn-sm" data-sub-new="1"><i class="bi bi-plus-lg me-1"></i>Ny delplanering…</button>' : ''}</span></div>
             <p class="pl-help small px-3 mb-2">De delar som planeras för sig — en gren, en tävling eller en förening som sköter en del. Du som är sammankallande här är det i dem också${S.me.canEdit && !S.me.canManage ? ', och du som kan ändra här kan läsa dem' : ''}.</p>
             <div class="table-responsive"><table class="table align-middle mb-0">
             <thead><tr><th class="ps-3">Planering</th><th class="d-none d-md-table-cell">Sammankallande</th><th>Uppgifter</th><th class="d-none d-md-table-cell">Nästa</th></tr></thead>
@@ -4029,9 +4071,12 @@
                     <td class="d-none d-md-table-cell">${esc(s.conveners || '—')}</td>
                     <td>${s.openTasks} öppna <span class="pl-help small">av ${s.tasks}</span>${s.overdue ? `<div class="small text-danger">${s.overdue} försenade</div>` : ''}</td>
                     <td class="d-none d-md-table-cell small">${next || '<span class="pl-help">—</span>'}</td></tr>`;
-            }).join('')}</tbody></table></div></div>`;
+            }).join('')}</tbody>${totalRow}</table></div></div>`;
     }
-    document.addEventListener('click', e => { if (e.target.closest('[data-sub-new]')) { e.preventDefault(); openNewSub(); } });
+    document.addEventListener('click', e => {
+        if (e.target.closest('[data-sub-new]')) { e.preventDefault(); openNewSub(); }
+        else if (e.target.closest('[data-sub-status]')) { e.preventDefault(); openStatusReport(); }
+    });
 
     // Stefan 2026-10-25 (B3): delplaneringens folk läser huvudplaneringens fattade beslut.
     function parentDecisionsCardHtml() {

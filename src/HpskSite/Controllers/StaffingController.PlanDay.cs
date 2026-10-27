@@ -22,29 +22,11 @@ namespace HpskSite.Controllers
             var live = resp.Rows.SelectMany(r => r.Cells.Values.SelectMany(c => c))
                 .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
             var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
+            var unlinkedNames = live.Where(e => e.MemberId is not > 0).Select(e => (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
             var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
             var unsent = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && e.HasContact);
             var unreachable = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && !e.HasContact);
-            var cols = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
-            int needed = 0, missing = 0;
-            var perRole = new Dictionary<string, (int Needed, int Missing)>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in resp.Rows)
-                foreach (var c in cols)
-                {
-                    int n, m;
-                    var pc = row.PassCover.TryGetValue(c.Key, out var l) ? l : new List<GridPassCover>();
-                    if (pc.Any(p => p.Needed > 0)) { n = pc.Sum(p => p.Needed); m = pc.Sum(p => Math.Max(0, p.Needed - p.Filled)); }
-                    else
-                    {
-                        n = row.NeedFor(c.Key);
-                        var filled = row.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0;
-                        m = Math.Max(0, n - filled);
-                    }
-                    needed += n; missing += m;
-                    var key = row.RoleName ?? row.RoleKey;
-                    var cur = perRole.TryGetValue(key, out var x) ? x : (0, 0);
-                    perRole[key] = (cur.Item1 + n, cur.Item2 + m);
-                }
+            var (needed, missing, perRole) = StaffingPlaces.Count(resp);
             resp.PlacesNeeded = needed; resp.PlacesMissing = missing;
             // Krockar: inom planeringen (samma person på två poster), och över familjen (uppdrag mot annan del, uppdrag mot egen start). En avsikt att tävla är en varning, ingen krock.
             var startClashes = resp.FamilyClashes.Count(c => c.Kind == FamilyClashRules.KindStart);
@@ -56,7 +38,7 @@ namespace HpskSite.Controllers
                 ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
                 PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes,
                 ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList(),
-                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent, PlannedUnreachable: unreachable);
+                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent, PlannedUnreachable: unreachable, Unlinked: unlinkedNames);
             resp.PlanSteps = PlanStepRules.Derive(facts);
         }
 

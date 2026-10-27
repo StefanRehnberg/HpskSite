@@ -460,6 +460,20 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedSetupTasks(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Stationerna läggs in av den som kan ändra planeringen.");
+            var course = HttpContext.RequestServices.GetRequiredService<PlanningCourseService>();
+            var count = course.StationCount(id, (await course.CourseConfigAsync(id))?.JsonBlob);
+            if (count <= 0) return No("Planeringen har inga stationer än. Skapa stationerna under Stationerna först.");
+            var added = _planning.SeedSetupTasks(id, count, x.Caller.ParticipantId);
+            return Ok(new { success = true, added, stationCount = count });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> SeedStations(int id)
         {
             var x = await ResolveAsync(id, null);
