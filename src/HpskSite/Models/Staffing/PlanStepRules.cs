@@ -18,7 +18,7 @@ namespace HpskSite.Models.Staffing
     /// <summary>Fakta om planeringen som stegen härleds ur — alla läses ur samma rutnätssvar, ingenting lagras.</summary>
     public sealed record PlanFacts(bool HasRoles, bool HasNeeds, int PlacesNeeded, int PlacesMissing, bool Linked, int VolunteersTotal, string? ShooterModeTitle,
         bool PatrolPlanAvailable, int StartClashes, int Clashes, IReadOnlyList<RolePlaces>? ByRole = null,
-        int AssignedPeople = 0, int PeopleWithStart = 0, int AssignedTotal = 0, int PlannedUnsent = 0);
+        int AssignedPeople = 0, int PeopleWithStart = 0, int AssignedTotal = 0, int PlannedUnsent = 0, int PlannedUnreachable = 0);
 
     /// <summary>Platser per roll (summerat över dagar och stationer) — så att stegen kan säga VILKA roller som saknar folk, och så att ett orimligt antal (8 på varje av åtta stationer) syns som en siffra på sin rad.</summary>
     public sealed record RolePlaces(string Name, int Needed, int Missing);
@@ -80,7 +80,11 @@ namespace HpskSite.Models.Staffing
                 steps.Add(f.PlannedUnsent > 0
                     ? new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Todo,
                         $"{f.PlannedUnsent} {(f.PlannedUnsent == 1 ? "inlagd har" : "inlagda har")} ännu ingen förfrågan — de ser inget och får inget mejl förrän du skickar", new[] { "skicka" })
-                    : new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Done, "Alla inlagda har fått sin förfrågan", new[] { "skicka" }));
+                    : f.PlannedUnreachable > 0
+                        // Anders (persontest 11): "klart" stod där fast två inlagda inte gick att nå alls.
+                        ? new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Todo,
+                            $"{f.PlannedUnreachable} {(f.PlannedUnreachable == 1 ? "inlagd kan" : "inlagda kan")} inte nås — varken konto eller e-post. Lägg till e-post eller koppla till en medlem, så går förfrågan att skicka", new[] { "skicka" })
+                        : new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Done, "Alla inlagda har fått sin förfrågan", new[] { "skicka" }));
             }
 
             // 4. Startlistan — bara fält, och bara för den som får bygga om den. Grönt först när någon faktiskt är kontrollerad och inga platser står tomma

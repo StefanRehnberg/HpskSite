@@ -114,6 +114,10 @@ namespace HpskSite.Tests
             todo.Text.Should().Contain("15 inlagda har ännu ingen förfrågan");
             todo.Actions.Should().Equal("skicka");
             Step(Facts(assignedTotal: 15, unsent: 0), "skicka").State.Should().Be(PlanStepState.Done);
+            // Anders (persontest 11): två som inte går att nå är inte "klart".
+            var unreachable = Step(Facts(assignedTotal: 2, unsent: 0) with { PlannedUnreachable = 2 }, "skicka");
+            unreachable.State.Should().Be(PlanStepState.Todo);
+            unreachable.Text.Should().Contain("2 inlagda kan inte nås");
             var keys = PlanStepRules.Derive(Facts(assignedTotal: 15, unsent: 15)).Select(s => s.Key).ToList();
             keys.IndexOf("skicka").Should().Be(keys.IndexOf("fyll") + 1);
         }

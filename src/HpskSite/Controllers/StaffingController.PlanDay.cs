@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
             var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
             var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
             var unsent = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && e.HasContact);
+            var unreachable = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && !e.HasContact);
             var cols = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
             int needed = 0, missing = 0;
             var perRole = new Dictionary<string, (int Needed, int Missing)>(StringComparer.OrdinalIgnoreCase);
@@ -55,7 +56,7 @@ namespace HpskSite.Controllers
                 ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
                 PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes,
                 ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList(),
-                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent);
+                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent, PlannedUnreachable: unreachable);
             resp.PlanSteps = PlanStepRules.Derive(facts);
         }
 
