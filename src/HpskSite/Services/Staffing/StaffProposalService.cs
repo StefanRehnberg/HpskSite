@@ -236,7 +236,7 @@ namespace HpskSite.Services.Staffing
             if (lease == null) return (0, -1);
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            var mine = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId = @0 AND " + StaffOwner.Where(1), batchId, owner.P, owner.C);
+            var mine = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId = @0 AND " + StaffOwner.Where(1), batchId, owner.P);
             var removable = mine.Where(UntouchedSinceApply).ToList();
             foreach (var a in removable) db.Execute("DELETE FROM StaffAssignment WHERE Id = @0", a.Id);
             return (removable.Count, mine.Count - removable.Count);
@@ -246,7 +246,7 @@ namespace HpskSite.Services.Staffing
         public (Guid BatchId, int Rows, DateTime At)? LatestUndoable(StaffOwner owner)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            var rows = s.Database.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId IS NOT NULL AND " + StaffOwner.Where(0), owner.P, owner.C);
+            var rows = s.Database.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE BatchId IS NOT NULL AND " + StaffOwner.Where(0), owner.P);
             var g = rows.Where(UntouchedSinceApply).GroupBy(a => a.BatchId!.Value).Select(x => (BatchId: x.Key, Rows: x.Count(), At: x.Max(a => a.CreatedDate))).OrderByDescending(x => x.At).FirstOrDefault();
             return g.Rows > 0 ? g : null;
         }

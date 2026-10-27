@@ -60,9 +60,9 @@ namespace HpskSite.Services.Staffing
                 var rows = scope.Database.Fetch<RoleDayCount>(@"
                     SELECT sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day, COUNT(*) AS N
                     FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND ISNULL(sa.Status, '') <> @2
+                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND ISNULL(sa.Status, '') <> @1
                     GROUP BY sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))",
-                    owner.P, owner.C, StaffAssignmentStatus.Declined);
+                    owner.P, StaffAssignmentStatus.Declined);
                 foreach (var r in rows)
                     if (r.Day is { } d) assigned[(r.RoleKey.ToLowerInvariant(), d.Date)] = r.N;
             }
@@ -112,7 +112,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffHelpSlot>(
-                    "SELECT * FROM StaffHelpSlot WHERE " + StaffOwner.Where(0) + " ORDER BY SlotDate, SortOrder, StartTime, Id", owner.P, owner.C)
+                    "SELECT * FROM StaffHelpSlot WHERE " + StaffOwner.Where(0) + " ORDER BY SlotDate, SortOrder, StartTime, Id", owner.P)
                 .Select(ToSlotView).ToList();
         }
 
@@ -125,13 +125,13 @@ namespace HpskSite.Services.Staffing
             {
                 // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
                 var existing = db.SingleOrDefault<StaffHelpSlot>(
-                    "SELECT * FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
+                    "SELECT * FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P);
                 if (existing == null) return 0;
                 row = existing;
             }
             else
             {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffHelpSlot WHERE " + StaffOwner.Where(0), owner.P, owner.C) ?? 0;
+                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffHelpSlot WHERE " + StaffOwner.Where(0), owner.P) ?? 0;
                 row = new StaffHelpSlot { SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
             }
             row.PlanningId = owner.PlanningIdOrNull;
@@ -148,7 +148,7 @@ namespace HpskSite.Services.Staffing
         public void DeleteSlot(int id, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+            scope.Database.Execute("DELETE FROM StaffHelpSlot WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P);
         }
 
         // ---- member sign-up ----
@@ -157,7 +157,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var row = scope.Database.FirstOrDefault<StaffHelpSignup>(
-                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId);
+                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @1", owner.P, memberId);
             if (row == null) return null;
             return new MyHelpSignupView { Comment = row.Comment, Slots = ParseChoices(row.SlotsJson) };
         }
@@ -185,7 +185,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var existing = db.FirstOrDefault<StaffHelpSignup>(
-                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId);
+                "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @1", owner.P, memberId);
 
             var noContent = clean.Count == 0 && string.IsNullOrWhiteSpace(comment);
             if (noContent)
@@ -230,7 +230,7 @@ namespace HpskSite.Services.Staffing
             List<StaffHelpSignup> rows;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
                 rows = scope.Database.Fetch<StaffHelpSignup>(
-                    "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " ORDER BY MemberName", owner.P, owner.C);
+                    "SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " ORDER BY MemberName", owner.P);
 
             return rows.Select(r => new HelpSignupReviewView
             {

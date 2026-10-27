@@ -13,14 +13,13 @@ namespace HpskSite.Services.Planning
     public partial class PlanningService
     {
         /// <param name="SourceAnchor">Källans dag: den kopplade tävlingens, annars planeringens första.</param>
-        /// <param name="SourceCompetitionId">Den kopplade tävlingen — bemanningens äldre rader kan ligga på den.</param>
-        /// <param name="Subs">Stefan 2026-10-25 (B7): delplaneringarna som följer med — var och ens dag och tävling (samma
-        /// slags uppgifter som <paramref name="SourceAnchor"/>/<paramref name="SourceCompetitionId"/>). Null = inga.</param>
+        /// <param name="Subs">Stefan 2026-10-25 (B7): delplaneringarna som följer med — var och ens dag att räkna från (samma
+        /// slags dag som <paramref name="SourceAnchor"/>). Null = inga.</param>
         public sealed record CopyInput(string Name, DateTime? TargetStart, DateTime? TargetEnd,
             int RecipientMemberId, string RecipientName, int? RecipientClubId,
             int CopierMemberId, string CopierName, int? CopierClubId, bool AddCopier,
-            DateTime? SourceAnchor, int? SourceCompetitionId,
-            IReadOnlyDictionary<int, (DateTime? Anchor, int? CompetitionId)>? Subs = null);
+            DateTime? SourceAnchor,
+            IReadOnlyDictionary<int, DateTime?>? Subs = null);
 
         /// <summary>
         /// En ny planering med källans form. Mottagaren blir sammankallande; den som kopierar är med som Kan ändra
@@ -42,11 +41,11 @@ namespace HpskSite.Services.Planning
                 var offset = PlanningCopyRules.Offset(i.SourceAnchor, i.TargetStart);
                 foreach (var sub in db.Fetch<PlanningRow>("SELECT * FROM Planning WHERE ParentPlanningId = @0 AND DeletedAt IS NULL ORDER BY Name, Id", sourceId))
                 {
-                    var (anchor, comp) = i.Subs.TryGetValue(sub.Id, out var a) ? a : (sub.TargetStart, (int?)null);
+                    var anchor = i.Subs.TryGetValue(sub.Id, out var a) ? a : sub.TargetStart;
                     var start = PlanningCopyRules.Shift(sub.TargetStart ?? anchor, offset);
                     var end = PlanningCopyRules.Shift(sub.TargetEnd, offset);
                     var (sr, se) = CopyOne(db, sub.Id, i with { Name = sub.Name, TargetStart = start, TargetEnd = end ?? start,
-                        SourceAnchor = anchor ?? sub.TargetStart, SourceCompetitionId = comp, Subs = null }, report.PlanningId);
+                        SourceAnchor = anchor ?? sub.TargetStart, Subs = null }, report.PlanningId);
                     if (se != null || sr == null) return (null, $"Delplaneringen {sub.Name}: {se}");
                     subs++;
                 }
@@ -116,33 +115,30 @@ namespace HpskSite.Services.Planning
                 taskCount++;
             }
 
-            // Bemanningens roller: planeringens egna, och tävlingens för de nycklar planeringen inte har egna.
-            var comp = i.SourceCompetitionId is > 0 ? i.SourceCompetitionId.Value : -1;
+            // Bemanningens roller: källplaneringens egna (bemanningen ägs alltid av en planering).
             var roles = db.Execute(@"INSERT INTO StaffRole (OwnerType, OwnerId, RoleKey, DisplayName, PluralName, DefaultScopeType, SupportsTargetRange,
                     SupportsFunctionTitle, Description, NeedsJson, Disciplines, SortOrder, IsActive, CreatedByMemberId, CreatedDate, ModifiedDate)
                 SELECT N'Planning', @0, r.RoleKey, r.DisplayName, r.PluralName, r.DefaultScopeType, r.SupportsTargetRange,
-                    r.SupportsFunctionTitle, r.Description, r.NeedsJson, r.Disciplines, r.SortOrder, r.IsActive, @3, @4, @4
+                    r.SupportsFunctionTitle, r.Description, r.NeedsJson, r.Disciplines, r.SortOrder, r.IsActive, @2, @3, @3
                 FROM StaffRole r
-                WHERE (r.OwnerType = N'Planning' AND r.OwnerId = @1)
-                   OR (r.OwnerType = N'Competition' AND r.OwnerId = @2
-                       AND NOT EXISTS (SELECT 1 FROM StaffRole p WHERE p.OwnerType = N'Planning' AND p.OwnerId = @1 AND p.RoleKey = r.RoleKey))",
-                newId, sourceId, comp, i.CopierMemberId, now);
+                WHERE r.OwnerType = N'Planning' AND r.OwnerId = @1",
+                newId, sourceId, i.CopierMemberId, now);
 
             // Dagarna och behoven per dag flyttas; utan en dag att räkna från följer de inte med.
-            var owner = $"(PlanningId = @1 OR (PlanningId IS NULL AND CompetitionId = @2))";
+            var owner = "PlanningId = @1";
             int days = 0, daysDropped = 0;
             if (offset.HasValue)
                 days = db.Execute($@"INSERT INTO StaffDay (CompetitionId, PlanningId, DayDate, Label, Kind, SortOrder, CreatedByMemberId, CreatedDate)
-                    SELECT NULL, @0, DATEADD(day, @3, DayDate), Label, Kind, SortOrder, @4, @5 FROM StaffDay WHERE {owner}",
-                    newId, sourceId, comp, offset.Value, i.CopierMemberId, now);
-            else daysDropped = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM StaffDay WHERE {owner}", newId, sourceId, comp);
+                    SELECT NULL, @0, DATEADD(day, @2, DayDate), Label, Kind, SortOrder, @3, @4 FROM StaffDay WHERE {owner}",
+                    newId, sourceId, offset.Value, i.CopierMemberId, now);
+            else daysDropped = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM StaffDay WHERE {owner}", newId, sourceId);
             var needs = offset.HasValue
                 // Passens behov följer inte med (passen kopieras inte); stationens behov (ScopeKey) gör det.
                 ? db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate, ScopeKey)
-                    SELECT NULL, @0, ScopeKind, RoleKey, Count, CASE WHEN DayDate IS NULL THEN NULL ELSE DATEADD(day, @3, DayDate) END, ScopeKey
-                    FROM StaffCrewNeed WHERE {owner} AND PassId IS NULL", newId, sourceId, comp, offset.Value)
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, CASE WHEN DayDate IS NULL THEN NULL ELSE DATEADD(day, @2, DayDate) END, ScopeKey
+                    FROM StaffCrewNeed WHERE {owner} AND PassId IS NULL", newId, sourceId, offset.Value)
                 : db.Execute($@"INSERT INTO StaffCrewNeed (CompetitionId, PlanningId, ScopeKind, RoleKey, Count, DayDate, ScopeKey)
-                    SELECT NULL, @0, ScopeKind, RoleKey, Count, NULL, ScopeKey FROM StaffCrewNeed WHERE {owner} AND DayDate IS NULL AND PassId IS NULL", newId, sourceId, comp);
+                    SELECT NULL, @0, ScopeKind, RoleKey, Count, NULL, ScopeKey FROM StaffCrewNeed WHERE {owner} AND DayDate IS NULL AND PassId IS NULL", newId, sourceId);
 
             if (i.AddCopier && i.CopierMemberId != i.RecipientMemberId)
             {

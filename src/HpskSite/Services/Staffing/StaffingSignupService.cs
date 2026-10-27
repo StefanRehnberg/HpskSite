@@ -39,7 +39,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var rows = scope.Database.Fetch<StaffingSourceScope>(
-                "SELECT * FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " ORDER BY ScopeType, ScopeKey", owner.P, owner.C);
+                "SELECT * FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " ORDER BY ScopeType, ScopeKey", owner.P);
             return rows.Select(r => new SourceScopeView
             {
                 Id = r.Id,
@@ -84,7 +84,7 @@ namespace HpskSite.Services.Staffing
             }
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " AND ScopeType=@2 AND ScopeKey=@3", owner.P, owner.C, type, scopeKey.Trim());
+            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM StaffingSourceScope WHERE " + StaffOwner.Where(0) + " AND ScopeType=@1 AND ScopeKey=@2", owner.P, type, scopeKey.Trim());
             if (dup > 0) return (true, null, 0);   // already present — idempotent
             var id = Convert.ToInt32(db.Insert(new StaffingSourceScope
             {
@@ -101,7 +101,7 @@ namespace HpskSite.Services.Staffing
         public void RemoveScope(int id, StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM StaffingSourceScope WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+            scope.Database.Execute("DELETE FROM StaffingSourceScope WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P);
         }
 
         // ---- member self-sign-up ----

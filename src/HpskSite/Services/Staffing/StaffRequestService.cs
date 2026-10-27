@@ -205,7 +205,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.FirstOrDefault<StaffRequestLog>(
-                "SELECT * FROM StaffRequestLog WHERE " + StaffOwner.Where(0) + " ORDER BY Id DESC", owner.P, owner.C);
+                "SELECT * FROM StaffRequestLog WHERE " + StaffOwner.Where(0) + " ORDER BY Id DESC", owner.P);
         }
 
         private static readonly System.Globalization.CultureInfo Sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");

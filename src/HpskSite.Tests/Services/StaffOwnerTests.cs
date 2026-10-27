@@ -19,15 +19,13 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
-        public void Parametrarna_ligger_kvar_pa_sina_platser_men_planeringen_ar_alltid_med()
+        public void Where_har_en_parameter_planeringen_och_Filter_har_tva_planeringen_och_familjens_tavling()
         {
-            var unlinked = new StaffOwner(12, null);
-            unlinked.P.Should().Be(12);
-            unlinked.C.Should().Be(-1);
-
-            var linked = new StaffOwner(12, 500);
-            linked.P.Should().Be(12);
-            linked.C.Should().Be(500);
+            new StaffOwner(12, 500).P.Should().Be(12);
+            new StaffOwner(12, null).FamilyComp.Should().Be(-1, "en planering utan tävling matchar aldrig en tävlings rader");
+            new StaffOwner(12, 500).FamilyComp.Should().Be(-1, "utan IncludeFamily läser vyn bara planeringens egna rader");
+            new StaffOwner(12, 500) { IncludeFamily = true }.FamilyComp.Should().Be(500);
+            new StaffOwner(12, null) { IncludeFamily = true }.FamilyComp.Should().Be(-1);
         }
 
         [Fact]
@@ -55,10 +53,10 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void Tavlingens_vyer_ser_planeringens_rader_men_aldrig_rader_utan_planering()
         {
-            var family = new StaffOwner(12, 500) { IncludeFamily = true };
-            family.Filter(0).Should().Be("(PlanningId = @0 OR (PlanningId IS NOT NULL AND CompetitionId = @1))");
-            family.Filter(0).Should().Contain("PlanningId IS NOT NULL", "rader utan planering väntar på adoptionen och syns inte i någon vy");
-            new StaffOwner(12, 500).Filter(0).Should().Be(StaffOwner.Where(0));
+            // Samma text för alla ägare (alltid två parametrar); familjeläget avgörs av andra parametern (FamilyComp, -1 = ingen familj).
+            new StaffOwner(12, 500) { IncludeFamily = true }.Filter(0).Should().Be("(PlanningId = @0 OR (PlanningId IS NOT NULL AND CompetitionId = @1))");
+            new StaffOwner(12, 500).Filter(0).Should().Be("(PlanningId = @0 OR (PlanningId IS NOT NULL AND CompetitionId = @1))");
+            new StaffOwner(12, 500).Filter(0, "sa.").Should().Contain("sa.CompetitionId = @1").And.Contain("sa.PlanningId IS NOT NULL", "rader utan planering väntar på adoptionen och syns inte i någon vy");
         }
 
         [Fact]

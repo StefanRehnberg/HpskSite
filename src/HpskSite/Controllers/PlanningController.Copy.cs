@@ -36,21 +36,20 @@ namespace HpskSite.Controllers
 
             var comp = LinkedCompetition(id);
             // Stefan 2026-10-25 (B7): delplaneringarna följer med (förval) — var och en med sin egen dag att räkna från.
-            Dictionary<int, (DateTime?, int?)>? subs = null;
+            Dictionary<int, DateTime?>? subs = null;
             if (includeSubs != "0" && !(x.Planning.ParentPlanningId > 0))
             {
                 subs = new();
                 foreach (var sub in _planning.Family(id).Where(f => f.ParentPlanningId == id))
                 {
-                    var sc = LinkedCompetition(sub.Id);
-                    subs[sub.Id] = (AnchorFor(sub, sc), sc?.Id);
+                    subs[sub.Id] = AnchorFor(sub, LinkedCompetition(sub.Id));
                 }
             }
             var (report, err) = _planning.Copy(id, new PlanningService.CopyInput(
                 string.IsNullOrWhiteSpace(name) ? PlanningCopyRules.DefaultName(x.Planning.Name) : name!.Trim(), start, end,
                 recipientId, MemberDisplayName(recipient), Club(recipient),
                 x.MemberId, MemberDisplayName(me), Club(me), includeMe != "0",
-                AnchorFor(x.Planning, comp), comp?.Id, subs));
+                AnchorFor(x.Planning, comp), subs));
             if (err != null || report == null) return No(err ?? "Planeringen kunde inte kopieras.");
 
             var mailed = false;

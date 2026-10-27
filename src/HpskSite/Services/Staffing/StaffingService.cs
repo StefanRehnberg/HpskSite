@@ -54,7 +54,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE " + owner.Filter(0) + " ORDER BY RoleKey, ScopeKey, StartsAt, Id",
-                owner.P, owner.C);
+                owner.P, owner.FamilyComp);
         }
 
         /// <summary>Tävlingens bemanning — dess planerings. Tom när tävlingen inte har någon planering.</summary>
@@ -225,7 +225,7 @@ namespace HpskSite.Services.Staffing
             try
             {
                 using var pscope = _scopeProvider.CreateScope(autoComplete: true);
-                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE " + owner.Filter(0), owner.P, owner.C);
+                var passes = pscope.Database.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE " + owner.Filter(0), owner.P, owner.FamilyComp);
                 if (passes.Count > 0)
                 {
                     var byId = passes.ToDictionary(p => p.Id, p =>
@@ -326,7 +326,7 @@ namespace HpskSite.Services.Staffing
                     // kunde personal på en tävling flytta en annan tävlings tävlingsledare till sin egen
                     // (rättat 2026-10-21). Ett okänt id skapar inte heller en ny rad längre.
                     var existing = db.SingleOrDefault<StaffAssignment>(
-                        "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
+                        "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P);
                     if (existing == null) return 0;
                     row = existing;
                 }
@@ -356,7 +356,7 @@ namespace HpskSite.Services.Staffing
                 // so keeping both would let them drift apart.
                 row.DayDate = row.StartsAt != null ? null : ParseDate(req.DayDate);
                 if (req.PassId is > 0 && db.ExecuteScalar<int>(
-                        "SELECT COUNT(1) FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.PassId, owner.P, owner.C) == 0)
+                        "SELECT COUNT(1) FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.PassId, owner.P) == 0)
                     return 0;   // ett pass i en annan tävling
                 row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
@@ -392,7 +392,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
                 "UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND " + StaffOwner.Where(3),
-                NormalizeStatus(status), DateTime.UtcNow, id, owner.P, owner.C);
+                NormalizeStatus(status), DateTime.UtcNow, id, owner.P);
         }
 
         public void Delete(int id, StaffOwner owner)
@@ -400,8 +400,8 @@ namespace HpskSite.Services.Staffing
             string? roleKey;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
-                roleKey = scope.Database.ExecuteScalar<string>("SELECT RoleKey FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
-                scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+                roleKey = scope.Database.ExecuteScalar<string>("SELECT RoleKey FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P);
+                scope.Database.Execute("DELETE FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P);
             }
             if (!owner.HasCompetition) return;
             SyncCompetitionManagers(owner.Comp);
@@ -439,7 +439,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
                 "UPDATE StaffAssignment SET CheckedInAt = @0, ModifiedDate = @1 WHERE Id = @2 AND " + owner.Filter(3),
-                checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, owner.P, owner.C);
+                checkedIn ? DateTime.UtcNow : (DateTime?)null, DateTime.UtcNow, id, owner.P, owner.FamilyComp);
         }
 
         /// <summary>
@@ -517,8 +517,8 @@ namespace HpskSite.Services.Staffing
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
-                var src = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @2", owner.P, owner.C, fromPassId);
-                var dst = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @2", owner.P, owner.C, toPassId);
+                var src = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @1", owner.P, fromPassId);
+                var dst = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND PassId = @1", owner.P, toPassId);
                 string Key(StaffAssignment a) => $"{(a.MemberId is > 0 ? "m" + a.MemberId : "n" + (a.DisplayName ?? "").Trim().ToLowerInvariant())}|{a.RoleKey}|{a.ScopeType}|{a.ScopeKey}";
                 var have = dst.Select(Key).ToHashSet();
                 var now = DateTime.UtcNow;
@@ -561,14 +561,14 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffAvailability>(
-                "SELECT * FROM StaffAvailability WHERE " + StaffOwner.Where(0) + " ORDER BY MemberId, AvailableFrom", owner.P, owner.C);
+                "SELECT * FROM StaffAvailability WHERE " + StaffOwner.Where(0) + " ORDER BY MemberId, AvailableFrom", owner.P);
         }
 
         public bool MemberHasAssignment(StaffOwner owner, int memberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, memberId) > 0;
+                "SELECT COUNT(*) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @1", owner.P, memberId) > 0;
         }
 
         public int AddAvailability(StaffOwner owner, int memberId, DateTime? from, DateTime? to, string? note)
@@ -628,7 +628,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
             if (a == null) return (false, "Uppdraget hittades inte.");
 
             DateTime? Shift(DateTime? t) => t is { } v ? day.Date.Add(v.TimeOfDay) : null;
@@ -663,7 +663,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: false);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, from.P, from.C);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, from.P);
             if (a == null) return (false, "Uppdraget hittades inte.", false);
 
             DateTime? dayFromPass = null;
@@ -703,11 +703,11 @@ namespace HpskSite.Services.Staffing
                 && int.TryParse(personKey[2..], out var mid) && mid > 0)
             {
                 return db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @2", owner.P, owner.C, mid);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId = @1", owner.P, mid);
             }
             var name = personKey.StartsWith("n:", StringComparison.Ordinal) ? personKey[2..] : personKey;
             return db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId IS NULL", owner.P, owner.C)
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND MemberId IS NULL", owner.P)
                 .Where(r => string.Equals((r.DisplayName ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
@@ -900,7 +900,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
             if (a == null) return (false, "Uppdraget hittades inte.", null, null, null);
             if (a.MemberId == newMemberId) return (false, "Det är redan den personens uppdrag.", null, null, null);
             var m = _memberService.GetById(newMemberId);
@@ -943,7 +943,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P, owner.C);
+                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
             if (a == null) return (false, "Uppdraget hittades inte.", 0);
             if (a.StartsAt == null || a.EndsAt == null)
                 return (false, "Passet saknar tider. Sätt från- och till-tid först, annars finns ingen punkt att dela vid.", 0);
@@ -1010,7 +1010,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
                 "UPDATE StaffAssignment SET Email = @0, Phone = @1, ModifiedDate = @2 WHERE Id = @3 AND " + StaffOwner.Where(4),
-                email, phone, DateTime.UtcNow, assignmentId, owner.P, owner.C);
+                email, phone, DateTime.UtcNow, assignmentId, owner.P);
         }
 
         /// <summary>Resolve display info for the external-invite page (comp name, role, scope, shift, status).</summary>
@@ -1069,7 +1069,7 @@ namespace HpskSite.Services.Staffing
                     SELECT sa.MemberId, sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day
                     FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE " + owner.Filter(0, "sa.") + @" AND sa.MemberId > 0 AND ISNULL(sa.Status, '') <> @2",
-                    owner.P, owner.C, StaffAssignmentStatus.Declined);
+                    owner.P, owner.FamilyComp, StaffAssignmentStatus.Declined);
             }
             if (rows.Count == 0) return result;
             var names = _roles.For(owner, _owners.Discipline(owner))
@@ -1197,8 +1197,8 @@ namespace HpskSite.Services.Staffing
                         owner.PlanningId, competitionId) == 0)
                     return;
                 var existing = db.Fetch<StaffAssignment>(
-                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
-                    owner.P, owner.C, TavlingsledningRole);
+                    "SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @1",
+                    owner.P, TavlingsledningRole);
                 var haveMemberIds = existing.Where(r => r.MemberId.HasValue).Select(r => r.MemberId!.Value).ToHashSet();
 
                 foreach (var mid in managerIds.Distinct())

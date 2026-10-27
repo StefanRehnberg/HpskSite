@@ -1810,9 +1810,8 @@ namespace HpskSite.Controllers
         // ======================= P2b: bemanningens ägare =======================
 
         /// <summary>
-        /// Planeringen anropet gäller — <c>?planningId=</c> i adressen. Planeringens bemanningssida lägger
-        /// till den på varje anrop hit (se Bemanning.cshtml), så de delade vyerna (_StaffingGrid,
-        /// _StaffingRoster) behöver inte veta om den.
+        /// Planeringen anropet gäller — <c>?planningId=</c> i adressen. Planeringens bemanningssida (planering-bemanning.js)
+        /// lägger till den på varje anrop hit.
         /// </summary>
         private int PlanningIdFromRequest() =>
             int.TryParse(Request.Query["planningId"], out var p) && p > 0 ? p : 0;

@@ -26,7 +26,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<StaffPass>(
-                    "SELECT * FROM StaffPass WHERE " + StaffOwner.Where(0) + " ORDER BY PassDate, SortOrder, StartTime, Id", owner.P, owner.C)
+                    "SELECT * FROM StaffPass WHERE " + StaffOwner.Where(0) + " ORDER BY PassDate, SortOrder, StartTime, Id", owner.P)
                 .Select(ToPassView).ToList();
         }
 
@@ -39,13 +39,13 @@ namespace HpskSite.Services.Staffing
             {
                 // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
                 var existing = db.SingleOrDefault<StaffPass>(
-                    "SELECT * FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
+                    "SELECT * FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P);
                 if (existing == null) return 0;
                 row = existing;
             }
             else
             {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffPass WHERE " + StaffOwner.Where(0), owner.P, owner.C) ?? 0;
+                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffPass WHERE " + StaffOwner.Where(0), owner.P) ?? 0;
                 row = new StaffPass { SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
             }
             row.PlanningId = owner.PlanningIdOrNull;
@@ -62,8 +62,8 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("UPDATE StaffAssignment SET PassId = NULL WHERE PassId = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
-            db.Execute("DELETE FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C);
+            db.Execute("UPDATE StaffAssignment SET PassId = NULL WHERE PassId = @0 AND " + StaffOwner.Where(1), id, owner.P);
+            db.Execute("DELETE FROM StaffPass WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P);
         }
 
         // ---- crew needs ----
@@ -72,7 +72,7 @@ namespace HpskSite.Services.Staffing
         public List<StaffCrewNeed> GetAllCrewNeeds(StaffOwner owner)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P);
         }
 
         /// <summary>
@@ -129,8 +129,8 @@ namespace HpskSite.Services.Staffing
             var dayList = days.ToList();
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND ScopeKind = @2 AND RoleKey = @3 AND ISNULL(ScopeKey, N'') = @4",
-                owner.P, owner.C, kind, key, sk ?? "");
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND ScopeKind = @1 AND RoleKey = @2 AND ISNULL(ScopeKey, N'') = @3",
+                owner.P, kind, key, sk ?? "");
             foreach (var (day, count) in CrewNeedRules.Plan(all, dayList))
                 db.Insert(new StaffCrewNeed { PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull,
                     ScopeKind = kind, RoleKey = key, Count = count, DayDate = day?.Date, ScopeKey = sk });
@@ -144,7 +144,7 @@ namespace HpskSite.Services.Staffing
         public List<CrewNeedRow> GetCrewNeeds(StaffOwner owner, string? discipline)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P, owner.C)
+            return scope.Database.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P)
                 .Select(n => new CrewNeedRow
                 {
                     ScopeKind = n.ScopeKind,
@@ -160,7 +160,7 @@ namespace HpskSite.Services.Staffing
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P, owner.C);
+            db.Execute("DELETE FROM StaffCrewNeed WHERE " + StaffOwner.Where(0) + " AND DayDate IS NULL AND ScopeKey IS NULL AND PassId IS NULL", owner.P);
             foreach (var n in (needs ?? new()).Where(n => n.Count > 0 && !string.IsNullOrWhiteSpace(n.RoleKey)))
             {
                 var kind = string.Equals(n.ScopeKind, CrewNeedScope.Station, StringComparison.OrdinalIgnoreCase) ? CrewNeedScope.Station : CrewNeedScope.All;
@@ -178,8 +178,8 @@ namespace HpskSite.Services.Staffing
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = scope.Database;
-                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P, owner.C);
-                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0), owner.P, owner.C);
+                needs = db.Fetch<StaffCrewNeed>("SELECT * FROM StaffCrewNeed WHERE " + StaffOwner.Where(0), owner.P);
+                assignments = db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE " + StaffOwner.Where(0), owner.P);
             }
             bool isFalt = FunctionaryRoles.FaltFamily.Contains(discipline ?? "", StringComparer.OrdinalIgnoreCase);
             int stations = isFalt ? Math.Max(0, stationCount) : 0;

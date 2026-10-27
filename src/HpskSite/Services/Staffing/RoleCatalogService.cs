@@ -132,9 +132,9 @@ namespace HpskSite.Services.Staffing
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 // Planeringens roller, och tävlingens som ännu inte flyttats in. Samma nyckel på båda: planeringens gäller.
                 rows = scope.Database.Fetch<StaffRole>(
-                    @"SELECT * FROM StaffRole WHERE (OwnerType = @0 AND OwnerId = @1) OR (OwnerType = @2 AND OwnerId = @3)
+                    @"SELECT * FROM StaffRole WHERE OwnerType = @0 AND OwnerId = @1
                       ORDER BY SortOrder, DisplayName",
-                    RoleOwnerType.Planning, owner.P, RoleOwnerType.Competition, owner.C)
+                    RoleOwnerType.Planning, owner.P)
                     .GroupBy(r => r.RoleKey, StringComparer.OrdinalIgnoreCase)
                     .Select(g => g.OrderBy(r => r.OwnerType == RoleOwnerType.Planning ? 0 : 1).First())
                     .ToList();
@@ -292,8 +292,8 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
 
             var inUse = db.ExecuteScalar<int>(
-                "SELECT COUNT(1) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
-                owner.P, owner.C, roleKey);
+                "SELECT COUNT(1) FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @1",
+                owner.P, roleKey);
             if (inUse > 0 && !deleteAssignments) return (false, null, inUse);
 
             var name = Resolve(owner, discipline, roleKey)?.DisplayName ?? roleKey;
@@ -303,8 +303,8 @@ namespace HpskSite.Services.Staffing
             var isBuiltIn = FunctionaryRoles.Resolve(discipline, roleKey) != null;
 
             if (inUse > 0)
-                db.Execute("DELETE FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @2",
-                    owner.P, owner.C, roleKey);
+                db.Execute("DELETE FROM StaffAssignment WHERE " + StaffOwner.Where(0) + " AND RoleKey = @1",
+                    owner.P, roleKey);
 
             var now = DateTime.UtcNow;
             if (isBuiltIn)

@@ -43,7 +43,7 @@ namespace HpskSite.Services.Staffing
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 return scope.Database.Fetch<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " ORDER BY DayDate, SortOrder, Id", owner.P, owner.C);
+                    "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " ORDER BY DayDate, SortOrder, Id", owner.P);
             }
             catch (Exception ex)
             {
@@ -125,14 +125,14 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
 
             var clash = db.SingleOrDefault<StaffDay>(
-                "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " AND DayDate = @2", owner.P, owner.C, date.Date);
+                "SELECT * FROM StaffDay WHERE " + StaffOwner.Where(0) + " AND DayDate = @1", owner.P, date.Date);
             if (clash != null && clash.Id != req.Id)
                 return (false, $"{date.ToString("d MMMM", Sv)} finns redan i planen.", clash.Id);
 
             if (req.Id > 0)
             {
                 var row = db.SingleOrDefault<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P, owner.C);
+                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), req.Id, owner.P);
                 if (row == null) return (false, "Dagen hittades inte.", 0);
                 row.DayDate = date.Date; row.Label = label; row.Kind = kind;
                 db.Update(row);
@@ -173,7 +173,7 @@ namespace HpskSite.Services.Staffing
 
             var row = id > 0
                 ? db.SingleOrDefault<StaffDay>(
-                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P, owner.C)
+                    "SELECT * FROM StaffDay WHERE Id = @0 AND " + StaffOwner.Where(1), id, owner.P)
                 : null;
 
             DateTime date;
@@ -193,8 +193,8 @@ namespace HpskSite.Services.Staffing
                     DELETE sa FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE " + StaffOwner.Where(0, "sa.") + @"
-                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @2",
-                    owner.P, owner.C, date);
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
+                    owner.P, date);
             }
 
             if (row != null)
@@ -215,7 +215,7 @@ namespace HpskSite.Services.Staffing
                     SELECT COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))
                     FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE " + StaffOwner.Where(0, "sa."), owner.P, owner.C);
+                    WHERE " + StaffOwner.Where(0, "sa."), owner.P);
                 foreach (var d in rows)
                     if (d is { } v) set.Add(v.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             }
@@ -234,8 +234,8 @@ namespace HpskSite.Services.Staffing
                     SELECT COUNT(1) FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE " + StaffOwner.Where(0, "sa.") + @"
-                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @2",
-                    owner.P, owner.C, date.Date);
+                      AND COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) = @1",
+                    owner.P, date.Date);
             }
             catch { return 0; }
         }

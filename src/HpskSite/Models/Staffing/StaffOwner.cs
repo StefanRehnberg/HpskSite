@@ -20,12 +20,13 @@ namespace HpskSite.Models.Staffing
         public int? PlanningIdOrNull => PlanningId;
         public int? CompetitionIdOrNull => CompetitionId is > 0 ? CompetitionId : null;
 
-        /// <summary>Parametrarna till <see cref="Where"/>. C används inte längre av <see cref="Where"/> men står kvar på sin plats, så att parameterpositionerna i alla frågor är oförändrade.</summary>
+        /// <summary>Parametern till <see cref="Where"/>: planeringen.</summary>
         public object P => PlanningId;
-        public object C => CompetitionId is > 0 ? CompetitionId.Value : -1;
+        /// <summary>Den andra parametern till <see cref="Filter"/>: tävlingen när <see cref="IncludeFamily"/> gäller, annars -1 (matchar aldrig något).</summary>
+        public object FamilyComp => IncludeFamily && CompetitionId is > 0 ? CompetitionId.Value : -1;
 
         /// <summary>
-        /// SQL-villkoret för ägarens rader: planeringens rader. Parametern på plats <paramref name="i"/> är planeringen (P); i+1 (C) refereras inte här — se <see cref="C"/>.
+        /// SQL-villkoret för ägarens rader: planeringens rader. EN parameter, på plats <paramref name="i"/> (P).
         /// <paramref name="alias"/> = tabellens alias med punkt, t.ex. "sa.".
         /// </summary>
         public static string Where(int i, string alias = "") => $"({alias}PlanningId = @{i})";
@@ -38,13 +39,11 @@ namespace HpskSite.Models.Staffing
         public bool IncludeFamily { get; init; }
 
         /// <summary>
-        /// Läsvillkoret för tävlingens vyer: med <see cref="IncludeFamily"/> alla rader som bär tävlingen, annars
-        /// <see cref="Where"/>. Samma parametrar (P på plats i, C på i+1).
+        /// Läsvillkoret för tävlingens vyer: planeringens rader, och med <see cref="IncludeFamily"/> även familjens delplaneringars rader som bär tävlingen.
+        /// ALLTID två parametrar — P på plats i och <see cref="FamilyComp"/> på i+1 — så att anropet ser likadant ut för alla ägare.
         /// </summary>
         public string Filter(int i, string alias = "") =>
-            IncludeFamily && HasCompetition
-                ? $"({alias}PlanningId = @{i} OR ({alias}PlanningId IS NOT NULL AND {alias}CompetitionId = @{i + 1}))"
-                : Where(i, alias);
+            $"({alias}PlanningId = @{i} OR ({alias}PlanningId IS NOT NULL AND {alias}CompetitionId = @{i + 1}))";
 
         /// <summary>
         /// Om en rad med de här värdena hör till ägaren — samma regel som <see cref="Where"/>, alltså skrivningarnas. En

@@ -51,7 +51,7 @@ namespace HpskSite.Services.Staffing
             // En ägare: som förut. Flera (familjen): alla deras rader, via planeringens id.
             var single = owners.Count == 1;
             var where = single ? StaffOwner.Where(0) : "PlanningId IN (" + string.Join(",", owners.Select(o => o.PlanningId).DefaultIfEmpty(-1)) + ")";
-            var args = single ? new object[] { owners[0].P, owners[0].C } : Array.Empty<object>();
+            var args = single ? new object[] { owners[0].P } : Array.Empty<object>();
             List<StaffAssignment> rows;
             try
             {

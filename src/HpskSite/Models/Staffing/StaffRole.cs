@@ -20,7 +20,7 @@ namespace HpskSite.Models.Staffing
         public int Id { get; set; }
 
         /// <summary>System | Region | Club | Competition — see <see cref="RoleOwnerType"/>.</summary>
-        public string OwnerType { get; set; } = RoleOwnerType.Competition;
+        public string OwnerType { get; set; } = RoleOwnerType.Planning;
         public int OwnerId { get; set; }
 
         public string RoleKey { get; set; } = "";
