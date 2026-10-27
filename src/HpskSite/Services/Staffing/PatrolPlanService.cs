@@ -144,12 +144,14 @@ namespace HpskSite.Services.Staffing
         private static (PatrolPlan Plan, int KeptFitting) PlanOf(Basis b, PatrolPlanSettings settings)
         {
             var patrolById = b.Patrols.ToDictionary(p => p.Id);
+            // Platserna är fasta (9ccd668): den som stannar i sin patrull behåller sin plats. DNS-skyttar ligger kvar i sin patrull utan plats och flyttas aldrig.
+            static bool Dns(FaltskyttePatrolMember m) => string.Equals(m.Status, "DNS", StringComparison.OrdinalIgnoreCase);
             LockedPlacement Place(FaltskyttePatrolMember m) =>
-                new(m.MemberId, m.MemberName, m.ClubName, m.ShootingClass, patrolById[m.PatrolId].StartTime!.Value, patrolById[m.PatrolId].WeaponGroup);
+                new(m.MemberId, m.MemberName, m.ClubName, m.ShootingClass, patrolById[m.PatrolId].StartTime!.Value, patrolById[m.PatrolId].WeaponGroup, Dns(m) ? 0 : m.Position, Dns(m));
             var placed = b.Members.Where(m => patrolById.TryGetValue(m.PatrolId, out var p) && p.StartTime != null).ToList();
-            var locked = placed.Where(m => m.Locked).Select(Place).ToList();
+            var locked = placed.Where(m => m.Locked || Dns(m)).Select(Place).ToList();
             var fitting = settings.KeepFitting
-                ? placed.Where(m => !m.Locked && !b.Reserves.Contains(m.MemberId) && !b.Constraints.IsEarly(m.MemberId)
+                ? placed.Where(m => !m.Locked && !Dns(m) && !b.Reserves.Contains(m.MemberId) && !b.Constraints.IsEarly(m.MemberId)
                         && !b.Constraints.Blocks(m.MemberId, patrolById[m.PatrolId].StartTime!.Value)).Select(Place).ToList()
                 : new List<LockedPlacement>();
             return (FaltskyttePatrolPlanner.Plan(b.Regs, locked.Concat(fitting).ToList(), b.Constraints, b.Reserves, settings, GroupsOf(b, settings)), fitting.Count);
@@ -316,6 +318,7 @@ namespace HpskSite.Services.Staffing
                         db.Insert(new FaltskyttePatrolMember
                         {
                             PatrolId = row.Id, MemberId = m.MemberId, Position = m.Position, ShootingClass = m.ShootingClass, MemberName = m.Name, ClubName = m.Club,
+                            Status = m.IsDns ? "DNS" : null,
                             Locked = lockedKeys.Contains(m.MemberId + "|" + HpskSite.Models.ShootingClasses.ToCanonicalName(m.ShootingClass)),
                         });
                 }

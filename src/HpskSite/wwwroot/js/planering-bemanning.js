@@ -1030,7 +1030,9 @@ window.PlaneringBemanning = (function () {
                 } else if (need > 0 && c.key) {
                     const short = filled < need;
                     cls += short ? ' plb-short' : ' plb-full';
-                    tally = `<div class="plb-need ${short ? 'text-danger fw-semibold' : 'text-success'}" title="Flest på plats samtidigt">${filled}/${need}${short ? ' — saknas ' + (need - filled) : ''}</div>`;
+                    // Fler än behovet (Anders, persontest 12: 3 på en plats som behöver 1) är ingen brist men värt att se — en diskret gul text, ingen larmfärg.
+                    const over = filled > need;
+                    tally = `<div class="plb-need ${short ? 'text-danger fw-semibold' : over ? 'text-warning-emphasis' : 'text-success'}" title="${over ? 'Fler på plats samtidigt än behovet' : 'Flest på plats samtidigt'}" data-plb-over="${over ? filled - need : 0}">${filled}/${need}${short ? ' — saknas ' + (need - filled) : ''}${over ? ' — ' + (filled - need) + ' över behovet' : ''}</div>`;
                 }
                 if (entries.length > filled && filled > 0) tally += `<div class="plb-dim small">${entries.length} uppdrag, högst ${filled} samtidigt</div>`;
                 const holes = (row.gaps || []).filter(x => x.dateKey === c.key);

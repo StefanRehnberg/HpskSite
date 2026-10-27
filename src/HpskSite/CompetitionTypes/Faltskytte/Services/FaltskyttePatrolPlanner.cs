@@ -3,8 +3,11 @@ using HpskSite.Models.ViewModels.Competition;
 
 namespace HpskSite.CompetitionTypes.Faltskytte.Services
 {
-    /// <summary>En skytt vars patrull och tid ligger fast (lås). Bygger om-körningen runt den, aldrig över den.</summary>
-    public sealed record LockedPlacement(int MemberId, string Name, string Club, string ShootingClass, DateTime StartTime, string? WeaponGroup);
+    /// <summary>
+    /// En skytt vars patrull och tid ligger fast (lås). Bygger om-körningen runt den, aldrig över den. <paramref name="Position"/> är platsen i patrullen (fast sedan 9ccd668: en skytt som
+    /// stannar i sin patrull behåller sin plats), <paramref name="IsDns"/> en skytt som markerats DNS — hen har ingen plats (Position 0), räknas inte mot patrullens storlek och krockar inte med något.
+    /// </summary>
+    public sealed record LockedPlacement(int MemberId, string Name, string Club, string ShootingClass, DateTime StartTime, string? WeaponGroup, int Position = 0, bool IsDns = false);
 
     /// <summary>
     /// En grupp patruller som den ser ut i dagens startlista: etiketten ("B+C", "A+R"), vilka vapenklasser den rymmer (tom = alla), gruppens EGEN första start
@@ -54,6 +57,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         private static string Key(int memberId, string? cls) => memberId + "|" + ShootingClasses.ToCanonicalName(cls);
 
+        private static int Shooters(FaltskytteGeneratedPatrol p) => p.Members.Count(m => !m.IsDns);
+
+        private static FaltskytteGeneratedPatrolMember Member(LockedPlacement l) =>
+            new() { MemberId = l.MemberId, Name = l.Name, Club = l.Club, ShootingClass = l.ShootingClass, Position = l.IsDns ? 0 : l.Position, IsDns = l.IsDns };
+
+        /// <summary>
+        /// Platserna är fasta (9ccd668): den som stannar i sin patrull behåller sin plats, ingen flyttar upp, DNS har plats 0 och nya tar lägsta lediga plats (1, 2, 3 …).
+        /// Förut numrerades alla om 1..n, vilket hade flyttat om dem som redan stod på sina platser. Två som skulle få samma plats (patrullerna slogs ihop) får den som kommer sist en ny.
+        /// </summary>
+        internal static void Seat(FaltskytteGeneratedPatrol p)
+        {
+            var used = new HashSet<int>();
+            foreach (var m in p.Members)
+            {
+                if (m.IsDns) { m.Position = 0; continue; }
+                if (m.Position > 0 && !used.Add(m.Position)) m.Position = 0;
+            }
+            foreach (var m in p.Members.Where(m => !m.IsDns && m.Position <= 0))
+            {
+                var pos = 1;
+                while (used.Contains(pos)) pos++;
+                m.Position = pos; used.Add(pos);
+            }
+        }
+
         public static PatrolPlan Plan(IReadOnlyList<CompetitionRegistration> registrations, IReadOnlyCollection<LockedPlacement> locked,
             PatrolConstraints constraints, ISet<int> reserves, PatrolPlanSettings settings, IReadOnlyList<PatrolGroupSpec>? groups = null)
         {
@@ -64,6 +92,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             var keptLocked = lockedByKey.Where(kv => regKeys.Contains(kv.Key)).Select(kv => kv.Value).ToList();
             var dropped = lockedByKey.Where(kv => !regKeys.Contains(kv.Key)).Select(kv => kv.Value.Name).OrderBy(n => n).ToList();
+            // DNS-skyttar står kvar i sin patrull (utan plats) men skjuter inte: de räknas inte mot storleken och bokar ingen tid.
+            var keptDns = keptLocked.Where(l => l.IsDns).ToList();
+            keptLocked = keptLocked.Where(l => !l.IsDns).ToList();
 
             var reserveRegs = registrations.Where(r => reserves.Contains(r.MemberId) && !lockedByKey.ContainsKey(Key(r.MemberId, r.MemberClass))).ToList();
             var free = registrations.Where(r => !reserves.Contains(r.MemberId) && !lockedByKey.ContainsKey(Key(r.MemberId, r.MemberClass))).ToList();
@@ -83,11 +114,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 settings.WeaponGrouping, settings.MultiClassGapMinutes, existing, constraints, occupied);
             var patrols = gen.Patrols;
             var overflow = new List<string>();
+            // Generatorn numrerar sina egna 1..n; de nya ska ta lägsta lediga plats runt dem som behåller sin (Seat), så de nollas här.
+            foreach (var p in patrols) foreach (var m in p.Members) m.Position = 0;
 
             foreach (var l in keptLocked.OrderBy(l => l.StartTime).ThenBy(l => l.Name, StringComparer.Ordinal))
             {
                 var group = FaltskyttePatrolGenerator.GroupKey(l.ShootingClass, settings.WeaponGrouping);
-                var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && p.WeaponGroup == group && p.Members.Count < settings.PatrolSize);
+                var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && p.WeaponGroup == group && Shooters(p) < settings.PatrolSize);
                 if (target == null)
                 {
                     // Ingen patrull vid den tiden med plats: en egen patrull vid samma tid. Fanns det en full patrull där redovisas det.
@@ -95,15 +128,22 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     target = new FaltskytteGeneratedPatrol { StartTime = l.StartTime, WeaponGroup = group };
                     patrols.Add(target);
                 }
-                target.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = l.MemberId, Name = l.Name, Club = l.Club, ShootingClass = l.ShootingClass });
+                target.Members.Add(Member(l));
+            }
+            foreach (var l in keptDns.OrderBy(l => l.StartTime).ThenBy(l => l.Name, StringComparer.Ordinal))
+            {
+                var group = FaltskyttePatrolGenerator.GroupKey(l.ShootingClass, settings.WeaponGrouping);
+                var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && p.WeaponGroup == group);
+                if (target == null) { target = new FaltskytteGeneratedPatrol { StartTime = l.StartTime, WeaponGroup = group }; patrols.Add(target); }
+                target.Members.Add(Member(l));
             }
 
-            // Numrering i tidsordning (grupperna i generatorns ordning vid samma tid), och platserna 1..n i patrullen.
+            // Numrering i tidsordning (grupperna i generatorns ordning vid samma tid), och fasta platser i patrullen.
             var order = patrols.Select((p, i) => (p, i)).OrderBy(x => x.p.StartTime).ThenBy(x => x.i).Select(x => x.p).ToList();
             for (var i = 0; i < order.Count; i++)
             {
                 order[i].PatrolNumber = i + 1;
-                for (var m = 0; m < order[i].Members.Count; m++) order[i].Members[m].Position = m + 1;
+                Seat(order[i]);
             }
 
             return new PatrolPlan
@@ -140,6 +180,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var regKeys = registrations.Select(r => Key(r.MemberId, r.MemberClass)).ToHashSet();
             var keptLocked = lockedByKey.Where(kv => regKeys.Contains(kv.Key)).Select(kv => kv.Value).ToList();
             var dropped = lockedByKey.Where(kv => !regKeys.Contains(kv.Key)).Select(kv => kv.Value.Name).OrderBy(n => n).ToList();
+            var keptDns = keptLocked.Where(l => l.IsDns).ToList();
+            keptLocked = keptLocked.Where(l => !l.IsDns).ToList();
             var reserveRegs = registrations.Where(r => reserves.Contains(r.MemberId) && !lockedByKey.ContainsKey(Key(r.MemberId, r.MemberClass))).ToList();
 
             PatrolGroupSpec? GroupOfLocked(LockedPlacement l) => groups.FirstOrDefault(g => g.Label == (l.WeaponGroup ?? "")) ?? groups.FirstOrDefault(g => Accepts(g, l.ShootingClass));
@@ -167,18 +209,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var patrols = gen.Patrols;
                 foreach (var p in patrols) p.WeaponGroup = g.Label;
                 unavoidable.AddRange(gen.Unavoidable);
-                foreach (var p in patrols) foreach (var m in p.Members) Note(m.MemberId, p.StartTime ?? g.FirstStart);
+                foreach (var p in patrols) foreach (var m in p.Members) { Note(m.MemberId, p.StartTime ?? g.FirstStart); m.Position = 0; }   // nya tar lägsta lediga plats (Seat)
 
                 foreach (var l in lockedG)
                 {
-                    var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && p.Members.Count < g.PatrolSize);
+                    var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime && Shooters(p) < g.PatrolSize);
                     if (target == null)
                     {
                         if (patrols.Any(p => p.StartTime == l.StartTime)) overflow.Add(l.Name);
                         target = new FaltskytteGeneratedPatrol { StartTime = l.StartTime, WeaponGroup = g.Label };
                         patrols.Add(target);
                     }
-                    target.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = l.MemberId, Name = l.Name, Club = l.Club, ShootingClass = l.ShootingClass });
+                    target.Members.Add(Member(l));
+                }
+                foreach (var l in keptDns.Where(d => GroupOfLocked(d) == g).OrderBy(d => d.StartTime).ThenBy(d => d.Name, StringComparer.Ordinal))
+                {
+                    var target = patrols.FirstOrDefault(p => p.StartTime == l.StartTime);
+                    if (target == null) { target = new FaltskytteGeneratedPatrol { StartTime = l.StartTime, WeaponGroup = g.Label }; patrols.Add(target); }
+                    target.Members.Add(Member(l));
                 }
                 allPatrols.AddRange(patrols.Select(p => (p, gi)));
             }
@@ -187,7 +235,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             for (var i = 0; i < order.Count; i++)
             {
                 order[i].PatrolNumber = i + 1;
-                for (var m = 0; m < order[i].Members.Count; m++) order[i].Members[m].Position = m + 1;
+                Seat(order[i]);
             }
 
             return new PatrolPlan

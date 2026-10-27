@@ -277,5 +277,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public string Name { get; set; } = "";
         public string Club { get; set; } = "";
         public string ShootingClass { get; set; } = "";
+        /// <summary>Markerad DNS: står kvar i patrullen utan plats (Position 0) och skjuter inte. Sätts bara av ombyggnaden, aldrig av generatorn.</summary>
+        public bool IsDns { get; set; }
     }
 }

@@ -208,5 +208,61 @@ namespace HpskSite.Tests
             plan.LockedOverflow.Should().HaveCount(1);
             plan.Patrols.SelectMany(p => p.Members).Should().HaveCount(6);
         }
+
+        // 9ccd668 (main): platserna i en patrull är fasta. En ombyggnad får inte numrera om dem som står kvar, och DNS har plats 0.
+        [Fact]
+        public void Den_som_star_kvar_behaller_sin_plats_och_nya_tar_lagsta_lediga()
+        {
+            var t = D.AddHours(9);
+            var regs = Enumerable.Range(1, 4).Select(i => Reg(i)).ToList();
+            // 2 och 4 är låsta på plats 2 och 4 i sin patrull (1 och 3 har lämnat), de nya 1 och 3 ska fylla luckorna.
+            var locked = new List<LockedPlacement>
+            {
+                new(2, "Skytt 002", "Klubb", "C1", t, null, Position: 2),
+                new(4, "Skytt 004", "Klubb", "C1", t, null, Position: 4),
+            };
+            var plan = FaltskyttePatrolPlanner.Plan(regs, locked, new PatrolConstraints(), new HashSet<int>(), S);
+            var p = plan.Patrols.Single(x => x.StartTime == t);
+            p.Members.Single(m => m.MemberId == 2).Position.Should().Be(2);
+            p.Members.Single(m => m.MemberId == 4).Position.Should().Be(4);
+            p.Members.Where(m => m.MemberId is 1 or 3).Select(m => m.Position).OrderBy(x => x).Should().Equal(1, 3);
+            p.Members.Select(m => m.Position).Should().OnlyHaveUniqueItems();
+        }
+
+        [Fact]
+        public void En_DNS_skytt_stannar_i_sin_patrull_utan_plats_och_tar_ingen_plats_i_storleken()
+        {
+            var t = D.AddHours(9);
+            // Patrullstorlek 4: tre låsta + en DNS + en skytt till får plats i EN patrull, eftersom DNS inte räknas.
+            var regs = Enumerable.Range(1, 5).Select(i => Reg(i)).ToList();
+            var locked = new List<LockedPlacement>
+            {
+                new(1, "Skytt 001", "Klubb", "C1", t, null, Position: 1), new(2, "Skytt 002", "Klubb", "C1", t, null, Position: 2), new(3, "Skytt 003", "Klubb", "C1", t, null, Position: 3),
+                new(4, "Skytt 004", "Klubb", "C1", t, null, IsDns: true),
+            };
+            var plan = FaltskyttePatrolPlanner.Plan(regs, locked, new PatrolConstraints(), new HashSet<int>(), S);
+            var p = plan.Patrols.Single(x => x.StartTime == t && x.Members.Any(m => m.MemberId == 4));
+            var dns = p.Members.Single(m => m.MemberId == 4);
+            dns.IsDns.Should().BeTrue();
+            dns.Position.Should().Be(0);
+            p.Members.Where(m => !m.IsDns).Select(m => m.Position).Should().OnlyHaveUniqueItems().And.OnlyContain(x => x >= 1);
+            p.Members.Count(m => !m.IsDns).Should().BeLessThanOrEqualTo(S.PatrolSize);
+            p.Members.Should().Contain(m => m.MemberId == 5, "tre skyttar + en DNS lämnar en plats ledig, och den femte ska få den — DNS räknas inte mot storleken");
+            plan.Patrols.SelectMany(x => x.Members).Where(m => m.MemberId == 4).Should().HaveCount(1, "DNS-skytten placeras inte en gång till som en vanlig skytt");
+        }
+
+        [Fact]
+        public void Seat_loser_dubbletter_och_lamnar_DNS_pa_noll()
+        {
+            var p = new FaltskytteGeneratedPatrol { StartTime = D.AddHours(9) };
+            p.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = 1, Position = 2 });
+            p.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = 2, Position = 2 });
+            p.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = 3, IsDns = true, Position = 5 });
+            p.Members.Add(new FaltskytteGeneratedPatrolMember { MemberId = 4 });
+            FaltskyttePatrolPlanner.Seat(p);
+            p.Members.Single(m => m.MemberId == 3).Position.Should().Be(0);
+            p.Members.Where(m => !m.IsDns).Select(m => m.Position).Should().OnlyHaveUniqueItems().And.OnlyContain(x => x >= 1);
+            p.Members.Single(m => m.MemberId == 1).Position.Should().Be(2, "den som kom först behåller platsen");
+        }
     }
 }
