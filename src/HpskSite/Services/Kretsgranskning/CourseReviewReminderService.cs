@@ -27,11 +27,13 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly ReplyContactResolver _replyTo;
         private readonly ClubService _clubs;
         private readonly ILogger<CourseReviewReminderService> _logger;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitionStore;
 
         public CourseReviewReminderService(CourseReviewService reviews, CourseReviewAccess access, CompetitionApplicationService apps,
             KretsCalendarService calendar, IContentService contentService, EmailService email, ReplyContactResolver replyTo,
-            ClubService clubs, ILogger<CourseReviewReminderService> logger)
+            ClubService clubs, ILogger<CourseReviewReminderService> logger, HpskSite.Services.Competitions.ICompetitionStore competitionStore)
         {
+            _competitionStore = competitionStore;
             _reviews = reviews;
             _access = access;
             _apps = apps;
@@ -80,15 +82,15 @@ namespace HpskSite.Services.Kretsgranskning
         private async Task<int> ArrangerAsync(CourseReviewReminders.Due d)
         {
             var c = _access.Resolve(d.CompetitionId);
-            var node = _contentService.GetById(d.CompetitionId);
-            if (c == null || node == null) return 0;
+            var comp = _competitionStore.GetSaved(d.CompetitionId); // tabelläget har ingen nod
+            if (c == null || comp == null) return 0;
             var toForbundet = c.Route == CourseReviewRoute.Forbundet;
             var deadline = c.Deadline?.ToString("yyyy-MM-dd") ?? "";
 
             var to = new List<(string Email, string Name)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             void Add(string? e, string nm) { if (!string.IsNullOrWhiteSpace(e) && seen.Add(e.Trim())) to.Add((e.Trim(), nm)); }
-            Add(node.GetValue<string>("contactEmail"), node.GetValue<string>("contactPerson") ?? "");
+            Add(comp.ContactEmail, "");
             if (c.ClubId > 0) Add(_clubs.GetClubById(c.ClubId)?.ContactEmail, _clubs.GetClubNameById(c.ClubId) ?? "");
 
             var url = $"{_access.SiteUrl}/competitionmanagement?competitionId={d.CompetitionId}";

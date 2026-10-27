@@ -115,6 +115,7 @@ namespace HpskSite.Services
                 // EnsureUmbracoContext så att den publicerade läsningen har en kontext.
                 using var storeScope = _scopeFactory.CreateScope();
                 var competitionStore = storeScope.ServiceProvider.GetRequiredService<HpskSite.Services.Competitions.ICompetitionStore>();
+                var competitionLinks = storeScope.ServiceProvider.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>();
                 foreach (var node in competitionStore.List())
                 {
                     if (!node.IsVisible) continue;
@@ -154,7 +155,7 @@ namespace HpskSite.Services
                         Title = node.CompetitionName ?? node.Name ?? "",
                         ClubName = clubName,
                         Venue = node.Venue ?? "",
-                        Url = content.GetById(node.Id)?.Url() ?? ""
+                        Url = competitionLinks.Url(node.Id)
                     });
                 }
 

@@ -42,6 +42,7 @@ namespace HpskSite.Services
         private readonly ILogger<RangeCalendarService> _logger;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _competitionLinks;
 
         public RangeCalendarService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -50,9 +51,11 @@ namespace HpskSite.Services
             ClubService clubs,
             HpskSite.Services.Events.IClubEventStore events,
             ILogger<RangeCalendarService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.CompetitionLinks competitionLinks)
         {
             _competitions = competitions;
+            _competitionLinks = competitionLinks;
             _events = events;
             _databaseFactory = databaseFactory;
             _contextFactory = contextFactory;
@@ -461,7 +464,7 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
                         owner = regionNames.TryGetValue(code, out var rn) ? rn : code;
                     }
                     var row = new CompetitionRow(c.Id, c.CompetitionName ?? c.Name ?? "Tävling",
-                        date.Value.Date, end?.Date, clubId, owner, cref.UmbracoContext.Content?.GetById(c.Id)?.Url() ?? "");
+                        date.Value.Date, end?.Date, clubId, owner, _competitionLinks.Url(c.Id));
                     if (!index.TryGetValue(rangeId, out var list)) index[rangeId] = list = new();
                     list.Add(row);
                 }

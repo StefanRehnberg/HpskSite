@@ -349,9 +349,10 @@
 
         var html = '';
         (stationData.patrols || []).forEach(function(p) {
-            var total = p.members.length;
-            var done = p.completedCount;
-            var allDone = done >= total && total > 0;
+            // En DNS skjuter aldrig: ingen väntar på dem, och en patrull där alla är DNS är klar.
+            var total = p.members.filter(function (m) { return !fseIsDns(m); }).length;
+            var done = p.members.filter(function (m) { return !fseIsDns(m) && m.hasResult; }).length;
+            var allDone = p.members.length > 0 && done >= total;
             var timeStr = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE', { hour:'2-digit', minute:'2-digit' }) : '';
 
             var lbl = p.label ? ' — ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
@@ -431,10 +432,12 @@
         // Render roll call list
         presentMembers = new Set();
         var rcHtml = '';
+        var hiddenDns = 0;
         (currentPatrol.members || []).forEach(function(m, idx) {
-            // En DNS förkryssas INTE: den som inte startade ska inte in i inmatningsslingan.
-            // Funktionären kan fortfarande kryssa i manuellt om markeringen var fel.
+            // En DNS visas inte alls: den som inte startade ska inte finnas i uppropet eller i
+            // inmatningsslingan (Michael Henriksson 2026-10-27). Har den ändå ett resultat visas den.
             var isDns = fseIsDns(m);
+            if (isDns && !m.hasResult) { hiddenDns++; return; }
             if (!isDns) presentMembers.add(m.memberId);
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (isDns ? ' opacity-75' : '') + '">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isDns ? '' : ' checked') + ' onchange="fseRcToggle(this)">' +
@@ -443,6 +446,9 @@
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
+        if (hiddenDns > 0) {
+            rcHtml += '<div class="px-3 py-2 small text-muted">' + hiddenDns + (hiddenDns === 1 ? ' skytt' : ' skyttar') + ' ej start (DNS) visas inte.</div>';
+        }
         document.getElementById('fseRcList').innerHTML = rcHtml;
         fseUpdateRcCount();
 
@@ -469,7 +475,7 @@
     };
 
     function fseUpdateRcCount() {
-        var total = currentPatrol?.members?.length || 0;
+        var total = (currentPatrol?.members || []).filter(function (m) { return !fseIsDns(m) || m.hasResult; }).length;
         document.getElementById('fseRcCount').textContent = presentMembers.size + ' av ' + total + ' n\u00e4rvarande';
     }
 
@@ -538,6 +544,7 @@
         // Re-render roll call list to update green checkmarks
         var rcHtml = '';
         (currentPatrol.members || []).forEach(function(m) {
+            if (fseIsDns(m) && !m.hasResult) return;   // DNS visas inte (samma regel som uppropet)
             var isPresent = presentMembers.has(m.memberId);
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (fseIsDns(m) ? ' opacity-75' : '') + '">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isPresent ? ' checked' : '') + ' onchange="fseRcToggle(this)">' +

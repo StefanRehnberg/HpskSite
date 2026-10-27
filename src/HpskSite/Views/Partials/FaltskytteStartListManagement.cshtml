@@ -397,7 +397,7 @@
 
         Object.keys(byGroup).forEach(function(wg) {
             var grpPatrols = byGroup[wg];
-            var totalShooters = grpPatrols.reduce(function(s, p) { return s + p.members.length; }, 0);
+            var totalShooters = grpPatrols.reduce(function(s, p) { return s + p.members.filter(function(m) { return m.status !== 'DNS'; }).length; }, 0);
 
             var html = '<div class="card mb-3">' +
                 '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
@@ -421,7 +421,7 @@
                     (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr +
                         ' <button class="btn btn-link btn-sm p-0 text-muted" onclick="faltEditPatrol(' + patrol.patrolId + ',\'' + startTimeStr + '\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button></span>' :
                         ' <button class="btn btn-link btn-sm p-0 text-muted ms-2" onclick="faltEditPatrol(' + patrol.patrolId + ',\'\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button>') +
-                    '<span class="badge bg-secondary ms-2">' + patrol.members.length + '</span>' +
+                    '<span class="badge bg-secondary ms-2">' + patrol.members.filter(function(m) { return m.status !== 'DNS'; }).length + '</span>' +
                     '</span>' +
                     '<span class="d-flex gap-1">' +
                     '<button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="faltShowAddShooter(' + patrol.patrolId + ',\'' + wgEsc + '\')" title="Lägg till skytt"><i class="bi bi-person-plus"></i></button>' +
@@ -431,14 +431,48 @@
                 if (patrol.members.length === 0) {
                     html += '<div class="text-muted small fst-italic">Tom patrull</div>';
                 } else {
-                    patrol.members.forEach(function(m) {
-                        var isDns = m.status === 'DNS';
-                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row' + (isDns ? ' opacity-50' : '') + '" data-pm-id="' + m.patrolMemberId + '">' +
+                    // Platserna är fasta: en skytt som tas bort eller får DNS lämnar en ledig plats i stället
+                    // för att de andra flyttas upp (Michael Henriksson 2026-10-27). DNS visas efter platserna.
+                    var seated = patrol.members.filter(function(m) { return m.status !== 'DNS'; });
+                    var dnsMembers = patrol.members.filter(function(m) { return m.status === 'DNS'; });
+                    var seatByPos = {};
+                    var maxSeat = 0;
+                    seated.forEach(function(m) {
+                        // Äldre rader utan giltig plats läggs sist så de syns.
+                        var pos = m.position > 0 ? m.position : (maxSeat + 1);
+                        while (seatByPos[pos]) pos++;
+                        seatByPos[pos] = m;
+                        if (pos > maxSeat) maxSeat = pos;
+                    });
+                    for (var seat = 1; seat <= maxSeat; seat++) {
+                        var m = seatByPos[seat];
+                        if (!m) {
+                            html += '<div class="d-flex align-items-center gap-2 py-1 text-muted small fst-italic">' +
+                                '<span style="width:1.5rem" class="text-end">' + seat + '.</span>' +
+                                '<span class="flex-grow-1">Ledig plats</span>' +
+                                '<button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="faltShowAddShooter(' + patrol.patrolId + ',\'' + wgEsc + '\')" title="Lägg till skytt"><i class="bi bi-person-plus"></i></button>' +
+                                '</div>';
+                            continue;
+                        }
+                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row" data-pm-id="' + m.patrolMemberId + '">' +
+                            '<span style="width:1.5rem" class="text-end text-muted small">' + seat + '.</span>' +
+                            '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
+                            '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span></span>' +
+                            '<button class="btn btn-outline-secondary btn-sm py-0 px-1"' + (seat <= 1 ? ' disabled' : '') + ' onclick="faltSetPosition(' + m.patrolMemberId + ',' + (seat - 1) + ')" title="Flytta upp en plats"><i class="bi bi-arrow-up"></i></button>' +
+                            '<button class="btn btn-outline-secondary btn-sm py-0 px-1"' + (seat >= maxSeat ? ' disabled' : '') + ' onclick="faltSetPosition(' + m.patrolMemberId + ',' + (seat + 1) + ')" title="Flytta ner en plats"><i class="bi bi-arrow-down"></i></button>' +
+                            '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',true)" title="Markera DNS – platsen blir ledig">DNS</button>' +
+                            '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
+                            '</div>';
+                    }
+                    dnsMembers.forEach(function(m) {
+                        html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row opacity-50" data-pm-id="' + m.patrolMemberId + '">' +
+                            '<span style="width:1.5rem"></span>' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
                             '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
                             ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' +
-                            (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>' +
-                            '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>' +
+                            ' <span class="badge bg-secondary">DNS</span></span>' +
+                            '<button class="btn btn-warning btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',false)" title="Ångra DNS – tar första lediga plats">DNS</button>' +
                             '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
                             '</div>';
                     });
@@ -513,6 +547,13 @@
     // registration can take it (the capacity count ignores DNS).
     window.faltSetDns = async function(pmId, isDns) {
         var data = await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: pmId, isDns: isDns });
+        if (data.success) loadFaltPatrols();
+        else alert('Fel: ' + (data.message || 'Okänt fel'));
+    };
+
+    window.faltSetPosition = async function(pmId, position) {
+        if (!confirmIfResultsExist('Byta plats')) return;
+        var data = await apiPost('SetShooterPosition', { competitionId: parseInt(compId), patrolMemberId: pmId, position: position });
         if (data.success) loadFaltPatrols();
         else alert('Fel: ' + (data.message || 'Okänt fel'));
     };
@@ -692,8 +733,9 @@
         var patrolId = parseInt(document.getElementById('faltAddShooterPatrolId').value);
         // Check patrol size
         var patrol = allPatrols.find(function(p) { return p.patrolId === patrolId; });
-        if (patrol && patrol.members.length >= faltPatrolSize) {
-            if (!confirm('Patrullen har redan ' + patrol.members.length + ' skyttar (max ' + faltPatrolSize + '). Lägg till ändå?')) return;
+        var seatedCount = patrol ? patrol.members.filter(function(m) { return m.status !== 'DNS'; }).length : 0;
+        if (patrol && seatedCount >= faltPatrolSize) {
+            if (!confirm('Patrullen har redan ' + seatedCount + ' skyttar (max ' + faltPatrolSize + '). Lägg till ändå?')) return;
         }
         var data = await apiPost('AddShooterToPatrol', {
             competitionId: parseInt(compId),

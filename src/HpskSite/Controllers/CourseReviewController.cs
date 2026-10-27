@@ -409,8 +409,8 @@ namespace HpskSite.Controllers
                 void Add(string? e, string n) { if (!string.IsNullOrWhiteSpace(e) && seen.Add(e.Trim())) to.Add((e.Trim(), n)); }
                 var submitter = r.SubmittedByMemberId > 0 ? _memberService.GetById(r.SubmittedByMemberId) : null;
                 if (submitter != null) Add(submitter.Email, DisplayName(submitter));
-                var comp = _contentService.GetById(r.CompetitionId);
-                Add(comp?.GetValue<string>("contactEmail"), comp?.GetValue<string>("contactPerson") ?? "");
+                var comp = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.ICompetitionStore>().GetSaved(r.CompetitionId);
+                Add(comp?.ContactEmail, "");
                 var replyTo = who.MemberId > 0 ? _replyTo.ForMember(who.MemberId) : _replyTo.ForRegion(r.RegionId);
                 var url = $"{BaseUrl}/competitionmanagement?competitionId={r.CompetitionId}";
                 int sent = 0;

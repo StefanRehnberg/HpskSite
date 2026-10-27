@@ -1516,7 +1516,7 @@ async function handleMemberSelection() {
 
     try {
         // Get member details
-        const response = await fetch(`/umbraco/surface/Competition/GetMemberDetails?memberId=${selectedMemberId}`, {
+        const response = await fetch(`/umbraco/surface/Competition/GetMemberDetails?memberId=${selectedMemberId}&competitionId=${COMPETITION_ID}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });
