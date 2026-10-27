@@ -185,7 +185,7 @@ namespace HpskSite.Controllers
             try
             {
                 var p = HttpContext.RequestServices.GetRequiredService<FamilyWeekService>().Build(root.PlanningId, personKey, includeUnpublishedStarts: true).FirstOrDefault();
-                if (p == null) return Json(new { success = false, message = "Personen har inget uppdrag i veckan." });
+                if (p == null) return Json(new { success = false, message = "Personen är inte placerad i veckan." });
                 object? match = null;
                 if (p.IsExternal)
                 {
@@ -241,7 +241,7 @@ namespace HpskSite.Controllers
                     var r = _staffing.ApplyPersonIdentity(request, owner);
                     if (r.Success) affected += r.Affected; else if (r.Message != null && !r.Message.StartsWith("Hittade inga")) last = r.Message;
                 }
-                return affected > 0 ? Json(new { success = true, affected, skipped }) : Json(new { success = false, message = last ?? "Hittade inga uppdrag för personen." });
+                return affected > 0 ? Json(new { success = true, affected, skipped }) : Json(new { success = false, message = last ?? "Hittade inga placeringar för personen." });
             }
             catch (Exception ex)
             {
@@ -297,9 +297,9 @@ namespace HpskSite.Controllers
             try
             {
                 if (!_planning.Family(from.PlanningId).Any(p => p.Id == to.PlanningId))
-                    return Json(new { success = false, message = "Uppdraget kan bara flyttas inom samma huvudplanering." });
+                    return Json(new { success = false, message = "Placeringen kan bara flyttas inom samma huvudplanering." });
                 var row = _staffing.GetById(request.Id);
-                if (row == null) return Json(new { success = false, message = "Uppdraget hittades inte." });
+                if (row == null) return Json(new { success = false, message = "Placeringen hittades inte." });
                 if (!_roleCatalog.For(to, _owners.Discipline(to)).Any(r => string.Equals(r.Key, row.RoleKey, StringComparison.OrdinalIgnoreCase)))
                     return Json(new { success = false, message = "Rollen finns inte i den delen. Skriv rollen där först." });
                 var (ok, msg, revoked) = _staffing.MoveToPlanning(request.Id, from, to);
@@ -314,7 +314,7 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Staffing: MoveAssignmentToPlanning failed for {Id}", request.Id);
-                return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+                return Json(new { success = false, message = "Kunde inte flytta placeringen." });
             }
         }
 
@@ -335,7 +335,7 @@ namespace HpskSite.Controllers
                 // En ledare ser bara det den leder: i andra delar visas "uppdrag i en annan del" i stället för vad personen gör där.
                 var (t, list, err) = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>()
                     .Candidates(assignmentId, pid => viewer != null && (byLeader.IsLeader ? pid == owner.PlanningId : _planning.CanEditStaffingIn(pid, viewer.Id)));
-                if (err != null || t == null) return Json(new { success = false, message = err ?? "Uppdraget hittades inte." });
+                if (err != null || t == null) return Json(new { success = false, message = err ?? "Placeringen hittades inte." });
                 return Json(new
                 {
                     success = true,

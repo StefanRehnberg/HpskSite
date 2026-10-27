@@ -100,8 +100,8 @@ namespace HpskSite.Tests
         [Fact]
         public void Gron_startlista_sager_hur_manga_som_kontrollerats()
         {
-            Step(Facts(falt: true, assignedPeople: 12, withStart: 5, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 med uppdrag som också skjuter krockar med sin egen start");
-            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 medlemmarna med uppdrag skjuter i tävlingen");
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 5, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 placerade som också skjuter krockar med sin egen start");
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 placerade medlemmarna skjuter i tävlingen");
         }
 
         // Anders (persontest 11): en fritextperson har ingen identitet att matcha en start mot. Texten får inte påstå att hen kontrollerats, och steget är inte grönt.
@@ -110,7 +110,7 @@ namespace HpskSite.Tests
         {
             var s = Step(Facts(falt: true, assignedPeople: 40, withStart: 5, unlinked: 9, mode: "x"), "startlista");
             s.State.Should().Be(PlanStepState.Todo);
-            s.Text.Should().Contain("Ingen av de 5 med uppdrag som också skjuter krockar").And.Contain("9 namn är inte kopplade till en medlem och går inte att kontrollera");
+            s.Text.Should().Contain("Ingen av de 5 placerade som också skjuter krockar").And.Contain("9 namn är inte kopplade till en medlem och går inte att kontrollera");
             s.Actions.Should().Equal("koppla", "startlista");
             // Bara fritext: ingenting har kontrollerats, och texten påstår inget om dem.
             var only = Step(Facts(falt: true, assignedPeople: 3, withStart: 0, unlinked: 3, mode: "x"), "startlista");

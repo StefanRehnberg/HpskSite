@@ -611,7 +611,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var n = db.Execute("UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2", wanted, DateTime.UtcNow, assignmentId);
-            return n > 0 ? (true, null) : (false, "Uppdraget hittades inte.");
+            return n > 0 ? (true, null) : (false, "Placeringen hittades inte.");
         }
 
         /// <summary>
@@ -629,7 +629,7 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
-            if (a == null) return (false, "Uppdraget hittades inte.");
+            if (a == null) return (false, "Placeringen hittades inte.");
 
             DateTime? Shift(DateTime? t) => t is { } v ? day.Date.Add(v.TimeOfDay) : null;
 
@@ -664,7 +664,7 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, from.P);
-            if (a == null) return (false, "Uppdraget hittades inte.", false);
+            if (a == null) return (false, "Placeringen hittades inte.", false);
 
             DateTime? dayFromPass = null;
             if (a.PassId is int pid)
@@ -683,7 +683,7 @@ namespace HpskSite.Services.Staffing
             }
             catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return (false, "Samma person har redan det uppdraget i den delen.", false);
+                return (false, "Samma person är redan placerad där i den delen.", false);
             }
             return (true, null, revoke);
         }
@@ -726,7 +726,7 @@ namespace HpskSite.Services.Staffing
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var rows = RowsForPerson(db, owner, req.PersonKey);
-            if (rows.Count == 0) return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+            if (rows.Count == 0) return new PersonActionResult { Success = false, Message = "Hittade inga placeringar för personen." };
 
             string? name = string.IsNullOrWhiteSpace(req.NewName) ? null : req.NewName.Trim();
             int? memberId = req.MemberId > 0 ? req.MemberId : null;
@@ -810,7 +810,7 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var rows = RowsForPerson(db, owner, personKey);
             if (rows.Count == 0)
-                return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+                return new PersonActionResult { Success = false, Message = "Hittade inga placeringar för personen." };
             // P2b, Stefans svar 2: behörigheten gäller den tävling planeringen är kopplad till.
             if (grant && !owner.HasCompetition && !CarriesFamilyGrant(db, owner))
                 return new PersonActionResult
@@ -854,7 +854,7 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var rows = RowsForPerson(db, owner, personKey);
             if (rows.Count == 0)
-                return new PersonActionResult { Success = false, Message = "Hittade inga uppdrag för personen." };
+                return new PersonActionResult { Success = false, Message = "Hittade inga placeringar för personen." };
             var club = clubId > 0 ? clubId : null;
             var region = club.HasValue ? null : (regionId > 0 ? regionId : null);
             var now = DateTime.UtcNow;
@@ -901,8 +901,8 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
-            if (a == null) return (false, "Uppdraget hittades inte.", null, null, null);
-            if (a.MemberId == newMemberId) return (false, "Det är redan den personens uppdrag.", null, null, null);
+            if (a == null) return (false, "Placeringen hittades inte.", null, null, null);
+            if (a.MemberId == newMemberId) return (false, "Det är redan den personens plats.", null, null, null);
             var m = _memberService.GetById(newMemberId);
             if (m == null) return (false, "Medlemmen hittades inte.", null, null, null);
 
@@ -922,7 +922,7 @@ namespace HpskSite.Services.Staffing
             try { db.Update(a); }
             catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
             {
-                return (false, "Den personen har redan det uppdraget.", null, null, null);   // unikt villkor: samma person, roll, plats och pass
+                return (false, "Den personen är redan placerad där.", null, null, null);   // unikt villkor: samma person, roll, plats och pass
             }
             _logger.LogInformation("Staffing: uppdrag {Id} lämnat över från {Old} till medlem {New}", a.Id, oldName, newMemberId);
 
@@ -944,7 +944,7 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             var a = db.SingleOrDefault<StaffAssignment>(
                 "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
-            if (a == null) return (false, "Uppdraget hittades inte.", 0);
+            if (a == null) return (false, "Placeringen hittades inte.", 0);
             if (a.StartsAt == null || a.EndsAt == null)
                 return (false, "Passet saknar tider. Sätt från- och till-tid först, annars finns ingen punkt att dela vid.", 0);
 

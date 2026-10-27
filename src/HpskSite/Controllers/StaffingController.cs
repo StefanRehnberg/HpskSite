@@ -457,7 +457,7 @@ namespace HpskSite.Controllers
                     {
                         success = false,
                         duplicate = true,
-                        message = $"{request.DisplayName} har redan uppdraget \"{dup.Label}\""
+                        message = $"{request.DisplayName} är redan placerad som \"{dup.Label}\""
                                   + (string.IsNullOrEmpty(dup.DayLabel) ? "" : $" den {dup.DayLabel}")
                                   + ". Lägg till ändå?",
                     });
@@ -1372,7 +1372,7 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Staffing: MoveAssignmentToDay failed for {Id}", request.Id);
-                return Json(new { success = false, message = "Kunde inte flytta uppdraget." });
+                return Json(new { success = false, message = "Kunde inte flytta placeringen." });
             }
         }
 

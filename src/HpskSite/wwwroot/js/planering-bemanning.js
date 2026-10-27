@@ -97,7 +97,7 @@ window.PlaneringBemanning = (function () {
     }
     async function fullAssignment(id) {
         const d = await sget('GetRoster');
-        if (!d.success) throw new Error(d.message || 'Uppdraget kunde inte läsas.');
+        if (!d.success) throw new Error(d.message || 'Placeringen kunde inte läsas.');
         for (const g of (d.groups || [])) for (const a of (g.assignments || [])) if (a.id === id) return a;
         return null;
     }
@@ -219,12 +219,12 @@ window.PlaneringBemanning = (function () {
         // Platserna räknas på servern (GridResponse.PlacesMissing) — EN räkning för rubriken och Dagens plan. JS-räkningen finns kvar bara som reserv för en familjs sammanslagna rutnät.
         const places = g.placesMissing != null && !g.family ? g.placesMissing : (g.rows || []).reduce((acc, r) => acc + cols.reduce((a, c) => a + missingFor(r, c), 0), 0);
         const holes = (g.rows || []).reduce((a, r) => a + (r.gaps || []).length, 0);
-        const parts = [`${g.totalAssigned || 0} uppdrag`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
+        const parts = [`${g.totalAssigned || 0} placeringar`, `${(g.rows || []).length} roller`, `${cols.length} ${cols.length === 1 ? 'dag' : 'dagar'}`];
         if (places) parts.push(`<span class="text-danger fw-semibold" data-plb-missing="${places}">${places} ${places === 1 ? 'plats saknas' : 'platser saknas'}</span>`);
         // "Lucka" = en stund mellan två uppdrag på samma post då ingen står där (persontest 6b: ordet förklarades ingenstans).
-        if (holes) parts.push(`<span class="text-danger fw-semibold" title="Tider då ingen står på posten, mellan två uppdrag samma dag">${holes} ${holes === 1 ? 'obemannad tid' : 'obemannade tider'} mellan uppdragen</span>`);
+        if (holes) parts.push(`<span class="text-danger fw-semibold" title="Tider då ingen står på posten, mellan två placeringar samma dag">${holes} ${holes === 1 ? 'obemannad tid' : 'obemannade tider'} mellan placeringarna</span>`);
         if (g.volunteersTotal > 0) {
-            parts.push(`<span data-plb-volunteers="${g.volunteersWithJob || 0}/${g.volunteersTotal}">${g.volunteersWithJob || 0} av ${g.volunteersTotal} anmälda funktionärer har uppdrag</span>`);
+            parts.push(`<span data-plb-volunteers="${g.volunteersWithJob || 0}/${g.volunteersTotal}">${g.volunteersWithJob || 0} av ${g.volunteersTotal} anmälda funktionärer är placerade</span>`);
         }
         return parts.join(' · ');
     }
@@ -302,7 +302,7 @@ window.PlaneringBemanning = (function () {
                     <div class="small mt-2" id="plbMnPasteRes" aria-live="polite"></div>
                 </div>
                 <div class="list-group plb-many-list" id="plbMnList" style="max-height:40vh;overflow:auto"><div class="list-group-item small plb-dim">Hämtar…</div></div>
-                <div class="pl-help small mt-2 mb-0">Utan tid gäller uppdraget hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
+                <div class="pl-help small mt-2 mb-0">Utan tid gäller placeringen hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
                 <div class="text-danger small mt-1" id="plbMnErr" role="alert"></div>`,
             onOpen: b => {
                 let timer = null;
@@ -438,14 +438,14 @@ window.PlaneringBemanning = (function () {
         if (!todo.length) { A.showMsg('Alla inlagda har redan fått sin förfrågan.', 'success'); return; }
         const people = new Set(todo.map(e => e.memberId ? 'm' + e.memberId : 'n' + (e.displayName || '').toLowerCase())).size;
         if (!await A.plConfirm(`Skicka förfrågan till ${people} ${people === 1 ? 'person' : 'personer'}?`,
-            `${todo.length} ${todo.length === 1 ? 'uppdrag' : 'uppdrag'} får ett mejl (och en notis till dem med konto) med en länk där de svarar ja eller nej. Det går inte att ta tillbaka när det är skickat.`, 'Skicka')) return;
+            `${todo.length} ${todo.length === 1 ? 'placering' : 'placeringar'} får ett mejl (och en notis till dem med konto) med en länk där de svarar ja eller nej. Det går inte att ta tillbaka när det är skickat.`, 'Skicka')) return;
         let ok = 0, fail = '';
         for (const e of todo) {
             try { const d = await spost('NotifyAssignment', { id: e.id }); if (d.success) ok++; else fail = d.message || fail; }
             catch (err) { fail = err.message; }
         }
         await loadGrid(); drawGrid();
-        if (ok) A.showMsg(`Förfrågan är skickad om ${ok} av ${todo.length} uppdrag.` + (fail ? ' ' + esc(fail) : ''), ok === todo.length ? 'success' : 'warning');
+        if (ok) A.showMsg(`Förfrågan är skickad om ${ok} av ${todo.length} placeringar.` + (fail ? ' ' + esc(fail) : ''), ok === todo.length ? 'success' : 'warning');
         else A.showMsg(esc(fail || 'Förfrågan kunde inte skickas.'), 'danger');
     }
 
@@ -581,7 +581,7 @@ window.PlaneringBemanning = (function () {
         const d = await spost('UndoProposal', { batchId }).catch(() => null);
         if (!d || !d.success) { A.showMsg(esc((d && d.message) || 'Det gick inte att ångra.'), 'danger'); return; }
         await loadGrid(); drawGrid();
-        A.showMsg(`${d.removed} ${d.removed === 1 ? 'uppdrag togs' : 'uppdrag togs'} bort.${d.kept ? ` ${d.kept} står kvar eftersom de hunnit få svar eller ändrats.` : ''}`, 'success');
+        A.showMsg(`${d.removed} ${d.removed === 1 ? 'placering togs' : 'placeringar togs'} bort.${d.kept ? ` ${d.kept} står kvar eftersom de hunnit få svar eller ändrats.` : ''}`, 'success');
     }
     document.addEventListener('click', e => {
         const b = e.target.closest && e.target.closest('[data-plb-undoprop]');
@@ -626,12 +626,12 @@ window.PlaneringBemanning = (function () {
                 <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="plbPpRecalc">Räkna om</button>
                 <p class="mb-2" id="plbPpSummary"><b>${r.patrols.length} patruller</b>, ${r.patrols.reduce((n, p) => n + p.members.length, 0)} starter. I dag finns ${r.existing.patrols} patruller med ${r.existing.shooters} starter.
                     ${c.moved} flyttas · ${c.unchanged} ligger kvar · ${c.added} är nya${c.removed ? ` · ${c.removed} tas bort (inte anmälda längre)` : ''}.${r.lockedKept - (r.keptFitting || 0) > 0 ? ` ${r.lockedKept - (r.keptFitting || 0)} låsta ligger kvar på sin tid.` : ''}</p>
-                ${!(r.moves || []).length && !r.unavoidable.length ? `<div class="alert alert-success py-2 small" id="plbPpNothing"><b>Ingen behöver flyttas.</b> Ingen skytt har en start som krockar med ett uppdrag, så startlistan behöver inte ändras.</div>` : ''}
+                ${!(r.moves || []).length && !r.unavoidable.length ? `<div class="alert alert-success py-2 small" id="plbPpNothing"><b>Ingen behöver flyttas.</b> Ingen skytt har en start som krockar med en placering, så startlistan behöver inte ändras.</div>` : ''}
                 ${(r.moves || []).length ? `<div class="mb-2" id="plbPpMoves"><div class="fw-semibold small mb-1">Så här ändras startlistan (${r.moves.length}) <button type="button" class="btn btn-link btn-sm p-0 align-baseline fw-normal" data-plb-copymoves>Kopiera som lista att ringa efter</button></div>
                     <ul class="list-unstyled small mb-0" style="max-height:24vh;overflow:auto">${r.moves.slice(0, 60).map(m => `<li class="py-1 border-bottom"><span class="fw-semibold">${esc(m.name)}</span> <span class="plb-dim">${esc(m.shootingClass)}</span> —
                         ${m.kind === 'moved' ? `patrull ${m.fromPatrol} kl ca ${esc(m.fromTime)} → <b>patrull ${m.toPatrol} kl ca ${esc(m.toTime)}</b>` : m.kind === 'added' ? `får <b>patrull ${m.toPatrol} kl ${esc(m.toTime)}</b>` : `tas bort (var patrull ${m.fromPatrol} kl ${esc(m.fromTime)})`}
                         <span class="d-block plb-dim">${esc(m.why)}</span></li>`).join('')}${r.moves.length > 60 ? `<li class="py-1 plb-dim">…och ${r.moves.length - 60} till</li>` : ''}</ul></div>` : ''}
-                ${r.unavoidable.length ? `<div class="alert alert-warning py-2 small" id="plbPpUnavoidable"><b>Går inte att undvika krock:</b> ${r.unavoidable.map(u => esc(u.name) + ' kl ' + esc(u.time)).join('; ')}. Uppdraget täcker hela dagen — ändra uppdraget eller starten för hand.</div>` : ''}
+                ${r.unavoidable.length ? `<div class="alert alert-warning py-2 small" id="plbPpUnavoidable"><b>Går inte att undvika krock:</b> ${r.unavoidable.map(u => esc(u.name) + ' kl ' + esc(u.time)).join('; ')}. Placeringen täcker hela dagen — ändra placeringen eller starten för hand.</div>` : ''}
                 ${r.reservesLeftOut.length ? `<p class="small plb-dim" id="plbPpReserves">Utan start (hoppar in vid lucka): ${r.reservesLeftOut.map(esc).join(', ')}.</p>` : ''}
                 ${(r.ungrouped || []).length ? `<div class="alert alert-warning py-2 small" id="plbPpUngrouped"><b>De här har ingen grupp att gå i:</b> ${r.ungrouped.map(esc).join('; ')}. Deras vapenklass finns inte i någon grupp i startlistan, så de placeras inte. Skapa gruppen under Startlistor först.</div>` : ''}
                 ${r.lockedDropped.length ? `<p class="small text-warning-emphasis">Låsta som inte är anmälda längre och därför tas bort: ${r.lockedDropped.map(esc).join(', ')}.</p>` : ''}
@@ -772,7 +772,7 @@ window.PlaneringBemanning = (function () {
         const d = r.defaults || {};
         A.formModal({
             title: 'Skjuttid', okLabel: 'Spara', wide: false,
-            html: `<p class="pl-help mb-2">Så här länge räknar vi att en skytt är upptagen av sin egen start. Det används för att se när någon som både skjuter och jobbar inte hinner med uppdraget — och av förslagen.</p>
+            html: `<p class="pl-help mb-2">Så här länge räknar vi att en skytt är upptagen av sin egen start. Det används för att se när någon som både skjuter och jobbar inte hinner med placeringen — och av förslagen.</p>
                 <div class="mb-2"><label class="form-label mb-0" for="plbStBefore">Minuter före starten <span class="plb-dim small">(förberedelse, vapenkontroll)</span></label>
                     <input type="number" min="0" max="720" class="form-control" id="plbStBefore" inputmode="numeric" style="max-width:140px" value="${r.before}"></div>
                 <div class="mb-2"><label class="form-label mb-0" for="plbStDur">Så länge tar skjutningen <span class="plb-dim small">(minuter; används när slutet inte är känt, som i fält)</span></label>
@@ -952,7 +952,7 @@ window.PlaneringBemanning = (function () {
             <button type="button" class="btn btn-sm btn-outline-secondary" data-plb-undoprop="${esc(g.undoBatchId)}">Ångra förslaget</button></div>`;
         const vols = g.volunteers || [];
         const noNeeds = !(g.placesNeeded > 0);   // utan behov har förslaget inga platser att fylla (Stefan 2026-10-27)
-        if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}${noNeeds && !g.family ? '<div class="small mt-1" id="plbNoNeedsHint">Förslaget fyller de platser som behövs. Ni har ännu inte sagt hur många som behövs av varje roll — gör det först.</div>' : ''}</div>
+        if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men är inte placerade än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}${noNeeds && !g.family ? '<div class="small mt-1" id="plbNoNeedsHint">Förslaget fyller de platser som behövs. Ni har ännu inte sagt hur många som behövs av varje roll — gör det först.</div>' : ''}</div>
             <div class="d-flex gap-1 flex-wrap">${!g.family && linked() ? (noNeeds ? '<button type="button" class="btn btn-sm btn-primary" data-plb-plan-action="behov"><i class="bi bi-123 me-1" aria-hidden="true"></i>Sätt antal…</button>' : '<button type="button" class="btn btn-sm btn-primary" data-plb-proposal><i class="bi bi-magic me-1" aria-hidden="true"></i>Fyll med förslag</button>') : ''}
             <button type="button" class="btn btn-sm btn-warning" data-plb-queue>Visa dem</button></div></div>`;
         const clashes = g.clashes || [];
@@ -962,7 +962,7 @@ window.PlaneringBemanning = (function () {
         // Omgång 3 steg 9: krockar över hela veckan — med en annan del av veckan, en egen start eller en avsikt att tävla.
         const fam = g.familyClashes || [];
         if (fam.length) {
-            const KIND = { uppdrag: 'två uppdrag samtidigt', start: 'uppdrag under egen start', avsikt: 'tänker tävla samma dag' };
+            const KIND = { uppdrag: 'två platser samtidigt', start: 'placerad under egen start', avsikt: 'tänker tävla samma dag' };
             notes += `<div class="alert alert-warning py-2 small" id="plbFamilyClashes"><div class="fw-semibold mb-1"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Krockar i veckan</div>`
                 + fam.slice(0, 10).map(c => `<div data-clash-kind="${esc(c.kind || '')}">· <button type="button" class="btn btn-link p-0 align-baseline fw-semibold" data-plb-person="${esc(c.personKey)}">${esc(c.name)}</button>
                     <span class="badge ${c.kind === 'avsikt' ? 'text-bg-light border' : 'text-bg-warning'} fw-normal">${esc(KIND[c.kind] || c.kind || '')}</span>
@@ -1041,7 +1041,7 @@ window.PlaneringBemanning = (function () {
                     const over = filled > need;
                     tally = `<div class="plb-need ${short ? 'text-danger fw-semibold' : over ? 'text-warning-emphasis' : 'text-success'}" title="${over ? 'Fler på plats samtidigt än behovet' : 'Flest på plats samtidigt'}" data-plb-over="${over ? filled - need : 0}">${filled}/${need}${short ? ' — saknas ' + (need - filled) : ''}${over ? ' — ' + (filled - need) + ' över behovet' : ''}</div>`;
                 }
-                if (entries.length > filled && filled > 0) tally += `<div class="plb-dim small">${entries.length} uppdrag, högst ${filled} samtidigt</div>`;
+                if (entries.length > filled && filled > 0) tally += `<div class="plb-dim small">${entries.length} placeringar, högst ${filled} samtidigt</div>`;
                 const holes = (row.gaps || []).filter(x => x.dateKey === c.key);
                 if (holes.length) {
                     cls += ' plb-short';
@@ -1079,7 +1079,7 @@ window.PlaneringBemanning = (function () {
                 <tbody id="plbGridBody">${rows || `<tr><td class="plb-dim p-3" colspan="${shownCount + 1}">Inga roller än. Skriv den första nedan.</td></tr>`}</tbody>
                 ${g.family ? '' : `<tfoot><tr><td class="plb-rolecol"><label class="visually-hidden" for="plbNewRole">Ny roll</label><input type="text" class="form-control form-control-sm" id="plbNewRole" placeholder="+ Ny roll — skriv namnet" autocomplete="off"></td>
                 <td class="plb-dim small" colspan="${Math.max(1, shownCount)}">Skriv vad <em>ni</em> kallar funktionen och tryck Enter.</td></tr></tfoot>`}</table></div>
-            <p class="pl-help small mt-2 mb-0">Klicka på <b>lägg till</b> i en ruta för att sätta in en person. Utan tid gäller uppdraget hela dagen. Gulmarkerade namn saknar konto på pistol.nu.${g.family ? ' Varje del har sin egen rubrik; en grå ruta betyder att delen inte har den dagen planerad.' : ''}</p>${hiddenNote}`;
+            <p class="pl-help small mt-2 mb-0">Klicka på <b>lägg till</b> i en ruta för att sätta in en person. Utan tid gäller placeringen hela dagen. Gulmarkerade namn saknar konto på pistol.nu.${g.family ? ' Varje del har sin egen rubrik; en grå ruta betyder att delen inte har den dagen planerad.' : ''}</p>${hiddenNote}`;
         const t = $('plbGrid');
         // Rollkolumnen är smalare på telefon (se css) — samma mått här, annars rullar rutnätet i onödan.
         if (t) t.style.minWidth = phone ? '' : (260 + Math.max(1, shownCount) * 215) + 'px';
@@ -1363,7 +1363,7 @@ window.PlaneringBemanning = (function () {
             const d = await spost('SaveAssignment', payload, ed.row.planningId);
             if (!d.success && d.duplicate && !ed.allowDup) {
                 ed.allowDup = true;
-                err.textContent = (d.message || 'Personen har redan det här uppdraget.') + ' Tryck Enter igen för att lägga till ändå.';
+                err.textContent = (d.message || 'Personen är redan placerad här.') + ' Tryck Enter igen för att lägga till ändå.';
                 return;
             }
             if (!d.success) { err.textContent = d.message || 'Det gick inte att spara.'; return; }
@@ -1523,7 +1523,7 @@ window.PlaneringBemanning = (function () {
             let d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: false }, row.planningId);
             if (!d.success && d.requiresConfirm) {
                 const n = d.inUse || 0;
-                if (!await A.plConfirm('Ta bort raden ' + row.roleName + '?', n + (n === 1 ? ' person har' : ' personer har') + ' uppdrag på raden och förlorar dem.', 'Ta bort raden', true)) return;
+                if (!await A.plConfirm('Ta bort raden ' + row.roleName + '?', n + (n === 1 ? ' person står' : ' personer står') + ' på raden och förlorar sin plats.', 'Ta bort raden', true)) return;
                 d = await spost('DeleteRole', { roleKey: row.roleKey, deleteAssignments: true }, row.planningId);
             }
             if (!d.success) { A.failMsg(d, 'Raden kunde inte tas bort.'); return; }
@@ -1600,7 +1600,7 @@ window.PlaneringBemanning = (function () {
             title: col ? 'Ändra dagen' : 'Lägg till en dag', okLabel: col ? 'Spara' : 'Lägg till', wide: false,
             html: `${partPick(pid, 'plbDayPart')}<div class="mb-3"><label class="form-label" for="plbDayDate">Datum</label>
                     <input type="text" class="form-control" id="plbDayDate" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" value="${col ? esc(col.key) : ''}"${col ? ' disabled' : ''}>
-                    ${col ? '<div class="pl-help small mt-1">Datumet går inte att ändra. Flytta uppdragen till en ny dag i stället.</div>' : ''}</div>
+                    ${col ? '<div class="pl-help small mt-1">Datumet går inte att ändra. Flytta placeringarna till en ny dag i stället.</div>' : ''}</div>
                 <div class="mb-3"><label class="form-label" for="plbDayLabel">Vad kallar ni dagen? <span class="plb-dim">(valfritt)</span></label>
                     <input type="text" class="form-control" id="plbDayLabel" maxlength="100" placeholder="t.ex. Iordningställande, Vapengrupp C" value="${col ? esc(col.dayLabel || '') : ''}"></div>
                 <fieldset><legend class="form-label fs-6">Vad händer den dagen?</legend>
@@ -1624,7 +1624,7 @@ window.PlaneringBemanning = (function () {
             let d = await spost('DeleteDay', { id: col.dayId || 0, dateKey: col.key, deleteAssignments: false });
             if (!d.success && d.requiresConfirm) {
                 const n = d.inUse || 0;
-                if (!await A.plConfirm('Ta bort ' + col.label + '?', n + (n === 1 ? ' uppdrag ligger' : ' uppdrag ligger') + ' på dagen och tas bort med den.', 'Ta bort dagen', true)) return;
+                if (!await A.plConfirm('Ta bort ' + col.label + '?', n + (n === 1 ? ' placering ligger' : ' placeringar ligger') + ' på dagen och tas bort med den.', 'Ta bort dagen', true)) return;
                 d = await spost('DeleteDay', { id: col.dayId || 0, dateKey: col.key, deleteAssignments: true });
             }
             if (!d.success) { A.failMsg(d, 'Dagen kunde inte tas bort.'); return; }
@@ -1640,14 +1640,14 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Kopiera bemanningen från ' + col.label, okLabel: 'Kopiera', wide: false,
             html: `<label class="form-label" for="plbCopyTo">Till vilken dag?</label><select class="form-select" id="plbCopyTo">${dayOptions('', col.key, false)}</select>
-                <p class="pl-help small mt-2 mb-0">Alla uppdrag den dagen kopieras. Den som redan står på samma roll den andra dagen kopieras inte en gång till.</p>`,
+                <p class="pl-help small mt-2 mb-0">Alla placeringar den dagen kopieras. Den som redan står på samma roll den andra dagen kopieras inte en gång till.</p>`,
             onOk: async b => {
                 const to = b.querySelector('#plbCopyTo').value;
                 if (!to) return 'Välj en dag.';
                 const d = await spost('CopyDay', { fromDate: col.key, toDate: to });
                 if (!d.success) return d.message || 'Det gick inte att kopiera.';
                 await loadGrid(); drawGrid();
-                A.showMsg('Kopierade ' + (d.copied || 0) + ' uppdrag.' + (d.skipped ? ' ' + d.skipped + ' fanns redan.' : ''));
+                A.showMsg('Kopierade ' + (d.copied || 0) + ' placeringar.' + (d.skipped ? ' ' + d.skipped + ' fanns redan.' : ''));
                 return true;
             }
         });
@@ -1677,7 +1677,7 @@ window.PlaneringBemanning = (function () {
                 }
                 if (to) {
                     const d = await spost('MoveAssignmentToDay', { id, date: to }, pid);
-                    if (!d.success) { await refreshPart(); return d.message || 'Uppdraget flyttades, men inte till den dagen.'; }
+                    if (!d.success) { await refreshPart(); return d.message || 'Placeringen flyttades, men inte till den dagen.'; }
                 }
                 await refreshPart();
                 return true;
@@ -1697,7 +1697,7 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Personer
     function peopleSummary() {
         const m = B.meta || {};
-        const parts = [`${m.totalPeople || 0} personer`, `${m.assignedCount || 0} med uppdrag`];
+        const parts = [`${m.totalPeople || 0} personer`, `${m.assignedCount || 0} placerade`];
         if (m.needsResponseCount) parts.push(`${m.needsResponseCount} väntar på svar`);
         if (m.externalCount) parts.push(`${m.externalCount} utan konto`);
         return parts.join(' · ');
@@ -1729,9 +1729,9 @@ window.PlaneringBemanning = (function () {
         ]);
         const m = B.meta || {};
         let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>lägga in folk</b>? Gå till <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnät</button> och välj <b>Lägg in flera</b>.</p>`;
-        if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att få ett uppdrag. De väntar på att du fördelar rollerna.</div>
+        if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att bli placerade. De väntar på att du fördelar rollerna.</div>
             ${B.show === 'queue' ? '' : '<button type="button" class="btn btn-sm btn-warning" data-plb-show="queue">Visa dem</button>'}</div>`;
-        if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till ett uppdrag — platsen behöver fyllas.</div>
+        if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till sin plats — platsen behöver fyllas.</div>
             ${B.show === 'declined' ? '' : '<button type="button" class="btn btn-sm btn-outline-secondary" data-plb-show="declined">Visa</button>'}</div>`;
         const roles = new Map();
         (B.people || []).forEach(p => (p.assignments || []).forEach(a => roles.set(a.roleKey, a.roleName)));
@@ -1740,7 +1740,7 @@ window.PlaneringBemanning = (function () {
             <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                 <input type="search" class="form-control form-control-sm" id="plbQ" style="max-width:240px" placeholder="Sök namn, roll, förening" aria-label="Sök" value="${esc(B.q)}">
                 <select class="form-select form-select-sm" id="plbShow" style="width:auto" aria-label="Vilka som visas">
-                    ${opt('', 'Alla personer', B.show)}${opt('queue', 'Anmälda utan uppdrag', B.show)}${opt('assigned', 'Har uppdrag', B.show)}${opt('invited', 'Väntar på svar', B.show)}${opt('declined', 'Har tackat nej', B.show)}${opt('prep', 'Har förberedelser', B.show)}${opt('external', 'Utan konto', B.show)}
+                    ${opt('', 'Alla personer', B.show)}${opt('queue', 'Anmälda, inte placerade', B.show)}${opt('assigned', 'Är placerade', B.show)}${opt('invited', 'Väntar på svar', B.show)}${opt('declined', 'Har tackat nej', B.show)}${opt('prep', 'Har förberedelser', B.show)}${opt('external', 'Utan konto', B.show)}
                 </select>
                 <select class="form-select form-select-sm" id="plbRoleF" style="width:auto" aria-label="Roll">${opt('', 'Alla roller', B.role)}${[...roles].sort((a, b) => a[1].localeCompare(b[1], 'sv')).map(([k, n]) => opt(k, n, B.role)).join('')}</select>
                 <div class="form-check form-switch mb-0 ms-sm-2"><input class="form-check-input" type="checkbox" role="switch" id="plbByOrg"${B.byOrg ? ' checked' : ''}><label class="form-check-label small" for="plbByOrg">Gruppera per förening</label></div>
@@ -1760,15 +1760,15 @@ window.PlaneringBemanning = (function () {
         let chips = asg.slice(0, 3).map(a => `<span class="pl-role">${a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" aria-label="Ansvarig"></i>' : ''}${esc(a.roleName)}${a.dayLabel ? ` <span class="plb-dim">· ${esc(a.dayLabel)}</span>` : ''}</span>`).join(' ');
         if (asg.length > 3) chips += ` <span class="pl-role">+${asg.length - 3}</span>`;
         if (!asg.length) chips = p.volunteer
-            ? '<span class="text-warning-emphasis small"><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>Anmäld — inget uppdrag än</span>'
-            : ((p.availabilityLabels || []).length ? '<span class="text-warning-emphasis small">Har angett tider — inget uppdrag än</span>'
+            ? '<span class="text-warning-emphasis small"><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>Anmäld — inte placerad än</span>'
+            : ((p.availabilityLabels || []).length ? '<span class="text-warning-emphasis small">Har angett tider — inte placerad än</span>'
                 : ((p.prep || []).length ? '<span class="plb-dim small">Bara förberedelser</span>' : '<span class="plb-dim small">—</span>'));
         const state = `<span class="pl-state ${STATE_CLS[p.state] || 'off'}">${esc(p.state)}</span>`;
         const startsLine = (p.starts || []).length ? `<div class="plb-dim small" data-plb-starts>Skjuter själv: ${p.starts.map(esc).join(', ')}</div>` : '';
         const menu = p.readOnly ? '' : A.rowMenu([
             { label: 'Öppna ' + first(p.displayName), fn: () => nav('personer', p.key) },
-            { label: 'Ge ett uppdrag…', fn: () => openAssignment({ person: p }) },
-            asg.some(a => !a.readOnly) && (p.memberId || p.email) && { label: 'Skicka förfrågan om uppdragen…', fn: () => notifyPerson(p) },
+            { label: 'Placera på en plats…', fn: () => openAssignment({ person: p }) },
+            asg.some(a => !a.readOnly) && (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringarna…', fn: () => notifyPerson(p) },
         ]);
         const call = p.phone ? ` <a class="btn btn-sm btn-outline-success" href="tel:${esc(p.phone)}" title="Ring ${esc(p.displayName)}" aria-label="Ring ${esc(p.displayName)}"><i class="bi bi-telephone" aria-hidden="true"></i></a>` : '';
         return `<tr><td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-plb-person="${esc(p.key)}">${esc(p.displayName)}</button>
@@ -1786,7 +1786,7 @@ window.PlaneringBemanning = (function () {
         const total = (B.people || []).length;
         $('plbCount').textContent = list.length === total ? `${total} personer` : `Visar ${list.length} av ${total}`;
         if (!list.length) {
-            host.innerHTML = `<p class="pl-help mb-0">${total ? 'Ingen person matchar.' : 'Ingen har ett uppdrag än. Sätt in folk i rutnätet, eller använd Hitta funktionärer.'}</p>`;
+            host.innerHTML = `<p class="pl-help mb-0">${total ? 'Ingen person matchar.' : 'Ingen är placerad än. Sätt in folk i rutnätet, eller använd Hitta funktionärer.'}</p>`;
             return;
         }
         if (B.byOrg) list = list.slice().sort((a, b) => orgOf(a).localeCompare(orgOf(b), 'sv') || a.displayName.localeCompare(b.displayName, 'sv'));
@@ -1797,12 +1797,12 @@ window.PlaneringBemanning = (function () {
             if (B.byOrg && orgOf(p) !== lastOrg) {
                 lastOrg = orgOf(p);
                 const n = list.filter(x => orgOf(x) === lastOrg).length, o = orgCounts.get(lastOrg);
-                rows += `<tr class="plb-org"><th colspan="4" scope="rowgroup">${esc(lastOrg)} <span class="plb-dim fw-normal small">· ${n} ${n === 1 ? 'person' : 'personer'}${o ? ' · ' + o.assignments + ' uppdrag' : ''}</span></th></tr>`;
+                rows += `<tr class="plb-org"><th colspan="4" scope="rowgroup">${esc(lastOrg)} <span class="plb-dim fw-normal small">· ${n} ${n === 1 ? 'person' : 'personer'}${o ? ' · ' + o.assignments + ' placeringar' : ''}</span></th></tr>`;
             }
             rows += personRow(p);
         });
         host.innerHTML = `<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr>
-                <th scope="col">Person</th><th scope="col" class="d-none d-md-table-cell">Uppdrag</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th>
+                <th scope="col">Person</th><th scope="col" class="d-none d-md-table-cell">Placeringar</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th>
             </tr></thead><tbody>${rows}</tbody></table></div>`
             + (list.length > slice.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-plb-more>Visa ${Math.min(60, list.length - slice.length)} till (${list.length - slice.length} kvar)</button>` : '')
             + (B.byOrg ? '<p class="pl-help small mt-2 mb-0">Föreningen är den som personen ställer upp för — förvalt huvudklubben.</p>' : '');
@@ -1830,7 +1830,7 @@ window.PlaneringBemanning = (function () {
         box.innerHTML = `<div class="pl-cardh"><h2>Tävlar själv</h2>${r.canEdit && !p.readOnly ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-plb-shoot>Ändra…</button>' : ''}</div>`
             + (mine.length ? `<ul class="list-unstyled mb-0">${mine.map(i => { const t = byId.get(i.targetPlanningId) || {};
                 return `<li><i class="bi bi-bullseye me-1" aria-hidden="true"></i><b>${esc(t.name || '')}</b>${i.classes ? ' · ' + esc(i.classes) : ''}${when(t) ? ` <span class="plb-dim small">· ${esc(when(t))}</span>` : ''}</li>`; }).join('')}</ul>
-                <p class="pl-help small mt-2 mb-0">Uppdrag samma dagar visas som krockar i rutnätet.</p>`
+                <p class="pl-help small mt-2 mb-0">Placeringar samma dagar visas som krockar i rutnätet.</p>`
                 : `<p class="pl-help mb-0">${esc(first(p.displayName))} har inte sagt att hen tänker tävla i någon av veckans tävlingar.</p>`);
         const btn = box.querySelector('[data-plb-shoot]');
         if (btn) btn.addEventListener('click', () => openShoot(p, r, mine));
@@ -1846,7 +1846,7 @@ window.PlaneringBemanning = (function () {
                     <input class="form-check-input plb-shoot-cb" type="checkbox" id="plbSh${i}" data-t="${i}"${picked.has(t.planningId) ? ' checked' : ''}>
                     <label class="form-check-label" for="plbSh${i}"><b>${esc(t.name)}</b>${t.from ? ` <span class="plb-dim small">· ${esc(fmtDate(t.from))}</span>` : ''}</label></div>
                     <input type="text" class="form-control form-control-sm mt-1 plb-shoot-cls" data-t="${i}" maxlength="200" placeholder="Klass (valfritt), t.ex. C1" value="${esc(picked.get(t.planningId) || '')}"></div>`).join('')
-                + '<p class="pl-help small mb-0">Uppdrag de dagarna visas som krockar i rutnätet, så att du kan lägga dem när hen inte skjuter.</p>',
+                + '<p class="pl-help small mb-0">Placeringar de dagarna visas som krockar i rutnätet, så att du kan lägga dem när hen inte skjuter.</p>',
             onOk: async b => {
                 const picks = [];
                 b.querySelectorAll('.plb-shoot-cb').forEach(cb => {
@@ -1878,14 +1878,14 @@ window.PlaneringBemanning = (function () {
         const sub = [p.clubName ? esc(p.clubName) : '', p.memberId ? 'Medlem på pistol.nu' : '<span class="text-warning-emphasis">Saknar konto på pistol.nu</span>'].filter(Boolean).join(' · ');
         A.setHead(p.displayName, sub);
         A.setActions(p.readOnly ? [] : [
-            { label: 'Ge ' + first(p.displayName) + ' ett uppdrag…', icon: 'bi-plus-lg', fn: () => openAssignment({ person: p }) },
-            editable.length && (p.memberId || p.email) && { label: 'Skicka förfrågan om uppdragen…', icon: 'bi-send', fn: () => notifyPerson(p) },
+            { label: 'Placera ' + first(p.displayName) + '…', icon: 'bi-plus-lg', fn: () => openAssignment({ person: p }) },
+            editable.length && (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringarna…', icon: 'bi-send', fn: () => notifyPerson(p) },
             { divider: true },
             { label: 'Byt namn…', icon: 'bi-pencil', fn: () => openRenamePerson(p) },
             !p.memberId && { label: 'Koppla till en medlem…', icon: 'bi-person-check', fn: () => openLinkPerson(p) },
             { label: p.email ? 'Ändra e-post…' : 'Lägg till e-post…', icon: 'bi-envelope', fn: () => openEmailPerson(p) },
             asg.length && { divider: true },
-            editable.length && { label: 'Lämna över alla uppdrag till någon annan…', icon: 'bi-arrow-left-right', fn: () => openReplace(p) },
+            editable.length && { label: 'Lämna över alla placeringar till någon annan…', icon: 'bi-arrow-left-right', fn: () => openReplace(p) },
         ]);
 
         let h = `<p class="mb-3"><a href="#vy=bemanning&del=personer" data-plb-back>← Alla personer</a></p>`;
@@ -1906,18 +1906,18 @@ window.PlaneringBemanning = (function () {
         }
 
         // Uppdragen
-        h += `<div class="pl-card"><div class="pl-cardh"><h2>Uppdrag (${asg.length})</h2></div>`;
+        h += `<div class="pl-card"><div class="pl-cardh"><h2>Placeringar (${asg.length})</h2></div>`;
         h += asg.length ? `<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th scope="col">Roll</th><th scope="col">När</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th></tr></thead><tbody>`
             + asg.map(a => {
                 const timed = a.shiftLabel && a.shiftLabel.indexOf('–') > 0;
                 const menu = a.readOnly ? `<span class="badge text-bg-light border fw-normal">${esc(p.sourceLabel || 'Stationer-fliken')}</span>` : A.rowMenu([
-                    { label: 'Ändra uppdraget…', fn: () => openAssignment({ id: a.id, person: p }) },
+                    { label: 'Ändra placeringen…', fn: () => openAssignment({ id: a.id, person: p }) },
                     { label: 'Hitta ersättare…', icon: 'bi-person-plus', fn: () => openFindReplacement(a, p) },
                     timed && { label: 'Dela passet — någon annan tar resten…', fn: () => openSplit(a, p) },
                     { label: 'Flytta till en annan dag…', fn: () => moveFromPerson(a) },
-                    (p.memberId || p.email) && { label: 'Skicka förfrågan om uppdraget…', fn: () => notifyOne(a, p) },
+                    (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringen…', fn: () => notifyOne(a, p) },
                     { divider: true },
-                    { label: 'Ta bort uppdraget…', danger: true, fn: () => removeFromPerson(a, p) },
+                    { label: 'Ta bort placeringen…', danger: true, fn: () => removeFromPerson(a, p) },
                 ]);
                 const st = `<span class="pl-state ${STATUS_CLS[a.status] || 'off'}">${esc(STATUS[a.status] || a.status)}</span>`;
                 return `<tr><td><b>${esc(a.roleName)}</b>${a.functionTitle ? ` <span class="plb-dim">· ${esc(a.functionTitle)}</span>` : ''}${a.isResponsible ? ' <i class="bi bi-star-fill text-warning" title="Ansvarig" aria-label="Ansvarig"></i>' : ''}
@@ -1925,7 +1925,7 @@ window.PlaneringBemanning = (function () {
                     <td>${a.dayLabel ? esc(a.dayLabel) + '<br>' : ''}<span class="plb-dim small">${esc(a.shiftLabel || a.passLabel || 'Hela dagen')}</span></td>
                     <td class="d-none d-sm-table-cell">${st}</td><td class="text-end">${menu}</td></tr>`;
             }).join('') + '</tbody></table></div>'
-            : '<p class="pl-help mb-0">Inga uppdrag än.</p>';
+            : '<p class="pl-help mb-0">Inga placeringar än.</p>';
         h += '</div>';
 
         // Behörighet — när planeringen är kopplad till en tävling, eller är en huvudplanering med delar (steg 5: gäller då alla
@@ -1935,7 +1935,7 @@ window.PlaneringBemanning = (function () {
                 ? `<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" id="plbAccess"${p.hasAdminAccess ? ' checked' : ''}>
                     <label class="form-check-label" for="plbAccess">${linked() ? 'Får hantera tävlingen i pistol.nu' : 'Får hantera alla veckans tävlingar i pistol.nu'}</label>
                     <div class="pl-help small">${linked()
-                        ? 'Anmälningar, startlistor, resultat och funktionärssidorna. Gör inte personen till tävlingsledare. Gäller alla hens uppdrag.'
+                        ? 'Anmälningar, startlistor, resultat och funktionärssidorna. Gör inte personen till tävlingsledare. Gäller alla hens placeringar.'
                             + (family() ? ' Huvudplaneringen har en egen tävling: behörigheten gäller bara den, inte delarnas tävlingar.' : '')
                         : 'Anmälningar, startlistor och funktionärssidorna i <b>varje tävling i veckan</b> — men inte ekonomin och inte att ändra själva tävlingen. Ge bara till någon du litar på. Bara huvudplaneringens sammankallande kan ge den.'}</div></div>`
                 : '<p class="pl-help mb-0">Behörigheten ges till en inloggning — koppla personen till en medlem först.</p>') + '</div>';
@@ -1949,7 +1949,7 @@ window.PlaneringBemanning = (function () {
                 ? `<label class="visually-hidden" for="plbRep">Förening</label><select class="form-select" id="plbRep" style="max-width:420px">
                     <option value=""${p.representsIsDefault || !p.representsId ? ' selected' : ''}>${p.memberId ? 'Huvudklubben' + (p.representsIsDefault && p.representsName ? ' (' + esc(p.representsName) + ')' : '') : 'Ingen förening'}</option>
                     ${reps.map(c => { const v = c.type + ':' + c.id; return `<option value="${esc(v)}"${!p.representsIsDefault && v === repVal ? ' selected' : ''}>${esc(c.name)}${c.type === 'region' ? ' (krets)' : ''}</option>`; }).join('')}
-                  </select><div class="pl-help small mt-1">Gäller alla hens uppdrag.</div>`
+                  </select><div class="pl-help small mt-1">Gäller alla hens placeringar.</div>`
                 : `<p class="pl-help mb-0">${p.representsName ? esc(p.representsName) : 'Ingen förening känd. Koppla personen till en medlem, så kan du välja.'}</p>`) + '</div>';
         }
 
@@ -2043,7 +2043,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Byt namn', okLabel: 'Spara', wide: false,
             html: `<label class="form-label" for="plbPName">Namn</label><input type="text" class="form-control" id="plbPName" maxlength="200" value="${esc(p.displayName)}">
-                <p class="pl-help small mt-1 mb-0">Gäller alla ${(p.assignments || []).length} uppdrag.</p>`,
+                <p class="pl-help small mt-1 mb-0">Gäller alla ${(p.assignments || []).length} placeringar.</p>`,
             onOpen: b => { const i = b.querySelector('#plbPName'); i.focus(); i.select(); },
             onOk: async b => {
                 const v = b.querySelector('#plbPName').value.trim();
@@ -2065,7 +2065,7 @@ window.PlaneringBemanning = (function () {
                 <input type="search" class="form-control" id="plbLinkQ" autocomplete="off" value="${esc(p.displayName)}">
                 <div class="list-group mt-1 d-none" id="plbLinkRes"></div>
                 <div class="mt-2" id="plbLinkPicked"></div>
-                <p class="pl-help small mt-2 mb-0">Alla ${(p.assignments || []).length} uppdrag kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
+                <p class="pl-help small mt-2 mb-0">Alla ${(p.assignments || []).length} placeringar kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
             onOpen: b => {
                 const i = b.querySelector('#plbLinkQ'); i.focus(); i.dispatchEvent(new Event('input'));
                 wireMemberSearch(b, '#plbLinkQ', '#plbLinkRes', m => { picked = m; b.querySelector('#plbLinkPicked').innerHTML = `Vald: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
@@ -2084,7 +2084,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: (p.email ? 'Ändra e-post för ' : 'E-post till ') + p.displayName, okLabel: 'Spara', wide: false,
             html: `<label class="form-label" for="plbPEmail">E-postadress</label><input type="email" class="form-control" id="plbPEmail" autocomplete="off" value="${esc(p.email || '')}" placeholder="namn@exempel.se">
-                <p class="pl-help small mt-1 mb-0">Med e-post kan hen få förfrågan och sitt uppdrag. Utan konto på pistol.nu får hen inget eget schema och inga påminnelser.</p>`,
+                <p class="pl-help small mt-1 mb-0">Med e-post kan hen få förfrågan och sin placering. Utan konto på pistol.nu får hen inget eget schema och inga påminnelser.</p>`,
             onOpen: b => b.querySelector('#plbPEmail').focus(),
             onOk: async b => {
                 const v = b.querySelector('#plbPEmail').value.trim();
@@ -2100,8 +2100,8 @@ window.PlaneringBemanning = (function () {
         let picked = null;
         const n = (p.assignments || []).filter(a => !a.readOnly).length;
         A.formModal({
-            title: 'Lämna över uppdragen', okLabel: 'Lämna över', wide: false,
-            html: `<p class="mb-2">Om ${esc(first(p.displayName))} inte kan längre: alla ${n} uppdrag går över till någon annan. Svaren följer inte med — den nya personen står som Planerad tills hen tackat ja.</p>
+            title: 'Lämna över placeringarna', okLabel: 'Lämna över', wide: false,
+            html: `<p class="mb-2">Om ${esc(first(p.displayName))} inte kan längre: alla ${n} placeringar går över till någon annan. Svaren följer inte med — den nya personen står som Planerad tills hen tackat ja.</p>
                 <label class="form-label" for="plbRepQ">Vem tar över?</label>
                 <input type="search" class="form-control" id="plbRepQ" autocomplete="off" placeholder="Sök medlem, eller skriv ett namn">
                 <div class="list-group mt-1 d-none" id="plbRepRes"></div>
@@ -2185,8 +2185,8 @@ window.PlaneringBemanning = (function () {
             html: `<p class="pl-help mb-2">${esc(r.target.holder)} har ${esc(r.target.role)} ${esc(r.target.when)}. Här är de som anmält sig till dagen.</p>`
                 + (allBusy ? '<p class="small text-warning-emphasis mb-2"><b>Ingen ledig just nu.</b> Alla som anmält sig till dagen är upptagna den tiden. Du kan välja någon ändå, eller skicka en förfrågan under Hitta funktionärer.</p>' : '')
                 + (list.length ? `<div class="list-group" role="radiogroup" aria-label="Möjliga ersättare">${rows}</div>
-                    <div class="pl-help small mt-2">Den som tar över får besked och står som <b>Inbjuden</b> tills hen svarat. ${esc(r.target.holder)} får också besked om att hen inte ska komma.${r.target.hadAccess ? ' <b>Behörigheten i uppdraget följer inte med</b> — den nya personen får den inte, så ge den på nytt om den behövs.' : ''}</div>`
-                    : `<p class="mb-0">Ingen har anmält sig till den dagen ännu. Skicka en förfrågan under Hitta funktionärer, eller sök en medlem under Ändra uppdraget.</p>`),
+                    <div class="pl-help small mt-2">Den som tar över får besked och står som <b>Inbjuden</b> tills hen svarat. ${esc(r.target.holder)} får också besked om att hen inte ska komma.${r.target.hadAccess ? ' <b>Behörigheten i placeringen följer inte med</b> — den nya personen får den inte, så ge den på nytt om den behövs.' : ''}</div>`
+                    : `<p class="mb-0">Ingen har anmält sig till den dagen ännu. Skicka en förfrågan under Hitta funktionärer, eller sök en medlem under Ändra placeringen.</p>`),
             onOk: async b => {
                 const sel = b.querySelector('input[name="plbRepl"]:checked');
                 if (!sel) return list.length ? 'Välj vem som tar över.' : 'Det finns ingen att lämna över till.';
@@ -2196,9 +2196,9 @@ window.PlaneringBemanning = (function () {
                     return `${chosen.name} är upptagen${chosen.busyWith ? ' (' + chosen.busyWith + ')' : ''} den tiden. Tryck Lämna över igen om du vill lämna över ändå.`;
                 }
                 const d = await spost('ReplaceAssignmentHolder', { id: a.id, memberId: +sel.value });
-                if (!d.success) return d.message || 'Uppdraget kunde inte lämnas över.';
+                if (!d.success) return d.message || 'Placeringen kunde inte lämnas över.';
                 if (after) await after(); else { await loadPeople(); drawPerson(p.key); }
-                A.showMsg(`Uppdraget är lämnat till <b>${esc(d.name)}</b>. ${d.notified ? 'Hen har fått besked.' : 'Hen kunde inte nås automatiskt — hör av dig.'}`, 'success');
+                A.showMsg(`Placeringen är lämnad till <b>${esc(d.name)}</b>. ${d.notified ? 'Hen har fått besked.' : 'Hen kunde inte nås automatiskt — hör av dig.'}`, 'success');
                 return true;
             }
         });
@@ -2220,7 +2220,7 @@ window.PlaneringBemanning = (function () {
         });
     }
     async function removeFromPerson(a, p) {
-        if (!await A.plConfirm('Ta bort uppdraget?', p.displayName + ' tas bort från ' + a.roleName + (a.dayLabel ? ' ' + a.dayLabel : '') + '.', 'Ta bort', true)) return;
+        if (!await A.plConfirm('Ta bort placeringen?', p.displayName + ' tas bort från ' + a.roleName + (a.dayLabel ? ' ' + a.dayLabel : '') + '.', 'Ta bort', true)) return;
         try {
             const d = await spost('DeleteAssignment', { id: a.id });
             if (!d.success) { A.failMsg(d, 'Det gick inte att ta bort.'); return; }
@@ -2240,13 +2240,13 @@ window.PlaneringBemanning = (function () {
     async function notifyPerson(p) {
         const list = (p.assignments || []).filter(a => !a.readOnly);
         if (!list.length) return;
-        if (!await A.plConfirm('Skicka förfrågan till ' + p.displayName + '?', 'Hen får ett mejl' + (p.memberId ? ' och en notis' : '') + ' per uppdrag (' + list.length + ' st), med en länk där hen svarar ja eller nej.', 'Skicka')) return;
+        if (!await A.plConfirm('Skicka förfrågan till ' + p.displayName + '?', 'Hen får ett mejl' + (p.memberId ? ' och en notis' : '') + ' per placering (' + list.length + ' st), med en länk där hen svarar ja eller nej.', 'Skicka')) return;
         let ok = 0, fail = '';
         for (const a of list) {
             try { const d = await spost('NotifyAssignment', { id: a.id }); if (d.success) ok++; else fail = d.message || fail; }
             catch (e) { fail = e.message; }
         }
-        if (ok) A.showMsg(`Förfrågan är skickad om ${ok} av ${list.length} uppdrag.` + (fail ? ' ' + esc(fail) : ''));
+        if (ok) A.showMsg(`Förfrågan är skickad om ${ok} av ${list.length} placeringar.` + (fail ? ' ' + esc(fail) : ''));
         else A.showMsg(esc(fail || 'Förfrågan kunde inte skickas.'), 'danger');
         await refreshPart();
     }
@@ -2258,7 +2258,7 @@ window.PlaneringBemanning = (function () {
             await Promise.all([ensureRoles(), ensureGrid()]);
             if (id) {
                 full = await fullAssignment(id);
-                if (!full) { A.showMsg('Uppdraget finns inte längre.', 'danger'); return; }
+                if (!full) { A.showMsg('Placeringen finns inte längre.', 'danger'); return; }
             }
         } catch (e) { A.showMsg(esc(e.message), 'danger'); return; }
         let memberId = full ? (full.memberId || 0) : (person ? (person.memberId || 0) : 0);
@@ -2276,7 +2276,7 @@ window.PlaneringBemanning = (function () {
         const has = person && (person.assignments || []).length
             ? `<div class="pl-help small mb-3">${esc(first(person.displayName))} har redan: ${(person.assignments || []).map(a => esc(a.label || a.roleName)).join(' · ')}</div>` : '';
         A.formModal({
-            title: full ? 'Ändra uppdraget' : (person ? 'Ge ' + first(person.displayName) + ' ett uppdrag' : 'Lägg till en funktionär'),
+            title: full ? 'Ändra placeringen' : (person ? 'Placera ' + first(person.displayName) : 'Lägg till en funktionär'),
             okLabel: full ? 'Spara' : 'Lägg till', wide: false,
             html: `<div class="mb-3"><span class="form-label d-block">Person</span>
                     <div id="plbWhoLocked" class="d-flex justify-content-between align-items-center border rounded px-2 py-1${locked ? '' : ' d-none'}">
@@ -2299,7 +2299,7 @@ window.PlaneringBemanning = (function () {
                     <div class="col-sm-6"><label class="form-label" for="plbAStatus">Läge</label>
                         <select class="form-select" id="plbAStatus">${Object.keys(STATUS).map(k => `<option value="${k}"${k === status ? ' selected' : ''}>${STATUS[k]}</option>`).join('')}</select></div>
                 </div>
-                <p class="pl-help small mt-1 mb-3">Utan tider gäller uppdraget hela dagen.</p>
+                <p class="pl-help small mt-1 mb-3">Utan tider gäller placeringen hela dagen.</p>
                 <label class="form-label" for="plbANote">Anteckning <span class="plb-dim">(valfritt)</span></label>
                 <textarea class="form-control" id="plbANote" rows="2">${esc(full ? (full.note || '') : '')}</textarea>`,
             onOpen: b => {
@@ -2355,7 +2355,7 @@ window.PlaneringBemanning = (function () {
                 const d = await spost('SaveAssignment', payload);
                 if (!d.success && d.duplicate && !b.dataset.allowDup) {
                     b.dataset.allowDup = '1';
-                    return (d.message || 'Personen har redan det här uppdraget.') + ' Tryck ' + (full ? 'Spara' : 'Lägg till') + ' igen för att spara ändå.';
+                    return (d.message || 'Personen är redan placerad här.') + ' Tryck ' + (full ? 'Spara' : 'Lägg till') + ' igen för att spara ändå.';
                 }
                 if (!d.success) return d.message || 'Det gick inte att spara.';
                 B.grid = null;
@@ -2380,17 +2380,17 @@ window.PlaneringBemanning = (function () {
         const paint = (body, d) => {
             if (!rows.length) { body.innerHTML = '<p class="mb-0"><i class="bi bi-check2-circle text-success me-1" aria-hidden="true"></i>Alla i bemanningen är kopplade till en medlem.</p>'; return; }
             const sure = rows.filter(m => m.confident && (m.candidates || []).length);
-            let h = `<p class="pl-help">Personer som skrivits in för hand får varken eget schema eller notiser. Här gissar vi vem som menades — <b>du bekräftar</b>. En koppling gäller alla personens uppdrag.</p>
+            let h = `<p class="pl-help">Personer som skrivits in för hand får varken eget schema eller notiser. Här gissar vi vem som menades — <b>du bekräftar</b>. En koppling gäller alla personens placeringar.</p>
                 <p class="small mb-2">${rows.length} utan koppling · ${d.confident || 0} säkra förslag · ${d.unmatched || 0} utan träff</p>`;
             if (sure.length) h += confirmAll
                 ? `<div class="pl-next"><div class="t">Koppla ${sure.length} personer?<ul class="small mb-0 mt-1">${sure.slice(0, 12).map(m => `<li>${esc(m.name)} → ${esc(m.candidates[0].name)}</li>`).join('')}${sure.length > 12 ? `<li>…och ${sure.length - 12} till</li>` : ''}</ul></div>
                     <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary" data-m-allyes>Ja, koppla</button><button type="button" class="btn btn-sm btn-outline-secondary" data-m-allno>Avbryt</button></div></div>`
                 : `<button type="button" class="btn btn-sm btn-primary mb-3" data-m-all>Koppla alla säkra (${sure.length})</button>`;
             h += rows.map((m, i) => {
-                const head = `<div class="fw-semibold">${esc(m.name)} <span class="plb-dim fw-normal small">${m.rowCount} uppdrag</span>${m.confident ? ' <span class="pl-state ok">säkert förslag</span>' : ''}</div>`;
-                if (m.looksLikeTwoPeople) return `<div class="border rounded p-2 mb-2">${head}<div class="small text-warning-emphasis">Ser ut som två personer i samma ruta. Dela upp dem i två uppdrag först.</div></div>`;
+                const head = `<div class="fw-semibold">${esc(m.name)} <span class="plb-dim fw-normal small">${m.rowCount} placeringar</span>${m.confident ? ' <span class="pl-state ok">säkert förslag</span>' : ''}</div>`;
+                if (m.looksLikeTwoPeople) return `<div class="border rounded p-2 mb-2">${head}<div class="small text-warning-emphasis">Ser ut som två personer i samma ruta. Dela upp dem i två placeringar först.</div></div>`;
                 const dup = (m.inPlan || []).length
-                    ? `<div class="small mt-1 text-warning-emphasis">Finns redan i planen som ${m.inPlan.map((x, j) => `<button type="button" class="btn btn-sm btn-link p-0 align-baseline fw-semibold" data-m-merge="${i}" data-j="${j}">${esc(x.name)}</button> <span class="plb-dim">(${x.rowCount} uppdrag, ${esc(x.reason)})</span>`).join(', ')} — samma person?</div>` : '';
+                    ? `<div class="small mt-1 text-warning-emphasis">Finns redan i planen som ${m.inPlan.map((x, j) => `<button type="button" class="btn btn-sm btn-link p-0 align-baseline fw-semibold" data-m-merge="${i}" data-j="${j}">${esc(x.name)}</button> <span class="plb-dim">(${x.rowCount} placeringar, ${esc(x.reason)})</span>`).join(', ')} — samma person?</div>` : '';
                 if (!(m.candidates || []).length) return `<div class="border rounded p-2 mb-2">${head}${dup}<div class="small plb-dim">Ingen medlem liknar namnet. Lägg till e-post på personen, så kan hen åtminstone få förfrågan.</div></div>`;
                 return `<div class="border rounded p-2 mb-2">${head}${dup}<div class="d-flex gap-2 align-items-center flex-wrap mt-1">
                     <label class="visually-hidden" for="plbMSel${i}">Medlem för ${esc(m.name)}</label>
@@ -2543,7 +2543,7 @@ window.PlaneringBemanning = (function () {
                 <div class="d-flex gap-2 flex-wrap mb-2">
                     <button type="button" class="btn btn-primary btn-sm" data-plb-request${n ? '' : ' disabled'}><i class="bi bi-send me-1" aria-hidden="true"></i>Skicka förfrågan…</button>
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-plb-copylink><i class="bi bi-link-45deg me-1" aria-hidden="true"></i>Kopiera länken</button></div>
-                <p class="mb-0">${volunteers ? `<b>${volunteers}</b> har anmält sig${un ? ` — <span class="text-warning-emphasis fw-semibold">${un} väntar på uppdrag</span> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-queue>Visa dem</button>` : ' — alla har fått uppdrag'}.` : '<span class="pl-help">Ingen har anmält sig än.</span>'}</p></div>`;
+                <p class="mb-0">${volunteers ? `<b>${volunteers}</b> har anmält sig${un ? ` — <span class="text-warning-emphasis fw-semibold">${un} väntar på en plats</span> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-queue>Visa dem</button>` : ' — alla har fått placeringar'}.` : '<span class="pl-help">Ingen har anmält sig än.</span>'}</p></div>`;
         const q = $('plbScopeQ');
         q.addEventListener('input', () => {
             const v = q.value.trim().toLowerCase(), host = $('plbScopeRes'), o = B.scopeOptions || {};
@@ -2659,18 +2659,18 @@ window.PlaneringBemanning = (function () {
     function weekRows() {
         const q = (B.wq || '').trim().toLowerCase();
         const list = (B.week || []).filter(p => !q || p.name.toLowerCase().indexOf(q) >= 0);
-        if (!list.length) return `<p class="plb-dim p-3 mb-0">${(B.week || []).length ? 'Ingen heter så.' : 'Ingen har något uppdrag i veckan än.'}</p>`;
+        if (!list.length) return `<p class="plb-dim p-3 mb-0">${(B.week || []).length ? 'Ingen heter så.' : 'Ingen är placerad i veckan än.'}</p>`;
         return `<div class="list-group list-group-flush">${list.map(p => `<button type="button" class="list-group-item list-group-item-action d-flex flex-wrap gap-2 align-items-baseline" data-plbw-person="${esc(p.key)}">
             <span class="fw-semibold${p.isExternal ? ' text-warning-emphasis' : ''}">${esc(p.name)}</span>
             ${p.clashes ? `<span class="badge text-bg-danger fw-normal">${p.clashes} ${p.clashes === 1 ? 'krock' : 'krockar'}</span>` : ''}
             ${p.warnings ? `<span class="badge text-bg-warning fw-normal">${p.warnings} ${p.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''}
-            <span class="plb-dim small ms-auto">${p.assignments} ${p.assignments === 1 ? 'uppdrag' : 'uppdrag'} · ${esc((p.days || []).map(d => d.label).join(', '))}</span></button>`).join('')}</div>`;
+            <span class="plb-dim small ms-auto">${p.assignments} ${p.assignments === 1 ? 'placering' : 'placeringar'} · ${esc((p.days || []).map(d => d.label).join(', '))}</span></button>`).join('')}</div>`;
     }
     function paintWeek() {
         const list = B.week || [], hard = list.filter(p => p.clashes > 0).length;
         A.setHead('Bemanning', `${list.length} ${list.length === 1 ? 'person' : 'personer'}` + (hard ? ` · <span class="text-danger fw-semibold">${hard} med krock</span>` : ''));
         A.setActions([]);
-        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. ${B.weekStarts ? 'Krock betyder att någon jobbar medan hen själv ska skjuta, eller har två uppdrag på samma tid.' : 'Egna starter räknas först när du öppnar personen.'}</p>
+        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. ${B.weekStarts ? 'Krock betyder att någon jobbar medan hen själv ska skjuta, eller har två placeringar på samma tid.' : 'Egna starter räknas först när du öppnar personen.'}</p>
             <label class="visually-hidden" for="plbwQ">Sök person</label>
             <input type="search" class="form-control mb-2" id="plbwQ" placeholder="Sök person" autocomplete="off" value="${esc(B.wq || '')}">
             <div class="border rounded" id="plbwRows">${weekRows()}</div>`;
@@ -2689,7 +2689,7 @@ window.PlaneringBemanning = (function () {
     function shootWindowsHtml(list) {
         if (!list || !list.length) return '';
         return `<div class="pl-card" id="plbwShoot"><h2 class="h6 mb-1">Lediga fönster att skjuta i</h2>
-            <p class="pl-help small mb-2">Tiden mellan uppdrag och egna starter, minst en timme, kl. 07–20 — så ser du när hen hinner skjuta innan startlistan är gjord.</p>
+            <p class="pl-help small mb-2">Tiden mellan placeringar och egna starter, minst en timme, kl. 07–20 — så ser du när hen hinner skjuta innan startlistan är gjord.</p>
             ${list.map(t => `<div class="mb-2"><b>${esc(t.name)}</b>${t.declared ? ' <span class="badge text-bg-success fw-normal">Tänker tävla</span>' : ''}
                 ${(t.days || []).map(day => `<div class="small plbw-win"><span class="plb-dim">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}:</span> ${day.windows.length ? day.windows.map(w => esc(w.from + '–' + w.to)).join(', ') : '<span class="text-danger">ingen ledig tid</span>'}</div>`).join('')}</div>`).join('')}</div>`;
     }
@@ -2699,7 +2699,7 @@ window.PlaneringBemanning = (function () {
         const back = '<button type="button" class="btn btn-link p-0 mb-2" data-plbw-back><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Alla personer</button>';
         if (!d.success) { A.setHead('Bemanning', ''); A.setActions([]); area().innerHTML = back + `<div class="pl-card"><p class="mb-0">${esc(d.message || 'Personen kunde inte läsas.')}</p></div>`; return; }
         B.wp = d;
-        A.setHead(d.name, `${d.assignments} ${d.assignments === 1 ? 'uppdrag' : 'uppdrag'}`
+        A.setHead(d.name, `${d.assignments} ${d.assignments === 1 ? 'placering' : 'placeringar'}`
             + (d.clashes ? ` · <span class="text-danger fw-semibold">${d.clashes} ${d.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
             + (d.warnings ? ` · <span class="text-warning-emphasis fw-semibold">${d.warnings} ${d.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''));
         A.setActions([d.isExternal ? { label: 'Koppla till en medlem…', icon: 'bi-link-45deg', fn: () => openWeekLink(d, null) } : { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoWeekLink(d) },
@@ -2707,7 +2707,7 @@ window.PlaneringBemanning = (function () {
         let h = back;
         const m = d.match;
         if (d.isExternal && m && !m.looksLikeTwoPeople && ((m.candidates || []).length || (m.inPlan || []).length)) {
-            h += `<div class="pl-next warn" id="plbwMatch"><div class="t"><b>Är det här någon du känner igen?</b> ${esc(d.name)} saknar konto. Kopplingen gäller alla uppdrag i hela veckan.</div>
+            h += `<div class="pl-next warn" id="plbwMatch"><div class="t"><b>Är det här någon du känner igen?</b> ${esc(d.name)} saknar konto. Kopplingen gäller alla placeringar i hela veckan.</div>
                 <div class="d-flex flex-wrap gap-1 mt-1">${(m.candidates || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-primary" data-plbw-cand="${i}">Koppla till ${esc(c.name)}${c.clubName ? ' · ' + esc(c.clubName) : ''}</button>`).join('')}
                 ${(m.inPlan || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-secondary" data-plbw-inplan="${i}">Samma person som ${esc(c.name)}</button>`).join('')}</div></div>`;
         } else if (d.isExternal) h += `<p class="pl-help small"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${esc(d.name)} saknar konto på pistol.nu — inget eget schema och inga påminnelser förrän hen är kopplad.</p>`;
@@ -2715,13 +2715,13 @@ window.PlaneringBemanning = (function () {
             ${(day.carriedIn || []).map(c => `<div class="plb-dim small"><i class="bi bi-moon me-1" aria-hidden="true"></i>Från kvällen före: ${esc(c.label)}</div>`).join('')}
             <ul class="list-unstyled mb-0">${(day.items || []).map(weekItemHtml).join('')}</ul></div>`).join('');
         h += shootWindowsHtml(d.shootWindows);
-        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Uppdragen ändras i<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
+        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Placeringarna ändras i<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
         area().innerHTML = h;
     }
     async function applyWeekLink(d, body, goKey) {
         const r = await spost('ApplyFamilyPersonIdentity', Object.assign({ personKey: d.key }, body));
         if (!r.success) return r.message || 'Det gick inte att koppla.';
-        A.showMsg('Klart — ' + r.affected + (r.affected === 1 ? ' uppdrag' : ' uppdrag') + ' i veckan uppdaterade.' + (r.skipped ? ' ' + r.skipped + ' del' + (r.skipped === 1 ? '' : 'ar') + ' fick du inte ändra och rördes inte.' : ''), 'success');
+        A.showMsg('Klart — ' + r.affected + (r.affected === 1 ? ' placering' : ' placeringar') + ' i veckan uppdaterade.' + (r.skipped ? ' ' + r.skipped + ' del' + (r.skipped === 1 ? '' : 'ar') + ' fick du inte ändra och rördes inte.' : ''), 'success');
         nav('veckan', goKey);
         return true;
     }
@@ -2731,7 +2731,7 @@ window.PlaneringBemanning = (function () {
             title: 'Koppla ' + d.name + ' till en medlem', okLabel: 'Koppla', wide: false,
             html: `<label class="form-label" for="plbLinkQ">Sök medlem</label><input type="search" class="form-control" id="plbLinkQ" autocomplete="off" value="${esc(d.name)}">
                 <div class="list-group mt-1 d-none" id="plbLinkRes"></div><div class="mt-2" id="plbLinkPicked"></div>
-                <p class="pl-help small mt-2 mb-0">Alla ${d.assignments} uppdrag i hela veckan kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
+                <p class="pl-help small mt-2 mb-0">Alla ${d.assignments} placeringar i hela veckan kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
             onOpen: b => {
                 const i = b.querySelector('#plbLinkQ'); i.focus(); i.dispatchEvent(new Event('input'));
                 wireMemberSearch(b, '#plbLinkQ', '#plbLinkRes', m => { picked = m; b.querySelector('#plbLinkPicked').innerHTML = `Vald: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });

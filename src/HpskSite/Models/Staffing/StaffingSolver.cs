@@ -75,7 +75,7 @@ namespace HpskSite.Models.Staffing
                 .Select(r => new BusyItem(BusyKind.Assignment, r.Interval, "förslaget", slotByKey[r.SlotKey].Place)));
             SlotConflict? Conflict(SolverPerson p, SolverSlot s) => StaffingRules.FirstConflict(s.Interval, s.Place, BusyOf(p), options.TravelMargin);
             string Why(SolverPerson p, SolverSlot s) => (p.Roles.Contains(s.RoleKey) ? $"anmäld som {s.RoleName.ToLowerInvariant()}" : "anmäld, var det behövs")
-                + (count[p.MemberId] == 0 ? ", inget uppdrag än" : $", {count[p.MemberId]} uppdrag hittills");
+                + (count[p.MemberId] == 0 ? ", inte placerad än" : $", {count[p.MemberId]} placeringar hittills");
             ProposedRow Row(SolverPerson p, SolverSlot s, SlotConflict? c) => new(s.Key, p.MemberId, p.Name, s.RoleKey, s.ScopeType, s.ScopeKey, s.Date, s.Interval, Why(p, s),
                 c == null ? null : $"{c.Label} ({(c.GapMinutes is int g ? g + " min emellan" : "trångt")})");
 

@@ -96,13 +96,13 @@ namespace HpskSite.Models.Staffing
                 // Texten säger därför vad som faktiskt kontrollerats och hur många som inte kunnat kontrolleras — den gissar aldrig på namn.
                 var members = Math.Max(0, f.AssignedPeople - f.Unlinked);
                 var who = f.PeopleWithStart > 0
-                    ? $"Ingen av de {f.PeopleWithStart} med uppdrag som också skjuter krockar med sin egen start"
-                    : members > 0 ? $"Ingen av de {members} medlemmarna med uppdrag skjuter i tävlingen, så ingen start krockar" : "";
+                    ? $"Ingen av de {f.PeopleWithStart} placerade som också skjuter krockar med sin egen start"
+                    : members > 0 ? $"Ingen av de {members} placerade medlemmarna skjuter i tävlingen, så ingen start krockar" : "";
                 var unlinkedText = f.Unlinked > 0
                     ? $"{f.Unlinked} {(f.Unlinked == 1 ? "namn är inte kopplat till en medlem och går" : "namn är inte kopplade till en medlem och går")} inte att kontrollera"
                     : "";
                 if (f.StartClashes > 0)
-                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, $"{f.StartClashes} {(f.StartClashes == 1 ? "start krockar" : "starter krockar")} med ett uppdrag — bygg om startlistan runt funktionärerna", new[] { "startlista" }));
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, $"{f.StartClashes} {(f.StartClashes == 1 ? "start krockar" : "starter krockar")} med en placering — bygg om startlistan runt funktionärerna", new[] { "startlista" }));
                 else if (f.AssignedPeople == 0)
                     steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, "Ingen är inlagd än, så det finns inget att kontrollera mot startlistan", new[] { "startlista" }));
                 else if (f.Unlinked > 0)
