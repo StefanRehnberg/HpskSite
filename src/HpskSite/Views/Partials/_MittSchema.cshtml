@@ -152,6 +152,14 @@ else
                             {
                                 <div class="text-muted small">@item.Detail</div>
                             }
+                            @if (!string.IsNullOrWhiteSpace(item.HandoverBefore))
+                            {
+                                <div class="small" data-handover="before"><i class="bi bi-arrow-down-right-circle me-1" aria-hidden="true"></i>@item.HandoverBefore</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.HandoverAfter))
+                            {
+                                <div class="small" data-handover="after"><i class="bi bi-arrow-right-circle me-1" aria-hidden="true"></i>@item.HandoverAfter</div>
+                            }
                             @if (!compact && item.HasConflict)
                             {
                                 <div class="small text-warning-emphasis">Krockar med: @item.ConflictText</div>

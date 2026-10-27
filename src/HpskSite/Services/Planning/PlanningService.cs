@@ -68,7 +68,8 @@ namespace HpskSite.Services.Planning
                                                  ("PlanningDecision", "DeciderKind"), ("CompetitionApplication", "PlanningId"),
                                                  ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId"),
                                                  ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin"),
-                                                 ("Planning", "ShooterMode"), ("StaffAssignment", "BatchId"), ("FaltskyttePatrolMember", "Locked") })
+                                                 ("Planning", "ShooterMode"), ("StaffAssignment", "BatchId"), ("FaltskyttePatrolMember", "Locked"),
+                                                 ("Planning", "WholeDayRoles") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;
@@ -194,6 +195,16 @@ namespace HpskSite.Services.Planning
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             s.Database.Execute("UPDATE Planning SET ShooterMode = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL", planningId, mode, Now, byMemberId);
+            Bump(s.Database, planningId);
+        }
+
+        /// <summary>Skiftschemat: slår "ska vara bemannad hela skjuttiden" på eller av för en roll i planeringen. Rollnyckeln prövas av anroparen mot katalogen.</summary>
+        public void SetRoleWholeDay(int planningId, string roleKey, bool on, int byMemberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            var current = s.Database.ExecuteScalar<string?>("SELECT WholeDayRoles FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
+            s.Database.Execute("UPDATE Planning SET WholeDayRoles = @1, UpdatedAt = @2, UpdatedBy = @3 WHERE Id = @0 AND DeletedAt IS NULL",
+                planningId, HpskSite.Models.Staffing.ShiftScheduleRules.WithRole(current, roleKey, on), Now, byMemberId);
             Bump(s.Database, planningId);
         }
 

@@ -276,6 +276,8 @@ namespace HpskSite.Services.Staffing
                             // A whole-day person renders as a bare name; a chip appears only where a real
                             // time exists. Five identical chips would read as five people.
                             TimeLabel = a.ShiftLabel ?? a.PassLabel,
+                            From = a.PassId is > 0 ? null : TimeOnly(a.ShiftLabel, true),
+                            To = a.PassId is > 0 ? null : TimeOnly(a.ShiftLabel, false),
                             ScopeLabel = row.ScopeLabel,
                             Status = a.Status,
                             IsResponsible = a.IsResponsible,
@@ -411,6 +413,10 @@ namespace HpskSite.Services.Staffing
 
             return resp;
         }
+
+        /// <summary>Början eller slutet ur en skiftetikett "08:00–11:00"; null när etiketten saknas eller inte är ett tidsspann.</summary>
+        private static string? TimeOnly(string? label, bool from)
+            => ParseShiftRange(label) is { } r ? $"{(from ? r.start : r.end):hh\\:mm}" : null;
 
         private List<StaffPassView> SafeGetPasses(StaffOwner owner)
         {

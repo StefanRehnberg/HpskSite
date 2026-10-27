@@ -66,6 +66,7 @@ namespace HpskSite.Services.Planning
             copy.DisciplineKey = src.DisciplineKey;
             copy.SignupRoleChoice = src.SignupRoleChoice;
             copy.ShooterMode = src.ShooterMode;
+            copy.WholeDayRoles = src.WholeDayRoles;
             copy.ShootBeforeMin = src.ShootBeforeMin; copy.ShootDurationMin = src.ShootDurationMin; copy.ShootAfterMin = src.ShootAfterMin;
             copy.DoneAtMeetingsOnly = src.DoneAtMeetingsOnly;
             copy.GroupName = src.GroupName;

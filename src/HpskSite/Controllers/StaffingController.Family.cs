@@ -42,6 +42,7 @@ namespace HpskSite.Controllers
                     var grid = _grid.BuildGrid(owner, discipline, viewer.Id);
                     try { ApplyRoleChoice(grid, owner, discipline, row.Id); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", row.Id); }
+                    ApplyShiftSchedule(grid, owner, row);
                     resp.Parts.Add(new FamilyGridPart
                     {
                         PlanningId = row.Id,

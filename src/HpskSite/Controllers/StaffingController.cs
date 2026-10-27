@@ -256,6 +256,7 @@ namespace HpskSite.Controllers
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: latest undoable failed for planning {Planning}", pid); }
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
+                    ApplyShiftSchedule(resp, owner, _owners.Planning(pid));
                     // "Dagens plan": stegen härleds ur det som redan står i svaret — efter rollvalet, så att dolda rader inte räknas.
                     try
                     {
@@ -1524,34 +1525,6 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Staffing: SetPersonRepresents failed for {Comp}", request.CompetitionId);
                 return Json(new { success = false, message = "Kunde inte spara föreningen." });
-            }
-        }
-
-        /// <summary>Cut a shift at a clock time and hand the tail to someone else — the mid-shift dropout.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SplitAssignment([FromBody] SplitAssignmentRequest request)
-        {
-            if (request == null || request.Id <= 0)
-                return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var owner = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
-            if (owner == null)
-                return Json(new { success = false, message = "Ingen behörighet" });
-            // "12" och "1230" räcker (ClockTime) — samma tolkning som fältet i webbläsaren.
-            if (HpskSite.Models.ClockTime.ToTimeSpan(request.At) is not TimeSpan at)
-                return Json(new { success = false, message = "Tiden går inte att läsa. Skriv till exempel 12 eller 12:30." });
-            try
-            {
-                var (ok, msg, newId) = _staffing.SplitAssignment(request.Id, owner, at,
-                    request.MemberId > 0 ? request.MemberId : null, request.NewName, viewer.Id);
-                return Json(new { success = ok, message = msg, id = newId });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Staffing: SplitAssignment failed for {Id}", request.Id);
-                return Json(new { success = false, message = "Kunde inte dela passet." });
             }
         }
 

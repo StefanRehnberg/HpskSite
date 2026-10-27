@@ -63,6 +63,11 @@ namespace HpskSite.Models.Schedule
         /// <summary>Veckan: uppdragets id (StaffAssignment.Id) när raden är ett uppdrag — för "Jag kan inte". 0 för starter och avsikter.</summary>
         public int AssignmentId { get; set; }
 
+        /// <summary>Skiftschemat: "Du tar över kl 11:00 efter Anna." — vem som står före dig i samma ruta. Bara på funktionärsrader med klockslag.</summary>
+        public string? HandoverBefore { get; set; }
+        /// <summary>"Du avlöses kl 14:00 av Berit."</summary>
+        public string? HandoverAfter { get; set; }
+
         /// <summary>Tie-break within a day when StartsAt is null. Minutes-since-midnight when known.</summary>
         public int SortHint { get; set; }
 

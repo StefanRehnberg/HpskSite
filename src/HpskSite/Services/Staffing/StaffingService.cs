@@ -931,75 +931,159 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Split a timed assignment at a clock time and hand the remainder to someone else — "han blev sjuk
-        /// en timme in i passet". Doing it by hand is two edits with nothing tying them together, and it is
-        /// easy to leave the tail uncovered without noticing.
-        /// <para>Refuses on an untimed row: there is no point to split at, and inventing one would invent a
-        /// time the person never agreed to.</para>
+        /// Skiftschemat för en ruta (roll × station × dag): ändrar tiderna på befintliga placeringar, lägger till nya skift och tar bort skift — i EN
+        /// transaktion, så att en gräns som flyttas mellan två skift aldrig lämnar det ena halvt ändrat (Stefan 2026-10-27: "Dela passet" på personens
+        /// sida felade och gick inte att hitta; schemat byggs i stället för rutan). Allt prövas före första skrivningen.
+        /// <para>Befintliga rader byter bara TID här; en annan person på ett befintligt skift går genom Hitta ersättare, som aviserar båda. Skiften får
+        /// överlappa — behövs två samtidigt är det två på samma tid. Ändrade tider på den som redan fått förfrågan (Inbjuden/Tackat ja) lämnas
+        /// tillbaka så att anroparen kan ge besked.</para>
         /// </summary>
-        public (bool Ok, string? Message, int NewId) SplitAssignment(int assignmentId, StaffOwner owner,
-            TimeSpan at, int? newMemberId, string? newName, int byMemberId)
+        public CellShiftsResult SaveCellShifts(StaffOwner owner, SaveCellShiftsRequest req, int byMemberId)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var a = db.SingleOrDefault<StaffAssignment>(
-                "SELECT * FROM StaffAssignment WHERE Id = @0 AND " + StaffOwner.Where(1), assignmentId, owner.P);
-            if (a == null) return (false, "Placeringen hittades inte.", 0);
-            if (a.StartsAt == null || a.EndsAt == null)
-                return (false, "Passet saknar tider. Sätt från- och till-tid först, annars finns ingen punkt att dela vid.", 0);
+            if (string.IsNullOrWhiteSpace(req.RoleKey)) return CellShiftsResult.Fail("Roll saknas.");
+            if (!DateTime.TryParseExact(req.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+                return CellShiftsResult.Fail("Dagen går inte att läsa.");
+            var scopeType = string.IsNullOrWhiteSpace(req.ScopeType) ? null : req.ScopeType.Trim();
+            var scopeKey = string.IsNullOrWhiteSpace(req.ScopeKey) ? null : req.ScopeKey.Trim();
 
-            var day = a.StartsAt.Value.Date;
-            var cut = day.Add(at);
-            if (cut <= a.StartsAt.Value || cut >= a.EndsAt.Value)
-                return (false, $"Tiden måste ligga inuti passet ({a.StartsAt:HH\\:mm}–{a.EndsAt:HH\\:mm}).", 0);
-
-            var tailEnd = a.EndsAt.Value;
-            var now = DateTime.UtcNow;
-
-            string? name = string.IsNullOrWhiteSpace(newName) ? null : newName.Trim();
-            string? phone = null;
-            if (newMemberId is int mid && mid > 0)
+            // Tider: båda tomma = hela dagen; annars båda, och slutet efter början.
+            (DateTime? Start, DateTime? End)? Times(string? from, string? to, out string? error)
             {
-                var m = _memberService.GetById(mid);
-                if (m == null) return (false, "Medlemmen hittades inte.", 0);
-                name ??= ResolveMemberName(mid);
-                if (m.HasProperty("phoneNumber")) phone = m.GetValue<string>("phoneNumber");
+                error = null;
+                var f = (from ?? "").Trim(); var t = (to ?? "").Trim();
+                if (f.Length == 0 && t.Length == 0) return (null, null);
+                if (f.Length == 0 || t.Length == 0) { error = "Skriv både från och till, eller lämna båda tomma för hela dagen."; return null; }
+                if (!HpskSite.Models.ClockTime.TryNormalize(f, out var fh) || !HpskSite.Models.ClockTime.TryNormalize(t, out var th) || fh == null || th == null)
+                { error = "Klockslagen går inte att läsa. Skriv till exempel 8 eller 8:30."; return null; }
+                var a = day.Date + HpskSite.Models.ClockTime.ToTimeSpan(fh)!.Value; var b = day.Date + HpskSite.Models.ClockTime.ToTimeSpan(th)!.Value;
+                if (b <= a) { error = $"Sluttiden ({th}) måste vara efter starttiden ({fh})."; return null; }
+                return (a, b);
             }
-            if (string.IsNullOrWhiteSpace(name))
-                return (false, "Ange vem som tar över resten av passet.", 0);
 
-            a.EndsAt = cut;
-            a.ModifiedDate = now;
-            db.Update(a);
-
-            var tail = new StaffAssignment
+            var upserts = req.Shifts ?? new();
+            var deletes = (req.DeleteIds ?? new()).Distinct().ToList();
+            var planned = new List<(CellShiftItem Item, DateTime? Start, DateTime? End)>();
+            foreach (var it in upserts)
             {
-                PlanningId = owner.PlanningIdOrNull,
-                CompetitionId = owner.CompetitionIdOrNull,
-                MemberId = newMemberId is > 0 ? newMemberId : null,
-                DisplayName = name!,
-                Phone = phone,
-                RoleKey = a.RoleKey,
-                FunctionTitle = a.FunctionTitle,
-                ScopeType = a.ScopeType,
-                ScopeKey = a.ScopeKey,
-                TargetFrom = a.TargetFrom,
-                TargetTo = a.TargetTo,
-                StartsAt = cut,
-                EndsAt = tailEnd,
-                PassId = a.PassId,
-                IsResponsible = false,
-                HasAdminAccess = false,
-                // A stand-in has not agreed to anything yet.
-                Status = StaffAssignmentStatus.Planned,
-                Note = a.Note,
-                AssignedByMemberId = byMemberId,
-                CreatedDate = now,
-                ModifiedDate = now,
-            };
-            tail.Id = Convert.ToInt32(db.Insert(tail));
-            return (true, null, tail.Id);
+                // Ett befintligt skift utan From och To alls (null, inte tomt) behåller sina tider — bara personen byts.
+                if (it.Id > 0 && it.From == null && it.To == null) { planned.Add((it, null, null)); continue; }
+                var t = Times(it.From, it.To, out var err);
+                if (t == null) return CellShiftsResult.Fail(err!);
+                if (it.Id <= 0 && it.MemberId <= 0 && string.IsNullOrWhiteSpace(it.DisplayName))
+                    return CellShiftsResult.Fail("Välj eller skriv en person för varje nytt skift.");
+                planned.Add((it, t.Value.Start, t.Value.End));
+            }
+            if (upserts.Where(u => u.Id > 0).Select(u => u.Id).Intersect(deletes).Any())
+                return CellShiftsResult.Fail("Ett skift kan inte både ändras och tas bort.");
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var ids = upserts.Where(u => u.Id > 0).Select(u => u.Id).Concat(deletes).Distinct().ToList();
+            var rows = ids.Count == 0 ? new List<StaffAssignment>()
+                : db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE Id IN (@ids) AND " + StaffOwner.Where(1), new { ids }, owner.P);
+            if (rows.Count != ids.Count) return CellShiftsResult.Fail("Ett skift finns inte längre. Ladda om sidan.");
+            var passDates = rows.Where(r => r.PassId is > 0).Select(r => r.PassId!.Value).Distinct().ToList();
+            var passDay = passDates.Count == 0 ? new Dictionary<int, DateTime>()
+                : db.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE Id IN (@ids)", new { ids = passDates }).ToDictionary(p => p.Id, p => p.PassDate.Date);
+            foreach (var r in rows)
+            {
+                var rday = r.StartsAt?.Date ?? r.DayDate?.Date ?? (r.PassId is > 0 && passDay.TryGetValue(r.PassId.Value, out var pd) ? pd : (DateTime?)null);
+                var sameScope = string.Equals(NormScope(r.ScopeType), NormScope(scopeType), StringComparison.OrdinalIgnoreCase) && (r.ScopeKey ?? "") == (scopeKey ?? "");
+                if (!string.Equals(r.RoleKey, req.RoleKey, StringComparison.OrdinalIgnoreCase) || !sameScope || rday != day.Date)
+                    return CellShiftsResult.Fail("Ett skift hör inte till den här rutan.");
+                if (r.PassId is > 0 && upserts.Any(u => u.Id == r.Id))
+                    return CellShiftsResult.Fail("Tiden styrs av passet och ändras där.");
+            }
+
+            var now = DateTime.UtcNow;
+            var changed = new List<ChangedShift>();
+            var replaced = new List<ReplacedShift>();
+            foreach (var (it, start, end) in planned)
+            {
+                if (it.Id > 0)
+                {
+                    var r = rows.Single(x => x.Id == it.Id);
+                    var told = string.Equals(r.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(r.Status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase);
+                    var personChanged = it.MemberId > 0 && r.MemberId != it.MemberId;
+                    if (personChanged && !told)
+                    {
+                        // Ingen har fått besked om det här skiftet än: personen byts rakt av, och ingen får något mejl förrän förfrågan skickas.
+                        var nm = _memberService.GetById(it.MemberId);
+                        if (nm == null) return CellShiftsResult.Fail("Medlemmen hittades inte.");
+                        if (string.IsNullOrEmpty(r.OriginalName)) r.OriginalName = r.DisplayName;
+                        r.MemberId = it.MemberId; r.DisplayName = ResolveMemberName(it.MemberId);
+                        r.Email = null; r.Phone = null; r.RepresentsClubId = null; r.RepresentsRegionId = null;
+                        r.Status = StaffAssignmentStatus.Planned; r.CheckedInAt = null; r.HasAdminAccess = false; r.InviteNonce = Guid.NewGuid();
+                        if (string.Equals(r.OriginalName, r.DisplayName, StringComparison.Ordinal)) r.OriginalName = null;
+                        r.ModifiedDate = now;
+                        db.Update(r);
+                        personChanged = false;
+                    }
+                    if (!(it.From == null && it.To == null) && (r.StartsAt != start || r.EndsAt != end))
+                    {
+                        var before = r.StartsAt != null && r.EndsAt != null ? $"{r.StartsAt:HH\\:mm}–{r.EndsAt:HH\\:mm}" : "hela dagen";
+                        r.StartsAt = start; r.EndsAt = end;
+                        r.DayDate = start == null ? day.Date : null;
+                        r.ModifiedDate = now;
+                        db.Update(r);
+                        changed.Add(new ChangedShift(r, before));
+                    }
+                    if (personChanged)
+                    {
+                        // Den som redan fått förfrågan byts genom samma väg som Hitta ersättare: den nya personen blir Inbjuden, båda får besked.
+                        var rep = ReplaceHolder(r.Id, owner, it.MemberId);
+                        if (!rep.Ok) return CellShiftsResult.Fail(rep.Message ?? "Personen kunde inte bytas.");
+                        replaced.Add(new ReplacedShift(rep.Row!, rep.OldName, rep.OldMemberId));
+                        changed.RemoveAll(c => c.Row.Id == r.Id);   // den nya personen får "du har fått ett uppdrag", inte "din tid har ändrats"
+                    }
+                    continue;
+                }
+                string? name = string.IsNullOrWhiteSpace(it.DisplayName) ? null : it.DisplayName.Trim();
+                string? phone = null;
+                if (it.MemberId > 0)
+                {
+                    var m = _memberService.GetById(it.MemberId);
+                    if (m == null) return CellShiftsResult.Fail("Medlemmen hittades inte.");
+                    name ??= ResolveMemberName(it.MemberId);
+                    if (m.HasProperty("phoneNumber")) phone = m.GetValue<string>("phoneNumber");
+                }
+                if (string.IsNullOrWhiteSpace(name)) return CellShiftsResult.Fail("Välj eller skriv en person för varje nytt skift.");
+                db.Insert(new StaffAssignment
+                {
+                    PlanningId = owner.PlanningIdOrNull,
+                    CompetitionId = owner.CompetitionIdOrNull,
+                    MemberId = it.MemberId > 0 ? it.MemberId : null,
+                    DisplayName = name!,
+                    Phone = phone,
+                    RoleKey = req.RoleKey,
+                    ScopeType = scopeType,
+                    ScopeKey = scopeKey,
+                    StartsAt = start, EndsAt = end,
+                    DayDate = start == null ? day.Date : null,
+                    // Ingen har sagt ja än: förfrågan skickas först när arrangören väljer det.
+                    Status = StaffAssignmentStatus.Planned,
+                    AssignedByMemberId = byMemberId,
+                    CreatedDate = now, ModifiedDate = now,
+                });
+            }
+            if (deletes.Count > 0)
+                db.Execute("DELETE FROM StaffAssignment WHERE Id IN (@ids) AND " + StaffOwner.Where(1), new { ids = deletes }, owner.P);
+            scope.Complete();
+            return new CellShiftsResult(true, null, changed, replaced);
         }
+
+        public sealed record ChangedShift(StaffAssignment Row, string Before);
+
+        public sealed record ReplacedShift(StaffAssignment Row, string? OldName, int? OldMemberId);
+
+        public sealed record CellShiftsResult(bool Ok, string? Message, List<ChangedShift> Changed, List<ReplacedShift> Replaced)
+        {
+            public static CellShiftsResult Fail(string message) => new(false, message, new(), new());
+        }
+
+        private static string? NormScope(string? t)
+            => string.IsNullOrEmpty(t) || string.Equals(t, StaffScopeType.All, StringComparison.OrdinalIgnoreCase) ? null : t;
 
         /// <summary>
         /// Set contact details on an existing roster row. Used by the grid to rescue an account-less helper

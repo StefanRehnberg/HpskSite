@@ -140,6 +140,50 @@ namespace HpskSite.Services.Staffing
             return result.OrderByDescending(x => x.Row.Open).ThenBy(x => x.Date).ThenBy(x => x.Row.RoleName).Select(x => x.Row).Take(100).ToList();
         }
 
+        /// <summary>
+        /// Skiftschemat: en person som redan fått förfrågan har fått en ny tid (en gräns flyttades, ett skift delades). Push och mejl med gamla och nya tiden, svar
+        /// till den som ändrade. Returnerar om något gick iväg. Anropas efter att ändringen sparats; ett fel här fäller aldrig sparningen.
+        /// </summary>
+        public async Task<bool> NotifyTimeChangedAsync(StaffAssignment row, string before, int byMemberId)
+        {
+            if (row.MemberId is not > 0) return false;
+            try
+            {
+                var owner = row.PlanningId is > 0 ? _owners.ForPlanning(row.PlanningId.Value) : null;
+                if (owner == null) return false;
+                var member = _members.GetById(row.MemberId.Value);
+                var by = _members.GetById(byMemberId);
+                var roleName = _roles.NameFor(owner, _owners.Discipline(owner), row.RoleKey);
+                var (date, interval) = FamilyWeekService.WhenOf(row, null);
+                var day = date == null ? "" : date.Value.ToString("dddd d MMMM", CultureInfo.GetCultureInfo("sv-SE"));
+                var now = interval is { AllDay: false } iv ? $"{iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : "hela dagen";
+                var planningName = _owners.Name(owner);
+                var title = "Din tid har ändrats";
+                var body = $"{roleName}{(day.Length > 0 ? ", " + day : "")}: nu {now} (var {before}) — {planningName}.";
+                var any = false;
+                try { any = await _push.SendToMemberAsync(row.MemberId.Value, title, body, owner.SignupPath, $"retime-{row.Id}-{now}") > 0; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Skiftschema: pushen till medlem {Member} föll.", row.MemberId); }
+                if (member != null && !string.IsNullOrWhiteSpace(member.Email))
+                {
+                    var url = _links.SiteUrl + owner.SignupPath;
+                    var inner = $"<p>Din tid i <b>{PlanningNotifier.H(planningName)}</b> har ändrats:</p>"
+                        + $"<p style=\"font-size:18px\"><b>{PlanningNotifier.H(roleName)}</b>{(day.Length > 0 ? "<br>" + PlanningNotifier.H(day) : "")}<br><b>{PlanningNotifier.H(now)}</b> <span style=\"color:#666\">(var {PlanningNotifier.H(before)})</span></p>"
+                        + $"<p>{PlanningNotifier.Button("Se din tid", url)}</p>"
+                        + ContactHtml(by);
+                    var replyTo = by != null && !string.IsNullOrWhiteSpace(by.Email)
+                        ? MailReplyTo.To(by.Email, by.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
+                    var html = PlanningNotifier.Page(member.Name ?? "", planningName, inner, "Du får det här mejlet för att din tid har ändrats efter att du fått förfrågan. Det här är den som gäller.");
+                    if (await _email.SendPlanningMailAsync(member.Email, $"Ny tid: {roleName} {day}".Trim(), html, replyTo)) any = true;
+                }
+                return any;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Skiftschema: beskedet om ny tid för uppdrag {Id} föll.", row.Id);
+                return false;
+            }
+        }
+
         /// <summary>Aviserar den som tar över (push och mejl). Returnerar om något gick iväg. Anropas efter att överlämningen sparats.</summary>
         public async Task<bool> NotifyAsync(StaffAssignment row, string? oldName, int? oldMemberId, int byMemberId)
         {

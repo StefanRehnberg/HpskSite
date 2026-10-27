@@ -32,5 +32,24 @@ namespace HpskSite.Services.Staffing
         /// <summary>Alla starter per medlem över <see cref="CompetitionsOf"/>. Opublicerade ingår för planeraren.</summary>
         public Dictionary<int, List<StartWindow>> StartsByMember(StaffOwner owner, bool includeUnpublished = true) =>
             CompetitionsOf(owner).SelectMany(c => _starts.ForCompetition(c, includeUnpublished)).GroupBy(w => w.MemberId).ToDictionary(g => g.Key, g => g.ToList());
+
+        /// <summary>
+        /// Skjuttiden per dag (nyckel "yyyy-MM-dd"): från första start till sista slut över alla starter i tävlingarna. Skiftschemat mäter hålen mot den.
+        /// Slutet är det kända slutet, annars starten + planeringens skjuttid. En dag utan startlista saknas — då finns ingen skjuttid att mäta mot. En start som går över midnatt räknas till 23:59.
+        /// </summary>
+        public Dictionary<string, (TimeSpan From, TimeSpan To)> DayWindows(StaffOwner owner, ShootTime shoot)
+        {
+            var result = new Dictionary<string, (TimeSpan From, TimeSpan To)>();
+            foreach (var w in StartsByMember(owner).Values.SelectMany(x => x))
+            {
+                var key = w.Start.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                var from = w.Start.TimeOfDay;
+                var endAt = w.End is DateTime e && e > w.Start ? e : w.Start + shoot.Duration;   // fältets patruller har inget känt slut: starten + skjuttiden
+                var to = endAt.Date > w.Start.Date ? new TimeSpan(23, 59, 0) : endAt.TimeOfDay;
+                if (to <= from) continue;
+                result[key] = result.TryGetValue(key, out var cur) ? (from < cur.From ? from : cur.From, to > cur.To ? to : cur.To) : (from, to);
+            }
+            return result;
+        }
     }
 }

@@ -125,6 +125,7 @@ namespace HpskSite.Services.Schedule
             if (me == null) return null;
             var s = ToSchedule(rootId, family[0].Name, me.Days, from, to, DateTime.Now);
             if (!s.HasAny) return null;
+            ShiftHandoverReader.Fill(_scopes, s.Days.SelectMany(d => d.Items), _logger);
             if (s.ConflictCount > 0 && ContactFor(rootId) is { } c) { s.ContactName = c.Name; s.ContactPhone = c.Phone; }   // ringer man först när något krockar
             return s;
         }

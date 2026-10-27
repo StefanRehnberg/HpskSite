@@ -892,7 +892,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
             html: `<p class="pl-help small mb-2">${cols.length > 1 ? 'Hur många som behövs varje dag, av varje roll.' : 'Hur många som behövs av varje roll.'} <b>Gäller rollen stationer</b> skriver du hur många på varje station — en ansvarig och en markör på varje station betyder 1 och 1. Tävlingsledning bemannas av den som skapade planeringen.</p>
-                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in som egna namn i samma ruta, var och en med klockslag (till exempel 08–11, 11–14 och 14–17). Då räknas platsen som fylld när någon står där, och du ser om det blir ett hål mellan två.</p>
+                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in i rutans <b>skiftschema</b> (knappen <i>skiftschema</i> i rutan, eller <i>Flera skift under dagen</i> när du klickar lägg till), var och en med klockslag, till exempel 08–11, 11–14 och 14–17. Där ser du vem som står när och var det blir hål, och den som avlöser ser det i sitt schema.</p>
                 <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
                 <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
@@ -1047,7 +1047,11 @@ window.PlaneringBemanning = (function () {
                     cls += ' plb-short';
                     tally += `<div class="plb-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>ingen ${holes.map(x => esc(x.from) + '–' + esc(x.to)).join(', ')}</div>`;
                 }
-                h += `<td class="${cls}">${entries.map(e => entryHtml(e, row, c.key)).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button></td>`;
+                // Skiftschemat: knappen syns bara när det finns något att visa — skift, ett hål eller en roll som ska vara bemannad hela skjuttiden. En tom ruta når det via lägg till.
+                const wholeRole = (g.wholeDayRoles || []).some(k => String(k).toLowerCase() === String(row.roleKey).toLowerCase());
+                const sched = c.key && (entries.length || holes.length || wholeRole)
+                    ? `<button type="button" class="plb-add plb-sc" data-plb-sched="${ri}" data-col="${ci}" title="Se och ändra vem som står när"><i class="bi bi-clock" aria-hidden="true"></i> skiftschema</button>` : '';
+                h += `<td class="${cls}">${entries.map(e => entryHtml(e, row, c.key)).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button>${sched}</td>`;
             });
             return h + '</tr>';
         };
@@ -1136,7 +1140,7 @@ window.PlaneringBemanning = (function () {
             <div class="small fw-semibold mb-1" id="plbEdHead"></div>
             <label class="visually-hidden" for="plbEdName">Person</label>
             <input type="text" class="form-control form-control-sm mb-1" id="plbEdName" autocomplete="off" placeholder="Sök medlem eller skriv ett namn">
-            <div class="small mb-1"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdPaste">Har du en lista med namn? Klistra in den</button></div>
+            <div class="small mb-1"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdPaste">Har du en lista med namn? Klistra in den</button><br><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdSched">Flera skift under dagen? Öppna skiftschemat</button></div>
             <div class="small mb-1 p-1 border rounded bg-body-tertiary" id="plbEdChosen" style="display:none" aria-live="polite"></div>
             <div class="list-group mb-1" id="plbEdSuggest" style="display:none"></div>
             <div id="plbEdCandBox" class="mb-1" style="display:none">
@@ -1191,6 +1195,7 @@ window.PlaneringBemanning = (function () {
         $('plbEdSave').addEventListener('click', edCommit);
         // Många namn på en gång: samma roll, station och dag, men i "Lägg in flera" med inklistringen öppen.
         $('plbEdPaste').addEventListener('click', () => { const e = B.editing; if (!e) return; closeEditor(); openAssignMany({ paste: true, row: e.row, col: e.col }); });
+        $('plbEdSched').addEventListener('click', () => { const e = B.editing; if (!e || !e.col.key) { $('plbEdErr').textContent = 'Skiftschemat gäller en dag. Välj en dagkolumn.'; return; } closeEditor(); openSchedule(e.row, colsFor(e.row).find(x => x.key === e.col.key) || e.col); });
         $('plbEdClose').addEventListener('click', closeEditor);
         $('plbEdSuggest').addEventListener('click', e => {
             const b = e.target.closest('[data-i]'); if (!b || !B.editing) return;
@@ -1909,11 +1914,10 @@ window.PlaneringBemanning = (function () {
         h += `<div class="pl-card"><div class="pl-cardh"><h2>Placeringar (${asg.length})</h2></div>`;
         h += asg.length ? `<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th scope="col">Roll</th><th scope="col">När</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th></tr></thead><tbody>`
             + asg.map(a => {
-                const timed = a.shiftLabel && a.shiftLabel.indexOf('–') > 0;
                 const menu = a.readOnly ? `<span class="badge text-bg-light border fw-normal">${esc(p.sourceLabel || 'Stationer-fliken')}</span>` : A.rowMenu([
                     { label: 'Ändra placeringen…', fn: () => openAssignment({ id: a.id, person: p }) },
                     { label: 'Hitta ersättare…', icon: 'bi-person-plus', fn: () => openFindReplacement(a, p) },
-                    timed && { label: 'Dela passet — någon annan tar resten…', fn: () => openSplit(a, p) },
+                    a.dateKey && { label: 'Se stationens schema…', fn: () => openScheduleFor(a) },
                     { label: 'Flytta till en annan dag…', fn: () => moveFromPerson(a) },
                     (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringen…', fn: () => notifyOne(a, p) },
                     { divider: true },
@@ -2134,30 +2138,232 @@ window.PlaneringBemanning = (function () {
             }
         });
     }
-    async function openSplit(a, p) {
-        let picked = null;
+    // ---- skiftschemat för en ruta (Stefan 2026-10-27) ----
+    // Rollen och dagen har ett schema med vem som står när. Gränsen mellan två skift flyttas på ett ställe och följer med grannen, hålen syns som
+    // röda stycken mot skjuttiden, och allt sparas i en transaktion (SaveCellShifts). Ersätter "Dela passet" på personens sida.
+    const hmMin = h => { const m = /^(\d{1,2}):(\d{2})$/.exec(h || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+    const minHm = n => String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+    // Samma uträkning som servern (ShiftScheduleRules.Holes): stretchar i fönstret där färre än "need" är på plats. En post utan tider är på plats hela dagen.
+    function scHoles(rows, win, need) {
+        if (!win || win.to <= win.from || need < 1) return [];
+        const live = rows.filter(r => !r.removed && r.status !== 'Declined');
+        const timed = live.map(r => ({ a: hmMin(r.from), b: hmMin(r.to) })).filter(s => s.a != null && s.b != null && s.b > s.a);
+        const allDay = live.length - live.filter(r => hmMin(r.from) != null && hmMin(r.to) != null && hmMin(r.to) > hmMin(r.from)).length;
+        const cuts = new Set([win.from, win.to]);
+        timed.forEach(s => { if (s.a > win.from && s.a < win.to) cuts.add(s.a); if (s.b > win.from && s.b < win.to) cuts.add(s.b); });
+        const pts = [...cuts].sort((x, y) => x - y), holes = [];
+        for (let i = 0; i + 1 < pts.length; i++) {
+            const a = pts[i], b = pts[i + 1];
+            if (allDay + timed.filter(s => s.a <= a && s.b >= b).length >= need) continue;
+            if (holes.length && holes[holes.length - 1].to === a) holes[holes.length - 1].to = b; else holes.push({ from: a, to: b });
+        }
+        return holes;
+    }
+    // Lika långa skift på hela kvartar (som ShiftScheduleRules.Split); det sista tar resten.
+    function scSplit(win, n) {
+        const out = [], step = (win.to - win.from) / n, quarter = step >= 15;
+        let cur = win.from;
+        for (let i = 1; i <= n; i++) {
+            let end;
+            if (i === n) end = win.to;
+            else {
+                const raw = win.from + step * i;
+                end = quarter ? Math.round(raw / 15) * 15 : Math.round(raw);
+                if (end <= cur) end = cur + 1;
+                if (end >= win.to) end = win.to - 1;
+            }
+            out.push({ from: cur, to: end }); cur = end;
+        }
+        return out;
+    }
+    async function openScheduleFor(a) {
+        try { await ensureGrid(); } catch (e) { A.showMsg(esc(e.message), 'danger'); return; }
+        const norm = t => (!t || String(t).toLowerCase() === 'all') ? '' : String(t).toLowerCase();
+        const row = (B.grid.rows || []).find(r => r.roleKey === a.roleKey && norm(r.scopeType) === norm(a.scopeType) && (r.scopeKey || '') === (a.scopeKey || ''));
+        const col = row ? colsFor(row).find(c => c.key === a.dateKey) : null;
+        if (!row || !col) { A.showMsg('Rutan hittades inte i rutnätet. Öppna den därifrån.', 'warning'); return; }
+        openSchedule(row, col);
+    }
+    function openSchedule(row, col) {
+        const cells = (row.cells && row.cells[col.key]) || [];
+        const roleOn = () => (B.grid.wholeDayRoles || []).some(k => String(k).toLowerCase() === String(row.roleKey).toLowerCase());
+        const S = {
+            winFrom: col.windowFrom || '', winTo: col.windowTo || '', fromList: !!(col.windowFrom && col.windowTo),
+            need: Math.max(1, needFor(row, col.key) || 0), n: 3, picking: -1,
+            rows: cells.map(e => ({
+                id: e.id, name: e.displayName, memberId: e.memberId || 0, from: e.from || '', to: e.to || '', status: e.status,
+                locked: !!(e.passId > 0 || e.readOnly), passLabel: e.passId > 0 ? e.timeLabel : '', isNew: false, removed: false, swapping: false,
+                orig: { from: e.from || '', to: e.to || '', memberId: e.memberId || 0 }
+            })),
+        };
+        // Utan startlista: förslaget är hela spannet som skiften redan täcker — arrangören kan skriva över det.
+        if (!S.fromList) {
+            const t = S.rows.filter(r => hmMin(r.from) != null && hmMin(r.to) != null);
+            if (t.length) { S.winFrom = minHm(Math.min(...t.map(r => hmMin(r.from)))); S.winTo = minHm(Math.max(...t.map(r => hmMin(r.to)))); }
+        }
+        const win = () => { const f = hmMin(S.winFrom), t = hmMin(S.winTo); return f != null && t != null && t > f ? { from: f, to: t } : null; };
+        const title = `${row.roleName}${row.scopeLabel ? ' · ' + row.scopeLabel : ''} · ${col.label}`;
+        let body = null;
+        const draw = () => {
+            if (!body) return;
+            const w = win(), holes = scHoles(S.rows, w, S.need), live = S.rows.filter(r => !r.removed);
+            const winHtml = S.fromList
+                ? `<div class="small mb-2"><b>Skjuttid ${esc(S.winFrom)}–${esc(S.winTo)}</b> <span class="plb-dim">(första till sista start i startlistan)</span></div>`
+                : `<div class="d-flex flex-wrap align-items-center gap-2 small mb-2"><span>Tid som ska vara bemannad <span class="plb-dim">(valfritt)</span>:</span>
+                    <input type="text" class="form-control form-control-sm" style="width:5.5rem" id="plbScWF" data-hpsk-time inputmode="decimal" placeholder="från" value="${esc(S.winFrom)}" aria-label="Bemannad från">
+                    <span>–</span><input type="text" class="form-control form-control-sm" style="width:5.5rem" id="plbScWT" data-hpsk-time inputmode="decimal" placeholder="till" value="${esc(S.winTo)}" aria-label="Bemannad till"></div>`;
+            let bar = '';
+            if (w) {
+                const pct = m => ((m - w.from) / (w.to - w.from) * 100).toFixed(2);
+                const segs = live.filter(r => hmMin(r.from) != null && hmMin(r.to) != null && hmMin(r.to) > hmMin(r.from)).map(r => {
+                    const a = Math.max(hmMin(r.from), w.from), b = Math.min(hmMin(r.to), w.to);
+                    return b > a ? `<div class="position-absolute top-0 bottom-0 border-start border-end px-1 small text-truncate" style="left:${pct(a)}%;width:${(pct(b) - pct(a)).toFixed(2)}%;background:var(--bs-success-bg-subtle);color:var(--bs-success-text-emphasis)" title="${esc(r.name || 'Ingen vald')} ${esc(r.from)}–${esc(r.to)}">${esc(first(r.name || ''))}</div>` : '';
+                }).join('');
+                const allDay = live.some(r => hmMin(r.from) == null || hmMin(r.to) == null);
+                bar = `<div class="position-relative rounded border mb-1" id="plbScBar" style="height:1.9rem;background:${allDay ? 'var(--bs-success-bg-subtle)' : 'var(--bs-danger-bg-subtle)'}">${segs}</div>
+                    <div class="d-flex justify-content-between small plb-dim mb-1"><span>${esc(minHm(w.from))}</span><span>${esc(minHm(w.to))}</span></div>`;
+            }
+            const holeHtml = !w ? '' : holes.length
+                ? `<div class="small text-danger fw-semibold mb-2" id="plbScHoles"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>${S.need > 1 ? `Färre än ${S.need} på plats` : 'Ingen'} ${holes.map(h => minHm(h.from) + '–' + minHm(h.to)).join(', ')}</div>`
+                : `<div class="small text-success mb-2" id="plbScHoles"><i class="bi bi-check-circle-fill me-1" aria-hidden="true"></i>Hela tiden är bemannad.</div>`;
+            const rowsHtml = live.length ? live.map(r => { const i = S.rows.indexOf(r); return scRowHtml(r, i); }).join('')
+                : '<p class="plb-dim small mb-2" id="plbScEmpty">Inga skift än. Lägg till ett, eller dela dagen i lika långa skift.</p>';
+            const allNew = !live.some(r => !r.isNew);
+            const splitHtml = w && allNew ? `<span class="d-inline-flex align-items-center gap-1"><button type="button" class="btn btn-outline-secondary btn-sm" data-sc-split>Dela dagen i</button>
+                    <select class="form-select form-select-sm" style="width:4.2rem" id="plbScN" aria-label="Antal skift">${[2, 3, 4, 5, 6].map(n => `<option${n === S.n ? ' selected' : ''}>${n}</option>`).join('')}</select> skift</span>` : '';
+            const wholeHtml = S.fromList ? `<div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="plbScWhole"${roleOn() ? ' checked' : ''}>
+                    <label class="form-check-label small" for="plbScWhole">Ska vara bemannad hela skjuttiden <span class="plb-dim">— gäller alla rader för ${esc(row.roleName)}. Då syns hålen i rutnätet.</span></label></div>` : '';
+            body.innerHTML = `<p class="pl-help small mb-2">Här ser du vem som står när. Flyttar du ett klockslag följer grannskiftet med. Ett skift utan tider gäller hela dagen. Avlösaren ser sin tid i Mitt schema.</p>
+                ${winHtml}${bar}${holeHtml}<div id="plbScRows">${rowsHtml}</div>
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" data-sc-add><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Lägg till skift</button>${splitHtml}</div>${wholeHtml}`;
+        };
+        const scRowHtml = (r, i) => {
+            const who = r.isNew || r.swapping
+                ? `<input type="text" class="form-control form-control-sm plb-sc-name" data-i="${i}" autocomplete="off" placeholder="${r.swapping ? 'Sök en medlem' : 'Sök medlem eller skriv ett namn'}" value="${esc(r.isNew ? r.name : '')}" aria-label="Person">`
+                : `<span class="fw-semibold">${esc(r.name)}</span> <span class="pl-state ${STATUS_CLS[r.status] || 'off'}">${esc(STATUS[r.status] || r.status)}</span>
+                    ${r.locked ? '' : `<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-sc-swap="${i}">Byt person…</button>`}`;
+            const times = r.locked
+                ? `<span class="plb-dim small">${esc(r.passLabel || 'Passets tid')}</span>`
+                : `<input type="text" class="form-control form-control-sm plb-sc-from" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="från" value="${esc(r.from)}" aria-label="Från klockan">
+                    <span>–</span><input type="text" class="form-control form-control-sm plb-sc-to" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="till" value="${esc(r.to)}" aria-label="Till klockan">`;
+            return `<div class="plb-sc-row border rounded p-2 mb-2" data-i="${i}"><div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="flex-grow-1" style="min-width:11rem">${who}</div>${times}
+                <button type="button" class="btn btn-sm btn-outline-danger" data-sc-del="${i}" aria-label="Ta bort skiftet" title="Ta bort skiftet"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+                <div class="list-group mt-1 d-none plb-sc-sug" data-i="${i}"></div></div>`;
+        };
+        // Personförslag för en rad: anmälda funktionärer först (lediga på skiftets tid), därefter alla anmälda, sist medlemssökningen.
+        let sugTimer = null, sugSeq = 0;
+        const suggest = (i, q) => {
+            clearTimeout(sugTimer);
+            sugTimer = setTimeout(async () => {
+                const r = S.rows[i], box = body && body.querySelector(`.plb-sc-sug[data-i="${i}"]`); if (!r || !box) return;
+                const seq = ++sugSeq;
+                const qs = { planningId: row.planningId || A.ID, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 8, onlyVolunteers: q.length >= 2 ? 'false' : 'true' };
+                const f = normTime(r.from), t = normTime(r.to); if (f && t) { qs.from = f; qs.to = t; }
+                if (q) qs.q = q;
+                let list = [];
+                try { const d = await sget('GetCandidates', qs); if (d && d.success) list = (d.candidates || []).map(c => ({ memberId: c.memberId, name: c.name, free: c.free, vol: c.volunteer, sub: candSub(c), badges: candBadges(c, !!(f && t)), conflict: c.conflict && c.conflict.label })); } catch (e) { /* ingen lista */ }
+                if (!list.length && q.length >= 2) {
+                    try { const d = await sget('SearchMembers', { query: q }); list = ((d && d.members) || []).slice(0, 8).map(m => ({ memberId: m.memberId, name: m.memberName, sub: m.clubName || '', badges: '' })); } catch (e) { /* ingen lista */ }
+                }
+                if (seq !== sugSeq || !body || !body.contains(box)) return;
+                S.sug = { i, list };
+                box.innerHTML = list.length ? list.map((c, k) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-sc-pick="${k}"><span class="fw-semibold">${esc(c.name)}</span> ${c.badges || ''}${c.sub ? `<span class="d-block plb-dim">${esc(c.sub)}</span>` : ''}${c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict)}</span>` : ''}</button>`).join('')
+                    : '<div class="list-group-item small plb-dim">Ingen hittades. Skriv ett namn och spara — då läggs det in som text, utan kallelse.</div>';
+                box.classList.remove('d-none');
+            }, q ? 200 : 0);
+        };
+        // Gränsen följer med: ändras ett skifts slut flyttas det som började när det slutade, och tvärtom.
+        const onTime = (i, which, raw) => {
+            const r = S.rows[i]; if (!r) return;
+            const v = normTime(raw);
+            const old = r[which];
+            r[which] = v === null ? raw : v;
+            if (v && old && v !== old) S.rows.forEach((o, k) => { if (k !== i && !o.removed && !o.locked) { if (which === 'to' && o.from === old) o.from = v; if (which === 'from' && o.to === old) o.to = v; } });
+            draw();
+        };
         A.formModal({
-            title: 'Dela passet ' + (a.shiftLabel || ''), okLabel: 'Dela passet', wide: false,
-            html: `<p class="pl-help mb-2">${esc(first(p.displayName))} har ${esc(a.roleName)} ${esc(a.dayLabel || '')} ${esc(a.shiftLabel || '')}. Någon annan tar resten av passet.</p>
-                <div class="mb-3"><label class="form-label" for="plbSplitAt">Från klockan</label><input type="text" class="form-control" id="plbSplitAt" data-hpsk-time inputmode="decimal" placeholder="t.ex. 13" style="max-width:140px"></div>
-                <label class="form-label" for="plbSplitQ">Vem tar över?</label>
-                <input type="search" class="form-control" id="plbSplitQ" autocomplete="off" placeholder="Sök medlem, eller skriv ett namn">
-                <div class="list-group mt-1 d-none" id="plbSplitRes"></div>
-                <div class="pl-help small mt-2">Den som tar över står som Planerad tills hen tackat ja.</div>`,
+            title, okLabel: 'Spara schemat', wide: true,
+            html: '<div id="plbSc"></div>',
             onOpen: b => {
-                b.querySelector('#plbSplitAt').focus();
-                b.querySelector('#plbSplitQ').addEventListener('input', () => { picked = null; });
-                wireMemberSearch(b, '#plbSplitQ', '#plbSplitRes', m => { picked = m; b.querySelector('#plbSplitQ').value = m.memberName; });
+                body = b.querySelector('#plbSc'); draw();
+                b.addEventListener('change', async e => {
+                    const t = e.target;
+                    if (t.classList.contains('plb-sc-from')) onTime(+t.dataset.i, 'from', t.value);
+                    else if (t.classList.contains('plb-sc-to')) onTime(+t.dataset.i, 'to', t.value);
+                    else if (t.id === 'plbScWF' || t.id === 'plbScWT') { const v = normTime(t.value); S[t.id === 'plbScWF' ? 'winFrom' : 'winTo'] = v === null ? t.value : v; draw(); }
+                    else if (t.id === 'plbScN') S.n = +t.value;
+                    else if (t.id === 'plbScWhole') {
+                        t.disabled = true;
+                        try {
+                            const d = await spost('SetRoleWholeDay', { roleKey: row.roleKey, on: t.checked }, row.planningId);
+                            if (!d.success) { t.checked = !t.checked; A.showMsg(esc(d.message || 'Det gick inte att spara valet.'), 'danger'); }
+                            else { await loadGrid(); drawGrid(); }
+                        } catch (er) { t.checked = !t.checked; A.showMsg(esc(er.message), 'danger'); }
+                        t.disabled = false;
+                    }
+                });
+                b.addEventListener('input', e => {
+                    const t = e.target; if (!t.classList.contains('plb-sc-name')) return;
+                    const r = S.rows[+t.dataset.i]; if (!r) return;
+                    r.name = t.value; if (r.isNew) r.memberId = 0;
+                    suggest(+t.dataset.i, t.value.trim());
+                });
+                b.addEventListener('focusin', e => { const t = e.target; if (t.classList.contains('plb-sc-name') && !t.value.trim()) suggest(+t.dataset.i, ''); });
+                b.addEventListener('click', e => {
+                    const t = e.target.closest('[data-sc-add],[data-sc-del],[data-sc-swap],[data-sc-split],[data-sc-pick]'); if (!t) return;
+                    if (t.hasAttribute('data-sc-add')) {
+                        const w = win(), ends = S.rows.filter(r => !r.removed && hmMin(r.to) != null).map(r => hmMin(r.to));
+                        const from = ends.length ? Math.max(...ends) : (w ? w.from : null);
+                        const to = w && from != null && w.to > from ? w.to : null;
+                        S.rows.push({ id: 0, name: '', memberId: 0, from: from != null ? minHm(from) : '', to: to != null ? minHm(to) : '', status: 'Planned', isNew: true, removed: false, locked: false });
+                        draw();
+                        const inp = body.querySelectorAll('.plb-sc-name'); if (inp.length) inp[inp.length - 1].focus();
+                    } else if (t.hasAttribute('data-sc-del')) {
+                        const r = S.rows[+t.dataset.scDel]; if (!r) return;
+                        if (r.isNew) S.rows.splice(+t.dataset.scDel, 1); else r.removed = true;
+                        draw();
+                    } else if (t.hasAttribute('data-sc-swap')) {
+                        const r = S.rows[+t.dataset.scSwap]; if (!r) return;
+                        r.swapping = true; draw();
+                        const inp = body.querySelector(`.plb-sc-name[data-i="${t.dataset.scSwap}"]`); if (inp) { inp.focus(); suggest(+t.dataset.scSwap, ''); }
+                    } else if (t.hasAttribute('data-sc-split')) {
+                        const w = win(); if (!w) return;
+                        S.rows = S.rows.filter(r => !r.isNew);
+                        scSplit(w, S.n).forEach(p => S.rows.push({ id: 0, name: '', memberId: 0, from: minHm(p.from), to: minHm(p.to), status: 'Planned', isNew: true, removed: false, locked: false }));
+                        draw();
+                        const inp = body.querySelector('.plb-sc-name'); if (inp) inp.focus();
+                    } else if (t.hasAttribute('data-sc-pick')) {
+                        const sug = S.sug; if (!sug) return;
+                        const c = sug.list[+t.dataset.scPick], r = S.rows[sug.i]; if (!c || !r) return;
+                        r.memberId = c.memberId; r.name = c.name;
+                        const inp = body.querySelector(`.plb-sc-name[data-i="${sug.i}"]`), box = body.querySelector(`.plb-sc-sug[data-i="${sug.i}"]`);
+                        if (inp) inp.value = c.name; if (box) { box.innerHTML = ''; box.classList.add('d-none'); }
+                    }
+                });
             },
-            onOk: async b => {
-                const raw = b.querySelector('#plbSplitAt').value;
-                const at = window.hpskNormalizeTime ? window.hpskNormalizeTime(raw) : raw.trim();
-                if (!at) return 'Skriv klockslaget där passet delas, till exempel 13.';
-                const who = b.querySelector('#plbSplitQ').value.trim();
-                if (!picked && !who) return 'Skriv eller välj vem som tar över.';
-                const r = await spost('SplitAssignment', { id: a.id, at, memberId: picked ? picked.memberId : 0, newName: picked ? null : who });
-                if (!r.success) return r.message || 'Passet kunde inte delas.';
-                await loadPeople(); drawPerson(p.key);
+            onOk: async () => {
+                const shifts = [], deleteIds = [];
+                for (const r of S.rows) {
+                    if (r.removed) { if (!r.isNew) deleteIds.push(r.id); continue; }
+                    const f = normTime(r.from), t = normTime(r.to);
+                    if (f === null || t === null) return 'Klockslagen går inte att läsa. Skriv till exempel 8 eller 8:30.';
+                    if (!r.locked && ((f && !t) || (!f && t))) return 'Skriv både från och till, eller lämna båda tomma för hela dagen.';
+                    if (!r.locked && f && t && hmMin(t) <= hmMin(f)) return `Sluttiden ${t} måste vara efter starttiden ${f}.`;
+                    if (r.isNew) {
+                        if (!(r.name || '').trim() && !f && !t) continue;   // en tom rad som aldrig fylldes i
+                        if (!(r.name || '').trim()) return `Välj eller skriv vem som tar skiftet ${f}–${t}, eller ta bort det.`;
+                        shifts.push({ id: 0, memberId: r.memberId || 0, displayName: r.name.trim(), from: f, to: t });
+                    } else if (!r.locked && (f !== r.orig.from || t !== r.orig.to || (r.memberId && r.memberId !== r.orig.memberId))) {
+                        if (r.swapping && !r.memberId) return 'Välj en medlem att byta till, eller avbryt bytet genom att ladda om dialogen.';
+                        shifts.push({ id: r.id, memberId: r.memberId !== r.orig.memberId ? r.memberId : 0, from: f, to: t });
+                    }
+                }
+                if (!shifts.length && !deleteIds.length) return true;
+                const d = await spost('SaveCellShifts', { roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null, date: col.key, shifts, deleteIds }, row.planningId);
+                if (!d.success) return d.message || 'Det gick inte att spara schemat.';
+                await refreshPart();
+                if (d.notified) A.showMsg(`Klart. ${d.notified} ${d.notified === 1 ? 'person har' : 'personer har'} fått besked om sin nya tid.`, 'success');
                 return true;
             }
         });
@@ -2769,7 +2975,7 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
         if (t.hasAttribute('data-plb-proposal')) openProposal();
@@ -2778,6 +2984,7 @@ window.PlaneringBemanning = (function () {
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { closeEditor(); nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
         else if (t.hasAttribute('data-plb-add')) openEditor(t);
+        else if (t.hasAttribute('data-plb-sched')) { const r = (B.grid.rows || [])[+t.dataset.plbSched], c = (B.grid.columns || [])[+t.dataset.col]; if (r && c) openSchedule(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));
         else if (t.hasAttribute('data-plb-queue')) { B.show = 'queue'; B.q = ''; B.role = ''; nav('personer'); }

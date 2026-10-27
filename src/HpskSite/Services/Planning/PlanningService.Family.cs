@@ -278,6 +278,7 @@ namespace HpskSite.Services.Planning
             child.DoneAtMeetingsOnly = parent.DoneAtMeetingsOnly;
             child.SignupRoleChoice = parent.SignupRoleChoice;
             child.ShooterMode = parent.ShooterMode;
+            child.WholeDayRoles = parent.WholeDayRoles;
             child.ShootBeforeMin = parent.ShootBeforeMin; child.ShootDurationMin = parent.ShootDurationMin; child.ShootAfterMin = parent.ShootAfterMin;
             child.HostClubId = i.HostClubId > 0 ? i.HostClubId : null;
             child.HostRegionId = child.HostClubId.HasValue ? null : (i.HostRegionId > 0 ? i.HostRegionId : null);

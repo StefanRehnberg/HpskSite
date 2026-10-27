@@ -100,6 +100,9 @@ namespace HpskSite.Models.Staffing
         public string DisplayName { get; set; } = "";
         public string? ClubName { get; set; }
         public string? TimeLabel { get; set; }      // "08–09"; null = heldag (shown as bare name)
+        /// <summary>Skiftschemat: exakta klockslag "HH:mm" när raden har egna tider (inte när tiden kommer från ett pass). Null = heldag eller passtid.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
         public string? ScopeLabel { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
         public bool IsResponsible { get; set; }
@@ -143,6 +146,9 @@ namespace HpskSite.Models.Staffing
         public int DayId { get; set; }
         public bool HasAssignments { get; set; }
         public string? TimeLabel { get; set; }       // "09:00–19:00" from the day's passes
+        /// <summary>Skiftschemat: skjuttiden ur startlistan (första start till sista slut), "HH:mm". Null när det inte finns någon startlista den dagen.</summary>
+        public string? WindowFrom { get; set; }
+        public string? WindowTo { get; set; }
         public List<int> PassIds { get; set; } = new();
         /// <summary>Omgång 3 (3.2): dagens pass med tider (namn), för behovet per pass. Antalen är inte satta här.</summary>
         public List<GridPassCover> Passes { get; set; } = new();
@@ -272,6 +278,8 @@ namespace HpskSite.Models.Staffing
         public int PlacesMissing { get; set; }
         /// <summary>Same person, two posts, overlapping time, same day.</summary>
         public List<GridClash> Clashes { get; set; } = new();
+        /// <summary>Skiftschemat: rollnycklar som ska vara bemannade hela skjuttiden (planeringens val; tom = ingen). Bara en planering har dem.</summary>
+        public List<string> WholeDayRoles { get; set; } = new();
         /// <summary>Omgång 3 steg 9: krockar över hela veckan — med en annan planering, en egen start eller en avsikt att tävla.</summary>
         public List<GridClash> FamilyClashes { get; set; } = new();
         /// <summary>
@@ -350,14 +358,29 @@ namespace HpskSite.Models.Staffing
         public string To { get; set; } = "";
     }
 
-    public class SplitAssignmentRequest
+    /// <summary>Skiftschemat för en ruta: roll × station × dag. Befintliga skift byter tid, nya läggs till, andra tas bort — allt eller inget.</summary>
+    public class SaveCellShiftsRequest
     {
-        public int Id { get; set; }
         public int CompetitionId { get; set; }
-        /// <summary>"HH:mm" — where to cut.</summary>
-        public string? At { get; set; }
+        public string RoleKey { get; set; } = "";
+        public string? ScopeType { get; set; }
+        public string? ScopeKey { get; set; }
+        /// <summary>"yyyy-MM-dd".</summary>
+        public string Date { get; set; } = "";
+        public List<CellShiftItem>? Shifts { get; set; }
+        public List<int>? DeleteIds { get; set; }
+    }
+
+    public class CellShiftItem
+    {
+        /// <summary>0 = ett nytt skift.</summary>
+        public int Id { get; set; }
+        /// <summary>Bara för ett nytt skift; ett befintligt skifts person byts med Hitta ersättare.</summary>
         public int MemberId { get; set; }
-        public string? NewName { get; set; }
+        public string? DisplayName { get; set; }
+        /// <summary>"8", "8:30", "08:00" — tomt (men skickat) i båda = hela dagen. Utelämnat i båda på ett befintligt skift = tiderna behålls.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
     }
 
 }

@@ -229,6 +229,8 @@ namespace HpskSite.Models.Planning
         /// </summary>
         /// <summary>Planera dagen: hur arrangören gör med funktionärer som också skjuter (<see cref="HpskSite.Models.Staffing.ShooterMode"/>). Null = inte valt.</summary>
         public string? ShooterMode { get; set; }
+        /// <summary>Skiftschemat (Stefan 2026-10-27): roller som ska vara bemannade under hela skjuttiden, kommaseparerade nycklar. Null = ingen. Av som standard.</summary>
+        public string? WholeDayRoles { get; set; }
         public int? ShootBeforeMin { get; set; }
         public int? ShootDurationMin { get; set; }
         public int? ShootAfterMin { get; set; }

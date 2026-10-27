@@ -259,6 +259,7 @@ namespace HpskSite.Services.Schedule
                     }
                 }
 
+                ShiftHandoverReader.Fill(_scopeProvider, items, _logger);
                 DetectConflicts(items);
                 s.Days = GroupIntoDays(items);
                 s.NextItem = items
@@ -598,6 +599,7 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                     LinkText = isInvited ? "Svara på inbjudan" : "Uppdraget",
                     Icon = "bi-person-badge",
                     SourceKey = $"uppdrag-{a.Id}",
+                    AssignmentId = a.Id,
                 });
             }
             return items;
