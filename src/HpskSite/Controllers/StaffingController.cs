@@ -257,7 +257,17 @@ namespace HpskSite.Controllers
                     try { ApplyRoleChoice(resp, owner, discipline, pid); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: role choice failed for planning {Planning}", pid); }
                     // "Dagens plan": stegen härleds ur det som redan står i svaret — efter rollvalet, så att dolda rader inte räknas.
-                    try { DerivePlanSteps(resp, owner); }
+                    try
+                    {
+                        // Vilka som har en egen start i tävlingen (familjen): "ingen av de N krockar" räknas bara på dem.
+                        ISet<int>? starters = null;
+                        if (owner.HasCompetition)
+                        {
+                            try { starters = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().StartsByMember(owner).Where(kv => kv.Value.Count > 0).Select(kv => kv.Key).ToHashSet(); }
+                            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: starters for plan steps failed for planning {Planning}", pid); }
+                        }
+                        DerivePlanSteps(resp, owner, starters);
+                    }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: plan steps failed for planning {Planning}", pid); }
                 }
                 return Json(resp);
@@ -350,6 +360,16 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             var p = _people.Build(owner, _owners.Discipline(owner), canEdit: true);
+            // Personer-fliken visar när var och en själv skjuter (persontest 8: det gick inte att se att ingen jobbar när hen skjuter). Ett fel här får inte fälla listan.
+            try
+            {
+                var starts = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().StartsByMember(owner);
+                var sv = CultureInfo.GetCultureInfo("sv-SE");
+                foreach (var row in p.People.Where(r => r.MemberId is > 0 && r.Assignments.Count > 0))
+                    if (starts.TryGetValue(row.MemberId!.Value, out var w))
+                        row.Starts = w.OrderBy(x => x.Start).Select(x => x.Start.ToString("ddd d MMM 'kl' HH:mm", sv)).Distinct().Take(4).ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: starts for the people view failed for competition {Competition}", competitionId); }
             return Json(new
             {
                 success = true,

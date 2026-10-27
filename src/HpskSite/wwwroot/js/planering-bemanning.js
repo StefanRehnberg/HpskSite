@@ -281,7 +281,7 @@ window.PlaneringBemanning = (function () {
         let cands = [];
         const sel = new Set();
         A.formModal({
-            title: 'Lägg in flera', okLabel: 'Lägg in de markerade', wide: true,
+            title: 'Lägg in flera', okLabel: 'Lägg in alla på den här stationen', wide: true,
             html: `<div class="row g-2 mb-2">
                     <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
                     <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}"${k === startDay ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
@@ -308,7 +308,7 @@ window.PlaneringBemanning = (function () {
                 let timer = null;
                 const cur = () => ({ x: rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c: cols[parseInt(b.querySelector('#plbMnDay').value, 10)] });
                 // Rollen som läggs in syns vid knappen och följer valet överst (persontest 6b: den förvalda rollen var fel och märktes inte).
-                const roleNote = () => { const el = b.querySelector('#plbMnAsRole'); if (el) el.innerHTML = `De läggs in som <b>${esc(cur().x.r.roleName)}</b>. Fel roll? Byt under "Roll och station" överst.`; };
+                const roleNote = () => { const el = b.querySelector('#plbMnAsRole'); if (el) el.innerHTML = `De läggs in som <b>${esc(cur().x.r.roleName)}</b>. Fel roll? Byt under "Roll och station" överst. <b>Fördela</b> sprider dem över alla stationer; knappen längst ned lägger <b>alla på samma station</b> (${esc(rowLabel(cur().x))}).`; };
                 const paint = () => {
                     const { x } = cur();
                     roleNote();
@@ -428,6 +428,27 @@ window.PlaneringBemanning = (function () {
         });
     }
 
+    // Bandets steg "Skicka förfrågan till de inlagda": alla Planerade uppdrag med kontaktväg får sin förfrågan (samma ändpunkt och samma mejl som "Skicka förfrågan" på en person).
+    // Bekräftelsen säger hur många personer och uppdrag det gäller, eftersom mejlen inte går att ta tillbaka.
+    async function openSendRequests() {
+        const todo = [];
+        (B.grid.rows || []).forEach(r => Object.values(r.cells || {}).forEach(list => (list || []).forEach(e => {
+            if (e.status === 'Planned' && !e.readOnly && e.hasContact) todo.push(e);
+        })));
+        if (!todo.length) { A.showMsg('Alla inlagda har redan fått sin förfrågan.', 'success'); return; }
+        const people = new Set(todo.map(e => e.memberId ? 'm' + e.memberId : 'n' + (e.displayName || '').toLowerCase())).size;
+        if (!await A.plConfirm(`Skicka förfrågan till ${people} ${people === 1 ? 'person' : 'personer'}?`,
+            `${todo.length} ${todo.length === 1 ? 'uppdrag' : 'uppdrag'} får ett mejl (och en notis till dem med konto) med en länk där de svarar ja eller nej. Det går inte att ta tillbaka när det är skickat.`, 'Skicka')) return;
+        let ok = 0, fail = '';
+        for (const e of todo) {
+            try { const d = await spost('NotifyAssignment', { id: e.id }); if (d.success) ok++; else fail = d.message || fail; }
+            catch (err) { fail = err.message; }
+        }
+        await loadGrid(); drawGrid();
+        if (ok) A.showMsg(`Förfrågan är skickad om ${ok} av ${todo.length} uppdrag.` + (fail ? ' ' + esc(fail) : ''), ok === todo.length ? 'success' : 'warning');
+        else A.showMsg(esc(fail || 'Förfrågan kunde inte skickas.'), 'danger');
+    }
+
     // Planera dagen: "Fördela dem åt mig". De namngivna personerna (ur den inklistrade listan) sprids över rollens stationer och dagens block med tider som inte krockar med deras
     // egna starter. Förslaget visas först (inget är inlagt), du kryssar bort det du inte vill ha, och allt kan ångras. Öppnas ur "Lägg in flera" och ersätter då dess innehåll.
     async function openDistribution({ roleKey, roleName, planningId, memberIds }) {
@@ -443,22 +464,29 @@ window.PlaneringBemanning = (function () {
                 <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-ds="${i}"${sel.has(i) ? ' checked' : ''}>
                 <span><span class="fw-semibold">${esc(x.scope || x.role)}</span> · ${esc(x.dayLabel)} ${esc(x.time)} — <span class="fw-semibold">${esc(x.name)}</span>
                 <span class="d-block plb-dim">${esc(x.why)}</span>${x.warning ? `<span class="d-block text-warning-emphasis">${esc(x.warning)}</span>` : ''}</span></label>`;
+            const perStation = [];
+            r.rows.map((x, i) => ({ x, i })).sort((a, c) => stationNo(a.x.scope) - stationNo(c.x.scope) || (a.x.scope || '').localeCompare(c.x.scope || '', 'sv')).forEach(({ x }) => {
+                const k = x.scope || x.role; const hit = perStation.find(s => s.scope === k);
+                if (hit) hit.ids.add(x.memberId); else perStation.push({ scope: k, ids: new Set([x.memberId]) });
+            });
+            perStation.forEach(s => { s.n = s.ids.size; });
             body.innerHTML = `
-                <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> fick uppdrag${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} fick inget (se nedan)</span>` : ''} ·
-                    de är fördelade på ${new Set(r.rows.map(x => x.scope)).size} ${new Set(r.rows.map(x => x.scope)).size === 1 ? 'station' : 'stationer'} · efteråt saknas fortfarande folk på <span class="${r.stillMissing ? 'fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'tid' : 'tider'}</span>.
-                    <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} uppdrag är markerade. En "tid" är en station under ett par timmar, till exempel Station 3 kl 08–11 — det kan behövas flera personer på samma tid.</span></p>
+                <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> får en plats${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} får ingen (se nedan)</span>` : ''} ·
+                    ${r.stillMissing ? `<span class="fw-semibold">${r.stillMissing} ${r.stillMissing === 1 ? 'plats' : 'platser'} står fortfarande tomma</span>` : 'alla platser blir fyllda'}.
+                    <span class="d-block small plb-dim" id="plbDsPerStation">Så här många per station: ${perStation.map(s => `${esc(s.scope)} ${s.n}`).join(' · ')}.${r.blockMinutes >= 480 ? ' Var och en står på sin station hela dagen.' : ' Dagen delas i skift, eftersom alla inte kan stå hela dagen.'}</span>
+                    <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} förslag är markerade.</span></p>
                 ${(r.unplaced || []).length ? `<details class="mb-2" id="plbDsUnplaced" open><summary class="fw-semibold small">Fick ingen plats (${r.unplaced.length}) — och varför</summary>
                     <ul class="list-unstyled small mb-0">${r.unplaced.map(u => `<li class="py-1 border-bottom">${esc(u.name)} <span class="plb-dim">— ${esc(u.reason)}</span></li>`).join('')}</ul></details>` : ''}
                 <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
                     <div><label class="form-label small mb-0" for="plbDsBlock">Så länge står varje person åt gången</label>
-                        <select class="form-select form-select-sm" id="plbDsBlock"><option value="0"${blockMinutes === 0 ? ' selected' : ''}>Välj åt mig (rekommenderas)</option>${[90, 120, 180, 240].map(m => `<option value="${m}"${blockMinutes === m ? ' selected' : ''}>${m / 60} timmar</option>`).join('')}</select></div>
-                    <span class="small plb-dim align-self-center" id="plbDsBlockNote">${blockMinutes === 0 ? `Valde ${r.blockMinutes / 60} timmar${r.blockMinutes < 180 ? ' — kortare än vanligt, så att fler av dina namn får plats' : ''}.` : ''}</span>
+                        <select class="form-select form-select-sm" id="plbDsBlock"><option value="0"${blockMinutes === 0 ? ' selected' : ''}>Välj åt mig (rekommenderas)</option>${[480, 240, 180, 120, 90].map(m => `<option value="${m}"${blockMinutes === m ? ' selected' : ''}>${m === 480 ? 'Hela dagen' : m / 60 + ' timmar'}</option>`).join('')}</select></div>
+                    <span class="small plb-dim align-self-center" id="plbDsBlockNote">${blockMinutes === 0 ? (r.blockMinutes >= 480 ? 'Valde hela dagen — så få byten som möjligt.' : `Valde ${r.blockMinutes / 60} timmar${r.blockMinutes < 180 ? ' — kortare än vanligt, så att fler av dina namn får plats' : ''}, eftersom hela dagen inte räckte till alla platser.`) : ''}</span>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbDsRecalc">Räkna om</button>
                 </div>
                 ${r.safetyRole ? `<div class="alert alert-warning py-2 small">${esc(roleName)} är en säkerhetsroll (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</div>` : ''}
                 ${r.rows.length ? `<div class="list-group mb-2 plb-many-list" id="plbDsList" style="max-height:34vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Ingen kunde placeras.</p>'}
                 ${(r.unknown || []).length ? `<p class="small text-danger mb-2">${r.unknown.length} ${r.unknown.length === 1 ? 'person finns' : 'personer finns'} inte bland anmälda eller funktionärer och ${r.unknown.length === 1 ? 'togs' : 'togs'} inte med.</p>` : ''}
-                ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Tider som fortfarande saknar folk (${r.unfilled.length})</div>
+                ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Platser som fortfarande saknar folk (${r.unfilled.length})</div>
                     <ul class="list-unstyled small mb-0">${r.unfilled.slice(0, 20).map(u => `<li class="py-1 border-bottom">${esc(u.scope || '')} · ${esc(u.dayLabel)} ${esc(u.time)} — saknas ${u.missing} <span class="plb-dim">(${esc(u.reason)})</span></li>`).join('')}${r.unfilled.length > 20 ? `<li class="py-1 plb-dim">…och ${r.unfilled.length - 20} till</li>` : ''}</ul></div>` : ''}
                 <div class="text-danger small" id="plbDsErr" role="alert"></div>`;
         };
@@ -492,7 +520,7 @@ window.PlaneringBemanning = (function () {
                 if (!d.success) return d.message || 'Det gick inte att lägga in.';
                 await loadGrid(); drawGrid();
                 const skip = (d.skipped || []).length;
-                A.showMsg(`${d.added.length} ${d.added.length === 1 ? 'plats fylldes' : 'platser fylldes'} som Planerade — de står inlagda men ingen har fått någon förfrågan än, och inget mejl har gått iväg.${skip ? ` ${skip} hoppades över: ${d.skipped.slice(0, 3).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}.` : ''}`
+                A.showMsg(`${d.added.length} ${d.added.length === 1 ? 'plats fylldes' : 'platser fylldes'} som Planerade — de står inlagda men ingen har fått någon förfrågan än, och inget mejl har gått iväg. <b>Nästa steg:</b> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-plan-action="skicka">skicka förfrågan till de inlagda</button>.${skip ? ` ${skip} hoppades över: ${d.skipped.slice(0, 3).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}.` : ''}`
                     + (d.batchId ? ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-undoprop="${esc(d.batchId)}">Ångra</button>` : ''), 'success');
                 return true;
             }
@@ -785,6 +813,7 @@ window.PlaneringBemanning = (function () {
         skjuttid: { label: 'Skjuttid…', fn: () => openShootTime() },
         laggin: { label: 'Lägg in flera…', fn: () => openAssignMany() },
         forslag: { label: 'Fyll med förslag…', fn: () => openProposal() },
+        skicka: { label: 'Skicka förfrågan…', fn: () => openSendRequests() },
         startlista: { label: 'Bygg om startlistan…', fn: () => openPatrolPlan() },
         skrivut: { label: 'Skriv ut', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
     };
@@ -802,7 +831,7 @@ window.PlaneringBemanning = (function () {
         const btns = s => (s.actions || []).filter(k => PLAN_ACTIONS[k]).map((k, i) => `<button type="button" class="btn btn-sm ${i === 0 && s.state === 'Todo' && k !== 'skrivut' ? 'btn-primary' : 'btn-outline-secondary'}" data-plb-plan-action="${esc(k)}">${esc(s.state === 'Done' && PLAN_ACTIONS[k].changed ? PLAN_ACTIONS[k].changed : PLAN_ACTIONS[k].label)}</button>`).join(' ');
         const line = next
             ? `<b>${todo.length} ${todo.length === 1 ? 'steg kvar' : 'steg kvar'}</b> · Nästa: <b>${esc(next.title)}</b> — ${esc(next.text)}`
-            : '<b>Allt är klart</b> — alla platser är fyllda och inget krockar.';
+            : `<b>Allt är klart</b> — alla platser är fyllda och inget krockar.${(steps.find(s => s.key === 'startlista') || {}).text ? ' ' + esc(steps.find(s => s.key === 'startlista').text) + '.' : ''}`;
         return `<section class="pl-card" id="plbPlan" aria-labelledby="plbPlanH">
             <div class="d-flex justify-content-between align-items-start gap-2">
                 <h2 class="h6 mb-1" id="plbPlanH">Bemanningen steg för steg</h2>
@@ -1722,6 +1751,7 @@ window.PlaneringBemanning = (function () {
             : ((p.availabilityLabels || []).length ? '<span class="text-warning-emphasis small">Har angett tider — inget uppdrag än</span>'
                 : ((p.prep || []).length ? '<span class="plb-dim small">Bara förberedelser</span>' : '<span class="plb-dim small">—</span>'));
         const state = `<span class="pl-state ${STATE_CLS[p.state] || 'off'}">${esc(p.state)}</span>`;
+        const startsLine = (p.starts || []).length ? `<div class="plb-dim small" data-plb-starts>Skjuter själv: ${p.starts.map(esc).join(', ')}</div>` : '';
         const menu = p.readOnly ? '' : A.rowMenu([
             { label: 'Öppna ' + first(p.displayName), fn: () => nav('personer', p.key) },
             { label: 'Ge ett uppdrag…', fn: () => openAssignment({ person: p }) },
@@ -1731,7 +1761,7 @@ window.PlaneringBemanning = (function () {
         return `<tr><td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-plb-person="${esc(p.key)}">${esc(p.displayName)}</button>
                 ${p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Får hantera tävlingen" aria-label="Får hantera tävlingen"></i>' : ''}
                 ${p.isExternal ? ' <span class="badge text-bg-light border fw-normal" title="Saknar konto på pistol.nu">utan konto</span>' : ''}
-                ${!B.byOrg && orgOf(p) !== 'Ingen förening' ? `<div class="plb-dim small">${esc(orgOf(p))}</div>` : ''}
+                ${!B.byOrg && orgOf(p) !== 'Ingen förening' ? `<div class="plb-dim small">${esc(orgOf(p))}</div>` : ''}${startsLine}
                 <div class="d-md-none mt-1 d-flex gap-1 flex-wrap">${chips}</div><div class="d-sm-none mt-1">${state}</div></td>
             <td class="d-none d-md-table-cell"><div class="d-flex gap-1 flex-wrap">${chips}</div></td>
             <td class="d-none d-sm-table-cell">${state}</td>

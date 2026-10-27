@@ -12,7 +12,8 @@ namespace HpskSite.Tests
     public class PlanStepRulesTests
     {
         private static PlanFacts Facts(bool roles = true, bool needs = true, int needed = 24, int missing = 0, bool linked = true, int vols = 0, string? mode = null,
-            bool falt = false, int startClashes = 0, int clashes = 0) => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes);
+            bool falt = false, int startClashes = 0, int clashes = 0, int assignedPeople = 12, int withStart = 5, int assignedTotal = 0, int unsent = 0)
+            => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes, null, assignedPeople, withStart, assignedTotal, unsent);
 
         private static PlanStep Step(PlanFacts f, string key) => PlanStepRules.Derive(f).Single(s => s.Key == key);
 
@@ -84,6 +85,37 @@ namespace HpskSite.Tests
             var s = Step(Facts(falt: true, startClashes: 3, mode: "x"), "startlista");
             s.State.Should().Be(PlanStepState.Todo);
             s.Text.Should().Contain("3 starter krockar");
+        }
+
+        // Persontest 8: det gröna "klart" stod före allt var gjort och ingen skärm sa att alla var kontrollerade.
+        [Fact]
+        public void Startlistan_ar_inte_gron_forran_nagon_ar_kontrollerad_och_platserna_ar_fyllda()
+        {
+            Step(Facts(falt: true, assignedPeople: 0, withStart: 0, mode: "x"), "startlista").State.Should().Be(PlanStepState.Todo);
+            var open = Step(Facts(falt: true, missing: 4, mode: "x"), "startlista");
+            open.State.Should().Be(PlanStepState.Todo);
+            open.Text.Should().Contain("4 platser är inte fyllda");
+        }
+
+        [Fact]
+        public void Gron_startlista_sager_hur_manga_som_kontrollerats()
+        {
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 5, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 med uppdrag som också skjuter krockar med sin egen start");
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 med uppdrag skjuter i tävlingen");
+        }
+
+        // Persontest 8: hon hittade aldrig var man skickar förfrågan till de inlagda.
+        [Fact]
+        public void Skicka_forfragan_ar_ett_steg_efter_fyll_nar_nagot_ligger_inlagt_och_osant()
+        {
+            PlanStepRules.Derive(Facts(assignedTotal: 0)).Select(s => s.Key).Should().NotContain("skicka");
+            var todo = Step(Facts(assignedTotal: 15, unsent: 15), "skicka");
+            todo.State.Should().Be(PlanStepState.Todo);
+            todo.Text.Should().Contain("15 inlagda har ännu ingen förfrågan");
+            todo.Actions.Should().Equal("skicka");
+            Step(Facts(assignedTotal: 15, unsent: 0), "skicka").State.Should().Be(PlanStepState.Done);
+            var keys = PlanStepRules.Derive(Facts(assignedTotal: 15, unsent: 15)).Select(s => s.Key).ToList();
+            keys.IndexOf("skicka").Should().Be(keys.IndexOf("fyll") + 1);
         }
 
         [Fact]

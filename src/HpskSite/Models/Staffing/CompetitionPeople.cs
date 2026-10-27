@@ -30,6 +30,9 @@ namespace HpskSite.Models.Staffing
         // --- what they do on the day (roster) ---
         public List<CompetitionPersonAssignment> Assignments { get; set; } = new();
 
+        /// <summary>När personen själv skjuter i tävlingen ("lör 22 aug kl 11:30"), tidigast först — bara för dem med uppdrag, och bara när bemanningens Personer-flik läses.</summary>
+        public List<string> Starts { get; set; } = new();
+
         /// <summary>Compact "Markör · Skjutlag 2 · tavlor 1–8" summary of every roster row, for one-line display.</summary>
         public List<string> RoleLabels { get; set; } = new();
 

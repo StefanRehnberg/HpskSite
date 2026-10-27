@@ -17,7 +17,8 @@ namespace HpskSite.Models.Staffing
 
     /// <summary>Fakta om planeringen som stegen härleds ur — alla läses ur samma rutnätssvar, ingenting lagras.</summary>
     public sealed record PlanFacts(bool HasRoles, bool HasNeeds, int PlacesNeeded, int PlacesMissing, bool Linked, int VolunteersTotal, string? ShooterModeTitle,
-        bool PatrolPlanAvailable, int StartClashes, int Clashes, IReadOnlyList<RolePlaces>? ByRole = null);
+        bool PatrolPlanAvailable, int StartClashes, int Clashes, IReadOnlyList<RolePlaces>? ByRole = null,
+        int AssignedPeople = 0, int PeopleWithStart = 0, int AssignedTotal = 0, int PlannedUnsent = 0);
 
     /// <summary>Platser per roll (summerat över dagar och stationer) — så att stegen kan säga VILKA roller som saknar folk, och så att ett orimligt antal (8 på varje av åtta stationer) syns som en siffra på sin rad.</summary>
     public sealed record RolePlaces(string Name, int Needed, int Missing);
@@ -73,12 +74,30 @@ namespace HpskSite.Models.Staffing
                         + (byRole.Any(r => r.Missing > 0) ? ": " + RoleList(byRole.OrderByDescending(r => r.Missing).Select(r => (r.Name, r.Missing))) : ""), actions));
             }
 
-            // 4. Startlistan — bara fält, och bara för den som får bygga om den.
+            // 3b. Skicka förfrågan — det som lagts in ser ingen förrän det skickats (persontest 8: hon hittade aldrig var man gör det).
+            if (f.HasNeeds && f.AssignedTotal > 0)
+            {
+                steps.Add(f.PlannedUnsent > 0
+                    ? new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Todo,
+                        $"{f.PlannedUnsent} {(f.PlannedUnsent == 1 ? "inlagd har" : "inlagda har")} ännu ingen förfrågan — de ser inget och får inget mejl förrän du skickar", new[] { "skicka" })
+                    : new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Done, "Alla inlagda har fått sin förfrågan", new[] { "skicka" }));
+            }
+
+            // 4. Startlistan — bara fält, och bara för den som får bygga om den. Grönt först när någon faktiskt är kontrollerad och inga platser står tomma
+            // (persontest 8: det gröna stod där före allt var gjort, och ingen skärm sa att alla var kontrollerade).
             if (f.PatrolPlanAvailable)
             {
-                steps.Add(f.StartClashes > 0
-                    ? new("startlista", "Startlistan", PlanStepState.Todo, $"{f.StartClashes} {(f.StartClashes == 1 ? "start krockar" : "starter krockar")} med ett uppdrag — bygg om startlistan runt funktionärerna", new[] { "startlista" })
-                    : new("startlista", "Startlistan", PlanStepState.Done, "Ingen start krockar med ett uppdrag", new[] { "startlista" }));
+                var who = f.PeopleWithStart > 0
+                    ? $"Ingen av de {f.PeopleWithStart} med uppdrag som också skjuter krockar med sin egen start"
+                    : $"Ingen av de {f.AssignedPeople} med uppdrag skjuter i tävlingen, så ingen start krockar";
+                if (f.StartClashes > 0)
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, $"{f.StartClashes} {(f.StartClashes == 1 ? "start krockar" : "starter krockar")} med ett uppdrag — bygg om startlistan runt funktionärerna", new[] { "startlista" }));
+                else if (f.AssignedPeople == 0)
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, "Ingen är inlagd än, så det finns inget att kontrollera mot startlistan", new[] { "startlista" }));
+                else if (f.PlacesMissing > 0)
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, $"{who} — men {f.PlacesMissing} {(f.PlacesMissing == 1 ? "plats" : "platser")} är inte fyllda, så kontrollen är inte klar", new[] { "startlista" }));
+                else
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Done, who, new[] { "startlista" }));
             }
 
             // 5. Kontrollera och skriv ut — när något behövs.

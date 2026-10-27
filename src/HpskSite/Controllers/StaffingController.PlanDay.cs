@@ -16,8 +16,14 @@ namespace HpskSite.Controllers
         /// Fyller "Dagens plan" och platsräkningen ur rutnätssvaret. Platser = behov minus bemannat per roll och dag (per pass när dagen har flera pass) — samma regel som sidans
         /// rubrik förut räknade i JS; nu EN räkning här som både bandet och rubriken läser.
         /// </summary>
-        private static void DerivePlanSteps(GridResponse resp, StaffOwner owner)
+        private static void DerivePlanSteps(GridResponse resp, StaffOwner owner, ISet<int>? membersWithStart = null)
         {
+            // Vilka som har uppdrag (avböjda räknas inte), hur många uppdrag som ännu inte skickats som förfrågan, och hur många av personerna som också skjuter.
+            var live = resp.Rows.SelectMany(r => r.Cells.Values.SelectMany(c => c))
+                .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
+            var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
+            var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
+            var unsent = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && e.HasContact);
             var cols = resp.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
             int needed = 0, missing = 0;
             var perRole = new Dictionary<string, (int Needed, int Missing)>(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +54,8 @@ namespace HpskSite.Controllers
                 PlacesNeeded: needed, PlacesMissing: missing, Linked: owner.HasCompetition, VolunteersTotal: resp.VolunteersTotal,
                 ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
                 PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes,
-                ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList());
+                ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList(),
+                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent);
             resp.PlanSteps = PlanStepRules.Derive(facts);
         }
 
@@ -505,7 +512,7 @@ namespace HpskSite.Controllers
                         var couldTake = p.Slots.Any(s => StaffingRules.FirstConflict(s.Interval, s.Place, x.Busy) is not { IsHard: true });
                         var own = x.Busy.FirstOrDefault(b => b.Kind == BusyKind.Start)?.Label;
                         return new { memberId = x.MemberId, name = x.Name,
-                            reason = couldTake ? "De block hen kunde ta fylldes av andra" : $"Är upptagen under alla block som saknar folk{(own != null ? $" ({own})" : "")}" };
+                            reason = couldTake ? (p.Result.StillMissing == 0 ? "Alla platser är redan fyllda — hen behövs inte" : "De platser hen kunde ta fylldes av andra") : $"Är upptagen under alla block som saknar folk{(own != null ? $" ({own})" : "")}" };
                     }),
                     unknown = spec.MemberIds.Where(i => !found.Contains(i)).ToList(),
                     unfilled = p.Result.Unfilled.Select(u => new { slotKey = u.SlotKey, scope = u.ScopeLabel, dayLabel = u.Date.ToString("ddd d MMM", sv), time = Iv(u.Interval), missing = u.Missing, reason = u.Reason }),

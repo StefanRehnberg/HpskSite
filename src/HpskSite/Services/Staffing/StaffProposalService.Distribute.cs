@@ -15,7 +15,14 @@ namespace HpskSite.Services.Staffing
         /// Behovet gäller per block: en station som behöver 1 markör får en per block. Det som redan står i blocket räknas av. Ingenting lagras; allt räknas om vid varje anrop.
         /// </summary>
         /// <summary>Blocklängderna som prövas när användaren inte valt någon (BlockMinutes 0), längst först.</summary>
-        public static readonly int[] AutoBlockMinutes = { 180, 120, 90 };
+        /// <summary>
+        /// Persontest 8: tre timmars block gav "skift med hål" (röda tider mitt på dagen, sex personer på två stationer). Längst av allt är HELA dagen (<see cref="SlotSlicer.MaxBlockMinutes"/>):
+        /// en person på en station hela dagen. Den prövas först och används så fort den fyller alla platser; blocken är en reserv för dem som själva skjuter mitt på dagen.
+        /// </summary>
+        public static readonly int[] AutoBlockMinutes = { SlotSlicer.MaxBlockMinutes, 180, 120, 90 };
+
+        /// <summary>Fördelningen fyller varje plats — då är det längsta blocket som klarar det rätt val, även om fler namn hade fått plats med kortare block (resten behövs helt enkelt inte).</summary>
+        public static bool IsComplete(int stillMissing) => stillMissing == 0;
 
         /// <summary>Det bättre av två fördelningar: fler personer placerade först, sedan fler tider fyllda. Lika = det första (längre block) behålls.</summary>
         public static bool IsBetterDistribution(int personsA, int placedA, int personsB, int placedB) => personsA > personsB || (personsA == personsB && placedA > placedB);
@@ -38,6 +45,7 @@ namespace HpskSite.Services.Staffing
                 ct.ThrowIfCancellationRequested();
                 var p = BuildDistribution(owner, spec with { BlockMinutes = b }, ct);
                 if (p.Problems.Count > 0 || p.Slots.Count == 0) return (p, b);   // felet/avsaknaden ser likadan ut för alla blocklängder
+                if (IsComplete(p.Result.StillMissing)) return (p, b);              // inga hål: längre block är alltid bättre än kortare
                 var persons = p.Result.Proposed.Select(r => r.MemberId).Distinct().Count();
                 if (best == null || IsBetterDistribution(persons, p.Result.Placed, best.Value.Persons, best.Value.P.Result.Placed)) best = (p, b, persons);
                 if (persons >= p.People.Count) break;   // alla namngivna har en plats — längre block är bättre, prova inte kortare
