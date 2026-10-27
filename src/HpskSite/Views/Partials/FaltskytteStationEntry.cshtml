@@ -349,9 +349,10 @@
 
         var html = '';
         (stationData.patrols || []).forEach(function(p) {
-            var total = p.members.length;
-            var done = p.completedCount;
-            var allDone = done >= total && total > 0;
+            // En DNS skjuter aldrig: ingen väntar på dem, och en patrull där alla är DNS är klar.
+            var total = p.members.filter(function (m) { return !fseIsDns(m); }).length;
+            var done = p.members.filter(function (m) { return !fseIsDns(m) && m.hasResult; }).length;
+            var allDone = p.members.length > 0 && done >= total;
             var timeStr = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE', { hour:'2-digit', minute:'2-digit' }) : '';
 
             var lbl = p.label ? ' — ' + p.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';

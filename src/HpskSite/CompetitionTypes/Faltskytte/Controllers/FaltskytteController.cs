@@ -342,10 +342,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 "WHERE CompetitionId = @0", competitionId);
             var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0", competitionId);
             var patrolIds = patrols.Select(p => p.Id).ToList();
-            // Expected roster = total patrol-member rows (every (member,class) shoots every station once).
+            // Expected roster = patrol-member rows (every (member,class) shoots every station once).
+            // A DNS'd shooter never shoots, so they are not expected (Michael Henriksson 2026-10-27:
+            // "Klart 16/20" stayed forever with 4 DNS).
             var expectedCount = patrolIds.Any()
                 ? await db.ExecuteScalarAsync<int>(
-                    $"SELECT COUNT(1) FROM FaltskyttePatrolMember WHERE PatrolId IN ({string.Join(",", patrolIds)})")
+                    $"SELECT COUNT(1) FROM FaltskyttePatrolMember WHERE PatrolId IN ({string.Join(",", patrolIds)}) AND (Status IS NULL OR Status <> 'DNS')")
                 : 0;
 
             var byStation = allResults.GroupBy(r => r.StationNumber).ToDictionary(g => g.Key, g => g.ToList());
