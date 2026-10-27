@@ -350,13 +350,16 @@ namespace HpskSite.Controllers
                 // Build only what this sheet shows — the grid and the prep breakdown are both expensive.
                 if (model.ShowBemanning)
                 {
-                    // P2b: tävlingens bemanning är dess planerings, när den har en.
+                    // Tävlingens bemanning är dess planerings. En tävling utan planering har ingen bemanning att skriva ut.
                     var owner = _owners.ForCompetition(c);
-                    model.Roster = _staffing.BuildRoster(owner, model.Discipline, canEdit: false);
-                    // Same builder as the screen. A print that renders its own shape is how paper stopped
-                    // resembling the plan the organiser actually built.
-                    model.Grid = _grid.BuildGrid(owner, model.Discipline, 0);
-                    FillStarts(model, owner);
+                    if (owner != null)
+                    {
+                        model.Roster = _staffing.BuildRoster(owner, model.Discipline, canEdit: false);
+                        // Same builder as the screen. A print that renders its own shape is how paper stopped
+                        // resembling the plan the organiser actually built.
+                        model.Grid = _grid.BuildGrid(owner, model.Discipline, 0);
+                        FillStarts(model, owner);
+                    }
                 }
                 if (model.ShowForberedelser) model.Work = _work.Build(c, canEdit: false);
                 if (model.ShowDagsprogram)

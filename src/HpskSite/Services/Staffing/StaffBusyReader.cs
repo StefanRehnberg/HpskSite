@@ -24,9 +24,8 @@ namespace HpskSite.Services.Staffing
         {
             var comps = new List<int>();
             if (owner.HasCompetition) comps.Add(owner.Comp);
-            if (owner.HasPlanning)
-                foreach (var row in _planning.Family(owner.PlanningId))
-                    if (_planning.StaffingCompetitionFor(row.Id) is int c && c > 0 && !comps.Contains(c)) comps.Add(c);
+            foreach (var row in _planning.Family(owner.PlanningId))
+                if (_planning.StaffingCompetitionFor(row.Id) is int c && c > 0 && !comps.Contains(c)) comps.Add(c);
             return comps;
         }
 

@@ -107,7 +107,7 @@ namespace HpskSite.Services.Staffing
             // ---- personerna: de namngivna, med sina starter (över familjen) och uppdrag ----
             var names = ids.Count == 0 ? new Dictionary<int, string>()
                 : _candidates.Find(new CandidateQuery { Owner = owner, OnlyMembers = ids, Take = Math.Max(10, ids.Count) }).Candidates.ToDictionary(x => x.MemberId, x => x.Name);
-            var idList = owner.HasPlanning ? _planning.Family(owner.PlanningId).Select(f => f.Id).ToList() : new List<int>();
+            var idList = _planning.Family(owner.PlanningId).Select(f => f.Id).ToList();
             var famList = idList.Count > 0 ? string.Join(",", idList) : "0";
             List<StaffAssignment> assigns; List<StaffPass> allPasses;
             using (var s = _scopes.CreateScope(autoComplete: true))
@@ -116,7 +116,7 @@ namespace HpskSite.Services.Staffing
                 allPasses = s.Database.Fetch<StaffPass>($"SELECT * FROM StaffPass WHERE PlanningId IN ({famList})");
             }
             var passById = allPasses.ToDictionary(p => p.Id);
-            var shoot = owner.HasPlanning ? _owners.ShootTime(owner.PlanningId) : ShootTimeRules.Default(discipline);
+            var shoot = _owners.ShootTime(owner.PlanningId);
             var startsBy = _busy.StartsByMember(owner);
             var people = new List<SolverPerson>();
             foreach (var mid in ids.Where(names.ContainsKey).OrderBy(i => i))

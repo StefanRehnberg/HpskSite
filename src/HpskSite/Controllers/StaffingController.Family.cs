@@ -17,7 +17,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetFamilyGrid(int competitionId)
         {
             var rootOwner = await OwnerAsync(competitionId);
-            if (rootOwner is not { HasPlanning: true })
+            if (rootOwner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
 
             try
@@ -103,7 +103,7 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(competitionId);
             // Steg 4–6 M1: veckan visar alla personer i alla delar — den som bara har tävlingens behörighet (OwnerAsync släpper in
             // en GET via tävlingen) ska inte se den. Kräver rätt att ändra bemanningen i huvudplaneringen.
-            if (owner is not { HasPlanning: true } || !await CanEditPlanningStaffAsync(owner.PlanningId))
+            if (owner == null || !await CanEditPlanningStaffAsync(owner.PlanningId))
                 return (null, Json(new { success = false, message = "Ingen behörighet" }));
             var root = _owners.Planning(owner.PlanningId);
             if (root == null || root.ParentPlanningId > 0)
@@ -292,7 +292,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ogiltig förfrågan" });
             var from = await RowOwnerAsync(_staffing.OwnerOf(request.Id));
             var to = await RowOwnerAsync(_owners.ForPlanning(request.TargetPlanningId));
-            if (from == null || to == null || !from.HasPlanning || !to.HasPlanning)
+            if (from == null || to == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
@@ -411,7 +411,7 @@ namespace HpskSite.Controllers
             var raw = _staffing.OwnerOf(assignmentId);
             var editor = await RowOwnerAsync(raw);
             if (editor != null) return (editor, new ReplaceAccess(false, null));
-            if (raw is not { HasPlanning: true }) return (null, new ReplaceAccess(false, null));
+            if (raw == null) return (null, new ReplaceAccess(false, null));
             var viewer = await ResolveViewerAsync();
             if (viewer == null) return (null, new ReplaceAccess(false, null));
             var row = _staffing.GetById(assignmentId);

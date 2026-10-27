@@ -57,8 +57,9 @@ namespace HpskSite.Services.Staffing
                 owner.P, owner.C);
         }
 
-        /// <summary>Tävlingens bemanning — dess planerings, om den har en.</summary>
-        public List<StaffAssignment> GetForCompetition(int competitionId) => GetForOwner(_owners.ForCompetition(competitionId));
+        /// <summary>Tävlingens bemanning — dess planerings. Tom när tävlingen inte har någon planering.</summary>
+        public List<StaffAssignment> GetForCompetition(int competitionId) =>
+            _owners.ForCompetition(competitionId) is { } owner ? GetForOwner(owner) : new List<StaffAssignment>();
 
         public StaffAssignment? GetById(int id)
         {
@@ -120,7 +121,7 @@ namespace HpskSite.Services.Staffing
 
         /// <summary>Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.</summary>
         private static bool CarriesFamilyGrant(NPoco.IDatabase db, StaffOwner owner) =>
-            owner.HasPlanning && !owner.HasCompetition
+            !owner.HasCompetition
             && db.ExecuteScalar<int>(@"SELECT COUNT(1) FROM Planning r JOIN Planning f ON f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL
                                        WHERE r.Id = @0 AND r.Id = r.FamilyRootId AND r.DeletedAt IS NULL", owner.PlanningId) > 0;
 
@@ -658,7 +659,6 @@ namespace HpskSite.Services.Staffing
         /// </summary>
         public (bool Ok, string? Message, bool RevokedAccess) MoveToPlanning(int assignmentId, StaffOwner from, StaffOwner to)
         {
-            if (!from.HasPlanning || !to.HasPlanning) return (false, "Uppdraget kan bara flyttas mellan planeringar.", false);
             if (from.PlanningId == to.PlanningId) return (true, null, false);
             using var scope = _scopeProvider.CreateScope(autoComplete: false);
             var db = scope.Database;
@@ -1192,7 +1192,7 @@ namespace HpskSite.Services.Staffing
                 // Expertgruppen (arkitekten, 2026-10-25): bara den planering som SJÄLV är kopplad till tävlingen får
                 // tävlingsledarna. En del som ärver tävlingen (huvudplaneringens, "Bemannar för") fick dem annars — den som
                 // råkade laddas först.
-                if (owner.HasPlanning && db.ExecuteScalar<int>(
+                if (db.ExecuteScalar<int>(
                         "SELECT COUNT(*) FROM PlanningLink WHERE PlanningId = @0 AND TargetKind = N'competition' AND TargetId = @1",
                         owner.PlanningId, competitionId) == 0)
                     return;

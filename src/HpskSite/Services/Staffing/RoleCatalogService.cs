@@ -36,8 +36,8 @@ namespace HpskSite.Services.Staffing
 
         // P2b: rollerna hör till planeringen när det finns en, annars till tävlingen (tills planeringen startas
         // och StaffingPlanningLink.Adopt flyttar dem).
-        private static string OwnerTypeOf(StaffOwner o) => o.HasPlanning ? RoleOwnerType.Planning : RoleOwnerType.Competition;
-        private static int OwnerIdOf(StaffOwner o) => o.HasPlanning ? o.PlanningId : o.Comp;
+        private static string OwnerTypeOf(StaffOwner o) => RoleOwnerType.Planning;
+        private static int OwnerIdOf(StaffOwner o) => o.PlanningId;
 
         public RoleCatalogService(IScopeProvider scopeProvider, ILogger<RoleCatalogService> logger)
         {

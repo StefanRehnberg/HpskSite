@@ -66,9 +66,9 @@ namespace HpskSite.Services.Staffing
         public CandidateResult Find(CandidateQuery q)
         {
             var owner = q.Owner;
-            var ids = owner.HasPlanning ? _planning.Family(owner.PlanningId).Select(f => f.Id).ToList() : new List<int>();
+            var ids = _planning.Family(owner.PlanningId).Select(f => f.Id).ToList();
             var idList = ids.Count > 0 ? string.Join(",", ids) : "0";
-            var shoot = owner.HasPlanning ? _owners.ShootTime(owner.PlanningId) : ShootTimeRules.Default(_owners.Discipline(owner));
+            var shoot = _owners.ShootTime(owner.PlanningId);
 
             List<RegRow> regs = new(); List<StaffHelpSignup> signups = new(); List<StaffAssignment> assigns = new(); List<StaffPass> passes = new();
             HashSet<int> slotIds = new();
@@ -89,8 +89,8 @@ namespace HpskSite.Services.Staffing
             }
             var passById = passes.ToDictionary(p => p.Id);
             // Planera dagen: hur personen förhåller sig till startlistan — planeringens förval, med personens eget undantag över.
-            var planningRow = owner.HasPlanning ? _owners.Planning(owner.PlanningId) : null;
-            var overrides = owner.HasPlanning ? _planning.ShooterModeOverrides(owner.PlanningId) : new Dictionary<int, string>();
+            var planningRow = _owners.Planning(owner.PlanningId);
+            var overrides = _planning.ShooterModeOverrides(owner.PlanningId);
 
             // Starterna över ALLA tävlingar familjens planeringar bemannar (en funktionär kan skjuta i systertävlingen) — samma läsning som förslagen.
             var startsByMember = _busy.StartsByMember(owner);

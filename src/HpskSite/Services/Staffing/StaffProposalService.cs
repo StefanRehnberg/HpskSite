@@ -108,7 +108,7 @@ namespace HpskSite.Services.Staffing
         private List<SolverPerson> LoadPool(StaffOwner owner, List<SolverSlot> slots, Dictionary<int, StaffPassView> passes, DayProgram program, out List<string> fp)
         {
             fp = new List<string>();
-            var ids = owner.HasPlanning ? _planning.Family(owner.PlanningId).Select(f => f.Id).ToList() : new List<int>();
+            var ids = _planning.Family(owner.PlanningId).Select(f => f.Id).ToList();
             var idList = ids.Count > 0 ? string.Join(",", ids) : "0";
             List<StaffHelpSignup> signups = new(); List<StaffAssignment> assigns = new(); List<StaffPass> allPasses = new();
             var slotIdsByDate = new Dictionary<DateTime, HashSet<int>>();
@@ -123,7 +123,7 @@ namespace HpskSite.Services.Staffing
                     slotIdsByDate[d] = db.Fetch<int>($"SELECT Id FROM StaffHelpSlot WHERE PlanningId IN ({idList}) AND CAST(SlotDate AS date) = @0", d).ToHashSet();
             }
             var passById = allPasses.ToDictionary(p => p.Id);
-            var shoot = owner.HasPlanning ? _owners.ShootTime(owner.PlanningId) : ShootTimeRules.Default(_owners.Discipline(owner));
+            var shoot = _owners.ShootTime(owner.PlanningId);
             var startsBy = _busy.StartsByMember(owner);   // över alla tävlingar familjen bemannar
 
             fp.Add("shoot:" + $"{shoot.BeforeMinutes}/{shoot.DurationMinutes}/{shoot.AfterMinutes}");

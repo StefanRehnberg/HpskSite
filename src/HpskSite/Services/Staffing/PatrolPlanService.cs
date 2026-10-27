@@ -79,11 +79,11 @@ namespace HpskSite.Services.Staffing
             // Före alla scope: repositoryt har egen läsning.
             var regs = (await _registrations.GetCompetitionRegistrations(owner.Comp)).Where(r => r.IsActive && r.MemberId > 0).ToList();
 
-            var family = owner.HasPlanning ? _planning.Family(owner.PlanningId).Select(f => f.Id).ToList() : new List<int>();
+            var family = _planning.Family(owner.PlanningId).Select(f => f.Id).ToList();
             var idList = family.Count > 0 ? string.Join(",", family) : "0";
-            var shoot = owner.HasPlanning ? _owners.ShootTime(owner.PlanningId) : ShootTimeRules.Default(_owners.Discipline(owner));
-            var planningRow = owner.HasPlanning ? _owners.Planning(owner.PlanningId) : null;
-            var overrides = owner.HasPlanning ? _planning.ShooterModeOverrides(owner.PlanningId) : new Dictionary<int, string>();
+            var shoot = _owners.ShootTime(owner.PlanningId);
+            var planningRow = _owners.Planning(owner.PlanningId);
+            var overrides = _planning.ShooterModeOverrides(owner.PlanningId);
 
             List<FaltskyttePatrol> patrols; List<FaltskyttePatrolMember> members; List<StaffAssignment> assigns; List<StaffPass> passes; List<int> signedUp;
             using (var s = _scopes.CreateScope(autoComplete: true))

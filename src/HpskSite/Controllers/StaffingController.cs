@@ -686,16 +686,15 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(competitionId);
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            var signupPath = owner.HasPlanning ? $"/bemanna?p={owner.PlanningId}" : $"/bemanna?c={owner.Comp}";
             return Json(new
             {
                 success = true,
                 needDays = _help.NeedDays(owner),
                 roleChoice = _owners.SignupRoleChoice(owner),
-                roleChoiceSettable = owner.HasPlanning,
-                hasPlanning = owner.HasPlanning,
+                roleChoiceSettable = true,
+                hasPlanning = true,
                 hasCompetition = owner.HasCompetition,
-                signupPath,
+                signupPath = owner.SignupPath,
             });
         }
 
@@ -721,8 +720,6 @@ namespace HpskSite.Controllers
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null)
                 return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning)
-                return Json(new { success = false, message = "Inställningen hör till planeringen. Starta tävlingens planering först." });
             var value = string.Equals(request.Value, "1", StringComparison.Ordinal) || string.Equals(request.Value, "true", StringComparison.OrdinalIgnoreCase);
             _planning.SetSignupRoleChoice(owner.PlanningId, value, viewer.Id);
             return Json(new { success = true, roleChoice = value });
@@ -1838,12 +1835,13 @@ namespace HpskSite.Controllers
             if (pid > 0) return await RowOwnerAsync(_owners.ForPlanning(pid));
             if (competitionId <= 0) return null;
             if (!await HasCompetitionAccessAsync(competitionId)) return null;
+            // En tävling utan planering har ingen bemanning (dubbelägarskapet är borta, Stefan 2026-10-27): null, och sidorna visar startkortet.
             var owner = _owners.ForCompetition(competitionId);
-            // Expertgruppen K1 / Stefan B2: tävlingens personal LÄSER bemanningen via tävlingen, men en planerad
-            // tävlings bemanning ÄNDRAS bara av den som får ändra i planeringen (annars kunde den som fått behörighet
-            // genom bemanningen — kassan, sekretariatet — ändra den och dela ut behörighet vidare). En tävling utan
-            // planering (prod i dag) är oförändrad.
-            if (owner.HasPlanning && !HttpMethods.IsGet(Request.Method) && !await CanEditPlanningStaffAsync(owner.PlanningId))
+            if (owner == null) return null;
+            // Expertgruppen K1 / Stefan B2: tävlingens personal LÄSER bemanningen via tävlingen, men bemanningen ÄNDRAS bara av den som
+            // får ändra i planeringen (annars kunde den som fått behörighet genom bemanningen — kassan, sekretariatet — ändra den
+            // och dela ut behörighet vidare).
+            if (!HttpMethods.IsGet(Request.Method) && !await CanEditPlanningStaffAsync(owner.PlanningId))
                 return null;
             return owner;
         }
@@ -1856,9 +1854,7 @@ namespace HpskSite.Controllers
         private async Task<StaffOwner?> RowOwnerAsync(StaffOwner? owner)
         {
             if (owner == null) return null;
-            if (owner.HasPlanning) return await CanEditPlanningStaffAsync(owner.PlanningId) ? owner : null;
-            if (owner.HasCompetition && await HasCompetitionAccessAsync(owner.Comp)) return owner;
-            return null;
+            return await CanEditPlanningStaffAsync(owner.PlanningId) ? owner : null;
         }
 
         /// <summary>
@@ -1900,7 +1896,6 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task<string?> AdminGrantRefusalAsync(StaffOwner owner)
         {
-            if (!owner.HasPlanning) return null;
             // Faktan hämtas bara när den behövs (varje fråga kostar en databasläsning); själva regeln är ren och enhetstestad.
             var carries = !owner.HasCompetition && _staffing.CarriesFamilyGrant(owner);
             var convener = carries && await IsRootConvenerAsync(owner.PlanningId);

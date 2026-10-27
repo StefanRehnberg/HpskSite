@@ -49,7 +49,6 @@ namespace HpskSite.Controllers
         {
             var owner = await OwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Skjuttiden hör till planeringen." });
             var p = _owners.Planning(owner.PlanningId);
             var discipline = _owners.Discipline(owner);
             var def = ShootTimeRules.Default(discipline);
@@ -76,7 +75,6 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Skjuttiden hör till planeringen." });
             int? before = request.Reset ? null : request.Before, duration = request.Reset ? null : request.Duration, after = request.Reset ? null : request.After;
             var err = ShootTimeRules.Validate(before, duration, after);
             if (err != null) return Json(new { success = false, message = err });
@@ -297,7 +295,6 @@ namespace HpskSite.Controllers
         {
             var owner = await OwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Inställningen hör till planeringen." });
             var p = _owners.Planning(owner.PlanningId);
             var overrides = _planning.ShooterModeOverrides(owner.PlanningId);
             return Json(new
@@ -320,7 +317,6 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Inställningen hör till planeringen." });
             var mode = string.IsNullOrWhiteSpace(request.Mode) ? null : request.Mode;
             if (mode != null && !ShooterModeRules.IsValid(mode)) return Json(new { success = false, message = "Okänt läge." });
             if (request.MemberId is > 0)
@@ -355,7 +351,6 @@ namespace HpskSite.Controllers
         {
             var owner = await OwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Förslag görs i planeringen." });
             // Förslag görs för EN planering (en del, eller en fristående) — luckorna är den planeringens, upptagen-tiden läses över hela familjen.
             try
             {
@@ -415,7 +410,6 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Förslag görs i planeringen." });
             try
             {
                 using var cts = new CancellationTokenSource(StaffProposalService.MaxRun);
@@ -462,7 +456,6 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Välj en roll och minst en person." });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Fördelning görs i planeringen." });
             try
             {
                 var spec = SpecOf(request);
@@ -522,7 +515,6 @@ namespace HpskSite.Controllers
             if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
             var owner = await OwnerAsync(request.CompetitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
-            if (!owner.HasPlanning) return Json(new { success = false, message = "Fördelning görs i planeringen." });
             try
             {
                 var spec = SpecOf(request);

@@ -11,7 +11,12 @@
 }
 
 <div class="container mt-4 mb-5" style="max-width:760px">
-    @if (!compExists)
+    @if (!compExists && (ViewData["NoPlanning"] as bool? ?? false))
+    {
+        <h1 class="h3"><i class="bi bi-person-badge me-2"></i>Bemanning</h1>
+        <div class="alert alert-info" id="beNoPlanning">Anmälan till funktionärer för <strong>@ViewData["CompetitionName"]</strong> har inte öppnats än. Arrangören startar den när bemanningen planeras — kom tillbaka senare.</div>
+    }
+    else if (!compExists)
     {
         <div class="alert alert-warning">Tävlingen eller planeringen hittades inte.</div>
     }

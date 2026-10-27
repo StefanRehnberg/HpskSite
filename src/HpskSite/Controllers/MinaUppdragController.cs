@@ -159,6 +159,12 @@ namespace HpskSite.Controllers
             ViewData["PlanningId"] = owner?.PlanningId ?? 0;
             ViewData["CompetitionExists"] = owner != null;
             ViewData["CompetitionName"] = owner != null ? _owners.Name(owner) : "";
+            // En tävling utan planering har ingen bemanning (dubbelägarskapet är borta): anmälan är inte öppnad, och sidan säger det i stället för "hittades inte".
+            if (owner == null && c > 0 && p <= 0 && _competitions.Get(c) is { } noPlan)
+            {
+                ViewData["NoPlanning"] = true;
+                ViewData["CompetitionName"] = noPlan.CompetitionName ?? "tävlingen";
+            }
             // Preview mode: a manager verifying how the page looks for a fresh, not-yet-signed-up member.
             ViewData["Preview"] = Request.Query.ContainsKey("preview");
             return View("Bemanna", rootNode);

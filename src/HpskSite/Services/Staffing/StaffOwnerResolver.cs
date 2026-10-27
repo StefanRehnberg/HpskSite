@@ -14,7 +14,7 @@ namespace HpskSite.Services.Staffing
     {
         private readonly PlanningService _planning;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
-        private readonly Dictionary<int, StaffOwner> _byComp = new();
+        private readonly Dictionary<int, StaffOwner?> _byComp = new();
         private readonly Dictionary<int, StaffOwner?> _byPlanning = new();
         private readonly Dictionary<int, PlanningRow?> _planningRows = new();
 
@@ -25,16 +25,17 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Tävlingens bemanning: dess planering om den har en, annars tävlingen ensam.
+        /// Tävlingens bemanning: dess planering. <b>Null = tävlingen har ingen planering</b> och därmed ingen bemanning (Stefan 2026-10-27: dubbelägarskapet är borta — bemanningen ägs av en
+        /// planering, aldrig av en tävling ensam). Arrangören startar planeringen med ett klick (<c>PlanningService.CreateForCompetition</c>), och då tas äldre tävlingsägda rader in (<c>Adopt</c>).
         /// <para>Omgång 3 (Expertgruppen K4): <see cref="StaffOwner.IncludeFamily"/> — tävlingens vyer (upprop, incheckning,
         /// funktionärslistan) läser ALLA rader som bemannar tävlingen, även delplaneringarnas. Skrivningarna med
         /// <see cref="StaffOwner.Where"/> gäller fortfarande bara den kopplade planeringens rader.</para>
         /// </summary>
-        public StaffOwner ForCompetition(int competitionId)
+        public StaffOwner? ForCompetition(int competitionId)
         {
             if (_byComp.TryGetValue(competitionId, out var cached)) return cached;
             var p = competitionId > 0 ? _planning.ForCompetition(competitionId) : null;
-            var owner = p != null ? new StaffOwner(p.Id, competitionId) { IncludeFamily = true } : StaffOwner.ForCompetitionOnly(competitionId);
+            var owner = p != null ? new StaffOwner(p.Id, competitionId) { IncludeFamily = true } : null;
             _byComp[competitionId] = owner;
             return owner;
         }
@@ -130,11 +131,9 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Får medlemmen välja roll vid anmälan? Planeringens val; en tävling utan planering: ja.</summary>
-        public bool SignupRoleChoice(StaffOwner owner) =>
-            !owner.HasPlanning || (Planning(owner.PlanningId)?.SignupRoleChoice ?? true);
+        public bool SignupRoleChoice(StaffOwner owner) => Planning(owner.PlanningId)?.SignupRoleChoice ?? true;
 
         /// <summary>Var organisatören hanterar bemanningen.</summary>
-        public string ManageUrl(StaffOwner owner) =>
-            owner.HasPlanning ? $"/tavlingsplanering/{owner.PlanningId}#vy=bemanning" : $"/tavlingsplanering?c={owner.Comp}";
+        public string ManageUrl(StaffOwner owner) => $"/tavlingsplanering/{owner.PlanningId}#vy=bemanning";
     }
 }
