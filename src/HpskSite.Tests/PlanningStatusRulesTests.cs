@@ -82,5 +82,27 @@ namespace HpskSite.Tests
             (needed, missing).Should().Be((0, 0));
             perRole.Should().BeEmpty();
         }
+
+        // Anders (persontest 12): rapporten ska säga hur många som inte kunnat kontrolleras mot startlistan.
+        [Fact]
+        public void Rubrik_och_delrad_sager_hur_manga_namn_som_inte_ar_kopplade()
+        {
+            var h = PlanningStatusRules.Headline(new DateTime(2026, 10, 27), new[] { new StatusPart("Fält", true, 2, 2, 0, 0, null, null, 2), new StatusPart("Servering", true, 1, 1, 0, 0, null, null, 1) });
+            h.Should().Contain("3 namn är inte kopplade till en medlem och kan inte kontrolleras mot startlistan");
+            PlanningStatusRules.Headline(new DateTime(2026, 10, 27), new[] { new StatusPart("Fält", true, 2, 2, 0, 0, null, null, 1) }).Should().Contain("1 namn är inte kopplat");
+            PlanningStatusRules.Headline(new DateTime(2026, 10, 27), new[] { Part() }).Should().NotContain("kopplade");
+            PlanningStatusRules.PartLine(new StatusPart("Fält", true, 2, 2, 0, 0, null, null, 2)).Should().Contain("2 namn ej kopplade till medlem");
+        }
+
+        [Fact]
+        public void Fritextnamn_raknas_en_gang_per_namn_och_inte_for_Tavlingsledningen_eller_avbojda()
+        {
+            GridEntry E(string name, int? member = null, string status = "Planned") => new() { DisplayName = name, MemberId = member, Status = status };
+            var resp = new GridResponse();
+            resp.Rows.Add(new GridRow { RoleKey = "stationsmarkor", Cells = new() { ["2027-06-05"] = new() { E("ZZZ Hjälpare 1"), E("zzz hjälpare 1 "), E("Medlem", 55), E("Avböjd", null, "Declined") } } });
+            resp.Rows.Add(new GridRow { RoleKey = "sekretariat", Cells = new() { ["2027-06-05"] = new() { E("ZZZ Hjälpare 2") } } });
+            resp.Rows.Add(new GridRow { RoleKey = "tavlingsledning", Cells = new() { ["2027-06-05"] = new() { E("Lisa", null) } } });
+            StaffingPlaces.Unlinked(resp).Should().Be(2);
+        }
     }
 }

@@ -71,7 +71,7 @@
 #plbGridBody tr.plb-dropafter > * { box-shadow: inset 0 -3px 0 -1px var(--bs-primary); }
 
 /* Rutans snabbinmatning ligger över sidan, vid rutan (inte i en dialog — nästa namn ska gå att skriva direkt). */
-.plb-editor { position: fixed; z-index: 1060; display: none; }
+.plb-editor { position: fixed; z-index: 1060; display: none; max-height: calc(100vh - 16px); overflow-y: auto; }
 .plb-editor .list-group { max-height: 240px; overflow: auto; }
 .plb-editor .plb-cands { max-height: 220px; }
 .plb-cand { white-space: normal; text-align: left; }

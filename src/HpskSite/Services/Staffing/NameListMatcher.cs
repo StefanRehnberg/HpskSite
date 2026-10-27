@@ -5,7 +5,8 @@ using System.Text.RegularExpressions;
 namespace HpskSite.Services.Staffing
 {
     /// <summary>En person i poolen (anmälda och funktionärer) som en pappersrad kan matchas mot. <see cref="StartTimes"/> är "HH:mm".</summary>
-    public sealed record MatchPerson(int MemberId, string Name, string? Club, string? Class, IReadOnlyList<string> StartTimes);
+    /// <param name="Where">Var första starten är, t.ex. "Patrull 16" — så att två som heter lika i samma klubb och klass kan skiljas åt (persontest 12: bara klockslaget fanns, och Birgitta fick gissa).</param>
+    public sealed record MatchPerson(int MemberId, string Name, string? Club, string? Class, IReadOnlyList<string> StartTimes, string? Where = null);
 
     public enum NameMatchStatus
     {

@@ -4049,11 +4049,11 @@
     function subPlanningsCardHtml() {
         const list = S.planning.subPlannings || [];
         if (!list.length) return '';
-        // Summan över delarna (Anders, persontest 11): en rad längst ned, bara när det finns mer än en del.
-        const sum = k => list.reduce((a, s) => a + (s[k] || 0), 0);
-        const totalRow = list.length > 1
-            ? `<tfoot><tr class="fw-semibold" id="plSubTotal"><td class="ps-3">Totalt i delarna</td><td class="d-none d-md-table-cell"></td>
-                <td>${sum('openTasks')} öppna <span class="pl-help small fw-normal">av ${sum('tasks')}</span>${sum('overdue') ? `<div class="small text-danger fw-normal">${sum('overdue')} försenade</div>` : ''}</td><td class="d-none d-md-table-cell"></td></tr></tfoot>` : '';
+        // Summan (Anders, persontest 11 och 12): en rad längst ned. Den ska stämma med Lägesrapporten, alltså med huvudplaneringens egna uppgifter (som redan är laddade på Översikt) och delarnas.
+        const own = TASKS && TASKS.tasks ? { openTasks: TASKS.tasks.filter(t => t.status !== 'Done').length, tasks: TASKS.tasks.length, overdue: TASKS.tasks.filter(t => t.overdue && t.status !== 'Done').length } : null;
+        const sum = k => list.reduce((a, s) => a + (s[k] || 0), 0) + (own ? own[k] : 0);
+        const totalRow = `<tfoot><tr class="fw-semibold" id="plSubTotal"><td class="ps-3">${own ? 'Totalt, med huvudplaneringen' : 'Totalt i delarna'}</td><td class="d-none d-md-table-cell"></td>
+                <td>${sum('openTasks')} öppna <span class="pl-help small fw-normal">av ${sum('tasks')}</span>${sum('overdue') ? `<div class="small text-danger fw-normal">${sum('overdue')} försenade</div>` : ''}</td><td class="d-none d-md-table-cell"></td></tr></tfoot>`;
         return `<div class="pl-card p-0" id="plSubPlannings"><div class="pl-cardh px-3 pt-3"><h2>Delplaneringar</h2>
                 <span class="d-flex gap-2 flex-wrap">${!TOKEN ? '<button type="button" class="btn btn-outline-secondary btn-sm" data-sub-status="1"><i class="bi bi-clipboard-data me-1"></i>Lägesrapport…</button>' : ''}
                 ${S.me.canCreateSub && !TOKEN ? '<button type="button" class="btn btn-outline-primary btn-sm" data-sub-new="1"><i class="bi bi-plus-lg me-1"></i>Ny delplanering…</button>' : ''}</span></div>

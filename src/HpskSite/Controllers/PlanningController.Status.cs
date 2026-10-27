@@ -41,18 +41,21 @@ namespace HpskSite.Controllers
                 var tasks = _planning.Tasks(part.Id);
                 var open = tasks.Where(t => PlanningTaskStatus.IsOpen(t.Status)).ToList();
                 int? needed = null, missing = null;
+                var unlinked = 0;
                 try
                 {
                     var owner = owners.ForPlanning(part.Id);
                     if (owner != null)
                     {
-                        var (n, m, _) = StaffingPlaces.Count(grid.BuildGrid(owner, owners.Discipline(owner), 0));
+                        var g = grid.BuildGrid(owner, owners.Discipline(owner), 0);
+                        var (n, m, _) = StaffingPlaces.Count(g);
                         if (n > 0) { needed = n; missing = m; }
+                        unlinked = StaffingPlaces.Unlinked(g);
                     }
                 }
                 catch (Exception ex) { _logger.LogWarning(ex, "Planering {Id}: bemanningen i delen {Part} kunde inte räknas till lägesrapporten.", id, part.Id); }
                 parts.Add(new StatusPart(part.Id == id ? part.Name + " (huvudplaneringen)" : part.Name, readable, open.Count, tasks.Count,
-                    open.Count(t => t.DueDate.HasValue && t.DueDate.Value.Date < today), open.Count(t => t.Status == PlanningTaskStatus.NeedsHelp), needed, missing));
+                    open.Count(t => t.DueDate.HasValue && t.DueDate.Value.Date < today), open.Count(t => t.Status == PlanningTaskStatus.NeedsHelp), needed, missing, unlinked));
                 if (readable)
                     milestones.AddRange(open.Where(t => t.IsMilestone && t.DueDate.HasValue)
                         .Select(t => new StatusMilestone(part.Name, t.Title, t.DueDate!.Value.Date, t.DueDate.Value.Date < today)));

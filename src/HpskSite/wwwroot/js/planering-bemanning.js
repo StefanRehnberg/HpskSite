@@ -353,7 +353,7 @@ window.PlaneringBemanning = (function () {
 
                 // Klistra in en namnlista: raderna matchas mot anmälda och funktionärer. De som hittas markeras; flera med samma namn får ett val; resten redovisas.
                 const pasteBtn = b.querySelector('#plbMnPasteBtn'), pasteBox = b.querySelector('#plbMnPaste'), res = b.querySelector('#plbMnPasteRes');
-                const who = p => `${esc(p.name)}${p.club ? ' · ' + esc(p.club) : ''}${p.shooterClass ? ' · ' + esc(p.shooterClass) : ''}${p.starts ? ' · skjuter ' + esc(p.starts) : ''}`;
+                const who = p => `${esc(p.name)}${p.club ? ' · ' + esc(p.club) : ''}${p.shooterClass ? ' · ' + esc(p.shooterClass) : ''}${p.starts ? ' · skjuter ' + esc(p.starts) : ''}${p.where ? ' · ' + esc(p.where.toLowerCase()) : ''}`;
                 pasteBtn.addEventListener('click', () => {
                     const open = pasteBox.style.display === 'none';
                     pasteBox.style.display = open ? 'block' : 'none'; pasteBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -472,7 +472,7 @@ window.PlaneringBemanning = (function () {
             perStation.forEach(s => { s.n = s.ids.size; });
             body.innerHTML = `
                 <p class="mb-2" id="plbDsSummary"><b>${new Set(r.rows.map(x => x.memberId)).size} av dina ${memberIds.length} namn</b> får en plats${(r.unplaced || []).length ? ` · <span class="fw-semibold">${r.unplaced.length} får ingen (se nedan)</span>` : ''} ·
-                    ${r.stillMissing ? `<span class="fw-semibold">${r.stillMissing} ${r.stillMissing === 1 ? 'plats' : 'platser'} står fortfarande tomma</span>` : 'alla platser blir fyllda'}.
+                    ${r.stillMissing ? `<span class="fw-semibold">${r.stillMissing} ${r.blockMinutes >= 480 ? (r.stillMissing === 1 ? 'plats' : 'platser') : 'skift'} saknar fortfarande folk</span>` : 'alla platser blir fyllda'}${r.blockMinutes < 480 && r.stillMissing ? ' <span class="plb-dim">(ett skift är en station under en del av dagen — så räknas det här, inte som platserna i bandet)</span>' : ''}.
                     <span class="d-block small plb-dim" id="plbDsPerStation">Så här många per station: ${perStation.map(s => `${esc(s.scope)} ${s.n}`).join(' · ')}.${r.blockMinutes >= 480 ? ' Var och en står på sin station hela dagen.' : ' Dagen delas i skift, eftersom alla inte kan stå hela dagen.'}</span>
                     <span class="d-block small plb-dim">${sel.size} av ${r.rows.length} förslag är markerade.</span></p>
                 ${(r.unplaced || []).length ? `<details class="mb-2" id="plbDsUnplaced" open><summary class="fw-semibold small">Fick ingen plats (${r.unplaced.length}) — och varför</summary>
@@ -1144,6 +1144,9 @@ window.PlaneringBemanning = (function () {
             </div>
             <div class="text-danger small mt-1" id="plbEdErr" role="alert"></div></div>`;
         document.body.appendChild(ed);
+        // Rutan växer när ett felmeddelande, förslag eller kandidater tillkommer: placera om den varje gång, så att Stäng och Lägg till aldrig hamnar utanför fönstret
+        // (persontest 12: i ett lågt fönster klipptes rutan på sista raden och gick inte att nå). Bara top/left ändras, så ingen slinga uppstår.
+        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (B.editing) placeEditor(); }).observe(ed);
         const name = $('plbEdName');
         name.addEventListener('input', () => {
             if (B.editing) { B.editing.memberId = 0; B.editing.allowText = false; }
@@ -1317,7 +1320,7 @@ window.PlaneringBemanning = (function () {
             B.editing.list = list;
             box.innerHTML = list.length
                 ? list.map((m, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-i="${i}">${esc(m.memberName)}${m.clubName ? ` <span class="plb-dim">${esc(m.clubName)}</span>` : ''}</button>`).join('')
-                : '<div class="list-group-item small plb-dim">Ingen medlem heter så — Enter sparar namnet som det är skrivet.</div>';
+                : '<div class="list-group-item small plb-dim">Ingen medlem heter så. Enter lägger in namnet som text — du får bekräfta först.</div>';
             box.style.display = 'block';
         } catch (e) { hideSuggest(); }
     }

@@ -19,10 +19,11 @@ namespace HpskSite.Controllers
         private static void DerivePlanSteps(GridResponse resp, StaffOwner owner, ISet<int>? membersWithStart = null)
         {
             // Vilka som har uppdrag (avböjda räknas inte), hur många uppdrag som ännu inte skickats som förfrågan, och hur många av personerna som också skjuter.
-            var live = resp.Rows.SelectMany(r => r.Cells.Values.SelectMany(c => c))
+            // Tävlingsledning bemannas av den som skapade planeringen och räknas inte: annars stod "klart" på startlistan och "Alla inlagda har fått sin förfrågan" innan någon lagts in (persontest 12).
+            var live = resp.Rows.Where(r => !string.Equals(r.RoleKey, "tavlingsledning", StringComparison.OrdinalIgnoreCase)).SelectMany(r => r.Cells.Values.SelectMany(c => c))
                 .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
             var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
-            var unlinkedNames = live.Where(e => e.MemberId is not > 0).Select(e => (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
+            var unlinkedNames = StaffingPlaces.Unlinked(resp);
             var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
             var unsent = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && e.HasContact);
             var unreachable = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && !e.HasContact);
@@ -206,14 +207,15 @@ namespace HpskSite.Controllers
             {
                 var pool = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>()
                     .Find(new CandidateQuery { Owner = owner, Take = 5000 }).Candidates
-                    .Select(c => new MatchPerson(c.MemberId, c.Name, c.Club, c.ShooterClass, c.Starts.Select(s => s.Start.ToString("HH\\:mm")).Distinct().ToList()))
+                    .Select(c => new MatchPerson(c.MemberId, c.Name, c.Club, c.ShooterClass, c.Starts.Select(s => s.Start.ToString("HH\\:mm")).Distinct().ToList(),
+                        c.Starts.OrderBy(s => s.Start).Select(s => (s.Where ?? "").Split(" · ")[0].Trim()).FirstOrDefault(w => w.Length > 0)))
                     .ToList();
                 var lines = request.Text.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
                 var matches = NameListMatcher.Match(lines, pool);
                 object P(MatchPerson p) => new
                 {
                     memberId = p.MemberId, name = p.Name, club = p.Club, shooterClass = p.Class,
-                    starts = string.Join(", ", p.StartTimes),
+                    starts = string.Join(", ", p.StartTimes), where = p.Where,
                 };
                 return Json(new
                 {

@@ -6,7 +6,7 @@ using System.Linq;
 namespace HpskSite.Services.Planning
 {
     /// <summary>En del (huvudplaneringen eller en delplanering) i lägesrapporten. <c>PlacesMissing</c> är null när delen saknar bemanning att räkna på.</summary>
-    public sealed record StatusPart(string Name, bool Readable, int Open, int Total, int Overdue, int NeedsHelp, int? PlacesNeeded, int? PlacesMissing);
+    public sealed record StatusPart(string Name, bool Readable, int Open, int Total, int Overdue, int NeedsHelp, int? PlacesNeeded, int? PlacesMissing, int Unlinked = 0);
 
     /// <summary>En öppen milstolpe med datum, för tidslinjen per månad. Titeln visas bara för delar läsaren får läsa.</summary>
     public sealed record StatusMilestone(string Part, string Title, DateTime Due, bool Overdue);
@@ -30,6 +30,9 @@ namespace HpskSite.Services.Planning
             var needed = parts.Sum(p => p.PlacesNeeded ?? 0);
             var missing = parts.Sum(p => p.PlacesMissing ?? 0);
             if (needed > 0) pieces.Add(missing > 0 ? $"{missing} {(missing == 1 ? "plats saknas" : "platser saknas")}" : "alla platser är fyllda");
+            // Anders (persontest 12): rapporten ska säga rakt ut hur många som inte kunnat kontrolleras mot startlistan.
+            var unlinked = parts.Sum(p => p.Unlinked);
+            if (unlinked > 0) pieces.Add($"{unlinked} {(unlinked == 1 ? "namn är inte kopplat" : "namn är inte kopplade")} till en medlem och kan inte kontrolleras mot startlistan");
             return $"Läget {today.ToString("d MMMM", Sv)}: {string.Join(", ", pieces)}.";
         }
 
@@ -40,6 +43,7 @@ namespace HpskSite.Services.Planning
             if (p.Overdue > 0) pieces.Add($"{p.Overdue} {(p.Overdue == 1 ? "försenad" : "försenade")}");
             if (p.NeedsHelp > 0) pieces.Add($"{p.NeedsHelp} markerade Behöver hjälp");
             if (p.PlacesNeeded is > 0) pieces.Add(p.PlacesMissing > 0 ? $"{p.PlacesMissing} av {p.PlacesNeeded} platser saknas" : "alla platser fyllda");
+            if (p.Unlinked > 0) pieces.Add($"{p.Unlinked} namn ej kopplade till medlem");
             return string.Join(" · ", pieces);
         }
 

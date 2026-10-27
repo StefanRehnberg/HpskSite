@@ -34,5 +34,15 @@ namespace HpskSite.Models.Staffing
                 }
             return (needed, missing, perRole);
         }
+
+        /// <summary>
+        /// Antal olika namn med uppdrag som inte är kopplade till en medlem (avböjda och Tävlingsledningen räknas inte). De går inte att kontrollera mot startlistan: en fritextperson har ingen identitet
+        /// att matcha en start mot. Samma räkning för bandet och lägesrapporten.
+        /// </summary>
+        public static int Unlinked(GridResponse resp) => resp.Rows
+            .Where(r => !string.Equals(r.RoleKey, "tavlingsledning", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(r => r.Cells.Values.SelectMany(c => c))
+            .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase) && e.MemberId is not > 0)
+            .Select(e => (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
     }
 }
