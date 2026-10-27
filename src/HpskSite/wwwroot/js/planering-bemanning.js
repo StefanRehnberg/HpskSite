@@ -533,7 +533,12 @@ window.PlaneringBemanning = (function () {
         A.showMsg('Räknar ut ett förslag…', 'info');
         const r = await sget('GetProposal').catch(() => null);
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte räkna ut ett förslag.'), 'danger'); return; }
-        if (!r.rows.length && !r.unfilled.length) { A.showMsg('Alla platser är redan fyllda — det finns inget att föreslå.', 'success'); return; }
+        if (!r.rows.length && !r.unfilled.length) {
+            // Stefan 2026-10-27: 30 anmälda och inga behov satta gav "Alla platser är redan fyllda" — fel. Förslaget fyller de platser som BEHÖVS; utan behov finns inga platser.
+            if (!(B.grid.placesNeeded > 0)) A.showMsg('Det finns inga platser att fylla än: ni har inte sagt hur många som behövs av varje roll, och förslaget fyller de platser som behövs. <button type="button" class="btn btn-link btn-sm p-0 align-baseline fw-semibold" data-plb-plan-action="behov">Sätt antal…</button>', 'warning');
+            else A.showMsg('Alla platser är redan fyllda — det finns inget att föreslå.', 'success');
+            return;
+        }
         const sel = new Set(r.rows.map((x, i) => i));
         const rowHtml = (x, i) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small${x.warning ? ' plb-cand-busy' : ''}">
             <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-pr="${i}" checked>
@@ -945,8 +950,9 @@ window.PlaneringBemanning = (function () {
         if (g.undoBatchId) notes += `<div class="pl-next" id="plbUndoBar"><div class="t">Senaste förslaget lade in <b>${g.undoRows}</b> ${g.undoRows === 1 ? 'person' : 'personer'}. Du kan ångra det så länge ingen har svarat eller ändrat raderna.</div>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-plb-undoprop="${esc(g.undoBatchId)}">Ångra förslaget</button></div>`;
         const vols = g.volunteers || [];
-        if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}</div>
-            <div class="d-flex gap-1 flex-wrap">${!g.family && linked() ? '<button type="button" class="btn btn-sm btn-primary" data-plb-proposal><i class="bi bi-magic me-1" aria-hidden="true"></i>Fyll med förslag</button>' : ''}
+        const noNeeds = !(g.placesNeeded > 0);   // utan behov har förslaget inga platser att fylla (Stefan 2026-10-27)
+        if (vols.length) notes += `<div class="pl-next warn"><div class="t"><b>${vols.length} ${vols.length === 1 ? 'har anmält sig' : 'har anmält sig'}</b> men har inget uppdrag än: ${vols.slice(0, 6).map(v => esc(v.name)).join(', ')}${vols.length > 6 ? ' m.fl.' : ''}${noNeeds && !g.family ? '<div class="small mt-1" id="plbNoNeedsHint">Förslaget fyller de platser som behövs. Ni har ännu inte sagt hur många som behövs av varje roll — gör det först.</div>' : ''}</div>
+            <div class="d-flex gap-1 flex-wrap">${!g.family && linked() ? (noNeeds ? '<button type="button" class="btn btn-sm btn-primary" data-plb-plan-action="behov"><i class="bi bi-123 me-1" aria-hidden="true"></i>Sätt antal…</button>' : '<button type="button" class="btn btn-sm btn-primary" data-plb-proposal><i class="bi bi-magic me-1" aria-hidden="true"></i>Fyll med förslag</button>') : ''}
             <button type="button" class="btn btn-sm btn-warning" data-plb-queue>Visa dem</button></div></div>`;
         const clashes = g.clashes || [];
         if (clashes.length) notes += `<div class="alert alert-danger py-2 small"><div class="fw-semibold mb-1"><i class="bi bi-exclamation-octagon me-1" aria-hidden="true"></i>Samma person på två poster samtidigt</div>`
