@@ -124,11 +124,10 @@ window.PlaneringBemanning = (function () {
         startPoll();
         draw();
     }
-    function leave() { stopPoll(); closeEditor(); }
+    function leave() { stopPoll(); }
 
     async function draw() {
         const seq = ++B.seq, p = part(), pk = personKeyParam();
-        closeEditor();
         A.setActions([]);
         const body = $('plBody');
         body.innerHTML = switchHtml(p) + '<div id="plbArea">' + A.spinner() + '</div>';
@@ -280,8 +279,9 @@ window.PlaneringBemanning = (function () {
         const startDay = opts.col ? Math.max(0, cols.findIndex(c => c.key === opts.col.key)) : 0;
         let cands = [];
         const sel = new Set();
+        const pinned = [], names = [], selNames = new Set();   // personer som lagts till för hand: medlemmar utanför listan, och namn som text
         A.formModal({
-            title: 'Lägg in flera', okLabel: 'Lägg in alla på den här stationen', wide: true,
+            title: opts.row ? `Lägg till i ${rowLabel({ r: opts.row })}${opts.col && opts.col.key ? ' · ' + opts.col.label : ''}` : 'Lägg in flera', okLabel: opts.row ? 'Lägg till' : 'Lägg in alla på den här stationen', wide: true,
             html: `<div class="row g-2 mb-2">
                     <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
                     <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}"${k === startDay ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
@@ -290,11 +290,17 @@ window.PlaneringBemanning = (function () {
                 </div>
                 <div class="d-flex flex-wrap gap-3 align-items-center mb-1">
                     <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnVol" role="switch"><label class="form-check-label" for="plbMnVol">Bara de som anmält sig som funktionärer</label></div>
+                    <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnUnplaced" role="switch"><label class="form-check-label" for="plbMnUnplaced">Bara de som inte är placerade den dagen</label></div>
                     <input type="search" class="form-control form-control-sm" id="plbMnQ" placeholder="Sök namn" style="max-width:200px" autocomplete="off" aria-label="Sök namn">
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnFree">Markera alla lediga</button>
                     <span class="small plb-dim" id="plbMnCount" aria-live="polite"></span>
                 </div>
-                <div class="mb-2"><button type="button" class="btn btn-sm btn-outline-primary" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Klistra in en namnlista…</button></div>
+                <div class="mb-2 d-flex flex-wrap gap-2"><button type="button" class="btn btn-sm btn-outline-primary" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Klistra in en namnlista…</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnSched"><i class="bi bi-clock me-1" aria-hidden="true"></i>Flera skift under dagen? Öppna skiftschemat</button></div>
+                <div class="mb-2"><label class="form-label small mb-0" for="plbMnX">Någon som inte finns i listan?</label>
+                    <div class="d-flex flex-wrap gap-2"><input type="search" class="form-control form-control-sm" id="plbMnX" placeholder="Sök en medlem, eller skriv ett namn" autocomplete="off" style="max-width:320px">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnXAdd">Lägg till i listan</button></div>
+                    <div class="list-group mt-1 d-none" id="plbMnXRes" style="max-width:320px"></div></div>
                 <div class="border rounded p-2 mb-2" id="plbMnPaste" style="display:none">
                     <label class="form-label small mb-1" for="plbMnPasteText">Ett namn per rad. Har pappret klass, patrull eller starttid efter ett | hjälper det när flera heter lika.</label>
                     <textarea class="form-control form-control-sm mb-1" id="plbMnPasteText" rows="4" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
@@ -318,14 +324,17 @@ window.PlaneringBemanning = (function () {
                     const listEl = b.querySelector('#plbMnList');
                     const focusedMn = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.mn : null;
                     const scrolled = listEl.scrollTop;
-                    b.querySelector('#plbMnList').innerHTML = cands.length ? cands.map((c, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}">
+                    const onlyFree = b.querySelector('#plbMnUnplaced').checked;
+                    const shown = [...pinned.filter(p => !cands.some(c => c.memberId === p.memberId)), ...cands].filter(c => !onlyFree || !(c.assignedToday > 0));
+                    const textRows = names.map((n, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small"><input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mnn="${k}"${selNames.has(k) ? ' checked' : ''}><span><span class="fw-semibold">${esc(n)}</span> <span class="badge text-bg-light border fw-normal">som text</span><span class="d-block plb-dim">Ingen kallelse och ingen kontroll mot egen start</span></span></label>`).join('');
+                    b.querySelector('#plbMnList').innerHTML = textRows + (shown.length ? shown.map((c, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}">
                         <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mn="${c.memberId}"${sel.has(c.memberId) ? ' checked' : ''}${c.alreadyHere ? ' disabled' : ''}>
                         <span><span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, known)}${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
-                        ${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</span></label>`).join('')
-                        : '<div class="list-group-item small plb-dim">Ingen i listan. Slå av reglaget för att se alla anmälda.</div>';
+                        ${candPlaced(c)}${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</span></label>`).join('')
+                        : (names.length ? '' : '<div class="list-group-item small plb-dim">Ingen i listan. Slå av reglaget för att se alla anmälda, eller sök under "Någon som inte finns i listan".</div>'));
                     listEl.scrollTop = scrolled;
                     if (focusedMn) { const again = listEl.querySelector(`[data-mn="${focusedMn}"]`); if (again) again.focus({ preventScroll: true }); }
-                    b.querySelector('#plbMnCount').textContent = `${sel.size} markerade · ${cands.length} i listan${cands.length >= 200 ? ' (de första 200)' : ''} · ${rowLabel(x)}`;
+                    b.querySelector('#plbMnCount').textContent = `${sel.size + selNames.size} markerade · ${shown.length} i listan${(shown.length < cands.length) ? ' (' + (cands.length - shown.length) + ' placerade dolda)' : ''}${cands.length >= 200 ? ' (de första 200)' : ''} · ${rowLabel(x)}`;
                 };
                 const load = async () => {
                     const { x, c } = cur();
@@ -348,6 +357,48 @@ window.PlaneringBemanning = (function () {
                     const cb = e.target.closest('[data-mn]'); if (!cb) return;
                     const id = parseInt(cb.dataset.mn, 10); if (cb.checked) sel.add(id); else sel.delete(id);
                     paint();
+                });
+                b.querySelector('#plbMnUnplaced').addEventListener('change', () => paint());
+                b.querySelector('#plbMnList').addEventListener('change', e => {
+                    const cb = e.target.closest('[data-mnn]'); if (!cb) return;
+                    const k = parseInt(cb.dataset.mnn, 10); if (cb.checked) selNames.add(k); else selNames.delete(k);
+                    paint();
+                });
+                // Någon utanför listan: sök bland alla medlemmar, eller skriv ett namn som text.
+                let xTimer = null, xList = [];
+                const xBox = b.querySelector('#plbMnXRes'), xIn = b.querySelector('#plbMnX');
+                const xHide = () => { xBox.innerHTML = ''; xBox.classList.add('d-none'); };
+                xIn.addEventListener('input', () => {
+                    clearTimeout(xTimer);
+                    const q = xIn.value.trim();
+                    if (q.length < 2) { xHide(); return; }
+                    xTimer = setTimeout(async () => {
+                        try {
+                            const d = await sget('SearchMembers', { query: q });
+                            xList = (d && d.members) ? d.members.slice(0, 8) : [];
+                            xBox.innerHTML = xList.length ? xList.map((m, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-xi="${i}">${esc(m.memberName)}${m.clubName ? ` <span class="plb-dim">${esc(m.clubName)}</span>` : ''}</button>`).join('')
+                                : '<div class="list-group-item small plb-dim">Ingen medlem heter så. "Lägg till i listan" lägger in namnet som text.</div>';
+                            xBox.classList.remove('d-none');
+                        } catch (er) { xHide(); }
+                    }, 200);
+                });
+                xBox.addEventListener('click', e => {
+                    const bt = e.target.closest('[data-xi]'); if (!bt) return;
+                    const m = xList[parseInt(bt.dataset.xi, 10)]; if (!m) return;
+                    if (!pinned.some(p => p.memberId === m.memberId)) pinned.unshift({ memberId: m.memberId, name: m.memberName, club: m.clubName || '', starts: [] });
+                    sel.add(m.memberId); xIn.value = ''; xHide(); paint();
+                });
+                const addTyped = () => {
+                    const t = xIn.value.trim(); if (!t) return;
+                    if (xList.length === 1 && xList[0].memberName.toLowerCase() === t.toLowerCase()) { xBox.querySelector('[data-xi]').click(); return; }
+                    names.push(t); selNames.add(names.length - 1); xIn.value = ''; xHide(); paint();
+                };
+                b.querySelector('#plbMnXAdd').addEventListener('click', addTyped);
+                xIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } });
+                b.querySelector('#plbMnSched').addEventListener('click', () => {
+                    const { x, c } = cur();
+                    if (!c.key) return;
+                    openSchedule(x.r, colsFor(x.r).find(k => k.key === c.key) || c);
                 });
                 b.querySelector('#plbMnFree').addEventListener('click', () => { cands.filter(c => c.free !== false && !c.alreadyHere).forEach(c => sel.add(c.memberId)); paint(); });
 
@@ -407,11 +458,19 @@ window.PlaneringBemanning = (function () {
                 const x = rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c = cols[parseInt(b.querySelector('#plbMnDay').value, 10)];
                 const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
                 if (from === null || to === null) return 'Skriv klockslagen till exempel 8 eller 8:30.';
-                if (!sel.size) return 'Kryssa i minst en person.';
+                const typedNames = [...selNames].map(k => names[k]).filter(Boolean);
+                if (!sel.size && !typedNames.length) return 'Kryssa i minst en person.';
+                if (typedNames.length && (from || to) && !c.key) return 'Tider kräver en dag.';
                 const body = { roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null, date: c.key, from: from || null, to: to || null, memberIds: [...sel] };
-                const d = await spost('AssignMany', body, x.r.planningId);
+                const d = sel.size ? await spost('AssignMany', body, x.r.planningId) : { success: true, added: [], skipped: [] };
                 if (!d.success) return d.message || 'Det gick inte att lägga in.';
                 let added = d.added.length;
+                const asText = [];
+                for (const nm of typedNames) {
+                    const r = await spost('SaveAssignment', { id: 0, memberId: 0, displayName: nm, roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null,
+                        startsAt: from && c.key ? c.key + ' ' + from : null, endsAt: to && c.key ? c.key + ' ' + to : null, dayDate: c.key || null, status: 'Planned' }, x.r.planningId);
+                    if (r.success) added++; else d.skipped.push({ name: nm, reason: r.message || 'gick inte att lägga in', memberId: 0 });
+                }
                 const clashes = d.skipped.filter(s => s.clash), others = d.skipped.filter(s => !s.clash);
                 let forced = 0;
                 if (clashes.length && await A.plConfirm(`${clashes.length} ${clashes.length === 1 ? 'person är' : 'personer är'} upptagna`,
@@ -1127,122 +1186,21 @@ window.PlaneringBemanning = (function () {
         return null;
     }
 
-    // ---- rutans snabbinmatning: skriv ett namn, Enter, nästa namn ----
-    let searchTimer = null;
-    function ensureEditor() {
-        let ed = $('plbEditor');
-        if (ed) return ed;
-        ed = document.createElement('div');
-        ed.id = 'plbEditor';
-        ed.className = 'card shadow plb-editor';
-        ed.setAttribute('role', 'dialog');
-        ed.innerHTML = `<div class="card-body p-2">
-            <div class="small fw-semibold mb-1" id="plbEdHead"></div>
-            <label class="visually-hidden" for="plbEdName">Person</label>
-            <input type="text" class="form-control form-control-sm mb-1" id="plbEdName" autocomplete="off" placeholder="Sök medlem eller skriv ett namn">
-            <div class="small mb-1"><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdPaste">Har du en lista med namn? Klistra in den</button><br><button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdSched">Flera skift under dagen? Öppna skiftschemat</button></div>
-            <div class="small mb-1 p-1 border rounded bg-body-tertiary" id="plbEdChosen" style="display:none" aria-live="polite"></div>
-            <div class="list-group mb-1" id="plbEdSuggest" style="display:none"></div>
-            <div id="plbEdCandBox" class="mb-1" style="display:none">
-                <div class="form-check form-switch small mb-1"><input class="form-check-input" type="checkbox" id="plbEdOnlyVol" role="switch"><label class="form-check-label" for="plbEdOnlyVol">Bara de som anmält sig som funktionärer</label></div>
-                <div class="list-group plb-cands" id="plbEdCands" aria-label="Förslag på personer"></div>
-            </div>
-            <div class="d-flex gap-1 mb-1">
-                <input type="text" class="form-control form-control-sm" id="plbEdFrom" data-hpsk-time inputmode="decimal" placeholder="från, t.ex. 8" aria-label="Från klockan">
-                <input type="text" class="form-control form-control-sm" id="plbEdTo" data-hpsk-time inputmode="decimal" placeholder="till" aria-label="Till klockan">
-            </div>
-            <div class="d-flex justify-content-between align-items-center gap-2">
-                <span class="plb-dim" style="font-size:.75rem">Enter sparar · Esc stänger</span>
-                <div class="d-flex gap-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbEdClose">Stäng</button><button type="button" class="btn btn-sm btn-primary" id="plbEdSave">Lägg till</button></div>
-            </div>
-            <div class="text-danger small mt-1" id="plbEdErr" role="alert"></div></div>`;
-        document.body.appendChild(ed);
-        // Rutan växer när ett felmeddelande, förslag eller kandidater tillkommer: placera om den varje gång, så att Stäng och Lägg till aldrig hamnar utanför fönstret
-        // (persontest 12: i ett lågt fönster klipptes rutan på sista raden och gick inte att nå). Bara top/left ändras, så ingen slinga uppstår.
-        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (B.editing) placeEditor(); }).observe(ed);
-        const name = $('plbEdName');
-        name.addEventListener('input', () => {
-            if (B.editing) { B.editing.memberId = 0; B.editing.allowText = false; }
-            hideChosen();
-            const q = name.value.trim();
-            clearTimeout(searchTimer);
-            // Kandidatlistan (anmälda och funktionärer) filtreras på det som skrivs; den vanliga medlemssökningen tar över när den inte hittar.
-            refreshCandidates(120);
-            if (q.length < 2) { hideSuggest(); return; }
-            searchTimer = setTimeout(() => edSearch(q), 200);
-        });
-        // Tiderna avgör vem som är ledig: räkna om när ett klockslag är skrivet klart.
-        // En vald person ligger kvar (listan börjar inte om); ändras tiden prövas hen på nytt mot den nya tiden.
-        ['plbEdFrom', 'plbEdTo'].forEach(id => $(id).addEventListener('change', () => { if (B.editing && B.editing.memberId) recheckChosen(); else refreshCandidates(0); }));
-        $('plbEdOnlyVol').addEventListener('change', e => { if (B.editing) B.editing.onlyVol = e.target.checked; B.onlyVolPref = e.target.checked; refreshCandidates(0); });
-        $('plbEdCands').addEventListener('click', e => {
-            const b = e.target.closest('[data-cand]'); if (!b || !B.editing) return;
-            const c = (B.editing.cands || [])[parseInt(b.dataset.cand, 10)]; if (!c) return;
-            B.editing.memberId = c.memberId;
-            name.value = c.name;
-            $('plbEdErr').textContent = c.free === false ? `${c.name} är upptagen: ${c.conflict ? c.conflict.label : 'samtidigt'}. Enter lägger in ändå.` : '';
-            hideSuggest();
-            showChosen(c);
-            $('plbEdFrom').focus();
-        });
-        const keys = e => {
-            if (e.key === 'Enter') { e.preventDefault(); edCommit(); }
-            else if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
-        };
-        name.addEventListener('keydown', keys);
-        $('plbEdFrom').addEventListener('keydown', keys);
-        $('plbEdTo').addEventListener('keydown', keys);
-        $('plbEdSave').addEventListener('click', edCommit);
-        // Många namn på en gång: samma roll, station och dag, men i "Lägg in flera" med inklistringen öppen.
-        $('plbEdPaste').addEventListener('click', () => { const e = B.editing; if (!e) return; closeEditor(); openAssignMany({ paste: true, row: e.row, col: e.col }); });
-        $('plbEdSched').addEventListener('click', () => { const e = B.editing; if (!e || !e.col.key) { $('plbEdErr').textContent = 'Skiftschemat gäller en dag. Välj en dagkolumn.'; return; } closeEditor(); openSchedule(e.row, colsFor(e.row).find(x => x.key === e.col.key) || e.col); });
-        $('plbEdClose').addEventListener('click', closeEditor);
-        $('plbEdSuggest').addEventListener('click', e => {
-            const b = e.target.closest('[data-i]'); if (!b || !B.editing) return;
-            const m = (B.editing.list || [])[parseInt(b.dataset.i, 10)]; if (!m) return;
-            B.editing.memberId = m.memberId;
-            name.value = m.memberName;
-            hideSuggest();
-            showChosen({ name: m.memberName, club: m.clubName, starts: [] });
-            $('plbEdFrom').focus();
-        });
-        return ed;
-    }
-    // Den valda personen står kvar med det som skiljer henne från andra med samma namn: klubb, klass och när hen skjuter.
-    function showChosen(c) {
-        clearTimeout(searchTimer); clearTimeout(candTimer);   // en sökning som var på väg när personen valdes ska inte öppna en lista efteråt
-        const box = $('plbEdChosen'); if (!box) return;
-        const sub = candSub(c);
-        box.innerHTML = `<b>Vald:</b> ${esc(c.name)}${sub ? ` <span class="plb-dim">· ${esc(sub)}</span>` : ''} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="plbEdChange">Byt person</button>`;
-        box.style.display = 'block';
-        $('plbEdCandBox').style.display = 'none';
-        const ch = $('plbEdChange');
-        if (ch) ch.addEventListener('click', () => { if (B.editing) B.editing.memberId = 0; hideChosen(); $('plbEdName').focus(); $('plbEdName').select(); refreshCandidates(0); });
-        placeEditor();
-    }
-    function hideChosen() { const b = $('plbEdChosen'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }
-    // Tiden ändrades för en vald person: fråga om just hen är ledig på den nya tiden.
-    async function recheckChosen() {
-        const ed = B.editing; if (!ed || !ed.memberId) return;
-        const from = normTime($('plbEdFrom').value), to = normTime($('plbEdTo').value);
-        if (!(ed.col.key && from && to)) { $('plbEdErr').textContent = ''; return; }
-        const qs = { planningId: ed.row.planningId || A.ID, roleKey: ed.row.roleKey, date: ed.col.key, scopeKey: ed.row.scopeKey || '', take: 200, from, to, q: $('plbEdName').value.trim() };
-        let r; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
-        if (!B.editing || B.editing.memberId !== ed.memberId) return;
-        const c = r && r.success ? (r.candidates || []).find(x => x.memberId === ed.memberId) : null;
-        $('plbEdErr').textContent = c && c.free === false ? `${c.name} är upptagen: ${c.conflict ? c.conflict.label : 'samtidigt'}. Enter lägger in ändå.` : '';
-    }
-    function hideSuggest() { const b = $('plbEdSuggest'); if (b) { b.style.display = 'none'; b.innerHTML = ''; } }
-
-    // ---- kandidatlistan i rutan (Planera dagen steg 1): anmälda funktionärer och skyttar, med start och ledighet ----
+    // ---- kandidatlistan (Planera dagen steg 1): anmälda funktionärer och skyttar, med start och ledighet ----
     const normTime = v => window.hpskNormalizeTime ? window.hpskNormalizeTime(v) : (v || '').trim();
     function candBadges(c, slotKnown) {
         const b = [];
         if (c.alreadyHere) b.push('<span class="badge text-bg-info fw-normal">Står redan här</span>');
+        else if (c.assignedToday > 0) b.push('<span class="badge text-bg-secondary fw-normal">Placerad</span>');
         if (c.volunteer) b.push('<span class="badge text-bg-success fw-normal">Anmäld funktionär</span>');
         if (c.free === false) b.push('<span class="badge text-bg-warning fw-normal">Upptagen</span>');
         else if (c.free === true && slotKnown) b.push('<span class="badge text-bg-light border fw-normal">Ledig</span>');
         return b.join(' ');
+    }
+    // Var personen redan är placerad den dagen — annars går det inte att se vilka som är tagna och var.
+    function candPlaced(c) {
+        const p = (c.placements || []).filter(Boolean);
+        return p.length ? `<span class="d-block text-body-secondary"><i class="bi bi-person-check me-1" aria-hidden="true"></i>Placerad: ${esc(p.join('; '))}</span>` : '';
     }
     function candSub(c) {
         const parts = [];
@@ -1252,150 +1210,6 @@ window.PlaneringBemanning = (function () {
         if (c.club) parts.push(c.club);
         return parts.join(' · ');
     }
-    let candTimer = null;
-    function refreshCandidates(delay) {
-        clearTimeout(candTimer);
-        candTimer = setTimeout(loadCandidates, delay || 0);
-    }
-    async function loadCandidates() {
-        const ed = B.editing; if (!ed || !$('plbEdCands')) return;
-        if (ed.memberId) return;   // en vald person ligger kvar — listan börjar inte om
-        const seq = (B.candSeq = (B.candSeq || 0) + 1);
-        const from = normTime($('plbEdFrom').value), to = normTime($('plbEdTo').value);
-        const slotKnown = !!(ed.col.key && from && to);
-        const typed = ed.memberId ? '' : $('plbEdName').value.trim();
-        const qs = { planningId: ed.row.planningId || A.ID, roleKey: ed.row.roleKey, date: ed.col.key || '', scopeKey: ed.row.scopeKey || '', take: 8,
-            onlyVolunteers: ed.onlyVol ? 'true' : 'false' };
-        if (slotKnown) { qs.from = from; qs.to = to; }
-        if (typed) qs.q = typed;
-        let r;
-        try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
-        if (seq !== B.candSeq || !B.editing) return;
-        const box = $('plbEdCandBox');
-        if (!r || !r.success || (!r.shooters && !r.volunteers)) { box.style.display = 'none'; return; }
-        // Första gången: finns det någon som anmält sig som funktionär är det dem man vill se först.
-        if (ed.onlyVol == null) {
-            ed.onlyVol = B.onlyVolPref != null ? B.onlyVolPref : r.volunteers > 0;
-            if (ed.onlyVol) return loadCandidates();
-        }
-        $('plbEdOnlyVol').checked = !!ed.onlyVol;
-        ed.cands = r.candidates || [];
-        const list = $('plbEdCands');
-        list.innerHTML = ed.cands.length
-            ? ed.cands.map((c, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}" data-cand="${i}">
-                <span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, slotKnown)}
-                ${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
-                ${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</button>`).join('')
-            : `<div class="list-group-item small plb-dim">${typed ? 'Ingen i listan heter så.' : (ed.onlyVol ? 'Ingen har anmält sig som funktionär den dagen.' : 'Ingen i anmälningarna.')}${ed.onlyVol ? ' Slå av reglaget för att se alla anmälda.' : ''}</div>`;
-        box.style.display = 'block';
-        placeEditor();
-    }
-    function openEditor(btn) {
-        const row = (B.grid.rows || [])[parseInt(btn.dataset.plbAdd, 10)];
-        const col = (B.grid.columns || [])[parseInt(btn.dataset.col, 10)];
-        if (!row || !col) return;
-        const ed = ensureEditor();
-        B.editing = { row, col, memberId: 0, list: [], cands: [], onlyVol: B.onlyVolPref != null ? B.onlyVolPref : null };
-        const pt = B.grid.family ? partOf(row) : null;
-        $('plbEdHead').textContent = (pt ? (pt.isShared ? 'Gemensamt' : pt.name) + ' · ' : '') + row.roleName + ' · ' + (col.key ? col.label : 'Utan dag');
-        $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = ''; $('plbEdErr').textContent = '';
-        hideSuggest(); hideChosen();
-        ed.style.display = 'block';
-        const cell = (btn.closest('td') || btn).getBoundingClientRect();
-        const w = Math.min(330, window.innerWidth - 16);
-        ed.style.width = w + 'px';
-        B.editing.anchor = { top: cell.top, bottom: cell.bottom, left: cell.left, w };
-        placeEditor();
-        $('plbEdName').focus();
-        $('plbEdCandBox').style.display = 'none';
-        refreshCandidates(0);
-    }
-    // Rutan ligger under cellen; får den inte plats (kandidatlistan gör den hög) hamnar den ovanför, annars längst ned i fönstret.
-    function placeEditor() {
-        const ed = $('plbEditor'), a = B.editing && B.editing.anchor; if (!ed || !a) return;
-        const h = ed.offsetHeight;
-        let top = a.bottom + 4, left = a.left;
-        if (top + h > window.innerHeight - 8) top = a.top - h - 4 >= 8 ? a.top - h - 4 : Math.max(8, window.innerHeight - h - 8);
-        if (left + a.w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - a.w - 8);
-        ed.style.top = top + 'px'; ed.style.left = left + 'px';
-    }
-    function closeEditor() {
-        const ed = $('plbEditor');
-        if (ed) ed.style.display = 'none';
-        clearTimeout(candTimer);
-        B.editing = null;
-        hideSuggest();
-    }
-    async function edSearch(q) {
-        try {
-            const d = await sget('SearchMembers', { query: q });
-            const box = $('plbEdSuggest'); if (!box || !B.editing || B.editing.memberId) return;   // en vald person ligger kvar — sökningen får inte öppna listan igen
-            const list = (d && d.success && d.members) ? d.members.slice(0, 8) : [];
-            B.editing.list = list;
-            box.innerHTML = list.length
-                ? list.map((m, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-i="${i}">${esc(m.memberName)}${m.clubName ? ` <span class="plb-dim">${esc(m.clubName)}</span>` : ''}</button>`).join('')
-                : '<div class="list-group-item small plb-dim">Ingen medlem heter så. Enter lägger in namnet som text — du får bekräfta först.</div>';
-            box.style.display = 'block';
-        } catch (e) { hideSuggest(); }
-    }
-    async function edCommit() {
-        const ed = B.editing; if (!ed) return;
-        const err = $('plbEdErr'); err.textContent = '';
-        const name = $('plbEdName').value.trim();
-        if (!name) { closeEditor(); return; }
-        // Ett skrivet namn utan valt val: stämmer det med EN anmäld eller medlem väljs hen; flera = välj; ingen = bekräfta att det blir ren text.
-        if (!ed.memberId) {
-            const nm = name.toLowerCase();
-            const ids = [...new Set([...(ed.cands || []).map(c => [c.memberId, c.name]), ...(ed.list || []).map(m => [m.memberId, m.memberName])]
-                .filter(h => h[1] && h[1].toLowerCase() === nm).map(h => h[0]))];
-            if (ids.length === 1) ed.memberId = ids[0];
-            else if (ids.length > 1) { err.textContent = 'Flera heter så — klicka på rätt person i listan.'; return; }
-            else if (!ed.allowText) { ed.allowText = true; err.textContent = 'Ingen anmäld eller medlem heter så. Tryck Enter igen för att lägga in namnet som text — personen får då ingen kallelse och krocken med egen start kontrolleras inte.'; return; }
-        }
-        const from = window.hpskNormalizeTime ? window.hpskNormalizeTime($('plbEdFrom').value) : $('plbEdFrom').value.trim();
-        const to = window.hpskNormalizeTime ? window.hpskNormalizeTime($('plbEdTo').value) : $('plbEdTo').value.trim();
-        if (from === null || to === null) { err.textContent = 'Skriv klockslaget till exempel 8 eller 8:30.'; return; }
-        const day = ed.col.key || '';
-        if ((from || to) && !day) { err.textContent = 'Tider kräver en dag.'; return; }
-        const payload = {
-            id: 0, memberId: ed.memberId || 0, displayName: name, roleKey: ed.row.roleKey,
-            scopeType: ed.row.scopeType || null, scopeKey: ed.row.scopeKey || null,
-            startsAt: from && day ? day + ' ' + from : null, endsAt: to && day ? day + ' ' + to : null,
-            dayDate: day || null, status: 'Planned', allowDuplicate: !!ed.allowDup
-        };
-        $('plbEdSave').disabled = true;
-        try {
-            const d = await spost('SaveAssignment', payload, ed.row.planningId);
-            if (!d.success && d.duplicate && !ed.allowDup) {
-                ed.allowDup = true;
-                err.textContent = (d.message || 'Personen är redan placerad här.') + ' Tryck Enter igen för att lägga till ändå.';
-                return;
-            }
-            if (!d.success) { err.textContent = d.message || 'Det gick inte att spara.'; return; }
-            ed.allowDup = false; ed.memberId = 0; ed.allowText = false;
-            $('plbEdName').value = ''; $('plbEdFrom').value = ''; $('plbEdTo').value = '';
-            await loadGrid();
-            const keep = { roleKey: ed.row.roleKey, scopeKey: ed.row.scopeKey || '', colKey: ed.col.key, pid: ed.row.planningId };
-            drawGrid();
-            // Rutan står kvar öppen för nästa namn — det är hela poängen med ett rutnät.
-            const ri = (B.grid.rows || []).findIndex(r => r.roleKey === keep.roleKey && (r.scopeKey || '') === keep.scopeKey && r.planningId === keep.pid);
-            const ci = (B.grid.columns || []).findIndex(c => c.key === keep.colKey);
-            const btn = document.querySelector(`[data-plb-add="${ri}"][data-col="${ci}"]`);
-            if (btn) openEditor(btn);
-        } catch (e) { err.textContent = e.message || 'Det gick inte att spara.'; }
-        finally { const s = $('plbEdSave'); if (s) s.disabled = false; }
-    }
-    // Ett klick utanför rutan stänger den. composedPath: en vald träff tar bort sig själv ur sidan innan
-    // klicket når hit, och då hade closest() inte hittat rutan.
-    document.addEventListener('click', e => {
-        if (!B.editing) return;
-        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
-        for (const el of path) {
-            if (!el || el.nodeType !== 1) continue;
-            if (el.id === 'plbEditor' || (el.classList && el.classList.contains('plb-add'))) return;
-        }
-        closeEditor();
-    });
 
     // ---- radernas ordning: dra, eller piltangenterna på greppet ----
     let dragRole = null, dragPid = '0', pendingFocus = null;
@@ -2249,7 +2063,7 @@ window.PlaneringBemanning = (function () {
             return `<div class="plb-sc-row border rounded p-2 mb-2" data-i="${i}"><div class="d-flex flex-wrap align-items-center gap-2">
                 <div class="flex-grow-1" style="min-width:11rem">${who}</div>${times}
                 <button type="button" class="btn btn-sm btn-outline-danger" data-sc-del="${i}" aria-label="Ta bort skiftet" title="Ta bort skiftet"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
-                <div class="list-group mt-1 d-none plb-sc-sug" data-i="${i}"></div></div>`;
+                <div class="list-group mt-1 d-none plb-sc-sug" data-i="${i}" style="max-height:40vh;overflow:auto"></div></div>`;
         };
         // Personförslag för en rad: anmälda funktionärer först (lediga på skiftets tid), därefter alla anmälda, sist medlemssökningen.
         let sugTimer = null, sugSeq = 0;
@@ -2258,17 +2072,19 @@ window.PlaneringBemanning = (function () {
             sugTimer = setTimeout(async () => {
                 const r = S.rows[i], box = body && body.querySelector(`.plb-sc-sug[data-i="${i}"]`); if (!r || !box) return;
                 const seq = ++sugSeq;
-                const qs = { planningId: row.planningId || A.ID, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 8, onlyVolunteers: q.length >= 2 ? 'false' : 'true' };
+                const qs = { planningId: row.planningId || A.ID, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 200, onlyVolunteers: q.length >= 2 ? 'false' : 'true' };
                 const f = normTime(r.from), t = normTime(r.to); if (f && t) { qs.from = f; qs.to = t; }
                 if (q) qs.q = q;
                 let list = [];
-                try { const d = await sget('GetCandidates', qs); if (d && d.success) list = (d.candidates || []).map(c => ({ memberId: c.memberId, name: c.name, free: c.free, vol: c.volunteer, sub: candSub(c), badges: candBadges(c, !!(f && t)), conflict: c.conflict && c.conflict.label })); } catch (e) { /* ingen lista */ }
+                const fetchList = async () => { try { const d = await sget('GetCandidates', qs); return (d && d.success) ?                 (d.candidates || []).map(c => ({ memberId: c.memberId, name: c.name, free: c.free, vol: c.volunteer, sub: candSub(c), badges: candBadges(c, !!(f && t)), conflict: c.conflict && c.conflict.label, placed: candPlaced(c) })) : []; } catch (e) { return []; } };
+                list = await fetchList();
+                if (!list.length && !q) { qs.onlyVolunteers = 'false'; list = await fetchList(); }   // ingen har anmält sig: visa alla anmälda i stället för en tom lista
                 if (!list.length && q.length >= 2) {
                     try { const d = await sget('SearchMembers', { query: q }); list = ((d && d.members) || []).slice(0, 8).map(m => ({ memberId: m.memberId, name: m.memberName, sub: m.clubName || '', badges: '' })); } catch (e) { /* ingen lista */ }
                 }
                 if (seq !== sugSeq || !body || !body.contains(box)) return;
                 S.sug = { i, list };
-                box.innerHTML = list.length ? list.map((c, k) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-sc-pick="${k}"><span class="fw-semibold">${esc(c.name)}</span> ${c.badges || ''}${c.sub ? `<span class="d-block plb-dim">${esc(c.sub)}</span>` : ''}${c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict)}</span>` : ''}</button>`).join('')
+                box.innerHTML = list.length ? list.map((c, k) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-sc-pick="${k}"><span class="fw-semibold">${esc(c.name)}</span> ${c.badges || ''}${c.sub ? `<span class="d-block plb-dim">${esc(c.sub)}</span>` : ''}${c.placed || ''}${c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict)}</span>` : ''}</button>`).join('')
                     : '<div class="list-group-item small plb-dim">Ingen hittades. Skriv ett namn och spara — då läggs det in som text, utan kallelse.</div>';
                 box.classList.remove('d-none');
             }, q ? 200 : 0);
@@ -2980,10 +2796,10 @@ window.PlaneringBemanning = (function () {
         e.preventDefault();
         if (t.hasAttribute('data-plb-proposal')) openProposal();
         else if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
-        else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; closeEditor(); drawGrid(); }
+        else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
-        else if (t.dataset.plbPerson) { closeEditor(); nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
-        else if (t.hasAttribute('data-plb-add')) openEditor(t);
+        else if (t.dataset.plbPerson) { nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
+        else if (t.hasAttribute('data-plb-add')) { const r = (B.grid.rows || [])[parseInt(t.dataset.plbAdd, 10)], c = (B.grid.columns || [])[parseInt(t.dataset.col, 10)]; if (r && c) openAssignMany({ row: r, col: r && colsFor(r).find(x => x.key === c.key) || c }); }
         else if (t.hasAttribute('data-plb-sched')) { const r = (B.grid.rows || [])[+t.dataset.plbSched], c = (B.grid.columns || [])[+t.dataset.col]; if (r && c) openSchedule(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));
@@ -3022,7 +2838,7 @@ window.PlaneringBemanning = (function () {
     function stopPoll() { if (B.timer) { clearInterval(B.timer); B.timer = null; } }
     async function poll() {
         if (!A || !A.isActive() || B.polling || document.visibilityState !== 'visible') return;
-        if (B.editing || document.querySelector('.modal.show') || document.querySelector('#plBody .dropdown-menu.show')) return;
+        if (document.querySelector('.modal.show') || document.querySelector('#plBody .dropdown-menu.show')) return;
         const ae = document.activeElement;
         if (ae && $('plBody').contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
         B.polling = true;

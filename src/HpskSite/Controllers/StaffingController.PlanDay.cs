@@ -90,7 +90,7 @@ namespace HpskSite.Controllers
             memberId = c.MemberId, name = c.Name, club = c.Club, shooterClass = c.ShooterClass, isShooter = c.IsShooter,
             starts = c.Starts.Select(s => new { title = s.Title, where = s.Where, time = s.Start.ToString("HH\\:mm"), end = s.End?.ToString("HH\\:mm") }),
             volunteer = c.Volunteer, roleMatch = c.RoleMatch, comment = c.Comment, free = c.Free, tier = (int)c.Tier,
-            assignedToday = c.AssignedToday, alreadyHere = c.AlreadyHere, mode = c.Mode,
+            assignedToday = c.AssignedToday, alreadyHere = c.AlreadyHere, mode = c.Mode, placements = c.Placements ?? new List<string>(),
             conflict = c.Conflict == null ? null : new { kind = c.Conflict.Kind.ToString(), label = c.Conflict.Label, hard = c.Conflict.IsHard, gap = c.Conflict.GapMinutes },
         };
 

@@ -15,7 +15,7 @@ namespace HpskSite.Services.Staffing
     /// </summary>
     public sealed record StaffCandidate(int MemberId, string Name, string? Club, string? ShooterClass, IReadOnlyList<CandidateStart> Starts,
         bool IsShooter, bool Volunteer, bool RoleMatch, string? Comment, bool? Free, SlotConflict? Conflict, int AssignedToday,
-        bool AlreadyHere, CandidateTier Tier, string Mode = ShooterMode.Coordinated);
+        bool AlreadyHere, CandidateTier Tier, string Mode = ShooterMode.Coordinated, IReadOnlyList<string>? Placements = null);
 
     public sealed class CandidateQuery
     {
@@ -136,6 +136,10 @@ namespace HpskSite.Services.Staffing
                 var alreadyHere = q.RoleKey != null && mineToday.Any(m => string.Equals(m.A.RoleKey, q.RoleKey, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(m.A.ScopeKey ?? "", q.ScopeKey ?? "", StringComparison.OrdinalIgnoreCase));
 
+                // Var personen redan är placerad den dagen ("Stationsmarkör Station 2 09:00–12:00"), så att listan visar vilka som är tagna och var.
+                var placements = mineToday.OrderBy(m => m.Iv?.Start ?? DateTime.MinValue).Select(m =>
+                    $"{RoleLabel(m.A.RoleKey)}{(string.IsNullOrEmpty(m.A.ScopeKey) ? "" : $" {m.A.ScopeType} {m.A.ScopeKey}".TrimEnd())} {(m.Iv is { AllDay: false } v ? $"{v.Start:HH\\:mm}–{v.End:HH\\:mm}" : "hela dagen")}").ToList();
+
                 // Ledig? Egna starter (med förberedelse och vila), andra uppdrag och tiderna personen anmält sig till.
                 bool? free = null; SlotConflict? conflict = null;
                 var mode = ShooterModeRules.Effective(planningRow?.ShooterMode, overrides.GetValueOrDefault(mid));
@@ -166,7 +170,7 @@ namespace HpskSite.Services.Staffing
                 if (clubId > 0) { try { club = _clubs.GetClubNameById(clubId); } catch { /* utan förening */ } }
                 var tier = CandidateRules.Tier(fit.Volunteers, fit.RoleMatch, free);
                 result.Add(new StaffCandidate(mid, name, club, string.IsNullOrWhiteSpace(classes) ? null : classes, myStarts, regByMember.ContainsKey(mid), fit.Volunteers,
-                    fit.RoleMatch, comment, free, conflict, mineToday.Count, alreadyHere, tier, mode));
+                    fit.RoleMatch, comment, free, conflict, mineToday.Count, alreadyHere, tier, mode, placements));
             }
 
             var ranked = CandidateRules.Rank(result, c => c.Tier, c => c.Name, c => c.MemberId);
