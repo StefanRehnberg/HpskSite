@@ -3787,7 +3787,10 @@
             const whoHtml = s.responsible ? esc(s.responsible) : stDash;
             const menu = rowMenu([
                 s.url && { label: 'Öppna stationen i konfiguratorn', fn: () => { location.href = s.url; } },
-                whole && ST.course && { label: s.responsible ? 'Byt ansvarig…' : 'Ge stationen en ansvarig…', fn: () => openGiveStation(s) },
+                // Persontest (Stefan 2026-10-27): den gamla tvåstegsdialogen listade bara dem som redan var ansvariga för en station, och '+ Någon ny' gjorde inget förrän man tryckt Spara.
+                // Nu öppnas den riktiga dialogen direkt, med stationen förvald: personer i planeringen, klubbar, kretsar eller ett skrivet namn.
+                whole && ST.course && { label: s.responsible ? 'Byt ansvarig…' : 'Ge stationen en ansvarig…', fn: () => openResponsible(null, s.number) },
+                whole && ST.course && s.responsible && { label: 'Ta bort ansvarig…', fn: () => clearStationResponsible(s) },
                 TASKS && TASKS.canCreate && !TOKEN && { label: 'Lägg till en uppgift för stationen…',
                     fn: () => openTaskEdit(null, null, { scopeType: 'Station', scopeKey: String(s.number) }) },
             ]);
@@ -3887,32 +3890,11 @@
             },
         });
     }
-    function openGiveStation(s) {
-        const opts = (ST.responsibles || []).filter(a => a.editable && a.key !== s.responsibleKey);
-        formModal({
-            title: `Station ${s.number}`, okLabel: 'Spara', wide: false,
-            html: `<label class="form-label fw-semibold" for="gsArea">Vem är ansvarig för stationen?</label>
-                <select id="gsArea" class="form-select">${opts.map(a => `<option value="${esc(a.key)}">${esc(a.name)}</option>`).join('')}
-                    <option value="__new">＋ Någon ny…</option>
-                    ${s.responsible ? '<option value="__none">Ingen ansvarig</option>' : ''}</select>
-                ${s.responsible ? `<div class="pl-help small mt-1">I dag: ${esc(s.responsible)}.</div>` : ''}`,
-            onOk: async body => {
-                const v = body.querySelector('#gsArea').value;
-                if (v === '__new') { openResponsible(null, s.number); return; }
-                let r;
-                if (v === '__none') r = await post('ClearStationResponsible', { stations: String(s.number) });
-                else {
-                    const to = opts.find(a => a.key === v);
-                    r = await post('SetStationResponsible', {
-                        who: to.kind === 'Person' ? 'p:' + to.participantId : to.kind === 'Club' ? 'h:0:' + to.hostId : to.kind === 'Region' ? 'h:1:' + to.hostId : 'text',
-                        name: to.kind === 'Name' ? to.name : '', contactId: to.kind === 'Person' ? '' : (to.contactId || ''),
-                        stations: String(s.number), release: '' });
-                }
-                if (!r.success) return r.message;
-                await afterStationChange();
-                return true;
-            },
-        });
+    async function clearStationResponsible(s) {
+        if (!await plConfirm('Ta bort ansvarig?', 'Station ' + s.number + ' får ingen ansvarig. ' + s.responsible + ' är kvar som person i planeringen.', 'Ta bort', true)) return;
+        const r = await post('ClearStationResponsible', { stations: String(s.number) });
+        if (!r.success) { failMsg(r); return; }
+        await afterStationChange();
     }
     function openStationCount() {
         formModal({
