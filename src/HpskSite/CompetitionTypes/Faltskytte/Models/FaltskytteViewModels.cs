@@ -253,6 +253,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool IsDns { get; set; }
     }
 
+    /// <summary>Flytta en skytt till en annan plats i samma patrull (byter plats om den är upptagen).</summary>
+    public class SetPatrolSeatRequest
+    {
+        public int CompetitionId { get; set; }
+        public int PatrolMemberId { get; set; }
+        public int Position { get; set; }
+    }
+
     // ── Flow/statistics page (/faltskytte/statistik/{id}) ─────────
 
     public class FaltskytteStatsModel

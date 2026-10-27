@@ -1907,13 +1907,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
 
             // Add shooter to patrol
-            var maxPos = await db.ExecuteScalarAsync<int>(
-                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", openPatrol.Id);
+            var freePos = await NextFreePosition(db, openPatrol.Id);
             await db.InsertAsync(new FaltskyttePatrolMember
             {
                 PatrolId = openPatrol.Id,
                 MemberId = request.MemberId,
-                Position = maxPos + 1,
+                Position = freePos,
                 ShootingClass = request.ShootingClass,
                 MemberName = request.MemberName,
                 ClubName = request.ClubName
@@ -2328,14 +2327,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     request.MemberId, request.CompetitionId, sameGroupIds);
             }
 
-            var maxPos = await db.ExecuteScalarAsync<int>(
-                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.PatrolId);
+            var freePos = await NextFreePosition(db, request.PatrolId);
 
             var member = new FaltskyttePatrolMember
             {
                 PatrolId = request.PatrolId,
                 MemberId = request.MemberId,
-                Position = maxPos + 1,
+                Position = freePos,
                 ShootingClass = request.ShootingClass,
                 MemberName = request.MemberName,
                 ClubName = request.ClubName
@@ -2371,9 +2369,69 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", request.PatrolMemberId);
+            if (row == null)
+                return Json(new { success = false, message = "Skytten hittades inte." });
+            // En DNS lämnar sin plats (Position 0) så den blir ledig i patrullen; övriga skyttar
+            // behåller sina platsnummer. Ångra DNS tar lägsta lediga plats.
             object status = request.IsDns ? "DNS" : (object)DBNull.Value;
-            await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET Status = @0 WHERE Id = @1", status, request.PatrolMemberId);
+            var position = request.IsDns ? 0 : await NextFreePosition(db, row.PatrolId);
+            await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET Status = @0, Position = @1 WHERE Id = @2",
+                status, position, request.PatrolMemberId);
             return Json(new { success = true, isDns = request.IsDns });
+        }
+
+        /// <summary>
+        /// Lägsta lediga plats i patrullen (1, 2, 3 …). En skytt som tas bort eller markeras DNS
+        /// lämnar en lucka som nästa skytt fyller; platsnumren hoppar aldrig upp (Michael
+        /// Henriksson 2026-10-27: "de behöver stå kvar på sin plats").
+        /// </summary>
+        private static async Task<int> NextFreePosition(NPoco.IDatabase db, int patrolId)
+        {
+            var taken = (await db.FetchAsync<int>(
+                "SELECT Position FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND (Status IS NULL OR Status <> 'DNS')",
+                patrolId)).ToHashSet();
+            var pos = 1;
+            while (taken.Contains(pos)) pos++;
+            return pos;
+        }
+
+        private static async Task MoveMemberToPatrolSeat(NPoco.IDatabase db, int patrolMemberId, int targetPatrolId)
+        {
+            var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", patrolMemberId);
+            if (row == null) return;
+            // En DNS behåller Position 0 även när den flyttas.
+            var pos = row.Status == "DNS" ? 0 : await NextFreePosition(db, targetPatrolId);
+            await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET PatrolId = @0, Position = @1 WHERE Id = @2",
+                targetPatrolId, pos, patrolMemberId);
+        }
+
+        /// <summary>
+        /// Byt plats inom patrullen: till en ledig plats, eller byta plats med den som sitter där.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetShooterPosition([FromBody] SetPatrolSeatRequest request)
+        {
+            if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+            if (request.Position < 1 || request.Position > 99)
+                return Json(new { success = false, message = "Ogiltig plats." });
+
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>(
+                "WHERE Id = @0 AND PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @1)",
+                request.PatrolMemberId, request.CompetitionId);
+            if (row == null || row.Status == "DNS")
+                return Json(new { success = false, message = "Skytten hittades inte i en patrull." });
+
+            var occupant = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>(
+                "WHERE PatrolId = @0 AND Position = @1 AND Id <> @2 AND (Status IS NULL OR Status <> 'DNS')",
+                row.PatrolId, request.Position, row.Id);
+            if (occupant != null)
+                await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET Position = @0 WHERE Id = @1", row.Position, occupant.Id);
+            await db.ExecuteAsync("UPDATE FaltskyttePatrolMember SET Position = @0 WHERE Id = @1", request.Position, row.Id);
+            return Json(new { success = true });
         }
 
         [HttpPost]
@@ -2384,12 +2442,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var maxPos = await db.ExecuteScalarAsync<int>(
-                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.TargetPatrolId);
-
-            await db.ExecuteAsync(
-                "UPDATE FaltskyttePatrolMember SET PatrolId = @0, Position = @1 WHERE Id = @2",
-                request.TargetPatrolId, maxPos + 1, request.PatrolMemberId);
+            await MoveMemberToPatrolSeat(db, request.PatrolMemberId, request.TargetPatrolId);
 
             return Json(new { success = true });
         }
@@ -2543,17 +2596,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 // Insert one patrol-member row per class in this group. Increment maxPos
                 // across the inserts so two classes from the same shooter on the same
                 // patrol get consecutive positions.
-                var maxPos = await db.ExecuteScalarAsync<int>(
-                    "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", patrolId);
-
                 foreach (var classEntry in grp)
                 {
-                    maxPos++;
                     var memberRow = new FaltskyttePatrolMember
                     {
                         PatrolId = patrolId,
                         MemberId = memberId,
-                        Position = maxPos,
+                        Position = await NextFreePosition(db, patrolId),
                         ShootingClass = classEntry.Class,
                         MemberName = memberName,
                         ClubName = clubName
@@ -2792,16 +2841,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var maxPos = await db.ExecuteScalarAsync<int>(
-                "SELECT ISNULL(MAX(Position), 0) FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.TargetPatrolId);
-
             foreach (var pmId in request.PatrolMemberIds)
-            {
-                maxPos++;
-                await db.ExecuteAsync(
-                    "UPDATE FaltskyttePatrolMember SET PatrolId = @0, Position = @1 WHERE Id = @2",
-                    request.TargetPatrolId, maxPos, pmId);
-            }
+                await MoveMemberToPatrolSeat(db, pmId, request.TargetPatrolId);
 
             return Json(new { success = true, moved = request.PatrolMemberIds.Count });
         }
