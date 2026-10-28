@@ -33,6 +33,12 @@ namespace HpskSite.Services.Staffing
         /// <summary>Bara de som anmält sig som funktionärer den dagen.</summary>
         public bool OnlyVolunteers { get; init; }
         public int Take { get; init; } = 40;
+        /// <summary>Sidindelning: hoppa över så många av den rangordnade listan. Rangordningen är stabil (nivå, namn, medlems-id), så sidorna överlappar aldrig.</summary>
+        public int Skip { get; init; }
+        /// <summary>Bara de som inte står någon annanstans den dagen.</summary>
+        public bool OnlyUnplaced { get; init; }
+        /// <summary>Bara de som inte har ett hårt hinder på den angivna tiden (ingen tid angiven = inget filter).</summary>
+        public bool OnlyFree { get; init; }
     }
 
     public sealed record CandidateResult(List<StaffCandidate> Candidates, int Total, int Shooters, int Volunteers, int VolunteersWithoutAssignment);
@@ -103,6 +109,7 @@ namespace HpskSite.Services.Staffing
 
             var members = regByMember.Keys.Union(signupByMember.Keys).Where(m => q.OnlyMembers == null || q.OnlyMembers.Contains(m)).ToList();
             var result = new List<StaffCandidate>();
+            var clubIdByMember = new Dictionary<int, int>();
             foreach (var mid in members)
             {
                 var name = regByMember.TryGetValue(mid, out var rr) && !string.IsNullOrWhiteSpace(rr[0].MemberName) ? rr[0].MemberName!
@@ -165,18 +172,28 @@ namespace HpskSite.Services.Staffing
                 }
 
                 var classes = regByMember.TryGetValue(mid, out var rl) ? string.Join(", ", rl.Select(x => x.ClassKey).Where(c => !string.IsNullOrEmpty(c)).Distinct().Select(c => HpskSite.Models.ShootingClasses.DisplayName(c))) : null;
+                if (q.OnlyUnplaced && mineToday.Count > 0) continue;
+                if (q.OnlyFree && free == false) continue;
                 var clubId = rr?.FirstOrDefault(x => x.ClubId > 0)?.ClubId ?? 0;
-                string? club = null;
-                if (clubId > 0) { try { club = _clubs.GetClubNameById(clubId); } catch { /* utan förening */ } }
+                clubIdByMember[mid] = clubId;   // föreningens namn slås upp först för dem som hamnar på sidan
                 var tier = CandidateRules.Tier(fit.Volunteers, fit.RoleMatch, free);
-                result.Add(new StaffCandidate(mid, name, club, string.IsNullOrWhiteSpace(classes) ? null : classes, myStarts, regByMember.ContainsKey(mid), fit.Volunteers,
+                result.Add(new StaffCandidate(mid, name, null, string.IsNullOrWhiteSpace(classes) ? null : classes, myStarts, regByMember.ContainsKey(mid), fit.Volunteers,
                     fit.RoleMatch, comment, free, conflict, mineToday.Count, alreadyHere, tier, mode, placements));
             }
 
             var ranked = CandidateRules.Rank(result, c => c.Tier, c => c.Name, c => c.MemberId);
             var assignedMembers = assigns.Where(a => !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).Select(a => a.MemberId ?? 0).ToHashSet();
             var volunteersAll = signupByMember.Keys.ToList();
-            return new CandidateResult(ranked.Take(Math.Max(1, q.Take)).ToList(), ranked.Count, regByMember.Count, volunteersAll.Count,
+            var clubNames = new Dictionary<int, string?>();
+            string? ClubOf(int memberId)
+            {
+                var id = clubIdByMember.GetValueOrDefault(memberId);
+                if (id <= 0) return null;
+                if (!clubNames.TryGetValue(id, out var n)) { try { n = _clubs.GetClubNameById(id); } catch { n = null; /* utan förening */ } clubNames[id] = n; }
+                return n;
+            }
+            var page = ranked.Skip(Math.Max(0, q.Skip)).Take(Math.Max(1, q.Take)).Select(c => c with { Club = ClubOf(c.MemberId) }).ToList();
+            return new CandidateResult(page, ranked.Count, regByMember.Count, volunteersAll.Count,
                 volunteersAll.Count(m => !assignedMembers.Contains(m)));
         }
 

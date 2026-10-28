@@ -259,166 +259,6 @@ window.PlaneringBemanning = (function () {
             onOk: body => saveRoleChoice(body)
         });
     }
-    // ================================================================ Välj person (EN ruta, EN person)
-    // Stefan 2026-10-28, efter UX-granskning: "+ lägg till" i en ruta öppnar en liten dialog som bara gör en sak. Rutan är redan vald, så den frågar inte efter roll, station eller dag.
-    // Ett tryck på ett namn lägger in personen (planerat läge, inget mejl). Behöver rutan fler står dialogen kvar; är den full stängs den. Tid frågas inte i förväg:
-    // "hela dagen" om inget annat sägs, eller hålet i skiftschemat. Anmälda funktionärer visas först; skyttarna ligger bakom en länk och övriga medlemmar nås med sökningen.
-    const firstName = n => String(n || '').trim().split(/\s+/)[0] || 'Personen';
-    function openPickPerson(row, col) {
-        const pid = row.planningId || A.ID;
-        const need = needFor(row, col.key);
-        const win = col.windowFrom && col.windowTo ? { from: col.windowFrom, to: col.windowTo } : null;
-        const curRow = () => (B.grid.rows || []).find(r => r.roleKey === row.roleKey && (r.scopeKey || '') === (row.scopeKey || '') && r.planningId === row.planningId) || row;
-        const remainingNow = () => Math.max(0, need - filledFor(curRow(), col.key));
-        let remaining = remainingNow();
-        // Är rutan delad i skift med ett hål är hålet förvalt som tid.
-        let from0 = '', to0 = '';
-        const cellRows = ((row.cells || {})[col.key] || []).filter(e => e.status !== 'Declined');
-        if (win && cellRows.some(e => hmMin(e.from) != null && hmMin(e.to) != null)) {
-            const h = scHoles(cellRows.map(e => ({ from: e.from, to: e.to, status: e.status })), { from: hmMin(win.from), to: hmMin(win.to) }, need);
-            if (h.length) { from0 = minHm(h[0].from); to0 = minHm(h[0].to); }
-        }
-        let cands = [], members = [], q = '', showShooters = false, last = null, timer = null, seq = 0, pending = null;
-        const title = `${row.roleName}${row.scopeLabel ? ' · ' + row.scopeLabel : ''}${col.key ? ' · ' + col.label : ''}`;
-        const modal = A.formModal({
-            title, wide: false, cancelLabel: 'Klar',
-            html: `<div class="small mb-2" id="ppTimeLine"></div>
-                <div class="row g-2 mb-2 d-none" id="ppTimeBox">
-                    <div class="col-6"><label class="form-label small mb-0" for="ppFrom">Från klockan</label><input type="text" class="form-control form-control-sm" id="ppFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8" value="${esc(from0)}"></div>
-                    <div class="col-6"><label class="form-label small mb-0" for="ppTo">Till klockan</label><input type="text" class="form-control form-control-sm" id="ppTo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 12" value="${esc(to0)}"></div>
-                    <div class="col-12 pl-help small">Lämna båda tomma för hela dagen. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="ppSched">Flera personer efter varandra? Öppna skiftschemat</button></div>
-                </div>
-                <div class="small mb-2" id="ppDone" aria-live="polite"></div>
-                <input type="search" class="form-control mb-2" id="ppQ" placeholder="Sök namn" autocomplete="off" aria-label="Sök namn">
-                <div class="alert alert-warning py-2 small d-none" id="ppConfirm" role="alert"></div>
-                <div id="ppList" style="max-height:50vh;overflow:auto"><div class="small plb-dim">Hämtar…</div></div>
-                <div class="text-danger small mt-2" id="ppErr" role="alert"></div>`,
-            onOpen: b => {
-                const $b = s => b.querySelector(s);
-                const times = () => ({ f: normTime($b('#ppFrom').value), t: normTime($b('#ppTo').value) });
-                const paintTime = () => {
-                    const { f, t } = times();
-                    $b('#ppTimeLine').innerHTML = (f && t ? `Gäller <b>${esc(f)}–${esc(t)}</b>${f === from0 && t === to0 ? ' (hålet i schemat)' : ''}` : 'Gäller <b>hela dagen</b>')
-                        + ' · <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="ppTimeBtn">Ändra tid</button>';
-                };
-                const paintDone = () => {
-                    $b('#ppDone').innerHTML = (last ? `Inlagd: <b>${esc(last.name)}</b>${last.id ? ' · <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-pp-undo>Ångra</button>' : ''}` : '')
-                        + (need > 0 ? `${last ? ' · ' : ''}<span class="fw-semibold">${remaining === 0 ? (from0 ? 'Antalet är uppnått, men det finns ett hål i schemat' : 'Rutan är full') : `${remaining} av ${need} ${need === 1 ? 'plats' : 'platser'} kvar`}</span>` : '');
-                };
-                // En rad: den som redan är placerad visar var (och en eventuell krock efter det), annars krock, annars egen start, annars föreningen.
-                const sub = c => {
-                    const p = (c.placements || []).filter(Boolean);
-                    const clash = c.free === false && c.conflict ? c.conflict.label : '';
-                    if (p.length) return { t: 'Står på ' + p.join('; ') + (clash ? ' · ' + clash : ''), warn: !!clash };
-                    if (clash) return { t: clash, warn: true };
-                    return { t: candSub(c) };
-                };
-                const cmp = (a, c) => (a.roleMatch ? 0 : 1) - (c.roleMatch ? 0 : 1) || (a.free === false ? 1 : 0) - (c.free === false ? 1 : 0) || a.name.localeCompare(c.name, 'sv');
-                const btn = (c, attr) => { const s = c.t !== undefined ? c : sub(c); return `<button type="button" class="list-group-item list-group-item-action py-2${c.free === false ? ' plb-cand-busy' : ''}" style="min-height:48px" ${attr}><span class="fw-semibold">${esc(c.name)}</span>${s.t ? `<span class="d-block small ${s.warn ? 'text-warning-emphasis' : 'text-body-secondary'}">${esc(s.t)}</span>` : ''}</button>`; };
-                const paint = () => {
-                    const live = cands.filter(c => !c.alreadyHere).slice().sort(cmp);
-                    const list = $b('#ppList');
-                    let html = '';
-                    if (q.length >= 2) {
-                        if (live.length) html += `<div class="list-group">${live.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
-                        if (members.length) html += `<div class="small fw-semibold mt-2 mb-1">Övriga medlemmar</div><div class="list-group">${members.map((m, i) => btn({ name: m.memberName, t: m.clubName || '' }, `data-ppm="${i}"`)).join('')}</div>`;
-                        html += `<div class="list-group mt-2"><button type="button" class="list-group-item list-group-item-action py-2" style="min-height:48px" data-ppname><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Lägg in »${esc(q)}« utan konto</button></div>`;
-                    } else {
-                        const vols = live.filter(c => c.volunteer && !(c.assignedToday > 0));
-                        const placed = live.filter(c => c.assignedToday > 0);
-                        const shooters = live.filter(c => !c.volunteer && !(c.assignedToday > 0));
-                        if (vols.length) html += `<div class="small fw-semibold mb-1">Anmälda funktionärer</div><div class="list-group">${vols.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
-                        const shooterList = `<div class="small fw-semibold mt-2 mb-1">Skyttar i tävlingen</div><div class="list-group">${shooters.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
-                        if (!vols.length && shooters.length) html += `<p class="small plb-dim mb-1">Ingen har anmält sig som funktionär. Här är skyttarna i tävlingen.</p>${shooterList}`;
-                        else if (vols.length && shooters.length) html += showShooters ? shooterList : `<button type="button" class="btn btn-link btn-sm p-0 mt-2" data-pp-shooters>Visa skyttarna i tävlingen (${shooters.length})</button>`;
-                        if (placed.length) html += `<details class="mt-2"><summary class="small fw-semibold">Redan placerade den dagen (${placed.length})</summary><div class="list-group mt-1">${placed.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div></details>`;
-                        if (!html) html = '<p class="small plb-dim mb-0">Ingen att visa. Sök efter ett namn, så hittar du alla medlemmar.</p>';
-                    }
-                    list.innerHTML = html;
-                };
-                const fetchCands = async () => {
-                    const my = ++seq;
-                    const { f, t } = times();
-                    const qs = { planningId: pid, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 200, onlyVolunteers: 'false' };
-                    if (f && t) { qs.from = f; qs.to = t; } else if (win) { qs.from = win.from; qs.to = win.to; }   // utan tid prövas mot dagens fönster, så att krockar syns direkt
-                    if (q.length >= 2) qs.q = q;
-                    let r = null; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
-                    if (my !== seq) return;
-                    if (!r || !r.success) { $b('#ppList').innerHTML = `<div class="small text-danger">${esc((r && r.message) || 'Kunde inte läsa listan.')}</div>`; return; }
-                    cands = r.candidates || []; members = [];
-                    if (q.length >= 2) {
-                        try {
-                            const d = await sget('SearchMembers', { query: q }); if (my !== seq) return;
-                            const known = new Set(cands.map(c => c.memberId));
-                            members = ((d && d.members) || []).filter(m => !known.has(m.memberId)).slice(0, 8);
-                        } catch (e) { members = []; }
-                    }
-                    paint();
-                };
-                const askForce = (p, label) => {
-                    pending = p;
-                    const n = esc(firstName(p.name));
-                    $b('#ppConfirm').innerHTML = `${n}: ${esc(label)}. Lägg in ${n} ändå?<span class="d-block mt-1"><button type="button" class="btn btn-sm btn-warning" data-pp-force>Lägg in ändå</button> <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-pp-time>Ändra tid</button></span>`;
-                    $b('#ppConfirm').classList.remove('d-none');
-                };
-                const doAdd = async (p, force) => {
-                    const err = $b('#ppErr'); err.textContent = '';
-                    $b('#ppConfirm').classList.add('d-none'); pending = null;
-                    const { f, t } = times();
-                    if (f === null || t === null) { err.textContent = 'Skriv klockslagen till exempel 8 eller 8:30.'; return; }
-                    if (!!f !== !!t) { err.textContent = 'Skriv både från och till, eller ingen tid alls.'; return; }
-                    if (p.free === false && !force) { askForce(p, p.conflict ? p.conflict.label : 'är upptagen'); return; }
-                    let id = 0;
-                    try {
-                        if (p.noAccount || p.outside) {
-                            const r = await spost('SaveAssignment', { id: 0, memberId: p.outside ? p.memberId : 0, displayName: p.name, roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null,
-                                startsAt: f && col.key ? col.key + ' ' + f : null, endsAt: t && col.key ? col.key + ' ' + t : null, dayDate: col.key || null, status: 'Planned' }, pid);
-                            if (!r.success) { err.textContent = r.message || 'Det gick inte att lägga in.'; return; }
-                            id = r.id || 0;
-                        } else {
-                            const d = await spost('AssignMany', { roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null, date: col.key, from: f || null, to: t || null, memberIds: [p.memberId], force: !!force }, pid);
-                            if (!d.success) { err.textContent = d.message || 'Det gick inte att lägga in.'; return; }
-                            if (d.added.length) id = d.added[0].id;
-                            else { const s = (d.skipped || [])[0]; if (s && s.clash) { askForce(p, s.reason); return; } err.textContent = s ? `${p.name}: ${s.reason}` : 'Det gick inte att lägga in.'; return; }
-                        }
-                    } catch (e) { err.textContent = e.message || 'Det gick inte att lägga in.'; return; }
-                    const before = remaining;
-                    last = { id, name: p.name };
-                    await loadGrid(); drawGrid();
-                    remaining = remainingNow();
-                    if (need > 0 && before > 0 && remaining === 0) { modal.hide(); A.showMsg(`${esc(p.name)} är inlagd. Rutan är full.`, 'success'); return; }
-                    paintDone(); q = ''; $b('#ppQ').value = ''; await fetchCands();
-                };
-                const find = target => {
-                    const a = target.closest('[data-pp]'); if (a) return cands.find(c => String(c.memberId) === a.dataset.pp);
-                    const m = target.closest('[data-ppm]'); if (m) { const x = members[parseInt(m.dataset.ppm, 10)]; return x ? { memberId: x.memberId, name: x.memberName, outside: true } : null; }
-                    if (target.closest('[data-ppname]')) return { name: q.trim(), noAccount: true };
-                    return null;
-                };
-                b.addEventListener('click', async e => {
-                    if (e.target.closest('#ppTimeBtn') || e.target.closest('[data-pp-time]')) {
-                        $b('#ppTimeBox').classList.remove('d-none'); $b('#ppConfirm').classList.add('d-none'); $b('#ppFrom').focus(); return;
-                    }
-                    if (e.target.closest('[data-pp-shooters]')) { showShooters = true; paint(); return; }
-                    if (e.target.closest('#ppSched')) { openSchedule(curRow(), col); return; }
-                    if (e.target.closest('[data-pp-force]')) { if (pending) await doAdd(pending, true); return; }
-                    if (e.target.closest('[data-pp-undo]')) {
-                        if (!last || !last.id) return;
-                        const d = await spost('DeleteAssignment', { id: last.id }, pid).catch(() => null);
-                        if (!d || !d.success) { $b('#ppErr').textContent = (d && d.message) || 'Det gick inte att ångra.'; return; }
-                        last = null; await loadGrid(); drawGrid(); remaining = remainingNow(); paintDone(); await fetchCands(); return;
-                    }
-                    const p = find(e.target); if (p) await doAdd(p, false);
-                });
-                ['#ppFrom', '#ppTo'].forEach(s => $b(s).addEventListener('change', () => { paintTime(); fetchCands(); }));
-                $b('#ppQ').addEventListener('input', () => { q = $b('#ppQ').value.trim(); clearTimeout(timer); timer = setTimeout(fetchCands, 250); });
-                paintTime(); paintDone();
-                if (window.matchMedia('(min-width: 768px)').matches) $b('#ppQ').focus();   // på telefonen skulle tangentbordet täcka listan
-                fetchCands();
-            }
-        });
-    }
-
     // ================================================================ Lägg in en namnlista
     // För den som har namnen på papper eller i ett mejl (en stor tävling, en gång): klistra in, kontrollera träffarna, välj var de ska stå. Nås bara ur Åtgärder och
     // ur tipset i Hitta funktionärer — aldrig ur en ruta, och aldrig för den som bara ska lägga in en person.
@@ -1028,7 +868,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
             html: `<p class="pl-help small mb-2">${cols.length > 1 ? 'Hur många som behövs varje dag, av varje roll.' : 'Hur många som behövs av varje roll.'} <b>Gäller rollen stationer</b> skriver du hur många på varje station — en ansvarig och en markör på varje station betyder 1 och 1. Tävlingsledning bemannas av den som skapade planeringen.</p>
-                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in i rutans <b>skiftschema</b> (knappen <i>skiftschema</i> i rutan), var och en med klockslag, till exempel 08–11, 11–14 och 14–17. Där ser du vem som står när och var det blir hål, och den som avlöser ser det i sitt schema.</p>
+                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in i rutans <b>skiftschema</b> (knappen <i>bemanning</i> i rutan), var och en med klockslag, till exempel 08–11, 11–14 och 14–17. Där ser du vem som står när och var det blir hål, och den som avlöser ser det i sitt schema.</p>
                 <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
                 <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
@@ -1183,11 +1023,11 @@ window.PlaneringBemanning = (function () {
                     cls += ' plb-short';
                     tally += `<div class="plb-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>ingen ${holes.map(x => esc(x.from) + '–' + esc(x.to)).join(', ')}</div>`;
                 }
-                // Skiftschemat: knappen syns bara när det finns något att visa — skift, ett hål eller en roll som ska vara bemannad hela skjuttiden. En tom ruta når det via lägg till → Ändra tid.
-                const wholeRole = (g.wholeDayRoles || []).some(k => String(k).toLowerCase() === String(row.roleKey).toLowerCase());
-                const sched = c.key && (entries.length || holes.length || wholeRole)
-                    ? `<button type="button" class="plb-add plb-sc" data-plb-sched="${ri}" data-col="${ci}" title="Se och ändra vem som står när"><i class="bi bi-clock" aria-hidden="true"></i> skiftschema</button>` : '';
-                h += `<td class="${cls}">${entries.map(e => entryHtml(e, row, c.key)).join('')}${tally}<button type="button" class="plb-add" data-plb-add="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button>${sched}</td>`;
+                // EN ingång i rutan (Stefan 2026-10-28): skiftschemat är dialogen för att lägga till, byta och avlösa. En tom ruta visar "+ lägg till", en ruta med folk "bemanning".
+                const sched = entries.length || holes.length
+                    ? `<button type="button" class="plb-add plb-sc" data-plb-sched="${ri}" data-col="${ci}" title="Se och ändra vem som står när, lägg till någon"><i class="bi bi-people" aria-hidden="true"></i> bemanning</button>`
+                    : `<button type="button" class="plb-add" data-plb-sched="${ri}" data-col="${ci}"><i class="bi bi-plus" aria-hidden="true"></i> lägg till</button>`;
+                h += `<td class="${cls}">${entries.map(e => entryHtml(e, row, c.key)).join('')}${tally}${sched}</td>`;
             });
             return h + '</tr>';
         };
@@ -2076,17 +1916,21 @@ window.PlaneringBemanning = (function () {
         openSchedule(row, col);
     }
     function openSchedule(row, col) {
+        const PAGE = 20;
         const cells = (row.cells && row.cells[col.key]) || [];
         const roleOn = () => (B.grid.wholeDayRoles || []).some(k => String(k).toLowerCase() === String(row.roleKey).toLowerCase());
         const S = {
             winFrom: col.windowFrom || '', winTo: col.windowTo || '', fromList: !!(col.windowFrom && col.windowTo),
-            need: Math.max(1, needFor(row, col.key) || 0), n: 3, picking: -1,
+            need: Math.max(1, needFor(row, col.key) || 0), n: 3, pick: null, clash: null,
             rows: cells.map(e => ({
                 id: e.id, name: e.displayName, memberId: e.memberId || 0, from: e.from || '', to: e.to || '', status: e.status,
                 locked: !!(e.passId > 0 || e.readOnly), passLabel: e.passId > 0 ? e.timeLabel : '', isNew: false, removed: false, swapping: false,
                 orig: { from: e.from || '', to: e.to || '', memberId: e.memberId || 0 }
             })),
         };
+        // En tom ruta öppnas med en färdig rad: ett namn och Spara, utan tid = hela dagen.
+        const emptyStart = S.rows.length === 0;
+        if (emptyStart) S.rows.push({ id: 0, name: '', memberId: 0, from: '', to: '', status: 'Planned', isNew: true, removed: false, locked: false });
         // Utan startlista: förslaget är hela spannet som skiften redan täcker — arrangören kan skriva över det.
         if (!S.fromList) {
             const t = S.rows.filter(r => hmMin(r.from) != null && hmMin(r.to) != null);
@@ -2094,15 +1938,29 @@ window.PlaneringBemanning = (function () {
         }
         const win = () => { const f = hmMin(S.winFrom), t = hmMin(S.winTo); return f != null && t != null && t > f ? { from: f, to: t } : null; };
         const title = `${row.roleName}${row.scopeLabel ? ' · ' + row.scopeLabel : ''} · ${col.label}`;
-        let body = null;
+        let body = null, modal = null;
+        // Flest samtidigt på plats, så att "2 av 3 platser" stämmer med det som står i raderna (ett skift utan tid gäller hela skjuttiden).
+        const peak = () => {
+            const w = win(), ev = [];
+            S.rows.filter(r => !r.removed && ((r.name || '').trim() || r.memberId)).forEach(r => {
+                const a = hmMin(r.from), b = hmMin(r.to);
+                if (a != null && b != null && b > a) ev.push([a, 1], [b, -1]); else ev.push([w ? w.from : 0, 1], [w ? w.to : 1440, -1]);
+            });
+            ev.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+            let cur = 0, max = 0; ev.forEach(e => { cur += e[1]; if (cur > max) max = cur; });
+            return max;
+        };
         const draw = () => {
             if (!body) return;
-            const w = win(), holes = scHoles(S.rows, w, S.need), live = S.rows.filter(r => !r.removed);
+            const w = win(), holes = scHoles(S.rows.filter(r => (r.name || "").trim() || r.memberId), w, S.need), live = S.rows.filter(r => !r.removed);
+            const pk = peak(), places = `<span class="plb-dim fw-normal ms-1" id="plbScPeak">· ${pk} av ${S.need} ${S.need === 1 ? 'plats' : 'platser'} bemannade samtidigt</span>`;
             const winHtml = S.fromList
-                ? `<div class="small mb-2"><b>Skjuttid ${esc(S.winFrom)}–${esc(S.winTo)}</b> <span class="plb-dim">(första till sista start i startlistan)</span></div>`
-                : `<div class="d-flex flex-wrap align-items-center gap-2 small mb-2"><span>Tid som ska vara bemannad <span class="plb-dim">(valfritt)</span>:</span>
+                ? `<div class="small"><b>Skjuttid ${esc(S.winFrom)}–${esc(S.winTo)}</b> <span class="plb-dim">(första till sista start i startlistan)</span></div>`
+                : `<div class="d-flex flex-wrap align-items-center gap-2 small"><span>Tid som ska vara bemannad <span class="plb-dim">(valfritt)</span>:</span>
                     <input type="text" class="form-control form-control-sm" style="width:5.5rem" id="plbScWF" data-hpsk-time inputmode="decimal" placeholder="från" value="${esc(S.winFrom)}" aria-label="Bemannad från">
                     <span>–</span><input type="text" class="form-control form-control-sm" style="width:5.5rem" id="plbScWT" data-hpsk-time inputmode="decimal" placeholder="till" value="${esc(S.winTo)}" aria-label="Bemannad till"></div>`;
+            const wholeHtml = S.fromList ? `<div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="plbScWhole"${roleOn() ? ' checked' : ''}>
+                    <label class="form-check-label small" for="plbScWhole">Ska vara bemannad hela skjuttiden <span class="plb-dim">— gäller alla rader för ${esc(row.roleName)}</span></label></div>` : '';
             let bar = '';
             if (w) {
                 const pct = m => ((m - w.from) / (w.to - w.from) * 100).toFixed(2);
@@ -2110,82 +1968,191 @@ window.PlaneringBemanning = (function () {
                     const a = Math.max(hmMin(r.from), w.from), b = Math.min(hmMin(r.to), w.to);
                     return b > a ? `<div class="position-absolute top-0 bottom-0 border-start border-end px-1 small text-truncate" style="left:${pct(a)}%;width:${(pct(b) - pct(a)).toFixed(2)}%;background:var(--bs-success-bg-subtle);color:var(--bs-success-text-emphasis)" title="${esc(r.name || 'Ingen vald')} ${esc(r.from)}–${esc(r.to)}">${esc(first(r.name || ''))}</div>` : '';
                 }).join('');
-                const allDay = live.some(r => hmMin(r.from) == null || hmMin(r.to) == null);
+                const allDay = live.some(r => ((r.name || "").trim() || r.memberId) && (hmMin(r.from) == null || hmMin(r.to) == null));
                 bar = `<div class="position-relative rounded border mb-1" id="plbScBar" style="height:1.9rem;background:${allDay ? 'var(--bs-success-bg-subtle)' : 'var(--bs-danger-bg-subtle)'}">${segs}</div>
                     <div class="d-flex justify-content-between small plb-dim mb-1"><span>${esc(minHm(w.from))}</span><span>${esc(minHm(w.to))}</span></div>`;
             }
-            const holeHtml = !w ? '' : holes.length
-                ? `<div class="small text-danger fw-semibold mb-2" id="plbScHoles"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>${S.need > 1 ? `Färre än ${S.need} på plats` : 'Ingen'} ${holes.map(h => minHm(h.from) + '–' + minHm(h.to)).join(', ')}</div>`
-                : `<div class="small text-success mb-2" id="plbScHoles"><i class="bi bi-check-circle-fill me-1" aria-hidden="true"></i>Hela tiden är bemannad.</div>`;
+            const holeHtml = !w ? `<div class="small mb-2" id="plbScHoles">${places}</div>` : holes.length
+                ? `<div class="small text-danger fw-semibold mb-2" id="plbScHoles"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>${S.need > 1 ? `Färre än ${S.need} på plats` : 'Ingen'} ${holes.map(h => minHm(h.from) + '–' + minHm(h.to)).join(', ')}${places}</div>`
+                : `<div class="small text-success mb-2" id="plbScHoles"><i class="bi bi-check-circle-fill me-1" aria-hidden="true"></i>Hela tiden är bemannad.${places}</div>`;
             const rowsHtml = live.length ? live.map(r => { const i = S.rows.indexOf(r); return scRowHtml(r, i); }).join('')
                 : '<p class="plb-dim small mb-2" id="plbScEmpty">Inga skift än. Lägg till ett, eller dela dagen i lika långa skift.</p>';
             const allNew = !live.some(r => !r.isNew);
             const splitHtml = w && allNew ? `<span class="d-inline-flex align-items-center gap-1"><button type="button" class="btn btn-outline-secondary btn-sm" data-sc-split>Dela dagen i</button>
                     <select class="form-select form-select-sm" style="width:4.2rem" id="plbScN" aria-label="Antal skift">${[2, 3, 4, 5, 6].map(n => `<option${n === S.n ? ' selected' : ''}>${n}</option>`).join('')}</select> skift</span>` : '';
-            const wholeHtml = S.fromList ? `<div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="plbScWhole"${roleOn() ? ' checked' : ''}>
-                    <label class="form-check-label small" for="plbScWhole">Ska vara bemannad hela skjuttiden <span class="plb-dim">— gäller alla rader för ${esc(row.roleName)}. Då syns hålen i rutnätet.</span></label></div>` : '';
-            body.innerHTML = `<p class="pl-help small mb-2">Här ser du vem som står när. Flyttar du ett klockslag följer grannskiftet med. Ett skift utan tider gäller hela dagen. Avlösaren ser sin tid i Mitt schema.</p>
-                ${winHtml}${bar}${holeHtml}<div id="plbScRows">${rowsHtml}</div>
-                <div class="d-flex flex-wrap align-items-center gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" data-sc-add><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Lägg till skift</button>${splitHtml}</div>${wholeHtml}`;
+            const clashHtml = S.clash ? `<div class="alert alert-warning py-2 small" role="alert" id="plbScClash">${S.clash.map(esc).join('<br>')}
+                    <div class="mt-2"><button type="button" class="btn btn-sm btn-warning" data-sc-force>Spara ändå</button> <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-sc-adj>Ändra tider</button></div></div>` : '';
+            body.innerHTML = `<p class="pl-help small mb-2">Här lägger du till vem som står när. Flyttar du ett klockslag följer grannskiftet med. Ett skift utan tider gäller hela dagen. Avlösaren ser sin tid i Mitt schema.</p>
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">${winHtml}${wholeHtml}</div>
+                ${bar}${holeHtml}
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2"><button type="button" class="btn btn-outline-primary btn-sm" data-sc-add><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Lägg till skift</button>${splitHtml}</div>
+                ${clashHtml}<div id="plbScRows">${rowsHtml}</div>`;
+            if (S.pick) paintPick();
         };
         const scRowHtml = (r, i) => {
             const who = r.isNew || r.swapping
-                ? `<input type="text" class="form-control form-control-sm plb-sc-name" data-i="${i}" autocomplete="off" placeholder="${r.swapping ? 'Sök en medlem' : 'Sök medlem eller skriv ett namn'}" value="${esc(r.isNew ? r.name : '')}" aria-label="Person">`
+                ? `<input type="text" class="form-control form-control-sm plb-sc-name" data-i="${i}" autocomplete="off" placeholder="${r.swapping ? 'Sök en medlem' : 'Sök medlem eller skriv ett namn'}" value="${esc(r.isNew ? r.name : (r.swapName || ''))}" aria-label="Person">`
                 : `<span class="fw-semibold">${esc(r.name)}</span> <span class="pl-state ${STATUS_CLS[r.status] || 'off'}">${esc(STATUS[r.status] || r.status)}</span>
                     ${r.locked ? '' : `<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-sc-swap="${i}">Byt person…</button>`}`;
             const times = r.locked
                 ? `<span class="plb-dim small">${esc(r.passLabel || 'Passets tid')}</span>`
                 : `<input type="text" class="form-control form-control-sm plb-sc-from" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="från" value="${esc(r.from)}" aria-label="Från klockan">
                     <span>–</span><input type="text" class="form-control form-control-sm plb-sc-to" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="till" value="${esc(r.to)}" aria-label="Till klockan">`;
-            return `<div class="plb-sc-row border rounded p-2 mb-2" data-i="${i}"><div class="d-flex flex-wrap align-items-center gap-2">
-                <div class="flex-grow-1" style="min-width:11rem">${who}</div>${times}
+            return `<div class="plb-sc-row border rounded p-2 mb-2${S.pick && S.pick.i === i ? ' border-primary' : ''}" data-i="${i}"><div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="flex-grow-1" style="min-width:11rem">${who}${r.warn ? `<div class="small text-warning-emphasis">${esc(r.warn)}</div>` : ''}</div>${times}
                 <button type="button" class="btn btn-sm btn-outline-danger" data-sc-del="${i}" aria-label="Ta bort skiftet" title="Ta bort skiftet"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
-                <div class="list-group mt-1 d-none plb-sc-sug" data-i="${i}" style="max-height:40vh;overflow:auto"></div></div>`;
+                <div class="plb-sc-pickbox mt-2" data-i="${i}"></div></div>`;
         };
-        // Personförslag för en rad: anmälda funktionärer först (lediga på skiftets tid), därefter alla anmälda, sist medlemssökningen.
-        let sugTimer = null, sugSeq = 0;
-        const suggest = (i, q) => {
-            clearTimeout(sugTimer);
-            sugTimer = setTimeout(async () => {
-                const r = S.rows[i], box = body && body.querySelector(`.plb-sc-sug[data-i="${i}"]`); if (!r || !box) return;
-                const seq = ++sugSeq;
-                const qs = { planningId: row.planningId || A.ID, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 200, onlyVolunteers: q.length >= 2 ? 'false' : 'true' };
-                const f = normTime(r.from), t = normTime(r.to); if (f && t) { qs.from = f; qs.to = t; }
-                if (q) qs.q = q;
-                let list = [];
-                const fetchList = async () => { try { const d = await sget('GetCandidates', qs); return (d && d.success) ?                 (d.candidates || []).map(c => ({ memberId: c.memberId, name: c.name, free: c.free, vol: c.volunteer, sub: candSub(c), badges: candBadges(c, !!(f && t)), conflict: c.conflict && c.conflict.label, placed: candPlaced(c) })) : []; } catch (e) { return []; } };
-                list = await fetchList();
-                if (!list.length && !q) { qs.onlyVolunteers = 'false'; list = await fetchList(); }   // ingen har anmält sig: visa alla anmälda i stället för en tom lista
-                if (!list.length && q.length >= 2) {
-                    try { const d = await sget('SearchMembers', { query: q }); list = ((d && d.members) || []).slice(0, 8).map(m => ({ memberId: m.memberId, name: m.memberName, sub: m.clubName || '', badges: '' })); } catch (e) { /* ingen lista */ }
+
+        // ---- Personlistan under raden man fyller i: en sida i taget från servern, med filter. Namnfältet på raden är sökrutan. ----
+        const bd = (cls, t) => `<span class="badge ${cls} fw-normal me-1 mt-1 text-wrap text-start">${esc(t)}</span>`;
+        const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+        const pkRow = (c, attr) => {
+            const roleLower = String(row.roleName || '').toLowerCase();
+            const badges = (c.volunteer ? bd('text-bg-success', c.roleMatch ? 'Anmäld som ' + roleLower : 'Anmäld som funktionär') : '')
+                + (!c.volunteer && c.isShooter ? bd('text-bg-primary', 'Skytt i tävlingen') : '')
+                + (c.shooterClass ? bd('border border-primary text-primary bg-transparent', 'Deltar i ' + c.shooterClass) : '')
+                + (c.alreadyHere ? bd('text-bg-warning', 'Står redan här') : '')
+                + (c.placements || []).map(p => bd('text-bg-warning', 'Står på ' + p)).join('')
+                + (c.conflict ? bd(c.conflict.hard ? 'text-bg-danger' : 'text-bg-warning', cap(c.conflict.label)) : '');
+            return `<button type="button" class="list-group-item list-group-item-action py-2" style="min-height:48px" ${attr}><span class="fw-semibold">${esc(c.name)}</span>${c.club ? ` <span class="small text-body-secondary">${esc(c.club)}</span>` : ''}${badges ? `<span class="d-block">${badges}</span>` : ''}</button>`;
+        };
+        const paintPickList = () => {
+            const P = S.pick; if (!P || !body) return;
+            const list = body.querySelector('.plb-pk-list'), count = body.querySelector('.plb-pk-count'), pg = body.querySelector('.plb-pk-pg'); if (!list) return;
+            if (P.err) { list.innerHTML = `<div class="small text-danger p-2">${esc(P.err)}</div>`; return; }
+            if (!P.list) { list.innerHTML = '<div class="small plb-dim p-2">Hämtar…</div>'; return; }
+            const vols = P.list.map((c, k) => [c, k]).filter(x => x[0].volunteer), shs = P.list.map((c, k) => [c, k]).filter(x => !x[0].volunteer);
+            let html = '';
+            if (P.note) html += `<p class="small plb-dim mb-1">${esc(P.note)}</p>`;
+            if (vols.length) html += `<div class="small fw-semibold mb-1">Anmälda funktionärer</div><div class="list-group mb-2">${vols.map(x => pkRow(x[0], `data-pk-pick="${x[1]}"`)).join('')}</div>`;
+            if (shs.length) html += `<div class="small fw-semibold mb-1">Skyttar i tävlingen som inte anmält sig som funktionär</div><div class="list-group mb-2">${shs.map(x => pkRow(x[0], `data-pk-pick="${x[1]}"`)).join('')}</div>`;
+            if (P.members.length) html += `<div class="small fw-semibold mb-1">Övriga medlemmar</div><div class="list-group mb-2">${P.members.map((m, k) => `<button type="button" class="list-group-item list-group-item-action py-2" style="min-height:48px" data-pk-mem="${k}"><span class="fw-semibold">${esc(m.memberName)}</span>${m.clubName ? ` <span class="small text-body-secondary">${esc(m.clubName)}</span>` : ''}</button>`).join('')}</div>`;
+            if (!P.list.length && !P.members.length) html += P.q
+                ? '<p class="small plb-dim p-2 mb-0">Ingen matchar. Skriv namnet och spara, så läggs personen in som text, utan kallelse.</p>'
+                : '<p class="small plb-dim p-2 mb-0">Ingen att visa. Slå på "Skyttar i tävlingen" eller sök efter ett namn.</p>';
+            list.innerHTML = html;
+            list.scrollTop = 0;
+            const from = P.page * PAGE, pages = Math.max(1, Math.ceil(P.total / PAGE));
+            count.textContent = P.list.length ? `${from + 1}–${from + P.list.length} av ${P.total.toLocaleString('sv-SE')}${P.shooters ? '' : ' anmälda funktionärer'}` : '0 träffar';
+            pg.innerHTML = `<button type="button" class="btn btn-sm btn-outline-secondary" data-pk-prev${P.page === 0 ? ' disabled' : ''}>‹ Föregående</button><span class="small">Sida ${P.page + 1} av ${pages.toLocaleString('sv-SE')}</span><button type="button" class="btn btn-sm btn-outline-secondary" data-pk-next${P.page >= pages - 1 ? ' disabled' : ''}>Nästa ›</button>`;
+        };
+        const paintPick = () => {
+            if (!body) return;
+            const P = S.pick;
+            body.querySelectorAll('.plb-sc-pickbox').forEach(b => { if (!P || +b.dataset.i !== P.i) b.innerHTML = ''; });
+            body.querySelectorAll('.plb-sc-row').forEach(el => el.classList.toggle('border-primary', !!P && +el.dataset.i === P.i));
+            if (!P) return;
+            const box = body.querySelector(`.plb-sc-pickbox[data-i="${P.i}"]`); if (!box) return;
+            box.innerHTML = `<div class="border border-primary rounded p-2">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-2"><span class="small fw-semibold">Välj person till skiftet ovan</span><button type="button" class="btn btn-link btn-sm p-0" data-pk-close>Stäng listan</button></div>
+                <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" role="switch" id="plbPkSh"${P.shooters ? ' checked' : ''}><label class="form-check-label" for="plbPkSh">Skyttar i tävlingen</label></div>
+                ${P.shooters ? `<div class="border rounded p-2 mb-2 bg-body-tertiary">
+                    <div class="form-check"><input class="form-check-input plb-pk-f" type="checkbox" id="plbPkUn" data-f="un"${P.un ? ' checked' : ''}><label class="form-check-label small" for="plbPkUn">Bara de som inte är placerade den dagen</label></div>
+                    <div class="form-check"><input class="form-check-input plb-pk-f" type="checkbox" id="plbPkFr" data-f="fr"${P.fr ? ' checked' : ''}><label class="form-check-label small" for="plbPkFr">Bara de som är lediga på skiftets tid</label></div>
+                    <div class="form-check"><input class="form-check-input plb-pk-f" type="checkbox" id="plbPkVo" data-f="vo"${P.vo ? ' checked' : ''}><label class="form-check-label small" for="plbPkVo">Bara anmälda funktionärer</label></div></div>` : ''}
+                <div class="plb-pk-list" style="max-height:300px;overflow:auto"></div>
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2"><span class="small plb-dim plb-pk-count"></span><span class="d-inline-flex align-items-center gap-2 plb-pk-pg"></span></div></div>`;
+            paintPickList();
+        };
+        let pkTimer = null, pkSeq = 0;
+        const loadPick = delay => {
+            clearTimeout(pkTimer);
+            pkTimer = setTimeout(async () => {
+                const P = S.pick; if (!P) return;
+                const r = S.rows[P.i]; if (!r) return;
+                const my = ++pkSeq;
+                const f = normTime(r.from), t = normTime(r.to), w = win();
+                const qs = { planningId: row.planningId || A.ID, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: PAGE, skip: P.page * PAGE,
+                    onlyVolunteers: (!P.shooters || P.vo) ? 'true' : 'false', onlyUnplaced: P.shooters && P.un ? 'true' : 'false', onlyFree: P.shooters && P.fr ? 'true' : 'false' };
+                if (f && t) { qs.from = f; qs.to = t; } else if (w) { qs.from = minHm(w.from); qs.to = minHm(w.to); }   // utan tid prövas mot dagens fönster, så att krockar syns direkt
+                if (P.q) qs.q = P.q;
+                let d = null; try { d = await sget('GetCandidates', qs); } catch (e) { d = null; }
+                if (my !== pkSeq || S.pick !== P) return;
+                if (!d || !d.success) { P.err = (d && d.message) || 'Kunde inte läsa listan.'; paintPickList(); return; }
+                P.err = '';
+                if (!P.shooters && !P.auto && d.volunteers === 0) {   // ingen har anmält sig som funktionär: visa skyttarna i stället för en tom lista
+                    P.auto = true; P.shooters = true; P.note = 'Ingen har anmält sig som funktionär. Här är skyttarna i tävlingen.';
+                    paintPick(); loadPick(0); return;
                 }
-                if (seq !== sugSeq || !body || !body.contains(box)) return;
-                S.sug = { i, list };
-                box.innerHTML = list.length ? list.map((c, k) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-sc-pick="${k}"><span class="fw-semibold">${esc(c.name)}</span> ${c.badges || ''}${c.sub ? `<span class="d-block plb-dim">${esc(c.sub)}</span>` : ''}${c.placed || ''}${c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict)}</span>` : ''}</button>`).join('')
-                    : '<div class="list-group-item small plb-dim">Ingen hittades. Skriv ett namn och spara — då läggs det in som text, utan kallelse.</div>';
-                box.classList.remove('d-none');
-            }, q ? 200 : 0);
+                P.list = d.candidates || []; P.total = d.total || 0; P.members = [];
+                if (P.q.length >= 2 && P.page === 0) {
+                    try {
+                        const m = await sget('SearchMembers', { query: P.q }); if (my !== pkSeq || S.pick !== P) return;
+                        const known = new Set(P.list.map(c => c.memberId));
+                        P.members = ((m && m.members) || []).filter(x => !known.has(x.memberId)).slice(0, 8);
+                    } catch (e) { P.members = []; }
+                }
+                paintPickList();
+            }, delay);
         };
+        const pickOpen = (i, q) => {
+            S.pick = { i, q: q || '', page: 0, shooters: false, un: false, fr: false, vo: false, list: null, total: 0, members: [], auto: false, note: '', err: '' };
+            paintPick(); loadPick(0);
+        };
+        const pickApply = (memberId, name, freeFalse, label) => {
+            const r = S.rows[S.pick.i]; if (!r) return;
+            r.memberId = memberId; r.warn = freeFalse ? label : '';
+            if (r.swapping) r.swapName = name; else r.name = name;
+            S.pick = null; S.clash = null; draw();
+        };
+
         // Gränsen följer med: ändras ett skifts slut flyttas det som började när det slutade, och tvärtom.
         const onTime = (i, which, raw) => {
             const r = S.rows[i]; if (!r) return;
             const v = normTime(raw);
             const old = r[which];
             r[which] = v === null ? raw : v;
+            r.warn = ''; S.clash = null;
             if (v && old && v !== old) S.rows.forEach((o, k) => { if (k !== i && !o.removed && !o.locked) { if (which === 'to' && o.from === old) o.from = v; if (which === 'from' && o.to === old) o.to = v; } });
             draw();
+            if (S.pick) loadPick(0);   // krockarna i listan gäller den nya tiden
         };
-        A.formModal({
+        // Sparar allt eller inget. Ett hårt hinder (egen start, annan placering) stoppar först och frågar; "Spara ändå" skickar force.
+        const save = async force => {
+            const shifts = [], deleteIds = [];
+            for (const r of S.rows) {
+                if (r.removed) { if (!r.isNew) deleteIds.push(r.id); continue; }
+                const f = normTime(r.from), t = normTime(r.to);
+                if (f === null || t === null) return 'Klockslagen går inte att läsa. Skriv till exempel 8 eller 8:30.';
+                if (!r.locked && ((f && !t) || (!f && t))) return 'Skriv både från och till, eller lämna båda tomma för hela dagen.';
+                if (!r.locked && f && t && hmMin(t) <= hmMin(f)) return `Sluttiden ${t} måste vara efter starttiden ${f}.`;
+                if (r.isNew) {
+                    if (!(r.name || '').trim() && !f && !t) continue;   // en tom rad som aldrig fylldes i
+                    if (!(r.name || '').trim()) return `Välj eller skriv vem som tar skiftet ${f}–${t}, eller ta bort det.`;
+                    shifts.push({ id: 0, memberId: r.memberId || 0, displayName: r.name.trim(), from: f, to: t });
+                } else if (!r.locked && (f !== r.orig.from || t !== r.orig.to || (r.memberId && r.memberId !== r.orig.memberId))) {
+                    if (r.swapping && !r.memberId) return 'Välj en medlem att byta till, eller avbryt bytet genom att ladda om dialogen.';
+                    shifts.push({ id: r.id, memberId: r.memberId || 0, from: f, to: t });
+                }
+            }
+            if (!shifts.length && !deleteIds.length) return true;
+            const d = await spost('SaveCellShifts', { roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null, date: col.key, shifts, deleteIds, force: !!force }, row.planningId);
+            if (!d.success) {
+                if (d.clash) { S.clash = d.clashes && d.clashes.length ? d.clashes : [d.message]; draw(); return 'Någon har en krock. Välj Spara ändå eller ändra tiderna.'; }
+                return d.message || 'Det gick inte att spara schemat.';
+            }
+            await refreshPart();
+            if (d.notified) A.showMsg(`Klart. ${d.notified} ${d.notified === 1 ? 'person har' : 'personer har'} fått besked om sin nya tid.`, 'success');
+            return true;
+        };
+        modal = A.formModal({
             title, okLabel: 'Spara schemat', wide: true,
             html: '<div id="plbSc"></div>',
             onOpen: b => {
                 body = b.querySelector('#plbSc'); draw();
+                if (emptyStart) {
+                    if (window.matchMedia('(min-width: 768px)').matches) { const inp = body.querySelector('.plb-sc-name'); if (inp) inp.focus(); }   // på telefonen skulle tangentbordet täcka listan
+                    if (!S.pick) pickOpen(0, '');
+                }
                 b.addEventListener('change', async e => {
                     const t = e.target;
                     if (t.classList.contains('plb-sc-from')) onTime(+t.dataset.i, 'from', t.value);
                     else if (t.classList.contains('plb-sc-to')) onTime(+t.dataset.i, 'to', t.value);
                     else if (t.id === 'plbScWF' || t.id === 'plbScWT') { const v = normTime(t.value); S[t.id === 'plbScWF' ? 'winFrom' : 'winTo'] = v === null ? t.value : v; draw(); }
                     else if (t.id === 'plbScN') S.n = +t.value;
+                    else if (t.id === 'plbPkSh' && S.pick) { S.pick.shooters = t.checked; S.pick.page = 0; S.pick.note = ''; S.pick.list = null; paintPick(); loadPick(0); }
+                    else if (t.classList.contains('plb-pk-f') && S.pick) { S.pick[t.dataset.f] = t.checked; S.pick.page = 0; S.pick.list = null; paintPickList(); loadPick(0); }
                     else if (t.id === 'plbScWhole') {
                         t.disabled = true;
                         try {
@@ -2198,67 +2165,60 @@ window.PlaneringBemanning = (function () {
                 });
                 b.addEventListener('input', e => {
                     const t = e.target; if (!t.classList.contains('plb-sc-name')) return;
-                    const r = S.rows[+t.dataset.i]; if (!r) return;
-                    r.name = t.value; if (r.isNew) r.memberId = 0;
-                    suggest(+t.dataset.i, t.value.trim());
+                    const i = +t.dataset.i, r = S.rows[i]; if (!r) return;
+                    if (r.swapping) r.swapName = t.value; else { r.name = t.value; r.memberId = 0; r.warn = ''; }
+                    S.clash = null;
+                    if (!S.pick || S.pick.i !== i) { pickOpen(i, t.value.trim()); return; }
+                    S.pick.q = t.value.trim(); S.pick.page = 0; S.pick.list = null; paintPickList(); loadPick(250);
                 });
-                b.addEventListener('focusin', e => { const t = e.target; if (t.classList.contains('plb-sc-name') && !t.value.trim()) suggest(+t.dataset.i, ''); });
-                b.addEventListener('click', e => {
-                    const t = e.target.closest('[data-sc-add],[data-sc-del],[data-sc-swap],[data-sc-split],[data-sc-pick]'); if (!t) return;
+                b.addEventListener('focusin', e => {
+                    const t = e.target; if (!t.classList.contains('plb-sc-name')) return;
+                    const i = +t.dataset.i; if (!S.pick || S.pick.i !== i) pickOpen(i, t.value.trim());
+                });
+                b.addEventListener('click', async e => {
+                    const nm = e.target.closest('.plb-sc-name');
+                    if (nm && !S.pick) { pickOpen(+nm.dataset.i, nm.value.trim()); return; }   // fältet har fokus men listan är stängd
+                    const t = e.target.closest('[data-sc-add],[data-sc-del],[data-sc-swap],[data-sc-split],[data-pk-pick],[data-pk-mem],[data-pk-close],[data-pk-prev],[data-pk-next],[data-sc-force],[data-sc-adj]'); if (!t) return;
                     if (t.hasAttribute('data-sc-add')) {
                         const w = win(), ends = S.rows.filter(r => !r.removed && hmMin(r.to) != null).map(r => hmMin(r.to));
                         const from = ends.length ? Math.max(...ends) : (w ? w.from : null);
                         const to = w && from != null && w.to > from ? w.to : null;
                         S.rows.push({ id: 0, name: '', memberId: 0, from: from != null ? minHm(from) : '', to: to != null ? minHm(to) : '', status: 'Planned', isNew: true, removed: false, locked: false });
-                        draw();
+                        S.pick = null; S.clash = null; draw();
                         const inp = body.querySelectorAll('.plb-sc-name'); if (inp.length) inp[inp.length - 1].focus();
                     } else if (t.hasAttribute('data-sc-del')) {
                         const r = S.rows[+t.dataset.scDel]; if (!r) return;
                         if (r.isNew) S.rows.splice(+t.dataset.scDel, 1); else r.removed = true;
-                        draw();
+                        S.pick = null; S.clash = null; draw();
                     } else if (t.hasAttribute('data-sc-swap')) {
                         const r = S.rows[+t.dataset.scSwap]; if (!r) return;
-                        r.swapping = true; draw();
-                        const inp = body.querySelector(`.plb-sc-name[data-i="${t.dataset.scSwap}"]`); if (inp) { inp.focus(); suggest(+t.dataset.scSwap, ''); }
+                        r.swapping = true; S.pick = null; draw();
+                        const inp = body.querySelector(`.plb-sc-name[data-i="${t.dataset.scSwap}"]`); if (inp) inp.focus(); else pickOpen(+t.dataset.scSwap, '');
                     } else if (t.hasAttribute('data-sc-split')) {
                         const w = win(); if (!w) return;
                         S.rows = S.rows.filter(r => !r.isNew);
                         scSplit(w, S.n).forEach(p => S.rows.push({ id: 0, name: '', memberId: 0, from: minHm(p.from), to: minHm(p.to), status: 'Planned', isNew: true, removed: false, locked: false }));
-                        draw();
+                        S.pick = null; S.clash = null; draw();
                         const inp = body.querySelector('.plb-sc-name'); if (inp) inp.focus();
-                    } else if (t.hasAttribute('data-sc-pick')) {
-                        const sug = S.sug; if (!sug) return;
-                        const c = sug.list[+t.dataset.scPick], r = S.rows[sug.i]; if (!c || !r) return;
-                        r.memberId = c.memberId; r.name = c.name;
-                        const inp = body.querySelector(`.plb-sc-name[data-i="${sug.i}"]`), box = body.querySelector(`.plb-sc-sug[data-i="${sug.i}"]`);
-                        if (inp) inp.value = c.name; if (box) { box.innerHTML = ''; box.classList.add('d-none'); }
+                    } else if (t.hasAttribute('data-pk-pick')) {
+                        const c = S.pick && S.pick.list ? S.pick.list[+t.dataset.pkPick] : null; if (!c) return;
+                        pickApply(c.memberId, c.name, c.free === false, c.conflict ? cap(c.conflict.label) : '');
+                    } else if (t.hasAttribute('data-pk-mem')) {
+                        const m = S.pick ? S.pick.members[+t.dataset.pkMem] : null; if (!m) return;
+                        pickApply(m.memberId, m.memberName, false, '');
+                    } else if (t.hasAttribute('data-pk-close')) { S.pick = null; paintPick(); }
+                    else if (t.hasAttribute('data-pk-prev') || t.hasAttribute('data-pk-next')) {
+                        if (!S.pick) return;
+                        S.pick.page = Math.max(0, S.pick.page + (t.hasAttribute('data-pk-next') ? 1 : -1)); S.pick.list = null; paintPickList(); loadPick(0);
+                    } else if (t.hasAttribute('data-sc-adj')) { S.clash = null; draw(); }
+                    else if (t.hasAttribute('data-sc-force')) {
+                        t.disabled = true;
+                        let res; try { res = await save(true); } catch (er) { res = er.message || 'Det gick inte att spara schemat.'; }
+                        if (res === true) modal.hide(); else { S.clash = null; draw(); A.showMsg(esc(String(res)), 'danger'); }
                     }
                 });
             },
-            onOk: async () => {
-                const shifts = [], deleteIds = [];
-                for (const r of S.rows) {
-                    if (r.removed) { if (!r.isNew) deleteIds.push(r.id); continue; }
-                    const f = normTime(r.from), t = normTime(r.to);
-                    if (f === null || t === null) return 'Klockslagen går inte att läsa. Skriv till exempel 8 eller 8:30.';
-                    if (!r.locked && ((f && !t) || (!f && t))) return 'Skriv både från och till, eller lämna båda tomma för hela dagen.';
-                    if (!r.locked && f && t && hmMin(t) <= hmMin(f)) return `Sluttiden ${t} måste vara efter starttiden ${f}.`;
-                    if (r.isNew) {
-                        if (!(r.name || '').trim() && !f && !t) continue;   // en tom rad som aldrig fylldes i
-                        if (!(r.name || '').trim()) return `Välj eller skriv vem som tar skiftet ${f}–${t}, eller ta bort det.`;
-                        shifts.push({ id: 0, memberId: r.memberId || 0, displayName: r.name.trim(), from: f, to: t });
-                    } else if (!r.locked && (f !== r.orig.from || t !== r.orig.to || (r.memberId && r.memberId !== r.orig.memberId))) {
-                        if (r.swapping && !r.memberId) return 'Välj en medlem att byta till, eller avbryt bytet genom att ladda om dialogen.';
-                        shifts.push({ id: r.id, memberId: r.memberId !== r.orig.memberId ? r.memberId : 0, from: f, to: t });
-                    }
-                }
-                if (!shifts.length && !deleteIds.length) return true;
-                const d = await spost('SaveCellShifts', { roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null, date: col.key, shifts, deleteIds }, row.planningId);
-                if (!d.success) return d.message || 'Det gick inte att spara schemat.';
-                await refreshPart();
-                if (d.notified) A.showMsg(`Klart. ${d.notified} ${d.notified === 1 ? 'person har' : 'personer har'} fått besked om sin nya tid.`, 'success');
-                return true;
-            }
+            onOk: () => save(false)
         });
     }
     // Steg 6b (B11): Hitta ersättare. De som anmält sig till dagen i någon del av familjen, lediga och med rätt roll först.
@@ -2868,7 +2828,7 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal],[data-plb-assignmany]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal],[data-plb-assignmany]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
         if (t.hasAttribute('data-plb-assignmany')) openNameList();
@@ -2877,7 +2837,6 @@ window.PlaneringBemanning = (function () {
         else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
-        else if (t.hasAttribute('data-plb-add')) { const r = (B.grid.rows || [])[parseInt(t.dataset.plbAdd, 10)], c = (B.grid.columns || [])[parseInt(t.dataset.col, 10)]; if (r && c) openPickPerson(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.hasAttribute('data-plb-sched')) { const r = (B.grid.rows || [])[+t.dataset.plbSched], c = (B.grid.columns || [])[+t.dataset.col]; if (r && c) openSchedule(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));

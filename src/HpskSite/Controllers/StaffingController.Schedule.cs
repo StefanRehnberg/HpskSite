@@ -28,6 +28,12 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Rollen finns inte." });
             try
             {
+                if (!request.Force)
+                {
+                    var clashes = ShiftClashes(owner, request);
+                    if (clashes.Count > 0)
+                        return Json(new { success = false, clash = true, message = string.Join(" ", clashes), clashes });
+                }
                 var r = _staffing.SaveCellShifts(owner, request, viewer.Id);
                 if (!r.Ok) return Json(new { success = false, message = r.Message });
                 var told = 0;
@@ -45,6 +51,26 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Staffing: SaveCellShifts failed for {Role} {Date}", request.RoleKey, request.Date);
                 return Json(new { success = false, message = "Kunde inte spara skiften." });
             }
+        }
+
+        /// <summary>
+        /// Hårda hinder för de skift som sparas: en person med medlemskonto på en tid, prövad som i kandidatlistan (egen start med förberedelse och vila,
+        /// annan placering, tider personen inte kan). Tomt = inga krockar. Skift utan tid (hela dagen) prövas inte mot tid.
+        /// </summary>
+        private List<string> ShiftClashes(StaffOwner owner, SaveCellShiftsRequest request)
+        {
+            var found = new List<string>();
+            var candidates = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>();
+            foreach (var s in request.Shifts ?? new())
+            {
+                if (s.MemberId <= 0) continue;
+                var f = StaffingRules.ParseTime(s.From); var t = StaffingRules.ParseTime(s.To);
+                if (f == null || t == null || t <= f) continue;
+                var c = candidates.Find(CandidateQueryOf(owner, request.RoleKey, request.Date, s.From, s.To, request.ScopeKey, null, false, 1, new[] { s.MemberId })).Candidates.FirstOrDefault();
+                if (c?.Conflict is { IsHard: true } k)
+                    found.Add($"{c.Name} ({s.From?.Trim()}–{s.To?.Trim()}): {k.Label}.");
+            }
+            return found;
         }
 
         public class SetRoleWholeDayRequest

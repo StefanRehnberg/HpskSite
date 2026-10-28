@@ -95,7 +95,7 @@ namespace HpskSite.Controllers
         };
 
         private static CandidateQuery CandidateQueryOf(StaffOwner owner, string? roleKey, string? date, string? from, string? to, string? scopeKey,
-            string? q, bool onlyVolunteers, int take, IReadOnlyCollection<int>? only = null)
+            string? q, bool onlyVolunteers, int take, IReadOnlyCollection<int>? only = null, int skip = 0, bool onlyUnplaced = false, bool onlyFree = false)
         {
             DateTime? d = DateTime.TryParseExact((date ?? "").Trim(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dd) ? dd : null;
             return new CandidateQuery
@@ -103,6 +103,7 @@ namespace HpskSite.Controllers
                 Owner = owner, RoleKey = string.IsNullOrWhiteSpace(roleKey) ? null : roleKey, Date = d, ScopeKey = scopeKey,
                 From = StaffingRules.ParseTime(from), To = StaffingRules.ParseTime(to), Search = q, OnlyVolunteers = onlyVolunteers,
                 Take = take is > 0 and <= 200 ? take : 40, OnlyMembers = only,
+                Skip = Math.Max(0, skip), OnlyUnplaced = onlyUnplaced, OnlyFree = onlyFree,
             };
         }
 
@@ -112,13 +113,13 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetCandidates(int competitionId, string? roleKey, string? date, string? from, string? to, string? scopeKey,
-            string? q, bool onlyVolunteers = false, int take = 40)
+            string? q, bool onlyVolunteers = false, int take = 40, int skip = 0, bool onlyUnplaced = false, bool onlyFree = false)
         {
             var owner = await OwnerAsync(competitionId);
             if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
             try
             {
-                var r = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>().Find(CandidateQueryOf(owner, roleKey, date, from, to, scopeKey, q, onlyVolunteers, take));
+                var r = HttpContext.RequestServices.GetRequiredService<StaffCandidateService>().Find(CandidateQueryOf(owner, roleKey, date, from, to, scopeKey, q, onlyVolunteers, take, null, skip, onlyUnplaced, onlyFree));
                 return Json(new { success = true, candidates = r.Candidates.Select(CandidateJson), total = r.Total, shooters = r.Shooters, volunteers = r.Volunteers, volunteersWithoutAssignment = r.VolunteersWithoutAssignment });
             }
             catch (Exception ex)

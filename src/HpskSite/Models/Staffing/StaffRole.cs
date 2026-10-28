@@ -369,13 +369,15 @@ namespace HpskSite.Models.Staffing
         public string Date { get; set; } = "";
         public List<CellShiftItem>? Shifts { get; set; }
         public List<int>? DeleteIds { get; set; }
+        /// <summary>Spara även om någon har ett hårt hinder på sin tid (egen start eller annan placering). Utan det stoppas sparningen och svaret säger vem.</summary>
+        public bool Force { get; set; }
     }
 
     public class CellShiftItem
     {
         /// <summary>0 = ett nytt skift.</summary>
         public int Id { get; set; }
-        /// <summary>Bara för ett nytt skift; ett befintligt skifts person byts med Hitta ersättare.</summary>
+        /// <summary>Ett nytt skifts person; på ett befintligt skift byter ett annat id person. Samma id som skiftet har betyder ingen ändring och används för krockkontrollen av ny tid.</summary>
         public int MemberId { get; set; }
         public string? DisplayName { get; set; }
         /// <summary>"8", "8:30", "08:00" — tomt (men skickat) i båda = hela dagen. Utelämnat i båda på ett befintligt skift = tiderna behålls.</summary>
