@@ -68,6 +68,8 @@ namespace HpskSite.Services.Training
             public bool IsCancelled { get; set; }
             public bool RegistrationRequired { get; set; }
             public int? MaxParticipants { get; set; }
+            /// <summary>"yyyy-MM-dd" eller tom = ingen sista anmälningsdag.</summary>
+            public string RegistrationDeadline { get; set; } = "";
             public bool LoanWeaponsOffered { get; set; }
             public bool IsMandatory { get; set; }
             public int SignedUp { get; set; }
@@ -197,6 +199,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                 IsCancelled = t.IsCancelled,
                 RegistrationRequired = t.RegistrationRequired,
                 MaxParticipants = t.MaxParticipants,
+                RegistrationDeadline = t.RegistrationDeadline?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
                 LoanWeaponsOffered = t.LoanWeaponsOffered,
                 IsMandatory = t.IsMandatory,
                 SignedUp = counts.TryGetValue(t.Id, out var c) ? c.SignedUp : 0,
@@ -230,6 +233,8 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             /// <summary>Strängar ("1"/"0"), eftersom "1" inte binder till bool i ASP.NET Core.</summary>
             public string? RegistrationRequired { get; set; }
             public int? MaxParticipants { get; set; }
+            /// <summary>"yyyy-MM-dd". null = RÖR INTE (äldre klient); tom = ingen sista anmälningsdag.</summary>
+            public string? RegistrationDeadline { get; set; }
             public string? LoanWeaponsOffered { get; set; }
             /// <summary>"following" = för över ändringen till seriens kommande tillfällen (kontrollern gör det).</summary>
             public string? Scope { get; set; }
@@ -257,6 +262,13 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             if (start != null && end != null && string.CompareOrdinal(end, start) <= 0)
                 return (0, "Sluttiden måste vara efter starttiden.");
             if (input.MaxParticipants is < 0) return (0, "Antalet platser kan inte vara negativt.");
+            DateTime? deadline = null;
+            if (!string.IsNullOrWhiteSpace(input.RegistrationDeadline))
+            {
+                if (!TryDate(input.RegistrationDeadline, out var dl)) return (0, "Sista anmälningsdag går inte att läsa.");
+                if (dl.Date > date.Date) return (0, "Sista anmälningsdag kan inte vara efter träningen.");
+                deadline = dl.Date;
+            }
 
             using var db = _databaseFactory.CreateDatabase();
             ClubTraining t;
@@ -286,6 +298,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             t.SkjutledareMemberId = input.SkjutledareMemberId is > 0 ? input.SkjutledareMemberId : null;
             t.RegistrationRequired = IsTrue(input.RegistrationRequired);
             t.MaxParticipants = input.MaxParticipants is > 0 ? input.MaxParticipants : null;
+            if (input.RegistrationDeadline != null) t.RegistrationDeadline = deadline;
             t.LoanWeaponsOffered = IsTrue(input.LoanWeaponsOffered);
             // ⚠️ En träning är aldrig obligatorisk för alla (Stefan 2026-10-06, efter Luleå PK):
             // obligatorisk närvaro för föreningsintyget hör till HÄNDELSER, och en kurs krav sätts på
@@ -653,10 +666,13 @@ WHERE s.Id = @0", seriesId);
             // Banan och vallen följer med: en serie flyttar till en annan bana i sin helhet.
             var changed = db.Execute(@"UPDATE dbo.ClubTraining SET Name = @2, StartTime = @3, EndTime = @4, Discipline = @5,
     Venue = @6, Description = @7, RegistrationRequired = @8, MaxParticipants = @9, LoanWeaponsOffered = @10,
-    IsMandatory = @11, RangeId = @12, RangeSectionId = @13, UpdatedDate = GETDATE()
+    IsMandatory = @11, RangeId = @12, RangeSectionId = @13,
+    RegistrationDeadline = CASE WHEN @14 IS NULL THEN NULL ELSE DATEADD(day, -@14, [Date]) END, UpdatedDate = GETDATE()
 WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
                 t.ScheduleId, t.Date.Date, t.Name, t.StartTime, t.EndTime, t.Discipline, t.Venue, t.Description,
-                t.RegistrationRequired, t.MaxParticipants, t.LoanWeaponsOffered, t.IsMandatory, t.RangeId, t.RangeSectionId);
+                t.RegistrationRequired, t.MaxParticipants, t.LoanWeaponsOffered, t.IsMandatory, t.RangeId, t.RangeSectionId,
+                // Dagar före träningen följer med, så "dagen före" gäller varje tillfälle i serien.
+                t.RegistrationDeadline is DateTime rd ? (object)(t.Date.Date - rd.Date).Days : DBNull.Value);
             FeedChanged();
             return changed;
         }
