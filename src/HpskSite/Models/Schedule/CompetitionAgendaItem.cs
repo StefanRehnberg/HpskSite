@@ -66,8 +66,8 @@ namespace HpskSite.Models.Schedule
     }
 
     /// <summary>
-    /// The starter programme offered as "Lägg till standardpunkter" — a competition day looks broadly
-    /// the same everywhere, so an empty editor is a worse default than a list to prune.
+    /// The starter programme offered as "Lägg till från mall" (Åtgärder) — a competition day looks broadly
+    /// the same everywhere, so an empty editor is a worse default than a list to pick from.
     /// </summary>
     public static class AgendaTemplate
     {
@@ -110,5 +110,9 @@ namespace HpskSite.Models.Schedule
     public class SeedAgendaRequest
     {
         public int CompetitionId { get; set; }
+        /// <summary>Mallens rader som ska läggas in (index i <see cref="AgendaTemplate.Default"/>). Utelämnat = alla.</summary>
+        public List<int>? Items { get; set; }
+        /// <summary>"yyyy-MM-dd". Utelämnat = tävlingens datum.</summary>
+        public string? ItemDate { get; set; }
     }
 }

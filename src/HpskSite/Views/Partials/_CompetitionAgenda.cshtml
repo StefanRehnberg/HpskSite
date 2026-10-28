@@ -11,29 +11,17 @@
     // reach registered participants.
     var competitionId = ViewData["CompetitionId"];
     var agToken = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+    var agPrintUrl = (ViewData["PlanningId"] as int? ?? 0) > 0
+        ? $"/tavlingsplanering/blad?p={ViewData["PlanningId"]}&vy=dagsprogram"
+        : $"/tavlingsplanering/blad?c={competitionId}&vy=dagsprogram";
 }
 
 <p class="text-muted small mb-3" style="max-width:760px">
     <i class="bi bi-signpost-2 me-1"></i>
     <strong>Så gör du:</strong> lägg in dagens hållpunkter här. De hamnar i skyttarnas och funktionärernas
     personliga schema (<em>Mitt schema</em>) tillsammans med deras starttider och pass — så alla ser samma
-    program. Har du en typisk tävlingsdag kan du börja från en färdig mall och stryka det som inte gäller.
+    program. Har du en typisk tävlingsdag kan du under <strong>Åtgärder</strong> välja punkter ur en färdig mall.
 </p>
-
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-    <h3 class="h5 mb-0"><i class="bi bi-calendar2-event me-2"></i>Dagsprogram</h3>
-    <div class="d-flex gap-2 flex-wrap">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="agSeedBtn" onclick="agSeed()">
-            <i class="bi bi-magic"></i> Lägg till standardpunkter
-        </button>
-        <a class="btn btn-sm btn-outline-secondary" href="@((ViewData["PlanningId"] as int? ?? 0) > 0 ? $"/tavlingsplanering/blad?p={ViewData["PlanningId"]}&vy=dagsprogram" : $"/tavlingsplanering/blad?c={competitionId}&vy=dagsprogram")" target="_blank" rel="noopener">
-            <i class="bi bi-printer"></i> Skriv ut
-        </a>
-        <button type="button" class="btn btn-sm btn-primary" onclick="agOpenNew()">
-            <i class="bi bi-plus-lg"></i> Lägg till punkt
-        </button>
-    </div>
-</div>
 
 <div id="agList">
     <div class="text-muted py-4"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>
@@ -126,7 +114,7 @@
         const wrap = document.getElementById('agList');
         if (!items.length) {
             wrap.innerHTML = '<div class="alert alert-light border mb-0">' +
-                'Inget dagsprogram än. Skyttarnas schema visar då bara deras starttider och pass.' +
+                'Inget dagsprogram än. Skyttarnas schema visar då bara deras starttider och pass. Under Åtgärder kan du lägga till punkter ur en mall.' +
                 '</div>';
             return;
         }
@@ -221,7 +209,6 @@
                 agItems = d.items || [];
                 agCompDate = d.competitionDate || null;
                 render(agItems);
-                document.getElementById('agSeedBtn').classList.toggle('d-none', agItems.length > 0);
             })
             .catch(() => {
                 document.getElementById('agList').innerHTML =
@@ -313,19 +300,71 @@
         .catch(() => {});
     }
 
-    window.agSeed = function () {
-        if (!confirm('Lägg till en standarddag (anmälan, upprop, första start, lunch, prisutdelning, avrigg)? Du kan ändra och ta bort punkter efteråt.')) return;
-        fetch('/umbraco/surface/Staffing/SeedAgenda', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': AG_TOKEN },
-            body: JSON.stringify({ competitionId: AG_COMP })
-        })
-        .then(r => r.json())
-        .then(d => {
-            if (!d.success) { alert(d.message || 'Kunde inte skapa standardprogrammet.'); return; }
-            load();
-        })
-        .catch(() => {});
+    // Åtgärder och dialoger kommer från planeringens skal (planering.js), som på övriga sidor.
+    let shell = null;
+    const PRINT_URL = '@Html.Raw(agPrintUrl)';
+
+    // "Lägg till från mall": mallens punkter i en dialog, kryssa de du vill ha. Punkter som redan finns den dagen går inte att välja.
+    window.agTemplate = async function () {
+        if (!shell) return;
+        const day = agCompDate || '';
+        let d;
+        try { d = await (await fetch('/umbraco/surface/Staffing/GetAgendaTemplate?competitionId=' + AG_COMP + '&date=' + encodeURIComponent(day))).json(); }
+        catch (e) { d = null; }
+        if (!d || !d.success) { shell.showMsg(esc((d && d.message) || 'Kunde inte hämta mallen.'), 'danger'); return; }
+        const rows = d.items || [];
+        const fresh = rows.filter(r => !r.exists).length;
+        shell.formModal({
+            title: 'Lägg till från mall', okLabel: 'Lägg till valda', wide: false,
+            html: '<p class="mb-2">Så ser en vanlig tävlingsdag ut. Bocka ur de punkter du inte vill ha — tiderna ändrar du efteråt.</p>'
+                + '<div class="d-flex flex-wrap align-items-center gap-2 mb-2">'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-ag-all="1">Välj alla</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-ag-all="0">Välj ingen</button>'
+                + '<span class="ms-auto small" id="agTmCount" aria-live="polite"></span></div>'
+                + (fresh ? '' : '<div class="alert alert-info py-2">Alla mallens punkter finns redan i dagsprogrammet.</div>')
+                + '<div class="border rounded p-2">' + rows.map(r =>
+                    '<div class="form-check"><input class="form-check-input" type="checkbox" id="agTm' + r.index + '" data-ag-tm="' + r.index + '"' + (r.exists ? ' disabled' : ' checked') + '>'
+                    + '<label class="form-check-label' + (r.exists ? ' text-body-secondary' : '') + '" for="agTm' + r.index + '">'
+                    + '<span class="fw-semibold">' + esc(r.title) + '</span> '
+                    + '<span class="text-body-secondary small">' + esc(timeLabel({ startTime: r.startTime, endTime: r.endTime })) + '</span>'
+                    + (r.audience === 'Staff' ? ' <span class="badge bg-success-subtle text-success-emphasis border">Funktionärer</span>' : r.audience === 'Shooters' ? ' <span class="badge bg-primary-subtle text-primary-emphasis border">Skyttar</span>' : '')
+                    + (r.exists ? ' <span class="text-body-secondary small">— finns redan, läggs inte in igen</span>' : '')
+                    + '</label></div>').join('') + '</div>',
+            onOpen: body => {
+                const boxes = () => [].slice.call(body.querySelectorAll('[data-ag-tm]:not(:disabled)'));
+                const sync = () => { body.querySelector('#agTmCount').textContent = boxes().filter(x => x.checked).length + ' av ' + fresh + ' punkter valda'; };
+                body.addEventListener('change', sync);
+                body.addEventListener('click', e => {
+                    const b = e.target.closest('[data-ag-all]'); if (!b) return;
+                    boxes().forEach(x => { x.checked = b.getAttribute('data-ag-all') === '1'; });
+                    sync();
+                });
+                sync();
+            },
+            onOk: async body => {
+                const picks = [].slice.call(body.querySelectorAll('[data-ag-tm]:checked:not(:disabled)')).map(x => parseInt(x.getAttribute('data-ag-tm'), 10));
+                if (!picks.length) return 'Välj minst en punkt, eller tryck Avbryt.';
+                const r = await (await fetch('/umbraco/surface/Staffing/SeedAgenda', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': AG_TOKEN },
+                    body: JSON.stringify({ competitionId: AG_COMP, items: picks, itemDate: day || null })
+                })).json();
+                if (!r.success) return r.message || 'Kunde inte lägga till punkterna.';
+                await loadItems();
+                shell.showMsg(r.created ? esc(r.created + (r.created === 1 ? ' punkt lades till.' : ' punkter lades till.')) : 'Ingenting lades till.', r.created ? 'success' : 'info');
+                return true;
+            }
+        });
+    };
+
+    window.plOnShell = function (A) {
+        shell = A;
+        A.setActions([
+            { label: 'Lägg till punkt…', icon: 'bi-plus-lg', fn: () => window.agOpenNew() },
+            { label: 'Lägg till från mall…', icon: 'bi-magic', fn: () => window.agTemplate() },
+            { divider: true },
+            { label: 'Skriv ut dagsprogrammet', icon: 'bi-printer', fn: () => window.open(PRINT_URL, '_blank', 'noopener') },
+        ]);
     };
 
     // Lazy-load when the tab is first shown, like the other planning tabs.

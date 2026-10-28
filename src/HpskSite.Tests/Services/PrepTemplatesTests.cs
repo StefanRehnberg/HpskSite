@@ -100,6 +100,21 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
+        public void Prisutdelningen_delar_aldrig_ut_standardmedaljer_eller_diplom_och_ingen_lottar()
+        {
+            foreach (var d in new[] { "Precision", "Faltskytte", "Springskytte", "Milsnabb" })
+                foreach (var size in PrepTemplates.Sizes)
+                {
+                    var t = PrepTemplates.For(d, size);
+                    var all = Titles(t).ToList();
+                    all.Should().NotContain(x => x.Contains("Lotta") || x.Contains("lotta"), $"{d}/{size}: startlistan lottas aldrig");
+                    all.Should().NotContain(x => x.Contains("Standardmedalj") || x.Contains("diplom"), $"{d}/{size}: de vinns som poäng och delas inte ut");
+                    var pris = t.Single(a => a.Area == "Prisutdelning").Items.Select(i => i.Title).ToList();
+                    pris.Should().Contain("Beställ priserna").And.Contain("Beställ gravering av priserna").And.Contain(x => x.StartsWith("Hederspriser"));
+                }
+        }
+
+        [Fact]
         public void En_gren_far_inga_grennamn()
         {
             PrepTemplates.ForMany(new[] { "Faltskytte" }, "krets").Should().NotContain(a => a.Area.Contains(" – "));

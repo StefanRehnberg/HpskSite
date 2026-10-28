@@ -295,11 +295,10 @@ window.PlaneringBemanning = (function () {
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnFree">Markera alla lediga</button>
                     <span class="small plb-dim" id="plbMnCount" aria-live="polite"></span>
                 </div>
-                <div class="mb-2 d-flex flex-wrap gap-2"><button type="button" class="btn btn-sm btn-outline-primary" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Klistra in en namnlista…</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnSched"><i class="bi bi-clock me-1" aria-hidden="true"></i>Flera skift under dagen? Öppna skiftschemat</button></div>
                 <div class="mb-2"><label class="form-label small mb-0" for="plbMnX">Någon som inte finns i listan?</label>
                     <div class="d-flex flex-wrap gap-2"><input type="search" class="form-control form-control-sm" id="plbMnX" placeholder="Sök en medlem, eller skriv ett namn" autocomplete="off" style="max-width:320px">
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnXAdd">Lägg till i listan</button></div>
+                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste">Eller klistra in flera namn på en gång…</button>
                     <div class="list-group mt-1 d-none" id="plbMnXRes" style="max-width:320px"></div></div>
                 <div class="border rounded p-2 mb-2" id="plbMnPaste" style="display:none">
                     <label class="form-label small mb-1" for="plbMnPasteText">Ett namn per rad. Har pappret klass, patrull eller starttid efter ett | hjälper det när flera heter lika.</label>
@@ -308,7 +307,8 @@ window.PlaneringBemanning = (function () {
                     <div class="small mt-2" id="plbMnPasteRes" aria-live="polite"></div>
                 </div>
                 <div class="list-group plb-many-list" id="plbMnList" style="max-height:40vh;overflow:auto"><div class="list-group-item small plb-dim">Hämtar…</div></div>
-                <div class="pl-help small mt-2 mb-0">Utan tid gäller placeringen hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
+                <div class="small mt-2"><button type="button" class="btn btn-link btn-sm p-0" id="plbMnSched">Flera skift under dagen? Öppna skiftschemat</button></div>
+                <div class="pl-help small mt-1 mb-0">Utan tid gäller placeringen hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
                 <div class="text-danger small mt-1" id="plbMnErr" role="alert"></div>`,
             onOpen: b => {
                 let timer = null;
@@ -1547,7 +1547,7 @@ window.PlaneringBemanning = (function () {
             { label: 'E-postlista…', icon: 'bi-envelope', fn: openEmailList },
         ]);
         const m = B.meta || {};
-        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>lägga in folk</b>? Gå till <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnät</button> och välj <b>Lägg in flera</b>.</p>`;
+        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>lägga in folk</b>? <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-plb-assignmany>Lägg in flera…</button></p>`;
         if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att bli placerade. De väntar på att du fördelar rollerna.</div>
             ${B.show === 'queue' ? '' : '<button type="button" class="btn btn-sm btn-warning" data-plb-show="queue">Visa dem</button>'}</div>`;
         if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till sin plats — platsen behöver fyllas.</div>
@@ -2544,7 +2544,7 @@ window.PlaneringBemanning = (function () {
                 <td class="text-end">${A.rowMenu([{ label: 'Ändra…', fn: () => openSlot(s) }, { divider: true }, { label: 'Ta bort…', danger: true, fn: () => deleteSlot(s) }])}</td></tr>`).join('')}</tbody></table></div>`
             : '<p class="pl-help mb-0">Inget utöver rollerna.</p>';
         const volunteers = (B.people || []).filter(p => !!p.volunteer).length, un = (B.meta && B.meta.unassignedVolunteerCount) || 0;
-        area().innerHTML = `<p class="pl-help small mb-2" id="plbFindHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Det här är för att <b>bjuda in</b> klubbar och medlemmar att anmäla sig som funktionärer. Har du namnen själv? Lägg in dem i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnät</button> med <b>Lägg in flera</b>.</p>
+        area().innerHTML = `<p class="pl-help small mb-2" id="plbFindHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Det här är för att <b>bjuda in</b> klubbar och medlemmar att anmäla sig som funktionärer. Har du namnen själv? <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-plb-assignmany>Lägg in flera…</button></p>
             <div class="pl-card"><h2>1. Vilka får anmäla sig?</h2>
                 <p class="pl-help">Medlemmar i de klubbar och kretsar du väljer kan anmäla sig. Andra kan du fortfarande sätta in själv i rutnätet.</p>
                 <div class="mb-2">${chips || '<span class="pl-help">Ingen vald än.</span>'}</div>
@@ -2791,10 +2791,11 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
         if (!A || !A.isActive()) return;
-        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal]');
+        const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal],[data-plb-assignmany]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.hasAttribute('data-plb-proposal')) openProposal();
+        if (t.hasAttribute('data-plb-assignmany')) openAssignMany();
+        else if (t.hasAttribute('data-plb-proposal')) openProposal();
         else if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
         else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }

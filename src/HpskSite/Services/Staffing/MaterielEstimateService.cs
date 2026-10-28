@@ -84,7 +84,6 @@ namespace HpskSite.Services.Staffing
 
             // Common to all disciplines.
             resp.Rows.Add(new MaterielEstimateRow { Category = "Priser", Item = "Medaljer (1:a/2:a/3:e per klass)", Quantity = classCount > 0 ? classCount * 3 : null, Unit = "st", Basis = classCount > 0 ? $"3 × {classCount} klasser" : "3 per klass" });
-            resp.Rows.Add(new MaterielEstimateRow { Category = "Priser", Item = "Diplom", Quantity = participants > 0 ? participants : null, Unit = "st", Basis = "1 per deltagare" });
 
             return resp;
         }

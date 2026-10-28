@@ -118,24 +118,37 @@ namespace HpskSite.Services.Schedule
             }
         }
 
+        /// <summary>Samma punkt (titel) finns redan den dagen — mallen lägger inte in den igen.</summary>
+        private static bool Has(IEnumerable<CompetitionAgendaItem> existing, AgendaTemplate.Row t, DateTime? date) =>
+            existing.Any(e => e.ItemDate?.Date == date?.Date && string.Equals(e.Title?.Trim(), t.Title, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Mallens rader med uppgift om vilka som redan finns den dagen (för dialogen).</summary>
+        public IReadOnlyList<(int index, AgendaTemplate.Row row, bool exists)> TemplateFor(int competitionId, DateTime? date)
+        {
+            var existing = GetForCompetition(competitionId);
+            return AgendaTemplate.Default.Select((t, i) => (i, t, Has(existing, t, date))).ToList();
+        }
+
         /// <summary>
-        /// Fills an empty programme from the default template. Refuses when rows already exist so a
-        /// double-click can't duplicate the whole day. Returns how many rows were created.
+        /// Lägger in de valda raderna ur mallen (null = alla). Rader som redan finns den dagen hoppas över, så att ett
+        /// dubbelklick eller en andra körning inte dubblerar dagen. Returns how many rows were created.
         /// </summary>
-        public (bool ok, string? message, int created) SeedDefaults(int competitionId, DateTime? compDate, int actingMemberId)
+        public (bool ok, string? message, int created) SeedDefaults(int competitionId, DateTime? compDate, int actingMemberId, IReadOnlyCollection<int>? picks = null)
         {
             if (competitionId <= 0) return (false, "Ogiltig tävling.", 0);
-            if (GetForCompetition(competitionId).Count > 0)
-                return (false, "Dagsprogrammet innehåller redan punkter — lägg till dem du saknar manuellt.", 0);
 
             var created = 0;
             try
             {
+                var existing = GetForCompetition(competitionId);
                 using var scope = _scopeProvider.CreateScope();
                 var now = DateTime.Now;
-                var order = 0;
-                foreach (var t in AgendaTemplate.Default)
+                var order = existing.Count;
+                for (var i = 0; i < AgendaTemplate.Default.Length; i++)
                 {
+                    var t = AgendaTemplate.Default[i];
+                    if (picks != null && !picks.Contains(i)) continue;
+                    if (Has(existing, t, compDate)) continue;
                     scope.Database.Insert(new CompetitionAgendaItem
                     {
                         CompetitionId = competitionId,

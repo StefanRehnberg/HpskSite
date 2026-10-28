@@ -38,14 +38,19 @@
         <div class="pl-main">
             <div class="pl-head">
                 <div>
-                    <h1>Dagsprogram</h1>
-                    @if (exists && canAccess)
-                    {
-                        <div class="pl-sub">@planningName@if (!string.IsNullOrEmpty(compName))
-                        {<span> · tävlingen <strong>@compName</strong></span>}</div>
-                    }
+                    <h1 id="plTitle">Dagsprogram</h1>
+                    <div class="pl-sub" id="plSub">@if (exists && canAccess)
+                        {<text>@planningName</text>@if (!string.IsNullOrEmpty(compName))
+                        {<span> · tävlingen <strong>@compName</strong></span>}}</div>
+                </div>
+                <div class="dropdown d-none pl-noprint" id="plActions">
+                    <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="plActionsList"></ul>
                 </div>
             </div>
+            <div id="plMsg" aria-live="polite"></div>
 
             @if (!exists || !canAccess)
             {
@@ -77,6 +82,37 @@
 
                 @await Html.PartialAsync("_CompetitionAgenda", childVd)
             }
+        </div>
+    </div>
+
+    @* Samma dialoger som övriga planeringssidor (planering.js formModal/plConfirm). *@
+    <div class="modal fade pl-modal" id="plConfirmModal" tabindex="-1" aria-hidden="true" aria-labelledby="plConfirmTitle">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="plConfirmTitle"></h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                <div class="modal-body" id="plConfirmText" style="white-space:pre-line;"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="plConfirmOk">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade pl-modal" id="plFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="plFormTitle" data-bs-backdrop="static">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+            <div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5" id="plFormTitle"></h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                <div class="modal-body">
+                    <div class="alert alert-danger d-none" id="plFormErr" role="alert"></div>
+                    <div id="plFormBody"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="plFormCancel">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="plFormOk">Spara</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>

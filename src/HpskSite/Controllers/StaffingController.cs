@@ -1153,9 +1153,36 @@ namespace HpskSite.Controllers
             if (!await CanManageAgendaAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
 
+            var date = DateTime.TryParseExact(request.ItemDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+                ? d : GetCompetitionDate(request.CompetitionId);
             var (ok, msg, created) = _agenda.SeedDefaults(
-                request.CompetitionId, GetCompetitionDate(request.CompetitionId), (await ResolveViewerAsync())?.Id ?? 0);
+                request.CompetitionId, date, (await ResolveViewerAsync())?.Id ?? 0, request.Items);
             return Json(new { success = ok, message = msg, created });
+        }
+
+        /// <summary>Mallens punkter för dialogen "Lägg till från mall": vilka som redan finns den dagen är markerade.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAgendaTemplate(int competitionId, string? date)
+        {
+            if (!await CanManageAgendaAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+
+            var day = DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+                ? d : GetCompetitionDate(competitionId);
+            return Json(new
+            {
+                success = true,
+                items = _agenda.TemplateFor(competitionId, day).Select(x => new
+                {
+                    index = x.index,
+                    title = x.row.Title,
+                    startTime = x.row.StartTime,
+                    endTime = x.row.EndTime,
+                    audience = x.row.Audience,
+                    audienceLabel = AgendaAudience.Label(x.row.Audience),
+                    exists = x.exists,
+                }),
+            });
         }
 
         /// <summary>

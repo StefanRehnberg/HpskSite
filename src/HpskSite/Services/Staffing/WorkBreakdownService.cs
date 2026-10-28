@@ -331,7 +331,7 @@ namespace HpskSite.Services.Staffing
             I("Öppna anmälan", big ? 60 : 30),
             I("Stäng anmälan och bekräfta anmälningarna", big ? 14 : 7),
         });
-        private static PrepArea Sekretariat(bool big, string lottning = "Lotta och publicera startlistan") => new("Sekretariat & resultat", new()
+        private static PrepArea Sekretariat(bool big, string lottning = "Publicera startlistan") => new("Sekretariat & resultat", new()
         {
             I(lottning, 3),
             I("Förbered resultatinmatning och resultattavla", 2),
@@ -339,8 +339,10 @@ namespace HpskSite.Services.Staffing
         });
         private static PrepArea Prisutdelning(bool big) => new("Prisutdelning", new()
         {
-            I("Priser, medaljer och diplom", big ? 30 : 10),
-            I("Standardmedaljer och märken att dela ut", big ? 30 : 14),
+            // Standardmedaljer delas aldrig ut på tävlingen (de vinns som poäng) och diplom delas inte ut; hederspriser kan delas ut.
+            I("Beställ priserna", big ? 45 : 28),
+            I("Beställ gravering av priserna", big ? 30 : 18),
+            I("Hederspriser att dela ut (om ni har några)", big ? 14 : 7),
             I("Planera prisutdelningen — tid, plats och vem som delar ut", big ? 14 : 3),
         });
         private static PrepArea Sakerhet(bool big) => new("Säkerhet & sjukvård", new()
@@ -441,7 +443,7 @@ namespace HpskSite.Services.Staffing
             }));
             var sakerhet = Sakerhet(big);
             sakerhet.Items.Add(I("Vätskestationer", 3));
-            var sekretariat = Sekretariat(big, "Lotta och publicera startlistan (individuellt, masstart eller stafett)");
+            var sekretariat = Sekretariat(big, "Publicera startlistan (individuellt, masstart eller stafett)");
             sekretariat.Items.Insert(1, I("Ålders- och könsklasser", 5));
             AddCommon(list, mid, big, falt: false, sekretariat, sakerhet);
             return list;

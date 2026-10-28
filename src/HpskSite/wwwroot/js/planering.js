@@ -453,6 +453,8 @@
         ID, req, token, esc, spinner, setHead, setActions, rowMenu, formModal, plConfirm, showMsg, failMsg, datePicker,
         S: () => S, isActive: () => view === 'bemanning', go,
     };
+    // Dagsprogrammets sida (RAIL_ONLY) har eget innehåll men samma Åtgärder och dialoger: den får skalets API när det är klart.
+    if (RAIL_ONLY && typeof window.plOnShell === 'function') window.plOnShell(STAFF_API);
 
     function subLine() {
         const p = S.planning;
