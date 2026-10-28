@@ -17,7 +17,7 @@ namespace HpskSite.Tests
         private static StaffInterval Iv(int fh, int th) => new(D.AddHours(fh), D.AddHours(th), false);
 
         /// <summary>En ond instans: många dubbelroller (starter som sammanfaller med passen), behov som är större än utbudet, säkerhetsroller och en heldagslucka.</summary>
-        private sealed record Instance(List<SolverSlot> Slots, List<SolverPerson> People, int DoubleRoles, int NeverSlots, int TotalNeeded)
+        private sealed record Instance(List<SolverSlot> Slots, List<SolverPerson> People, int DoubleRoles, int ChiefSlots, int TotalNeeded)
         {
             public int Volunteers => People.Count(p => p.Volunteer);
         }
@@ -46,7 +46,7 @@ namespace HpskSite.Tests
             }
             var slots = new List<SolverSlot>();
             var k = r.Next(8, 31);
-            var never = 0; var needed = 0;
+            var chief = 0; var needed = 0;
             for (var i = 0; i < k; i++)
             {
                 var (rk, rn) = roles[r.Next(0, roles.Length)];
@@ -55,12 +55,12 @@ namespace HpskSite.Tests
                 var missing = r.Next(1, 4);
                 slots.Add(new SolverSlot($"{rk}|{station}|{D:yyyyMMdd}|{from}-{to}|{i}", rk, rn, "Station", station, $"Station {station}", D, Iv(from, to), null, missing));
                 needed += missing;
-                if (rk == "stationschef") never++;
+                if (rk == "stationschef") chief++;
             }
             // Ett behov som är större än utbudet med flit: hela dagen, fem personer.
             slots.Add(new SolverSlot($"servering|X|{D:yyyyMMdd}|stor", "servering", "Servering", null, null, null, D, Iv(8, 18), null, 5));
             needed += 5;
-            return new Instance(slots, people, dbl, never, needed);
+            return new Instance(slots, people, dbl, chief, needed);
         }
 
         public static IEnumerable<object[]> Seeds() => Enumerable.Range(1, 300).Select(i => new object[] { i });
@@ -92,22 +92,25 @@ namespace HpskSite.Tests
             var all = Enumerable.Range(1, 300).Select(Make).ToList();
             all.Should().OnlyContain(i => i.TotalNeeded > 0);
             all.Count(i => i.DoubleRoles >= 5).Should().BeGreaterThan(250, "de flesta instanser ska ha minst fem som både skjuter och jobbar");
-            all.Count(i => i.NeverSlots > 0).Should().BeGreaterThan(200, "säkerhetsroller ska finnas i de flesta instanser");
+            all.Count(i => i.ChiefSlots > 0).Should().BeGreaterThan(200, "stationschefsluckor ska finnas i de flesta instanser, så att testet nedan prövar att de fylls");
             all.Average(i => i.Volunteers).Should().BeGreaterThan(15);
             // Och minst en instans där utbudet inte räcker (annars testas aldrig 'olöst').
             all.Count(i => StaffingSolver.Solve(i.Slots, i.People).StillMissing > 0).Should().BeGreaterThan(100);
         }
 
         [Fact]
-        public void Aldrig_nagon_pa_en_sakerhetsroll()
+        public void Stationschef_fylls_som_alla_andra_roller()
         {
+            // Stefan 2026-10-28: förslaget fyller allt det kan, även stationschef. Ingen lucka lämnas åt "en människa".
+            var placed = 0;
             for (var seed = 1; seed <= 300; seed++)
             {
                 var inst = Make(seed);
                 var res = StaffingSolver.Solve(inst.Slots, inst.People);
-                res.Proposed.Should().NotContain(r => r.RoleKey == "stationschef");
-                res.Unfilled.Where(u => u.RoleName == "Stationschef").Should().OnlyContain(u => u.Reason.Contains("utses av en människa"));
+                placed += res.Proposed.Count(r => r.RoleKey == "stationschef");
+                res.Unfilled.Should().NotContain(u => u.Reason.Contains("utses av en människa"));
             }
+            placed.Should().BeGreaterThan(0, "stationschefsluckor ska kunna fyllas");
         }
 
         [Fact]
@@ -203,7 +206,7 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Validatorn_hittar_en_dubblett_en_sakerhetsroll_och_en_ej_anmald()
+        public void Validatorn_hittar_en_dubblett_och_en_ej_anmald()
         {
             var slot = new SolverSlot("s", "stationschef", "Stationschef", null, null, null, D, Iv(9, 11), null, 1);
             var slot2 = new SolverSlot("t", "servering", "Servering", null, null, null, D, Iv(9, 11), null, 1);
@@ -215,7 +218,6 @@ namespace HpskSite.Tests
                 new ProposedRow("t", 1, "Nej", "servering", null, null, D, slot2.Interval, "x", null),
             }, Array.Empty<UnfilledSlot>());
             var problems = StaffingSolver.Validate(new[] { slot, slot2 }, new[] { p }, bad);
-            problems.Should().Contain(x => x.Contains("säkerhetsrollen"));
             problems.Should().Contain(x => x.Contains("inte anmält sig"));
             problems.Should().Contain(x => x.Contains("två platser samtidigt"));
             problems.Should().Contain(x => x.Contains("samma person två gånger"));
@@ -257,12 +259,10 @@ namespace HpskSite.Tests
         /// <summary>40 rader: luckorna i given ordning, första lediga anmälda — samma hårda villkor, ingen smart ordning.</summary>
         private static SolverResult Naive(IReadOnlyList<SolverSlot> slots, IReadOnlyList<SolverPerson> people)
         {
-            var opts = new SolverOptions();
             var proposed = new List<ProposedRow>(); var unfilled = new List<UnfilledSlot>();
             var added = people.ToDictionary(p => p.MemberId, _ => new List<BusyItem>());
             foreach (var s in slots.Where(s => s.Missing > 0))
             {
-                if (opts.NeverProposeRoles.Contains(s.RoleKey)) { unfilled.Add(new UnfilledSlot(s.Key, s.RoleName, s.ScopeLabel, s.Date, s.Interval, s.Missing, "utses av en människa", 0)); continue; }
                 var left = s.Missing;
                 foreach (var p in people.Where(p => p.Volunteer).OrderBy(p => p.MemberId))
                 {

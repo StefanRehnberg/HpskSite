@@ -186,7 +186,6 @@ namespace HpskSite.Services.Staffing
 
             var slotByKey = p.Slots.ToDictionary(s => s.Key);
             var person = p.People.ToDictionary(x => x.MemberId);
-            var never = new SolverOptions().NeverProposeRoles;
             var batch = Guid.NewGuid();
             var applied = new List<(int MemberId, SolverSlot Slot)>();
             using var scope = _scopes.CreateScope();   // EN transaktion: faller något avbryts allt
@@ -194,7 +193,6 @@ namespace HpskSite.Services.Staffing
             {
                 if (!slotByKey.TryGetValue(key, out var slot)) { skipped.Add((mid, MemberName(person, mid), "Luckan finns inte längre.")); continue; }
                 if (!person.TryGetValue(mid, out var pr)) { skipped.Add((mid, MemberName(person, mid), "Personen har inte anmält sig som funktionär.")); continue; }
-                if (never.Contains(slot.RoleKey)) { skipped.Add((mid, pr.Name, $"{slot.RoleName} utses av en människa.")); continue; }
                 if (applied.Count(a => a.Slot.Key == key) >= slot.Missing) { skipped.Add((mid, pr.Name, "Luckan är redan full.")); continue; }
                 var busy = pr.Busy.Concat(applied.Where(a => a.MemberId == mid).Select(a => new BusyItem(BusyKind.Assignment, a.Slot.Interval, "just inlagd", a.Slot.Place)));
                 if (StaffingRules.FirstConflict(slot.Interval, slot.Place, busy) is { IsHard: true } c) { skipped.Add((mid, pr.Name, c.Label)); continue; }

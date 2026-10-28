@@ -459,7 +459,6 @@ window.PlaneringBemanning = (function () {
                     <span class="small plb-dim align-self-center" id="plbDsBlockNote">${blockMinutes === 0 ? (r.blockMinutes >= 480 ? 'Valde hela dagen — så få byten som möjligt.' : `Valde ${r.blockMinutes / 60} timmar${r.blockMinutes < 180 ? ' — kortare än vanligt, så att fler av dina namn får plats' : ''}, eftersom hela dagen inte räckte till alla platser.`) : ''}</span>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbDsRecalc">Räkna om</button>
                 </div>
-                ${r.safetyRole ? `<div class="alert alert-warning py-2 small">${esc(roleName)} är en säkerhetsroll (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</div>` : ''}
                 ${r.rows.length ? `<div class="list-group mb-2 plb-many-list" id="plbDsList" style="max-height:34vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Ingen kunde placeras.</p>'}
                 ${(r.unknown || []).length ? `<p class="small text-danger mb-2">${r.unknown.length} ${r.unknown.length === 1 ? 'person finns' : 'personer finns'} inte bland anmälda eller funktionärer och ${r.unknown.length === 1 ? 'togs' : 'togs'} inte med.</p>` : ''}
                 ${(r.unfilled || []).length ? `<div class="mb-2" id="plbDsUnfilled"><div class="fw-semibold small mb-1">Platser som fortfarande saknar folk (${r.unfilled.length})</div>
@@ -509,6 +508,7 @@ window.PlaneringBemanning = (function () {
     async function openProposal() {
         A.showMsg('Räknar ut ett förslag…', 'info');
         const r = await sget('GetProposal').catch(() => null);
+        A.showMsg('');   // "Räknar ut…" ska inte bli kvar efter att dialogen stängts
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte räkna ut ett förslag.'), 'danger'); return; }
         if (!r.rows.length && !r.unfilled.length) {
             // Stefan 2026-10-27: 30 anmälda och inga behov satta gav "Alla platser är redan fyllda" — fel. Förslaget fyller de platser som BEHÖVS; utan behov finns inga platser.
@@ -523,19 +523,16 @@ window.PlaneringBemanning = (function () {
             <span class="d-block plb-dim">${esc(x.why)}</span>${x.warning ? `<span class="d-block text-warning-emphasis">${esc(x.warning)}</span>` : ''}</span></label>`;
         const unHtml = u => `<li class="py-1 border-bottom small"><span class="fw-semibold">${esc(u.role)}${u.scope ? ' · ' + esc(u.scope) : ''}</span>, ${esc(u.dayLabel)} ${esc(u.time)} — saknas <b>${u.missing}</b>
             <span class="d-block plb-dim">${esc(u.reason)}</span></li>`;
-        const humans = r.unfilled.filter(u => u.human), open = r.unfilled.filter(u => !u.human);
+        const open = r.unfilled;
         A.formModal({
             title: 'Förslag på bemanning', okLabel: 'Lägg in de markerade', wide: true,
             html: `<div class="alert alert-warning py-2 small mb-2" id="plbPrBanner"><b>Förslag — inget är inlagt än.</b> Ingen funktionär ser något och ingen får något mejl förrän du lagt in och skickat förfrågan.</div>
                 <p class="mb-2" id="plbPrSummary"></p>
                 ${r.rows.length ? `<div class="list-group mb-3 plb-many-list" id="plbPrList" style="max-height:34vh;overflow:auto">${r.rows.map(rowHtml).join('')}</div>` : '<p class="plb-dim">Det finns ingen som kan läggas in just nu.</p>'}
-                ${open.length ? `<div class="fw-semibold small mb-1" id="plbPrOpenHead">Det här gick inte att fylla</div><ul class="list-unstyled mb-2" id="plbPrOpen">${open.map(unHtml).join('')}</ul>` : ''}
-                ${humans.length ? `<div class="fw-semibold small mb-1">Utses av en människa</div><ul class="list-unstyled mb-2" id="plbPrHuman">${humans.map(unHtml).join('')}</ul>
-                    <p class="pl-help small">Skjutledare och stationschef är säkerhetsroller (SHB D.8.1) — förslaget lägger aldrig in någon där. Lägg in dem själv i rutnätet.</p>` : ''}
-                <div class="text-danger small" id="plbPrErr" role="alert"></div>`,
+                ${open.length ? `<div class="fw-semibold small mb-1" id="plbPrOpenHead">Det här gick inte att fylla</div><ul class="list-unstyled mb-2" id="plbPrOpen">${open.map(unHtml).join('')}</ul>` : ''}                <div class="text-danger small" id="plbPrErr" role="alert"></div>`,
             onOpen: b => {
                 const sum = () => {
-                    b.querySelector('#plbPrSummary').innerHTML = `${sel.size} av ${r.rows.length} förslag markerade · ${r.placed} av ${r.needed} platser kan fyllas · <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats saknas' : 'platser saknas'} efter förslaget</span>${r.humanMissing ? ` · ${r.humanMissing} ${r.humanMissing === 1 ? 'plats' : 'platser'} utses av dig` : ''}.`;
+                    b.querySelector('#plbPrSummary').innerHTML = `${sel.size} av ${r.rows.length} förslag markerade · ${r.placed} av ${r.needed} platser kan fyllas · <span class="${r.stillMissing ? 'text-danger fw-semibold' : ''}">${r.stillMissing} ${r.stillMissing === 1 ? 'plats saknas' : 'platser saknas'} efter förslaget</span>.`;
                 };
                 sum();
                 const list = b.querySelector('#plbPrList');

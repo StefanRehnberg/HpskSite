@@ -368,10 +368,8 @@ namespace HpskSite.Controllers
                 {
                     success = true, fingerprint = p.Fingerprint,
                     placed = p.Result.Placed,
-                    // Det som förslaget inte kan fylla (för få lediga) skiljs från det som en människa ska utse (säkerhetsroller).
-                    stillMissing = p.Result.Unfilled.Where(u => !new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey)).Sum(u => u.Missing),
-                    humanMissing = p.Result.Unfilled.Where(u => new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey)).Sum(u => u.Missing),
-                    needed = p.Slots.Where(s => !new SolverOptions().NeverProposeRoles.Contains(s.RoleKey)).Sum(s => s.Missing),
+                    stillMissing = p.Result.StillMissing,
+                    needed = p.Slots.Sum(s => s.Missing),
                     volunteers = p.People.Count,
                     rows = p.Result.Proposed.Select(r => new
                     {
@@ -382,7 +380,7 @@ namespace HpskSite.Controllers
                     unfilled = p.Result.Unfilled.Select(u => new
                     {
                         slotKey = u.SlotKey, role = u.RoleName, scope = u.ScopeLabel, dayLabel = u.Date.ToString("ddd d MMM", sv), time = Iv(u.Interval),
-                        missing = u.Missing, reason = u.Reason, human = new SolverOptions().NeverProposeRoles.Contains(p.Slots.First(s => s.Key == u.SlotKey).RoleKey),
+                        missing = u.Missing, reason = u.Reason,
                     }),
                 });
             }
@@ -472,13 +470,12 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Rollen har inget behov som saknar folk. Sätt hur många som behövs, eller välj en annan roll." });
                 var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
                 string Iv(StaffInterval i) => $"{i.Start:HH\\:mm}–{i.End:HH\\:mm}";
-                var never = new SolverOptions().NeverProposeRoles.Contains(spec.RoleKey);
                 var placedIds = p.Result.Proposed.Select(r => r.MemberId).ToHashSet();
                 var found = p.People.Select(x => x.MemberId).ToHashSet();
                 return Json(new
                 {
                     success = true, fingerprint = p.Fingerprint, blockMinutes = chosenBlock, autoBlock = spec.BlockMinutes <= 0,
-                    placed = p.Result.Placed, stillMissing = p.Result.StillMissing, needed = p.Slots.Sum(s => s.Missing), safetyRole = never,
+                    placed = p.Result.Placed, stillMissing = p.Result.StillMissing, needed = p.Slots.Sum(s => s.Missing),
                     rows = p.Result.Proposed.Select(r => new
                     {
                         slotKey = r.SlotKey, memberId = r.MemberId, name = r.Name, scope = p.Slots.First(s => s.Key == r.SlotKey).ScopeLabel, role = p.Slots.First(s => s.Key == r.SlotKey).RoleName,

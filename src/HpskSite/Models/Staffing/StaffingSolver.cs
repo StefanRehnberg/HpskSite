@@ -21,8 +21,6 @@ namespace HpskSite.Models.Staffing
 
     public sealed record SolverOptions
     {
-        /// <summary>Roller som aldrig föreslås — en människa utser dem (skjutledare och stationschef är säkerhetsroller, SHB D.8.1).</summary>
-        public IReadOnlySet<string> NeverProposeRoles { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "skjutledare", "stationschef", "tavlingsledning" };
         /// <summary>Föreslå bara de som anmält sig som funktionärer (Stefans svar: startlistan tillsammans med funktionärsanmälan är källan).</summary>
         public bool OnlyVolunteers { get; init; } = true;
         public TimeSpan? TravelMargin { get; init; }
@@ -47,7 +45,6 @@ namespace HpskSite.Models.Staffing
     /// <list type="bullet">
     /// <item><b>Hårt:</b> ingen överlappning med personens upptagna tid (<see cref="StaffingRules.FirstConflict"/> — samma regel som veckan och
     /// kandidatlistan) och aldrig två förslag åt samma person som överlappar. Ett hårt hinder fäller kandidaten, alltid.</item>
-    /// <item><b>Aldrig föreslagna:</b> roller i <see cref="SolverOptions.NeverProposeRoles"/> — de hamnar bland de olösta med skäl.</item>
     /// <item><b>Ordning:</b> de svåraste luckorna först (färst kandidater), sedan tidigast. Bland kandidaterna: anmäld just till rollen, utan trång
     /// förflyttning, färst uppdrag hittills (jämn fördelning), sedan namn och id.</item>
     /// </list>
@@ -83,7 +80,6 @@ namespace HpskSite.Models.Staffing
             var order = slots.Where(s => s.Missing > 0).Select(s => new
             {
                 Slot = s,
-                Never = options.NeverProposeRoles.Contains(s.RoleKey),
                 Count = people.Count(p => Eligible(p, s) && Conflict(p, s) is not { IsHard: true }),
             }).OrderBy(x => x.Count).ThenBy(x => x.Slot.Date).ThenBy(x => x.Slot.Interval.Start).ThenBy(x => x.Slot.Key, StringComparer.Ordinal).ToList();
 
@@ -91,12 +87,6 @@ namespace HpskSite.Models.Staffing
             {
                 ct.ThrowIfCancellationRequested();
                 var s = x.Slot;
-                if (x.Never)
-                {
-                    unfilled.Add(new UnfilledSlot(s.Key, s.RoleName, s.ScopeLabel, s.Date, s.Interval, s.Missing,
-                        $"{s.RoleName} utses av en människa — förslaget lägger inte in någon på en säkerhetsroll", x.Count));
-                    continue;
-                }
                 var left = s.Missing;
                 remaining[s.Key] = left;
                 while (left > 0)
@@ -104,7 +94,7 @@ namespace HpskSite.Models.Staffing
                     var taken = proposed.Where(r => r.SlotKey == s.Key).Select(r => r.MemberId).ToHashSet();
                     // Täckning före jämn fördelning: den som passar på FÄRRE andra luckor används först, så att de flexibla finns kvar till de svåra
                     // luckorna. (Fördelningen mellan lika flexibla avgörs sedan av antalet uppdrag hittills.)
-                    var open = order.Where(o => !o.Never && o.Slot.Missing > 0 && remaining[o.Slot.Key] > 0 && o.Slot.Key != s.Key).Select(o => o.Slot).ToList();
+                    var open = order.Where(o => o.Slot.Missing > 0 && remaining[o.Slot.Key] > 0 && o.Slot.Key != s.Key).Select(o => o.Slot).ToList();
                     var ranked = people.Where(p => Eligible(p, s) && !taken.Contains(p.MemberId))
                         .Select(p => (P: p, C: Conflict(p, s)))
                         .Where(t => t.C is not { IsHard: true })
@@ -198,7 +188,6 @@ namespace HpskSite.Models.Staffing
             {
                 if (!byKey.TryGetValue(r.SlotKey, out var s)) { problems.Add($"okänd lucka {r.SlotKey}"); continue; }
                 if (!person.TryGetValue(r.MemberId, out var p)) { problems.Add($"okänd person {r.MemberId}"); continue; }
-                if (options.NeverProposeRoles.Contains(s.RoleKey)) problems.Add($"{p.Name} föreslogs till säkerhetsrollen {s.RoleKey}");
                 if (options.OnlyVolunteers && !p.Volunteer) problems.Add($"{p.Name} har inte anmält sig som funktionär");
                 foreach (var b in p.Busy)
                     if (b.Interval.Overlaps(s.Interval)) problems.Add($"{p.Name} är upptagen ({b.Label}) när hen föreslås {s.RoleName} {s.Key}");
