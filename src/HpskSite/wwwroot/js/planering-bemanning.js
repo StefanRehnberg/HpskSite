@@ -1632,6 +1632,16 @@ window.PlaneringBemanning = (function () {
         try { r = await shootData(); } catch (e) { r = null; }
         if (!$('plbShoot')) return;
         if (!r || !r.success || !(r.targets || []).length) { box.remove(); return; }
+        // Den som redan är anmäld till tävlingen har en riktig anmälan, och den ändras i tävlingshanteringen: "Tänker tävla" nedan är bara en anteckning för
+        // tävlingar utan anmälan än (veckan med flera tävlingar) och ändrar ingen anmälan. Förut visades en Ändra-knapp som inte rörde anmälan (Stefan 2026-10-28).
+        if (p.registered && !family()) {
+            const comp = A.S().planning.competition;
+            const cls = (p.registered || []).length ? ' · ' + p.registered.map(esc).join(', ') : '';
+            box.innerHTML = `<div class="pl-cardh"><h2>Anmäld till tävlingen</h2></div>
+                <p class="mb-1"><i class="bi bi-check-circle me-1" aria-hidden="true"></i><b>${esc(first(p.displayName))}</b>${cls}</p>
+                <p class="pl-help small mb-0">Anmälan ändras i tävlingshanteringen${comp && comp.manageUrl ? ` — <a href="${esc(comp.manageUrl)}">öppna Tävlingshanteringen</a>` : ''}.${(p.starts || []).length ? '' : ' Egna starttider syns här när startlistan är gjord.'}</p>`;
+            return;
+        }
         const mine = (r.intents || []).filter(i => i.personKey === p.key);
         const byId = new Map(r.targets.map(t => [t.planningId, t]));
         const when = t => t.from ? fmtDate(t.from) + (t.to && t.to !== t.from ? '–' + fmtDate(t.to) : '') : '';
