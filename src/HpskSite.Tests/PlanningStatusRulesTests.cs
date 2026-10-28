@@ -95,11 +95,11 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Fritextnamn_raknas_en_gang_per_namn_och_inte_for_Tavlingsledningen_eller_avbojda()
+        public void Fritextnamn_raknas_en_gang_per_namn_och_inte_for_Tavlingsledningen()
         {
             GridEntry E(string name, int? member = null, string status = "Planned") => new() { DisplayName = name, MemberId = member, Status = status };
             var resp = new GridResponse();
-            resp.Rows.Add(new GridRow { RoleKey = "stationsmarkor", Cells = new() { ["2027-06-05"] = new() { E("ZZZ Hjälpare 1"), E("zzz hjälpare 1 "), E("Medlem", 55), E("Avböjd", null, "Declined") } } });
+            resp.Rows.Add(new GridRow { RoleKey = "stationsmarkor", Cells = new() { ["2027-06-05"] = new() { E("ZZZ Hjälpare 1"), E("zzz hjälpare 1 "), E("Medlem", 55) } } });
             resp.Rows.Add(new GridRow { RoleKey = "sekretariat", Cells = new() { ["2027-06-05"] = new() { E("ZZZ Hjälpare 2") } } });
             resp.Rows.Add(new GridRow { RoleKey = "tavlingsledning", Cells = new() { ["2027-06-05"] = new() { E("Lisa", null) } } });
             StaffingPlaces.Unlinked(resp).Should().Be(2);

@@ -146,7 +146,7 @@ namespace HpskSite.Services.Staffing
                     if (!fit.Volunteers) busy.Add(new BusyItem(BusyKind.Availability, new StaffInterval(d, d.AddDays(1), false), "har inte anmält sig den dagen"));
                     else busy.AddRange(StaffingRules.OutsideAvailability(d, fit.Windows));
                 }
-                var already = assigns.Count(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase));
+                var already = assigns.Count(a => a.MemberId == mid);
                 result.Add(new SolverPerson(mid, name, true, roles, busy, already));
             }
             return result.OrderBy(p => p.MemberId).ToList();
@@ -158,7 +158,7 @@ namespace HpskSite.Services.Staffing
             var busy = new List<BusyItem>();
             foreach (var w in startsBy.GetValueOrDefault(mid) ?? new List<StartWindow>())
                 busy.Add(new BusyItem(BusyKind.Start, shoot.Window(w.Start, w.End), $"egen start {w.Start:HH\\:mm}"));
-            foreach (var a in assigns.Where(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)))
+            foreach (var a in assigns.Where(a => a.MemberId == mid))
             {
                 var (_, iv) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passById.TryGetValue(a.PassId.Value, out var p) ? p : null);
                 if (iv is { } v) busy.Add(new BusyItem(BusyKind.Assignment, v, "annat uppdrag"));
@@ -221,11 +221,12 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Rader som ett tillämpat förslag lade in och som ingen rört sedan: fortfarande Planerade, och <c>ModifiedDate</c> ligger inom några sekunder från skapandet
-        /// (BatchId sätts direkt efter, utan att röra ModifiedDate). En rad som någon ändrat — tid, roll, kontakt — är inte längre förslagets och tas inte bort.
+        /// Rader som ett tillämpat förslag lade in och som ingen rört sedan: fortfarande Planerade, <b>inte meddelade</b> (en meddelad person har fått veta — då är raden hens),
+        /// och <c>ModifiedDate</c> ligger inom några sekunder från skapandet (BatchId sätts direkt efter, utan att röra ModifiedDate). En rad som någon ändrat — tid, roll,
+        /// kontakt — är inte längre förslagets och tas inte bort.
         /// </summary>
         internal static bool UntouchedSinceApply(StaffAssignment a) =>
-            a.Status == StaffAssignmentStatus.Planned && (a.ModifiedDate - a.CreatedDate).Duration() <= TimeSpan.FromSeconds(5);
+            a.Status == StaffAssignmentStatus.Planned && a.NotifiedAt == null && (a.ModifiedDate - a.CreatedDate).Duration() <= TimeSpan.FromSeconds(5);
 
         /// <summary>Ångrar en tillämpning: tar bort raderna med <paramref name="batchId"/> som fortfarande är Planerade och orörda. Antalet borttagna och kvarlämnade (svarat eller ändrat).</summary>
         public (int Removed, int Kept) Undo(StaffOwner owner, Guid batchId)

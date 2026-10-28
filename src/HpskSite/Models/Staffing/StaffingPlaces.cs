@@ -42,7 +42,7 @@ namespace HpskSite.Models.Staffing
         public static int Unlinked(GridResponse resp) => resp.Rows
             .Where(r => !string.Equals(r.RoleKey, "tavlingsledning", StringComparison.OrdinalIgnoreCase))
             .SelectMany(r => r.Cells.Values.SelectMany(c => c))
-            .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase) && e.MemberId is not > 0)
+            .Where(e => e.MemberId is not > 0)
             .Select(e => (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
     }
 }

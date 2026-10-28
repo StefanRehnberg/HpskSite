@@ -7,7 +7,7 @@
     string StatusSv(string s) => s switch
     {
         "Planerad" => "Planerad", "Pagar" => "Pågår", "Blockerad" => "Blockerad", "Klar" => "Klar",
-        "Planned" => "Planerad", "Invited" => "Inbjuden", "Accepted" => "Accepterad", "Declined" => "Avböjt", "Confirmed" => "Bekräftad",
+        "Planned" => "Placerad", "Accepted" => "Anmäld själv", "Confirmed" => "Bekräftad",
         _ => s
     };
     // Only role groups that actually have people (keeps the sheet tight); prep shows every område.

@@ -118,6 +118,7 @@ namespace HpskSite.Services.Staffing
                         DateKey = a.DateKey,
                         DayLabel = FormatDay(a.DateKey),
                         Status = a.Status,
+                        NotifiedAt = a.NotifiedAt,
                         IsResponsible = a.IsResponsible,
                         HasAdminAccess = a.HasAdminAccess,
                         CheckedIn = a.CheckedIn,
@@ -251,10 +252,7 @@ namespace HpskSite.Services.Staffing
             // "Att tilldela" filter in agreement. Keep this predicate and the client filter in step.
             resp.UnassignedVolunteerCount = resp.People.Count(p =>
                 (p.Volunteer != null || p.AvailabilityLabels.Count > 0) && p.Assignments.Count == 0);
-            resp.NeedsResponseCount = resp.People.Count(p => p.Assignments.Any(a =>
-                string.Equals(a.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase)));
-            resp.DeclinedCount = resp.People.Count(p => p.Assignments.Any(a =>
-                string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)));
+            resp.UnnotifiedCount = resp.People.Count(p => p.Assignments.Any(a => !a.ReadOnly && !StaffAssignmentStatus.IsTold(a.Status, a.NotifiedAt)));
             resp.ExternalCount = resp.People.Count(p => p.IsExternal);
             // ONE ROW PER PERSON. Leadership is collected per ASSIGNMENT, and since tävlingsledning is
             // staffed per day a three-day SM produced three identical "Hans Reschke · Tävlingsledare"
@@ -473,7 +471,7 @@ namespace HpskSite.Services.Staffing
 
         /// <summary>
         /// The one word that says where this person is in the process. A volunteer with no role is the
-        /// organiser's to-do (priority 0); a declined invitation is the next most urgent thing to know.
+        /// organiser's to-do (priority 0); a placement nobody has been told about is the next.
         /// </summary>
         private static (string State, int Priority) RollUpState(CompetitionPersonRow row)
         {
@@ -482,29 +480,12 @@ namespace HpskSite.Services.Staffing
                 var state = row.Volunteer != null ? PersonState.Anmald
                     : row.Prep.Count > 0 ? PersonState.PrepOnly
                     : row.AvailabilityLabels.Count > 0 ? PersonState.Anmald
-                    : PersonState.Planned;
+                    : PersonState.Unplaced;
                 return (state, PersonState.Priority(state));
             }
-            // Worst-first across their rows: what the organiser must act on wins over what is settled.
-            var order = new[]
-            {
-                StaffAssignmentStatus.Declined, StaffAssignmentStatus.Invited, StaffAssignmentStatus.Planned,
-                StaffAssignmentStatus.Accepted, StaffAssignmentStatus.Confirmed,
-            };
-            foreach (var s in order)
-                if (row.Assignments.Any(a => string.Equals(a.Status, s, StringComparison.OrdinalIgnoreCase)))
-                {
-                    var label = s switch
-                    {
-                        StaffAssignmentStatus.Declined => PersonState.Declined,
-                        StaffAssignmentStatus.Invited => PersonState.Invited,
-                        StaffAssignmentStatus.Accepted => PersonState.Accepted,
-                        StaffAssignmentStatus.Confirmed => PersonState.Confirmed,
-                        _ => PersonState.Planned,
-                    };
-                    return (label, PersonState.Priority(label));
-                }
-            return (PersonState.Planned, PersonState.Priority(PersonState.Planned));
+            // Worst-first across their rows: what the organiser must act on (not told yet) wins over what is settled.
+            var label = PersonState.OfRows(row.Assignments.Select(a => (a.Status, a.NotifiedAt)));
+            return (label, PersonState.Priority(label));
         }
 
         private string ResolveMemberName(int memberId)

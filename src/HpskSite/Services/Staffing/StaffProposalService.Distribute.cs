@@ -90,7 +90,7 @@ namespace HpskSite.Services.Staffing
                     var need = row.NeedFor(c.Key);
                     if (need <= 0) continue;
                     var existing = (row.Cells.TryGetValue(c.Key, out var cell) ? cell : new List<GridEntry>())
-                        .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
+                        
                         .Select(e => e.PassId is int pid && passes.TryGetValue(pid, out var pp) && PassWindow(pp) is { } w ? w : StaffTimeCoverage.ParseRange(e.TimeLabel))
                         .ToList();
                     foreach (var b in SlotSlicer.Blocks(date, program, block))
@@ -121,7 +121,7 @@ namespace HpskSite.Services.Staffing
             var people = new List<SolverPerson>();
             foreach (var mid in ids.Where(names.ContainsKey).OrderBy(i => i))
                 people.Add(new SolverPerson(mid, names[mid], true, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { spec.RoleKey },
-                    BusyOf(mid, startsBy, assigns, passById, shoot), assigns.Count(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))));
+                    BusyOf(mid, startsBy, assigns, passById, shoot), assigns.Count(a => a.MemberId == mid)));
 
             var fp = new List<string> { $"dist:{spec.RoleKey}|{block}|{string.Join(",", ids.OrderBy(i => i))}", $"shoot:{shoot.BeforeMinutes}/{shoot.DurationMinutes}/{shoot.AfterMinutes}" };
             fp.AddRange(assigns.OrderBy(a => a.Id).Select(a => $"a:{a.Id}|{a.MemberId}|{a.Status}|{a.RoleKey}|{a.ScopeKey}|{a.StartsAt:s}|{a.EndsAt:s}|{a.PassId}|{a.DayDate:d}"));

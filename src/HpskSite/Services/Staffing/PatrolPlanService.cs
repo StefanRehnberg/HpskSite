@@ -99,7 +99,7 @@ namespace HpskSite.Services.Staffing
 
             // Uppdragen: varje icke avböjt uppdrag med känt intervall är upptagen tid.
             var jobs = new Dictionary<int, List<StaffInterval>>();
-            foreach (var a in assigns.Where(a => !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)))
+            foreach (var a in assigns)
             {
                 var (_, iv) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passById.TryGetValue(a.PassId.Value, out var p) ? p : null);
                 if (iv is not { } v) continue;

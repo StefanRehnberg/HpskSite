@@ -379,8 +379,7 @@ namespace HpskSite.Controllers
                 totalPeople = p.TotalPeople,
                 assignedCount = p.AssignedCount,
                 unassignedVolunteerCount = p.UnassignedVolunteerCount,
-                needsResponseCount = p.NeedsResponseCount,
-                declinedCount = p.DeclinedCount,
+                unnotifiedCount = p.UnnotifiedCount,
                 externalCount = p.ExternalCount,
                 leadership = p.Leadership,
                 people = p.People,
@@ -881,57 +880,57 @@ namespace HpskSite.Controllers
 
         // ======================= Notiser & påminnelser (P2) =======================
 
-        /// <summary>Notify a roster person (member → e-post + push; extern hjälpare → e-post) about their
-        /// role, and flip Planerad → Inbjuden. The Phase-2 invitation seam.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> NotifyAssignment([FromBody] DeleteStaffAssignmentRequest request)
+        public class NotifyPlacementsRequest
         {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var a = _staffing.GetById(request.Id);
-            if (a == null) return Json(new { success = false, message = "Funktionären hittades inte." });
-            var owner = await RowOwnerAsync(_staffing.OwnerOf(a.Id));
-            if (owner == null)
-                return Json(new { success = false, message = "Ingen behörighet" });
-            if (a.MemberId is not > 0 && string.IsNullOrWhiteSpace(a.Email))
-                return Json(new { success = false, message = "Personen saknar konto och e-post — kan inte notifieras." });
-
-            var meta = (Name: _owners.Name(owner), Url: _owners.ManageUrl(owner));
-            var roleName = _roleCatalog.NameFor(owner, _owners.Discipline(owner), a.RoleKey);
-            var where = string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
-                ? "hela tävlingen" : $"{a.ScopeType} {a.ScopeKey}".Trim();
-            var subject = $"Funktionärsförfrågan: {roleName} – {meta.Name}";
-            var bodyText = $"Du är inplanerad som <strong>{System.Net.WebUtility.HtmlEncode(roleName)}</strong> på {System.Net.WebUtility.HtmlEncode(where)} under <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>. Tacka ja eller nej.";
-
-            bool email = false; int push = 0;
-            if (a.MemberId is > 0)
-            {
-                // Members act on the per-comp landing page (accept/decline + availability, in context).
-                var beUrl = owner.SignupPath;
-                var html = NotifyEmailHtml(bodyText + " Ange gärna när du kan arbeta.", "Öppna bemanningssidan", beUrl, viewer.Name);
-                (email, push) = await NotifyMemberAsync(a.MemberId.Value, subject, html, "Funktionärsförfrågan", $"{roleName} – {meta.Name}", beUrl);
-            }
-            else if (!string.IsNullOrWhiteSpace(a.Email))
-            {
-                // External (non-member) helper: a tokened accept/decline link, no login required.
-                var token = StaffingInviteToken.Protect(_dataProtection, a);
-                var html = NotifyEmailHtml(bodyText, "Svara på förfrågan", $"/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}", viewer.Name);
-                try { email = await _email.SendHtmlEmailAsync(a.Email!, subject, html); } catch { }
-            }
-
-            if (!email && push == 0)
-                return Json(new { success = false, message = "Kunde inte skicka — ingen e-post eller push-prenumeration." });
-
-            // Only flip Planerad → Inbjuden once something actually reached the person.
-            if (string.Equals(a.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase))
-                _staffing.SetStatus(a.Id, owner, StaffAssignmentStatus.Invited);
-
-            return Json(new { success = true, email, push });
+            /// <summary>Placeringarna (StaffAssignment.Id) som ska meddelas. Redan meddelade hoppas över.</summary>
+            public List<int> Ids { get; set; } = new();
         }
 
-        /// <summary>Return the tokened external accept/decline link for an assignment, so the organiser can
+        /// <summary>
+        /// Meddela placeringarna (Stefan 2026-10-28): ETT mejl (och push för medlemmar) per människa med alla hens ännu ej meddelade placeringar och
+        /// en knapp till hens tävlingsdagssida. Märker raderna <c>NotifiedAt</c>; statusen rörs inte. Ingen ja/nej och ingen länk att svara.
+        /// Används både av "meddela bara den här personen" och "meddela alla ännu ej meddelade" — samma slutpunkt. Varje rad prövas mot sin egen planering.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> NotifyPlacements([FromBody] NotifyPlacementsRequest request)
+        {
+            if (request?.Ids == null || request.Ids.Count == 0) return Json(new { success = false, message = "Välj minst en placering att meddela." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+
+            var rows = new List<StaffAssignment>();
+            var allowedPlanning = new Dictionary<int, bool>();
+            var denied = 0;
+            foreach (var id in request.Ids.Where(i => i > 0).Distinct().Take(5000))
+            {
+                var a = _staffing.GetById(id);
+                if (a == null) continue;
+                var rowOwner = _staffing.OwnerOf(id);
+                var key = rowOwner?.PlanningId ?? 0;
+                if (!allowedPlanning.TryGetValue(key, out var ok))
+                    allowedPlanning[key] = ok = rowOwner != null && await RowOwnerAsync(rowOwner) != null;
+                if (ok) rows.Add(a); else denied++;
+            }
+            if (rows.Count == 0)
+                return Json(new { success = false, message = denied > 0 ? "Ingen behörighet" : "Placeringarna hittades inte." });
+
+            var notice = HttpContext.RequestServices.GetRequiredService<PlacementNoticeService>();
+            var r = await notice.NotifyAsync(rows, viewer.Id);
+            return Json(new
+            {
+                success = r.Ok,
+                message = r.Message,
+                people = r.People,
+                placements = r.Placements,
+                mailed = r.Mailed,
+                pushed = r.Pushed,
+                alreadyTold = r.AlreadyTold,
+                unreachable = r.Unreachable,
+            });
+        }
+
+        /// <summary>Return the tokened external link (a read-only page with the person's placements) for an assignment, so the organiser can
         /// send it manually (SMS etc.) to a non-member helper. Staff-gated.</summary>
         [HttpGet]
         public async Task<IActionResult> GetInviteLink(int competitionId, int id)
@@ -1015,34 +1014,6 @@ namespace HpskSite.Controllers
             }
             catch { }
             return (name, $"/tavlingsplanering?c={competitionId}");
-        }
-
-        /// <summary>Send an in-app web-push + e-mail to a member (best-effort). Returns which channels landed.</summary>
-        private async Task<(bool Email, int Push)> NotifyMemberAsync(int memberId, string subject, string emailHtml, string pushTitle, string pushBody, string url)
-        {
-            bool email = false; int push = 0;
-            try
-            {
-                var m = _memberService.GetById(memberId);
-                var addr = m?.Email;
-                if (!string.IsNullOrWhiteSpace(addr))
-                    email = await _email.SendHtmlEmailAsync(addr!, subject, emailHtml);
-            }
-            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: notify e-mail failed for member {MemberId}", memberId); }
-            try { push = await _webPush.SendToMemberAsync(memberId, pushTitle, pushBody, url, $"planering-{memberId}"); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: notify push failed for member {MemberId}", memberId); }
-            return (email, push);
-        }
-
-        private static string NotifyEmailHtml(string bodyHtml, string ctaLabel, string ctaUrl, string senderName)
-        {
-            var abs = ctaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ctaUrl : $"https://pistol.nu{ctaUrl}";
-            return $@"<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#222'>
-<p>Hej!</p>
-<p>{bodyHtml}</p>
-<p style='margin:24px 0'><a href='{abs}' style='background:#0d6efd;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none'>{System.Net.WebUtility.HtmlEncode(ctaLabel)}</a></p>
-<p style='color:#666;font-size:13px'>Skickat av {System.Net.WebUtility.HtmlEncode(senderName)} via pistol.nu tävlingsplanering.</p>
-</div>";
         }
 
         /// <summary>Competition date + whole days until it (negative once passed), for deadline anchoring.</summary>

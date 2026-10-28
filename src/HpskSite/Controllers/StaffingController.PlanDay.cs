@@ -18,15 +18,15 @@ namespace HpskSite.Controllers
         /// </summary>
         private static void DerivePlanSteps(GridResponse resp, StaffOwner owner, ISet<int>? membersWithStart = null)
         {
-            // Vilka som har uppdrag (avböjda räknas inte), hur många uppdrag som ännu inte skickats som förfrågan, och hur många av personerna som också skjuter.
-            // Tävlingsledning bemannas av den som skapade planeringen och räknas inte: annars stod "klart" på startlistan och "Alla inlagda har fått sin förfrågan" innan någon lagts in (persontest 12).
+            // Vilka som har placeringar, hur många placeringar som ännu inte meddelats (NotifiedAt saknas; självanmälda och bekräftade räknas inte), och hur många av personerna som också skjuter.
+            // Tävlingsledning bemannas av den som skapade planeringen och räknas inte: annars stod "klart" på startlistan och "Alla inlagda har fått besked" innan någon lagts in (persontest 12).
             var live = resp.Rows.Where(r => !string.Equals(r.RoleKey, "tavlingsledning", StringComparison.OrdinalIgnoreCase)).SelectMany(r => r.Cells.Values.SelectMany(c => c))
-                .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
+                .ToList();
             var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
             var unlinkedNames = StaffingPlaces.Unlinked(resp);
             var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
-            var unsent = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && e.HasContact);
-            var unreachable = live.Count(e => string.Equals(e.Status, StaffAssignmentStatus.Planned, StringComparison.OrdinalIgnoreCase) && !e.ReadOnly && !e.HasContact);
+            var unsent = live.Count(e => PlanStepRules.IsUnnotified(e.Status, e.NotifiedAt) && !e.ReadOnly && e.HasContact);
+            var unreachable = live.Count(e => PlanStepRules.IsUnnotified(e.Status, e.NotifiedAt) && !e.ReadOnly && !e.HasContact);
             var (needed, missing, perRole) = StaffingPlaces.Count(resp);
             resp.PlacesNeeded = needed; resp.PlacesMissing = missing;
             // Krockar: inom planeringen (samma person på två poster), och över familjen (uppdrag mot annan del, uppdrag mot egen start). En avsikt att tävla är en varning, ingen krock.
@@ -262,12 +262,12 @@ namespace HpskSite.Controllers
             {
                 var g = _grid.BuildGrid(owner, _owners.Discipline(owner), viewer.Id);
                 var cols = g.Columns.Where(c => !string.IsNullOrEmpty(c.Key)).ToList();
-                var rows = g.Rows.Where(r => r.Cells.Values.Any(l => l.Any(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))) || r.HasNeed)
+                var rows = g.Rows.Where(r => r.Cells.Values.Any(l => l.Count > 0) || r.HasNeed)
                     .Select(r => new
                     {
                         roleName = r.RoleName, scopeLabel = r.ScopeLabel,
                         cells = r.Cells.ToDictionary(kv => kv.Key, kv => kv.Value
-                            .Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
+                            
                             .Select(e => new { name = e.DisplayName, club = e.ClubName, time = e.TimeLabel, responsible = e.IsResponsible }).ToList()),
                         needed = cols.ToDictionary(c => c.Key, c => r.NeedFor(c.Key)),
                         filled = cols.ToDictionary(c => c.Key, c => r.FilledByDay.TryGetValue(c.Key, out var f) ? f : 0),

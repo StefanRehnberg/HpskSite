@@ -13,14 +13,14 @@
 <div class="container mt-4 mb-5">
     <h1><i class="bi bi-person-check me-2"></i>Mina uppdrag</h1>
     <p class="text-muted" style="max-width:720px">
-        Här ser du de funktionärsuppdrag du blivit inbjuden till. Tacka ja eller nej, och berätta
+        Här ser du placeringarna arrangören har gett dig. Berätta gärna
         <strong>när du kan arbeta</strong> så att arrangören kan planera.
     </p>
 
     <div id="muGroups">
         <div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> Laddar…</div>
     </div>
-    <p class="text-muted small mt-3">Vill du anmäla dig som funktionär till en tävling? Öppna tävlingens bemanningssida (länk i inbjudan eller på startsidan).</p>
+    <p class="text-muted small mt-3">Vill du anmäla dig som funktionär till en tävling? Öppna tävlingens bemanningssida (länk i mejlet eller på startsidan).</p>
 </div>
 
 <!-- Tillgänglighet modal -->
@@ -65,8 +65,8 @@
     var groups = [];
     var availModal = null;
 
-    var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
-    var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
+    var STATUS_LABEL = { Planned: 'Placerad', Accepted: 'Anmäld', Confirmed: 'Bekräftad' };
+    var STATUS_CLS = { Planned: 'bg-secondary', Accepted: 'bg-success', Confirmed: 'bg-success' };
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function q(id) { return document.getElementById(id); }
@@ -140,12 +140,7 @@
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
         var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
         var statusBadge = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + '">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
-        var accepted = a.status === 'Accepted';
-        var declined = a.status === 'Declined';
-        var actions = readOnly ? '' : '<div class="btn-group btn-group-sm">'
-            + '<button type="button" class="btn ' + (accepted ? 'btn-success' : 'btn-outline-success') + '" onclick="muRespond(' + a.id + ',\'Accepted\')"><i class="bi bi-check-lg"></i> Tacka ja</button>'
-            + '<button type="button" class="btn ' + (declined ? 'btn-danger' : 'btn-outline-danger') + '" onclick="muRespond(' + a.id + ',\'Declined\')"><i class="bi bi-x-lg"></i> Tacka nej</button>'
-            + '</div>';
+        var actions = '';
         return '<div class="d-flex justify-content-between align-items-start py-2 gap-2 flex-wrap">'
             + '<div class="flex-grow-1">'
             + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + ' ' + statusBadge + '</div>'
@@ -167,11 +162,6 @@
             + (readOnly ? '' : '<button type="button" class="btn btn-outline-primary btn-sm" onclick="muOpenAvail(' + g.competitionId + ',' + (g.planningId || 0) + ')"><i class="bi bi-plus-lg me-1"></i>Lägg till tillgänglighet</button>')
             + '</div>';
     }
-
-    window.muRespond = async function (id, status) {
-        var d = await post('/mina-uppdrag/respond', { assignmentId: id, status: status });
-        if (d.success) await load(); else alert(d.message || 'Kunde inte spara svaret.');
-    };
 
     var availPlanningId = 0;   // P2b: planeringens bemanning (0 = tävlingens)
     window.muOpenAvail = function (compId, planningId) {

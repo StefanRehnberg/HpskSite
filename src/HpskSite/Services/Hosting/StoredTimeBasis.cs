@@ -88,7 +88,7 @@ namespace HpskSite.Services.Hosting
             "RefreshTokens.CreatedAt", "RefreshTokens.ExpiresAt", "RefreshTokens.RevokedAt",
             "RegionFeeCompetition.CreatedUtc",
             "SiteSetting.UpdatedUtc",
-            "StaffAssignment.CheckedInAt", "StaffAssignment.CreatedDate", "StaffAssignment.ModifiedDate",
+            "StaffAssignment.CheckedInAt", "StaffAssignment.CreatedDate", "StaffAssignment.ModifiedDate", "StaffAssignment.NotifiedAt",
             "StaffAvailability.CreatedDate",
             "StaffDay.CreatedDate",
             "StaffHelpSignup.CreatedDate", "StaffHelpSignup.ModifiedDate",

@@ -36,7 +36,7 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
    ["Bemanningsrutnät","",["Roll per dag","Förberedelse- och efterarbetsdagar","Behov mot bemannat","Luckor och dubbelbokning","Dela pass","Ersätt person"]],
    ["Roller","",["Rollkatalog","Egna rollnamn","Appbehörighet per roll","Stationschefer"]],
    ["Rekrytering","",["Hjälppass för självanmälan","Förfrågan till klubb eller krets","Push och mejl"]],
-   ["Funktionärens sida","",["Tacka ja eller nej","Anmäl dig till pass","Ange tillgänglighet","Svara utan konto"]],
+   ["Funktionärens sida","",["Se placeringarna du fått","Anmäl dig till pass","Ange tillgänglighet","Se placering utan konto"]],
    ["Personmatchning","",["Koppla till medlem","Hitta dubbletter"]],
    "Utskrift och e-postlista"]],
   ["Anmälan","",[

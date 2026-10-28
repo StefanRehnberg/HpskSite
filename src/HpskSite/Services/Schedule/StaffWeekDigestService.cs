@@ -45,11 +45,12 @@ namespace HpskSite.Services.Schedule
             public int MemberId { get; set; }
             public int RootId { get; set; }
             public string? Status { get; set; }
+            public DateTime? NotifiedAt { get; set; }
         }
 
         /// <summary>Uppdragen som ligger på dagen <c>@0</c> i en familj där veckan tillför något. Datumet är uppdragets egen dag (starttid → dag → passets dag).</summary>
         public static readonly string CandidatesSql = @"
-            SELECT sa.MemberId AS MemberId, p.FamilyRootId AS RootId, sa.Status AS Status
+            SELECT sa.MemberId AS MemberId, p.FamilyRootId AS RootId, sa.Status AS Status, sa.NotifiedAt AS NotifiedAt
               FROM StaffAssignment sa
               JOIN Planning p ON p.Id = sa.PlanningId AND p.DeletedAt IS NULL
               LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
@@ -76,7 +77,7 @@ namespace HpskSite.Services.Schedule
             {
                 using var s = _scopes.CreateScope(autoComplete: true);
                 return s.Database.Fetch<Candidate>(CandidatesSql, day.Date)
-                    .Where(c => StaffWeekDigest.Remindable(c.Status))
+                    .Where(c => StaffWeekDigest.Remindable(c.Status, c.NotifiedAt))
                     .Select(c => (c.MemberId, c.RootId))
                     .Distinct()
                     .ToList();

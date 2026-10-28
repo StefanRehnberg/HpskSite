@@ -171,7 +171,7 @@ namespace HpskSite.Services.C3
             foreach (var m in db.Fetch<int>(@"
                 SELECT DISTINCT sa.MemberId FROM StaffAssignment sa
                   JOIN Planning r ON r.Id = sa.PlanningId AND r.DeletedAt IS NULL AND r.Id = r.FamilyRootId
-                 WHERE sa.MemberId > 0 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL AND ISNULL(sa.Status, N'') <> N'Declined'
+                 WHERE sa.MemberId > 0 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL
                    AND EXISTS (SELECT 1 FROM Planning f
                                  JOIN PlanningLink l ON l.PlanningId = f.Id AND l.TargetKind = N'competition' AND l.TargetId = @0
                                 WHERE f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL)", competitionId))

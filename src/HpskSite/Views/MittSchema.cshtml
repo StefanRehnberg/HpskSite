@@ -68,27 +68,7 @@
             </p>
         }
 
-        @await Html.PartialAsync("_MittSchema", single, new ViewDataDictionary(ViewData) { ["AllowDecline"] = single.IsWeek })
-
-        @if (single.IsWeek)
-        {
-            @* Steg 4–6 K5: "Jag kan inte" — statusen blir Avböjd och den som bemannar får besked (push och mejl) med en knapp till Hitta ersättare. *@
-            <script>
-            document.addEventListener('click', async function (e) {
-                var b = e.target.closest && e.target.closest('[data-decline]'); if (!b) return;
-                if (!confirm('Säger du att du inte kan komma? Den som bemannar får besked och letar efter någon annan.')) return;
-                b.disabled = true;
-                try {
-                    var r = await fetch('/mina-uppdrag/respond', { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': '@Antiforgery.GetAndStoreTokens(Context).RequestToken' },
-                        body: JSON.stringify({ assignmentId: parseInt(b.getAttribute('data-decline'), 10), status: 'Declined' }) });
-                    var d = await r.json();
-                    if (d.success) { location.reload(); return; }
-                    alert(d.message || 'Det gick inte att spara.');
-                } catch (err) { alert('Nätverksfel — försök igen.'); }
-                b.disabled = false;
-            });
-            </script>
-        }
+        @await Html.PartialAsync("_MittSchema", single)
 
         @* Skjutledare och stationschef: "Din del" — uppdragen i delen de leder, med Hitta ersättare (ReplacementAccessRules). Ritas av
            skriptet; servern prövar rätten vid varje anrop. Markup-only: ingen `is {` i @if. *@
@@ -97,7 +77,7 @@
             <div class="card mt-3 d-print-none" id="ledPart" data-parts="@string.Join(",", ledParts.Select(x => x.Id))">
                 <div class="card-header fw-semibold"><i class="bi bi-people me-1"></i>Din del@(ledParts.Count == 1 ? ": " + ledParts[0].Name : "")</div>
                 <div class="card-body">
-                    <p class="text-muted small mb-2">Du leder den här delen. Har någon i den tackat nej, eller saknas, kan du hitta en ersättare bland dem som anmält sig till dagen.</p>
+                    <p class="text-muted small mb-2">Du leder den här delen. Saknas någon, eller kan någon inte komma, kan du hitta en ersättare bland dem som anmält sig till dagen.</p>
                     <div id="ledPartList" aria-live="polite"><span class="text-muted small">Hämtar…</span></div>
                 </div>
             </div>

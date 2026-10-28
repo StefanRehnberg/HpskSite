@@ -105,12 +105,12 @@ namespace HpskSite.Services.Staffing
             return (target, ReplacementRules.Rank(result), null);
         }
 
-        /// <summary>En rad i ledarens lista: ett uppdrag i delen som går att lämna över. <see cref="Open"/> = ingen har det eller personen har tackat nej.</summary>
+        /// <summary>En rad i ledarens lista: en placering i delen som går att lämna över. <see cref="Open"/> = ingen har den.</summary>
         public sealed record PartRow(int AssignmentId, string Holder, string RoleName, string When, string Status, bool Open);
 
         /// <summary>
-        /// Uppdragen i <paramref name="planningId"/> som en ledare där kan lämna över: kommande dagar, utan behörighet och inte ledarens egna
-        /// (<see cref="ReplacementAccessRules.Refusal"/>). Avböjda och tomma först — det är dem man letar ersättare till.
+        /// Placeringarna i <paramref name="planningId"/> som en ledare där kan lämna över: kommande dagar, utan behörighet och inte ledarens egna
+        /// (<see cref="ReplacementAccessRules.Refusal"/>). Tomma först — det är dem man letar ersättare till.
         /// </summary>
         public List<PartRow> PartAssignments(int planningId, int viewerMemberId)
         {
@@ -134,14 +134,14 @@ namespace HpskSite.Services.Staffing
                 var dayText = date.Value.ToString("dddd d MMMM", sv);
                 var when = interval is { AllDay: false } iv ? $"{dayText} {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : $"{dayText} hela dagen";
                 var roleName = owner == null ? a.RoleKey : _roles.NameFor(owner, _owners.Discipline(owner), a.RoleKey);
-                var open = a.MemberId is not > 0 || a.Status == StaffAssignmentStatus.Declined;
-                result.Add((date.Value.Date, new PartRow(a.Id, string.IsNullOrWhiteSpace(a.DisplayName) ? "Ingen utsedd" : a.DisplayName, roleName, when, a.Status ?? "", open)));
+                var open = a.MemberId is not > 0;
+                result.Add((date.Value.Date, new PartRow(a.Id, string.IsNullOrWhiteSpace(a.DisplayName) ? "Ingen utsedd" : a.DisplayName, roleName, when, StaffAssignmentStatus.Normalize(a.Status), open)));
             }
             return result.OrderByDescending(x => x.Row.Open).ThenBy(x => x.Date).ThenBy(x => x.Row.RoleName).Select(x => x.Row).Take(100).ToList();
         }
 
         /// <summary>
-        /// Skiftschemat: en person som redan fått förfrågan har fått en ny tid (en gräns flyttades, ett skift delades). Push och mejl med gamla och nya tiden, svar
+        /// Skiftschemat: en person som redan fått besked om sin placering har fått en ny tid (en gräns flyttades, ett skift delades). Push och mejl med gamla och nya tiden, svar
         /// till den som ändrade. Returnerar om något gick iväg. Anropas efter att ändringen sparats; ett fel här fäller aldrig sparningen.
         /// </summary>
         public async Task<bool> NotifyTimeChangedAsync(StaffAssignment row, string before, int byMemberId)
@@ -161,18 +161,19 @@ namespace HpskSite.Services.Staffing
                 var title = "Din tid har ändrats";
                 var body = $"{roleName}{(day.Length > 0 ? ", " + day : "")}: nu {now} (var {before}) — {planningName}.";
                 var any = false;
-                try { any = await _push.SendToMemberAsync(row.MemberId.Value, title, body, owner.SignupPath, $"retime-{row.Id}-{now}") > 0; }
+                var dayPage = DayPagePath(row.PlanningId!.Value);
+                try { any = await _push.SendToMemberAsync(row.MemberId.Value, title, body, dayPage, $"retime-{row.Id}-{now}") > 0; }
                 catch (Exception ex) { _logger.LogWarning(ex, "Skiftschema: pushen till medlem {Member} föll.", row.MemberId); }
                 if (member != null && !string.IsNullOrWhiteSpace(member.Email))
                 {
-                    var url = _links.SiteUrl + owner.SignupPath;
+                    var url = _links.SiteUrl + dayPage;
                     var inner = $"<p>Din tid i <b>{PlanningNotifier.H(planningName)}</b> har ändrats:</p>"
                         + $"<p style=\"font-size:18px\"><b>{PlanningNotifier.H(roleName)}</b>{(day.Length > 0 ? "<br>" + PlanningNotifier.H(day) : "")}<br><b>{PlanningNotifier.H(now)}</b> <span style=\"color:#666\">(var {PlanningNotifier.H(before)})</span></p>"
                         + $"<p>{PlanningNotifier.Button("Se din tid", url)}</p>"
                         + ContactHtml(by);
                     var replyTo = by != null && !string.IsNullOrWhiteSpace(by.Email)
                         ? MailReplyTo.To(by.Email, by.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
-                    var html = PlanningNotifier.Page(member.Name ?? "", planningName, inner, "Du får det här mejlet för att din tid har ändrats efter att du fått förfrågan. Det här är den som gäller.");
+                    var html = PlanningNotifier.Page(member.Name ?? "", planningName, inner, "Du får det här mejlet för att din tid har ändrats efter att du fått besked om din placering. Det här är den som gäller.");
                     if (await _email.SendPlanningMailAsync(member.Email, $"Ny tid: {roleName} {day}".Trim(), html, replyTo)) any = true;
                 }
                 return any;
@@ -198,32 +199,33 @@ namespace HpskSite.Services.Staffing
                 var (date, interval) = FamilyWeekService.WhenOf(row, null);
                 var when = date == null ? "" : date.Value.ToString("dddd d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
                     + (interval is { AllDay: false } iv ? $" {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : " hela dagen");
-                var url = _links.SiteUrl + owner.SignupPath;
+                var dayPage = DayPagePath(row.PlanningId!.Value);
+                var url = _links.SiteUrl + dayPage;
                 var planningName = _owners.Name(owner);
-                var title = "Du har fått ett uppdrag";
-                var body = $"{roleName}{(when.Length > 0 ? ", " + when : "")} — {planningName}. Svara om du kan.";
+                var title = "Du har fått en placering";
+                var body = $"{roleName}{(when.Length > 0 ? ", " + when : "")} — {planningName}.";
                 var any = false;
-                try { any = await _push.SendToMemberAsync(row.MemberId.Value, title, body, owner.SignupPath, $"replace-{row.Id}") > 0; }
+                try { any = await _push.SendToMemberAsync(row.MemberId.Value, title, body, dayPage, $"replace-{row.Id}") > 0; }
                 catch (Exception ex) { _logger.LogWarning(ex, "Ersättare: pushen till medlem {Member} föll.", row.MemberId); }
 
                 if (member != null && !string.IsNullOrWhiteSpace(member.Email))
                 {
-                    var inner = $"<p>Du har fått ett uppdrag i <b>{PlanningNotifier.H(planningName)}</b>:</p>"
+                    var inner = $"<p>Du har fått en placering i <b>{PlanningNotifier.H(planningName)}</b>:</p>"
                         + $"<p style=\"font-size:18px\"><b>{PlanningNotifier.H(roleName)}</b>{(when.Length > 0 ? "<br>" + PlanningNotifier.H(when) : "")}</p>"
                         + (string.IsNullOrWhiteSpace(oldName) ? "" : $"<p>{PlanningNotifier.H(oldName)} kunde inte. </p>")
-                        + $"<p>{PlanningNotifier.Button("Svara på uppdraget", url)}</p>"
+                        + $"<p>{PlanningNotifier.Button("Se din placering", url)}</p>"
                         + ContactHtml(by);
                     // Svaret går till den som lämnade över (motparten) — inte till en postlåda.
                     var replyTo = by != null && !string.IsNullOrWhiteSpace(by.Email)
                         ? MailReplyTo.To(by.Email, by.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
                     var html = PlanningNotifier.Page(member.Name ?? "", planningName, inner,
-                        "Du får det här mejlet för att någon har lagt ett uppdrag på dig. Tackar du nej går det vidare till någon annan.");
-                    if (await _email.SendPlanningMailAsync(member.Email, $"Uppdrag: {roleName} {when}".Trim(), html, replyTo)) any = true;
+                        "Du får det här mejlet för att du har fått en placering. Kan du inte, hör av dig till den som står som avsändare.");
+                    if (await _email.SendPlanningMailAsync(member.Email, $"Du har fått en placering: {roleName} {when}".Trim(), html, replyTo)) any = true;
                 }
 
                 // Steg 4–6 K6: den som lämnade uppdraget ska få veta att hen inte ska komma — annars har hen kanske redan fått kvällsmejlet.
                 if (oldMemberId is > 0 && oldMemberId != row.MemberId)
-                    await NotifyReleasedAsync(oldMemberId.Value, roleName, when, planningName, row.DisplayName, by, owner.SignupPath);
+                    await NotifyReleasedAsync(oldMemberId.Value, roleName, when, planningName, row.DisplayName, by, dayPage);
                 return any;
             }
             catch (Exception ex)
@@ -233,76 +235,11 @@ namespace HpskSite.Services.Staffing
             }
         }
 
-        /// <summary>
-        /// Steg 4–6 K5: funktionären har sagt "jag kan inte" — den som bemannar (huvudplaneringens och radens delplaneringens
-        /// sammankallande) får besked med en knapp rakt till personens vecka, där "Hitta ersättare" finns. En gång per uppdrag
-        /// (claim i <c>ScheduleReminderLog</c>, nyckel <c>declined-{id}</c>), så att en som växlar svar inte skickar flera mejl.
-        /// </summary>
-        public async Task NotifyDeclinedAsync(int assignmentId, int declinedByMemberId)
+        /// <summary>Tävlingsdagssidan (Mitt schema för hela familjen) — dit alla meddelanden om placeringar leder.</summary>
+        private string DayPagePath(int planningId)
         {
-            StaffAssignment? a; List<int> conveners, leaders; int rootId;
-            using (var s = _scopes.CreateScope(autoComplete: true))
-            {
-                var db = s.Database;
-                a = db.SingleOrDefault<StaffAssignment>("SELECT * FROM StaffAssignment WHERE Id = @0", assignmentId);
-                if (a?.PlanningId is not > 0 || a.MemberId != declinedByMemberId) return;
-                var fam = _planning.Family(a.PlanningId.Value);
-                if (fam.Count == 0) return;
-                rootId = fam[0].Id;
-                var pids = string.Join(",", new[] { a.PlanningId.Value, rootId }.Distinct());
-                conveners = db.Fetch<int>($"SELECT DISTINCT MemberId FROM PlanningMember WHERE PlanningId IN ({pids}) AND Access = @0 AND RemovedAt IS NULL AND ViaCompetition = 0 AND MemberId > 0",
-                    HpskSite.Models.Planning.PlanningAccessLevel.Owner);
-                // Skjutledare och stationschef i uppdragets del (ReplacementAccessRules) — de som står på banan och kan lämna över.
-                leaders = db.Fetch<int>("SELECT DISTINCT MemberId FROM StaffAssignment WHERE PlanningId = @0 AND MemberId > 0 AND RoleKey IN (@1, @2) AND Status <> @3",
-                    a.PlanningId.Value, ReplacementAccessRules.SkjutledareRole, ReplacementAccessRules.StationschefRole, StaffAssignmentStatus.Declined);
-            }
-            conveners.Remove(declinedByMemberId);
-            leaders.RemoveAll(l => l == declinedByMemberId || conveners.Contains(l));   // en sammankallande som också är ledare får EN avisering
-            if (conveners.Count == 0 && leaders.Count == 0) return;
-            var owner = _owners.ForPlanning(a.PlanningId.Value);
-            if (owner == null) return;
-            var who = _members.GetById(declinedByMemberId);
-            var roleName = _roles.NameFor(owner, _owners.Discipline(owner), a.RoleKey);
-            var (date, interval) = FamilyWeekService.WhenOf(a, null);
-            var when = date == null ? "" : date.Value.ToString("dddd d MMMM", CultureInfo.GetCultureInfo("sv-SE"))
-                + (interval is { AllDay: false } iv ? $" {iv.Start:HH\\:mm}–{iv.End:HH\\:mm}" : " hela dagen");
-            var planningName = _owners.Name(owner);
-            var convenerUrl = $"{_links.SiteUrl}/tavlingsplanering/{rootId}#vy=bemanning&del=veckan&person={Uri.EscapeDataString("m:" + declinedByMemberId)}";
-            var replyTo = who != null && !string.IsNullOrWhiteSpace(who.Email)
-                ? MailReplyTo.To(who.Email, who.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
-            var leaderUrl = $"{_links.SiteUrl}/mitt-schema?p={rootId}";
-            foreach (var c in conveners.Concat(leaders))
-            {
-                var isLeader = leaders.Contains(c);
-                var url = isLeader ? leaderUrl : convenerUrl;
-                if (!ClaimOnce(c, $"declined-{assignmentId}")) continue;
-                var body = $"{a.DisplayName} kan inte: {roleName}{(when.Length > 0 ? ", " + when : "")} i {planningName}. Hitta en ersättare.";
-                try { await _push.SendToMemberAsync(c, "Någon kan inte komma", body, url, $"declined-{assignmentId}"); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Ersättare: pushen om avböjt uppdrag till medlem {Member} föll.", c); }
-                var m = _members.GetById(c);
-                if (m == null || string.IsNullOrWhiteSpace(m.Email)) continue;
-                var inner = $"<p><b>{PlanningNotifier.H(a.DisplayName)}</b> kan inte ha uppdraget i <b>{PlanningNotifier.H(planningName)}</b>:</p>"
-                    + $"<p style=\"font-size:18px\"><b>{PlanningNotifier.H(roleName)}</b>{(when.Length > 0 ? "<br>" + PlanningNotifier.H(when) : "")}</p>"
-                    + $"<p>{PlanningNotifier.Button("Hitta ersättare", url)}</p>"
-                    + ContactHtml(who);
-                await _email.SendPlanningMailAsync(m.Email, $"{a.DisplayName} kan inte: {roleName} {when}".Trim(),
-                    PlanningNotifier.Page(m.Name ?? "", planningName, inner, isLeader ? "Du får det här mejlet för att du leder delen." : "Du får det här mejlet för att du är sammankallande för planeringen."), replyTo);
-            }
-        }
-
-        private bool ClaimOnce(int memberId, string key)
-        {
-            try
-            {
-                using var s = _scopes.CreateScope();
-                var n = s.Database.Execute(@"
-                    INSERT INTO ScheduleReminderLog (CompetitionId, MemberId, SourceKey, ItemStartsAt, SentAt)
-                    SELECT 0, @0, @1, GETDATE(), GETDATE()
-                     WHERE NOT EXISTS (SELECT 1 FROM ScheduleReminderLog WHERE CompetitionId = 0 AND MemberId = @0 AND SourceKey = @1)", memberId, key);
-                s.Complete();
-                return n > 0;
-            }
-            catch (Exception ex) { _logger.LogDebug(ex, "Ersättare: spärren {Key} för medlem {Member} gick inte att ta.", key, memberId); return false; }
+            var fam = _planning.Family(planningId);
+            return $"/mitt-schema?p={(fam.Count > 0 ? fam[0].Id : planningId)}";
         }
 
         private async Task NotifyReleasedAsync(int oldMemberId, string roleName, string when, string planningName, string newName,
@@ -313,17 +250,17 @@ namespace HpskSite.Services.Staffing
                 var old = _members.GetById(oldMemberId);
                 if (old == null) return;
                 var body = $"{roleName}{(when.Length > 0 ? ", " + when : "")} i {planningName} har lämnats över till {newName}. Du behöver inte komma.";
-                try { await _push.SendToMemberAsync(oldMemberId, "Ditt uppdrag har lämnats över", body, signupPath, $"released-{oldMemberId}-{roleName}"); }
+                try { await _push.SendToMemberAsync(oldMemberId, "Din placering har lämnats över", body, signupPath, $"released-{oldMemberId}-{roleName}"); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Ersättare: pushen till avlöst medlem {Member} föll.", oldMemberId); }
                 if (string.IsNullOrWhiteSpace(old.Email)) return;
-                var inner = $"<p>Ditt uppdrag i <b>{PlanningNotifier.H(planningName)}</b> har lämnats över till <b>{PlanningNotifier.H(newName)}</b>:</p>"
+                var inner = $"<p>Din placering i <b>{PlanningNotifier.H(planningName)}</b> har lämnats över till <b>{PlanningNotifier.H(newName)}</b>:</p>"
                     + $"<p style=\"font-size:18px\"><b>{PlanningNotifier.H(roleName)}</b>{(when.Length > 0 ? "<br>" + PlanningNotifier.H(when) : "")}</p>"
                     + "<p><b>Du behöver inte komma.</b> Har du redan fått ett mejl om dagen är det här det som gäller.</p>"
                     + ContactHtml(by);
                 var replyTo = by != null && !string.IsNullOrWhiteSpace(by.Email)
                     ? MailReplyTo.To(by.Email, by.Name ?? "", $"{planningName} via Pistol.nu") : MailReplyTo.NoReply;
-                await _email.SendPlanningMailAsync(old.Email, $"Uppdraget är lämnat över: {roleName} {when}".Trim(),
-                    PlanningNotifier.Page(old.Name ?? "", planningName, inner, "Du får det här mejlet för att uppdraget låg på dig."), replyTo);
+                await _email.SendPlanningMailAsync(old.Email, $"Placeringen är lämnad över: {roleName} {when}".Trim(),
+                    PlanningNotifier.Page(old.Name ?? "", planningName, inner, "Du får det här mejlet för att placeringen låg på dig."), replyTo);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Ersättare: beskedet till avlöst medlem {Member} föll.", oldMemberId); }
         }
@@ -333,7 +270,7 @@ namespace HpskSite.Services.Staffing
         {
             if (by == null) return "";
             var phone = PhoneOf(by.Id);
-            return $"<p style=\"color:#555\">Frågor om uppdraget: <b>{PlanningNotifier.H(by.Name ?? "")}</b>"
+            return $"<p style=\"color:#555\">Frågor om placeringen: <b>{PlanningNotifier.H(by.Name ?? "")}</b>"
                 + (phone != null ? $", <a href=\"tel:{PlanningNotifier.H(phone)}\">{PlanningNotifier.H(phone)}</a>" : "") + ".</p>";
         }
 
@@ -341,7 +278,7 @@ namespace HpskSite.Services.Staffing
         public static string BusyLabel(PersonWeekEntry e, Func<int, bool>? canSeePart)
         {
             if (e.Kind == PersonWeekKind.Start) return "egen start";
-            if (canSeePart != null && e.PlanningId is > 0 && !canSeePart(e.PlanningId.Value)) return "uppdrag i en annan del";
+            if (canSeePart != null && e.PlanningId is > 0 && !canSeePart(e.PlanningId.Value)) return "placering i en annan del";
             return e.Label;
         }
 

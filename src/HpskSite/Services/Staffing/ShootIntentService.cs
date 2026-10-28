@@ -142,7 +142,7 @@ namespace HpskSite.Services.Staffing
             }
 
             var slots = new List<FamilyClashRules.Slot>();
-            foreach (var a in rows.Where(a => a.PlanningId is int && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)
+            foreach (var a in rows.Where(a => a.PlanningId is int
                                              && !string.IsNullOrWhiteSpace(a.DisplayName)))
             {
                 var pid = a.PlanningId!.Value;

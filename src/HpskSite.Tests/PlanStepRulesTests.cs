@@ -118,14 +118,26 @@ namespace HpskSite.Tests
             Step(Facts(falt: true, assignedPeople: 1, withStart: 0, unlinked: 1, mode: "x"), "startlista").Text.Should().Contain("1 namn är inte kopplat till en medlem och går inte att kontrollera");
         }
 
-        // Persontest 8: hon hittade aldrig var man skickar förfrågan till de inlagda.
+        // Stefan 2026-10-28: "inlagd men inte meddelad" avgörs av NotifiedAt — inte av statusen, som är Planned både före och efter besked.
+        [Theory]
+        [InlineData("Planned", false, true)]
+        [InlineData("Planned", true, false)]
+        [InlineData("Accepted", false, false)]    // anmäld själv: har inget besked att vänta på
+        [InlineData("Confirmed", false, false)]
+        [InlineData("Declined", false, true)]     // ett kvarliggande gammalt värde är en vanlig, ej meddelad placering
+        [InlineData("Invited", false, false)]     // ...och ett kvarliggande Invited har redan fått sin förfrågan
+        public void Ej_meddelad_avgors_av_NotifiedAt_inte_av_statusen(string status, bool notified, bool expected)
+            => PlanStepRules.IsUnnotified(status, notified ? new System.DateTime(2028, 8, 1) : null).Should().Be(expected);
+
+        // Persontest 8: hon hittade aldrig var man meddelar de inlagda.
         [Fact]
-        public void Skicka_forfragan_ar_ett_steg_efter_fyll_nar_nagot_ligger_inlagt_och_osant()
+        public void Meddela_ar_ett_steg_efter_fyll_nar_nagot_ligger_inlagt_och_ej_meddelat()
         {
             PlanStepRules.Derive(Facts(assignedTotal: 0)).Select(s => s.Key).Should().NotContain("skicka");
             var todo = Step(Facts(assignedTotal: 15, unsent: 15), "skicka");
             todo.State.Should().Be(PlanStepState.Todo);
-            todo.Text.Should().Contain("15 inlagda har ännu ingen förfrågan");
+            todo.Title.Should().Be("Meddela de inlagda");
+            todo.Text.Should().Contain("15 inlagda har ännu inte fått besked").And.NotContain("förfrågan");
             todo.Actions.Should().Equal("skicka");
             Step(Facts(assignedTotal: 15, unsent: 0), "skicka").State.Should().Be(PlanStepState.Done);
             // Anders (persontest 11): två som inte går att nå är inte "klart".

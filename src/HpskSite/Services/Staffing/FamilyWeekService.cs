@@ -89,7 +89,6 @@ namespace HpskSite.Services.Staffing
             }
 
             foreach (var a in rows.Where(a => a.PlanningId is > 0
-                                             && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)
                                              && !string.IsNullOrWhiteSpace(a.DisplayName)))
             {
                 var key = StaffPersonKey.For(a.MemberId, a.DisplayName);

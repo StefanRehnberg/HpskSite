@@ -76,7 +76,7 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message = msg });
         }
 
-        // ---- External (non-member) helper accept/decline via tokened link (no login) ----
+        // ---- External (non-member) helper: read-only "Din placering" via tokened link (no login) ----
 
         /// <summary>Raden länken gäller — null om länken är fel eller uppdraget har lämnats över sedan den skickades (K3).</summary>
         private int? InviteRowId(string? t)
@@ -100,17 +100,23 @@ namespace HpskSite.Controllers
             return View("UppdragSvar", model);
         }
 
+        /// <summary>
+        /// Äldre sidor och mejl hade "Jag kan" / "Jag kan inte" här. En placering tilldelas nu (Stefan 2026-10-28) och behöver inget svar: ett gammalt
+        /// POST ändrar ingenting och får en vänlig sida i stället för ett fel.
+        /// </summary>
         [HttpPost("svar")]
         [ValidateAntiForgeryToken]
-        public IActionResult SvarRespond([FromForm] string t, [FromForm] string status)
+        public IActionResult SvarRespond([FromForm] string t, [FromForm] string? status)
         {
             var id = InviteRowId(t);
             if (id == null) return View("UppdragSvar", new InviteResponseModel { Token = t ?? "" });
-            _staffing.SetInviteResponse(id.Value, status);
             var info = _staffing.GetInviteInfo(id.Value) ?? new InviteResponseModel { Token = t };
             info.Token = t;
+            info.Notice = NoReplyNeeded;
             return View("UppdragSvar", info);
         }
+
+        private const string NoReplyNeeded = "Svar behövs inte längre. Vid förhinder, kontakta arrangören.";
 
         [HttpGet("")]
         public async Task<IActionResult> Index()
@@ -136,8 +142,7 @@ namespace HpskSite.Controllers
             return Json(new { success = true, groups });
         }
 
-        /// <summary>Per-competition sign-up landing page — the single action surface: accept/decline an
-        /// invitation, declare availability, and (if the comp is open for you) volunteer for a role.
+        /// <summary>Per-competition landing page — the placements the organiser has given you, declare availability, and (if the comp is open for you) volunteer for a role.
         /// P2b: <c>?p=</c> = en planerings bemanning (även innan den kopplats till en tävling); <c>?c=</c> =
         /// tävlingens, som leder till dess planering när den har en.</summary>
         [HttpGet("/bemanna")]
@@ -255,15 +260,11 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Respond([FromBody] RespondAssignmentRequest request)
         {
-            if (request == null || request.AssignmentId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            // Äldre sidor (och en flik som stått öppen) skickar fortfarande ja/nej hit. Placeringar tilldelas nu och behöver inget svar:
+            // ingenting ändras, och svaret är vänligt i stället för ett fel (Stefan 2026-10-28).
             var memberId = await CurrentMemberIdAsync();
             if (memberId == null) return Json(new { success = false, message = "Inte inloggad" });
-            var (ok, msg) = _staffing.RespondAsMember(request.AssignmentId, memberId.Value, request.Status ?? "");
-            // Steg 4–6 K5: "jag kan inte" ska nå den som bemannar — förut skrevs bara statusen och ingen fick veta (kvällen före, kl 06:30).
-            if (ok && string.Equals(request.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
-                try { await HttpContext.RequestServices.GetRequiredService<StaffReplacementService>().NotifyDeclinedAsync(request.AssignmentId, memberId.Value); }
-                catch (Exception ex) { HttpContext.RequestServices.GetRequiredService<ILogger<MinaUppdragController>>().LogWarning(ex, "Besked om avböjt uppdrag {Id} föll.", request.AssignmentId); }
-            return Json(new { success = ok, message = msg });
+            return Json(new { success = true, noChange = true, message = NoReplyNeeded });
         }
 
         [HttpPost("availability")]

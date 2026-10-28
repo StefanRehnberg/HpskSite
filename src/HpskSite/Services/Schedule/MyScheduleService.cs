@@ -178,17 +178,16 @@ namespace HpskSite.Services.Schedule
                 // or the linked StaffPass.PassDate — and filtering on the competition date alone hid every one
                 // of them. A competition on 11 October with a build day next Saturday belongs on a "next 7
                 // days" card; asking "is the competition soon?" instead of "do I have something soon?" is what
-                // made it disappear. Declined rows are excluded, exactly as BuildSchedule skips them.
+                // made it disappear.
                 foreach (var id in scope.Database.Fetch<int>(@"
                     SELECT DISTINCT sa.CompetitionId
                     FROM StaffAssignment sa
                     LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                     WHERE sa.MemberId = @0
                       AND sa.CompetitionId IS NOT NULL   -- Expertgruppen K8: ett planeringsuppdrag utan tävling fick Fetch<int> att kasta
-                      AND (sa.Status IS NULL OR sa.Status <> @3)
                       AND ( (sa.StartsAt IS NOT NULL AND CAST(sa.StartsAt AS date) BETWEEN @1 AND @2)
                          OR (sa.StartsAt IS NULL AND sp.PassDate IS NOT NULL AND CAST(sp.PassDate AS date) BETWEEN @1 AND @2) )",
-                    memberId, fromDate.Date, toDate.Date, StaffAssignmentStatus.Declined))
+                    memberId, fromDate.Date, toDate.Date))
                 {
                     result.Add(id);
                 }
@@ -543,9 +542,6 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
 
             foreach (var a in rows)
             {
-                if (string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
-                    continue;   // said no — not part of their day
-
                 DateTime? startsAt = a.StartsAt;
                 DateTime? endsAt = a.EndsAt;
                 string timeLabel;
@@ -578,7 +574,6 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                 }
 
                 var (dayKey, dayLabel, _) = ResolveDay(dayDate, null, s);
-                var isInvited = string.Equals(a.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase);
 
                 items.Add(new ScheduleItem
                 {
@@ -591,12 +586,11 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                     TimeLabel = timeLabel,
                     DayKey = dayKey,
                     DayLabel = dayLabel,
-                    Status = a.Status,
-                    NeedsResponse = isInvited,
+                    Status = StaffAssignmentStatus.Normalize(a.Status),
                     IsResponsible = a.IsResponsible,
                     SortHint = startsAt?.TimeOfDay.TotalMinutes is double m ? (int)m : 0,
                     Link = $"/bemanna?c={competitionId}",
-                    LinkText = isInvited ? "Svara på inbjudan" : "Uppdraget",
+                    LinkText = "Uppdraget",
                     Icon = "bi-person-badge",
                     SourceKey = $"uppdrag-{a.Id}",
                     AssignmentId = a.Id,

@@ -134,7 +134,7 @@ namespace HpskSite.Services.Staffing
 
                 // Mina uppdrag den dagen (inte avböjda) och om hen redan står här.
                 var mineToday = new List<(StaffAssignment A, DateTime? Date, StaffInterval? Iv)>();
-                foreach (var a in assigns.Where(a => a.MemberId == mid && !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)))
+                foreach (var a in assigns.Where(a => a.MemberId == mid))
                 {
                     var (d, iv) = FamilyWeekService.WhenOf(a, a.PassId is > 0 && passById.TryGetValue(a.PassId.Value, out var p) ? p : null);
                     if (q.Date != null && d?.Date != q.Date.Value.Date) continue;
@@ -182,7 +182,7 @@ namespace HpskSite.Services.Staffing
             }
 
             var ranked = CandidateRules.Rank(result, c => c.Tier, c => c.Name, c => c.MemberId);
-            var assignedMembers = assigns.Where(a => !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).Select(a => a.MemberId ?? 0).ToHashSet();
+            var assignedMembers = assigns.Select(a => a.MemberId ?? 0).ToHashSet();
             var volunteersAll = signupByMember.Keys.ToList();
             var clubNames = new Dictionary<int, string?>();
             string? ClubOf(int memberId)

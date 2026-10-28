@@ -18,11 +18,33 @@ namespace HpskSite.Models.Staffing
 
     public static class StaffAssignmentStatus
     {
+        /// <summary>Placerad. Om <c>NotifiedAt</c> finns har personen också fått besked.</summary>
         public const string Planned = "Planned";
-        public const string Invited = "Invited";
+        /// <summary>Anmäld själv (StaffingSignupService).</summary>
         public const string Accepted = "Accepted";
-        public const string Declined = "Declined";
         public const string Confirmed = "Confirmed";
+
+        // ⚠️ Stefan 2026-10-28: en placering tilldelas, den begärs inte. Koden sätter aldrig mer "Invited" eller "Declined" (migreringen
+        // add-staffassignment-notifiedat.sql gjorde dem till Planned). Konstanterna står kvar bara så att en rad som skulle ha kvar ett
+        // gammalt värde läses som Planned — se <see cref="Normalize"/>.
+        private const string LegacyInvited = "Invited";
+        private const string LegacyDeclined = "Declined";
+
+        /// <summary>Statusen som gäller: ett gammalt "Invited"/"Declined" är en vanlig placering. Okänt värde = Planned.</summary>
+        public static string Normalize(string? s)
+        {
+            if (string.Equals(s, Accepted, StringComparison.OrdinalIgnoreCase)) return Accepted;
+            if (string.Equals(s, Confirmed, StringComparison.OrdinalIgnoreCase)) return Confirmed;
+            return Planned;
+        }
+
+        /// <summary>Har personen fått veta om placeringen? Meddelad, anmäld själv eller bekräftad av tävlingsledningen. Ett kvarliggande
+        /// "Invited" betyder att förfrågan gått ut och räknas också.</summary>
+        public static bool IsTold(string? status, DateTime? notifiedAt) =>
+            notifiedAt != null
+            || string.Equals(status, Accepted, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, Confirmed, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, LegacyInvited, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

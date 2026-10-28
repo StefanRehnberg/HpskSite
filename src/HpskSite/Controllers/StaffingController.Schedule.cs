@@ -39,8 +39,7 @@ namespace HpskSite.Controllers
                 var told = 0;
                 var notifier = HttpContext.RequestServices.GetRequiredService<StaffReplacementService>();
                 foreach (var c in r.Changed.Where(c => c.Row.MemberId is > 0
-                    && (string.Equals(c.Row.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(c.Row.Status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase))))
+                    && StaffAssignmentStatus.IsTold(c.Row.Status, c.Row.NotifiedAt)))
                     if (await notifier.NotifyTimeChangedAsync(c.Row, c.Before, viewer.Id)) told++;
                 foreach (var p in r.Replaced)
                     if (await notifier.NotifyAsync(p.Row, p.OldName, p.OldMemberId, viewer.Id)) told++;
@@ -129,7 +128,7 @@ namespace HpskSite.Controllers
                         var need = row.NeedFor(c.Key);
                         if (need == 0 && row.HasNeed) continue;
                         if (!row.HasNeed && entries.Count == 0) continue;
-                        var spans = entries.Where(e => !string.Equals(e.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase))
+                        var spans = entries
                             .Select(Span).ToList();
                         var holes = ShiftScheduleRules.Holes(spans, new ShiftScheduleRules.Span(w.From, w.To), Math.Max(1, need));
                         row.Gaps.RemoveAll(g => g.DateKey == c.Key);

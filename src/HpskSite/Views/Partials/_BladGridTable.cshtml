@@ -25,9 +25,8 @@
             </td>
             @foreach (var col in Model.Cols)
             {
-                @* Den som tackat nej gör inte uppdraget — pappret säger vem som står där, och "saknas" när ingen gör det. *@
-                var cell = (row.Cells.TryGetValue(col.Key, out var list) ? list : new List<HpskSite.Models.Staffing.GridEntry>())
-                    .Where(x => !string.Equals(x.Status, HpskSite.Models.Staffing.StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)).ToList();
+                @* Pappret säger vem som står där, och "saknas" när ingen gör det. *@
+                var cell = (row.Cells.TryGetValue(col.Key, out var list) ? list : new List<HpskSite.Models.Staffing.GridEntry>()).ToList();
                 <td>
                     @foreach (var e in cell)
                     {

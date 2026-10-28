@@ -58,6 +58,9 @@ namespace HpskSite.Models.Staffing
         public Guid? InviteNonce { get; set; }
         /// <summary>Planera dagen: raden lades in av ett tillämpat förslag; alla rader från samma tillämpning delar id och kan ångras tillsammans. Null = för hand.</summary>
         public Guid? BatchId { get; set; }
+        /// <summary>Placeringen har meddelats personen (mejl/push med en länk till hens tävlingsdagssida). Null = inlagd men ingen har fått besked.
+        /// Statusen ändras inte av meddelandet: en placering tilldelas, den begärs inte. Stefan 2026-10-28.</summary>
+        public DateTime? NotifiedAt { get; set; }
 
         public int AssignedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
@@ -189,6 +192,8 @@ namespace HpskSite.Models.Staffing
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
+        /// <summary>Har fått besked om placeringen (null = inlagd men inte meddelad).</summary>
+        public DateTime? NotifiedAt { get; set; }
         public string? Note { get; set; }
         public bool CheckedIn { get; set; }
         /// <summary>Read-only mirror row (not a StaffAssignment) — e.g. a Fältskytte station chief pulled in

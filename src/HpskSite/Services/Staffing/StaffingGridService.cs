@@ -203,7 +203,6 @@ namespace HpskSite.Services.Staffing
                 var mine = all.Where(a => string.Equals(a.RoleKey, role.Key, StringComparison.OrdinalIgnoreCase)).ToList();
                 // NULL and "All" both mean "hela tävlingen" — grouping on the raw value split one function
                 // into two identical-looking rows depending on which surface created the assignment.
-                static bool IsDeclined(string? s) => string.Equals(s, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase);
                 static string? NormScope(string? t)
                     => string.IsNullOrEmpty(t) || string.Equals(t, StaffScopeType.All, StringComparison.OrdinalIgnoreCase)
                         ? null : t;
@@ -280,6 +279,7 @@ namespace HpskSite.Services.Staffing
                             To = a.PassId is > 0 ? null : TimeOnly(a.ShiftLabel, false),
                             ScopeLabel = row.ScopeLabel,
                             Status = a.Status,
+                            NotifiedAt = a.NotifiedAt,
                             IsResponsible = a.IsResponsible,
                             IsExternal = a.MemberId is not > 0,
                             OriginalName = a.OriginalName,
@@ -290,9 +290,7 @@ namespace HpskSite.Services.Staffing
                             PassId = a.PassId,
                             PlanningId = owner.PlanningId,
                         });
-                        // Planeringstestet k2 (S2-F7-1): den som tackat nej står kvar i rutan men bemannar inget — som
-                        // hjälpsidan (StaffHelpService), annars sa rutnätet "2/3" medan /bemanna sökte en till.
-                        if (!IsDeclined(a.Status)) row.Filled++;
+                        row.Filled++;
                     }
 
                     // Omgång 3 (3.2): tiden är sanningen — flest samtidigt per dag, och per pass när dagen har flera pass.
@@ -300,7 +298,7 @@ namespace HpskSite.Services.Staffing
                         e.PassId is int pid && passWindows.TryGetValue(pid, out var w) && w != null ? w : StaffTimeCoverage.ParseRange(e.TimeLabel);
                     foreach (var k in datedKeys)
                     {
-                        var list = (row.Cells.TryGetValue(k, out var l) ? l : new List<GridEntry>()).Where(e => !IsDeclined(e.Status)).ToList();
+                        var list = (row.Cells.TryGetValue(k, out var l) ? l : new List<GridEntry>()).ToList();
                         if (list.Count > 0) row.FilledByDay[k] = StaffTimeCoverage.Peak(list.Select(SpanOf));
                         var dayPasses = passes.Where(p => p.Date == k && passWindows.TryGetValue(p.Id, out var w) && w != null).ToList();
                         if (dayPasses.Count < 2 || (list.Count == 0 && !row.HasNeed)) continue;
@@ -407,7 +405,7 @@ namespace HpskSite.Services.Staffing
                 resp.VolunteersTotal = people.People.Count(p => p.Volunteer != null);
                 // "Har uppdrag" = ett uppdrag som inte är avböjt: den som tackat nej har inget uppdrag längre.
                 resp.VolunteersWithJob = people.People.Count(p => p.Volunteer != null
-                    && p.Assignments.Any(a => !string.Equals(a.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)));
+                    && p.Assignments.Count > 0);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: volunteer strip failed for {Comp}", competitionId); }
 

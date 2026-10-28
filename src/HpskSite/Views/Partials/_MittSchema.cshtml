@@ -16,7 +16,6 @@
     var sv = CultureInfo.GetCultureInfo("sv-SE");
     var compact = ViewData["Compact"] as bool? ?? false;
     var maxRows = ViewData["MaxRows"] as int? ?? int.MaxValue;
-    var allowDecline = ViewData["AllowDecline"] as bool? ?? false;
     var shown = 0;
 }
 
@@ -133,10 +132,6 @@ else
                                 {
                                     <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1">Ansvarig</span>
                                 }
-                                @if (item.NeedsResponse)
-                                {
-                                    <span class="badge bg-info text-dark ms-1">Svara</span>
-                                }
                                 @if (item.HasConflict)
                                 {
                                     <span class="badge bg-warning text-dark ms-1" title="@item.ConflictText">
@@ -171,11 +166,6 @@ else
                             @if (!compact && !string.IsNullOrWhiteSpace(item.Link))
                             {
                                 <a href="@item.Link" class="small text-decoration-none d-print-none">@(item.LinkText ?? "Öppna") →</a>
-                            }
-                            @* Steg 4–6 K5: "Jag kan inte" når den som bemannar (veckosidan). *@
-                            @if (allowDecline && item.AssignmentId > 0 && item.Status != "Declined")
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-danger ms-2 d-print-none" data-decline="@item.AssignmentId">Jag kan inte</button>
                             }
                         </div>
                         @* The kind used to live here, hidden below 576px. It is a badge next to the title now. *@

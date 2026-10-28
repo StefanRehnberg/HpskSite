@@ -36,15 +36,11 @@ namespace HpskSite.Services.Schedule
         public static DateTime DayFor(DateTime now) => now.Date.AddDays(1);
 
         /// <summary>
-        /// Statusar som ska ha en påminnelse: planerad och bekräftad personal, och den som <b>ännu inte svarat</b> (Invited) — den som tagit över
-        /// ett pass efter en avhoppare är Inbjuden och ska ändå veta att hen väntas (mejlet säger då att hen inte svarat än). Bara
-        /// <b>pennade</b> rader (Planned, ingen har bett personen) och avböjda får inget — ett utkast ska inte mejlas, och en okänd status
-        /// är inte en inbjudan.
+        /// Den som ska ha en påminnelse: den som <b>fått besked</b> om sin placering (<c>NotifiedAt</c>), har anmält sig själv (Accepted) eller är
+        /// bekräftad. En placering som arrangören bara lagt in (ingen har meddelat personen) är ett utkast och mejlas inte — då skulle personen
+        /// få sitt första besked som en påminnelse kvällen före.
         /// </summary>
-        public static bool Remindable(string? status) =>
-            string.Equals(status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, StaffAssignmentStatus.Confirmed, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase);
+        public static bool Remindable(string? status, DateTime? notifiedAt) => StaffAssignmentStatus.IsTold(status, notifiedAt);
 
         /// <summary>Spärren: <b>en per person och dag</b> (B9) — oavsett hur många familjer personen har uppdrag i.</summary>
         public static string Key(DateTime day) => $"week-{day:yyyyMMdd}";
@@ -60,7 +56,7 @@ namespace HpskSite.Services.Schedule
 
         /// <summary>
         /// Mejlets innehåll för en familj och en dag: raderna i tidsordning, krockar och varningar utskrivna, och en knapp till hela veckan.
-        /// En obesvarad inbjudan säger det rakt ut, med en länk att svara. <paramref name="siteUrl"/> gör relativa länkar absoluta.
+        /// <paramref name="siteUrl"/> gör relativa länkar absoluta.
         /// </summary>
         public static string Inner(MySchedule week, DateTime day, string weekUrl, string siteUrl = "", bool heading = false)
         {
@@ -76,11 +72,6 @@ namespace HpskSite.Services.Schedule
                 sb.Append("<td style=\"padding:8px 0\">");
                 sb.Append($"<b>{PlanningNotifier.H(it.Title)}</b>");
                 if (!string.IsNullOrWhiteSpace(it.Where)) sb.Append($"<br><span style=\"color:#666\">{PlanningNotifier.H(it.Where)}</span>");
-                if (it.NeedsResponse)
-                {
-                    var link = string.IsNullOrWhiteSpace(it.Link) ? weekUrl : (it.Link!.StartsWith('/') ? siteUrl.TrimEnd('/') + it.Link : it.Link);
-                    sb.Append($"<br><b>Du har inte svarat än.</b> <a href=\"{PlanningNotifier.H(link)}\">Svara här</a>");
-                }
                 if (it.HasConflict)
                     sb.Append($"<br><span style=\"color:#b45309\"><b>Krockar med:</b> {PlanningNotifier.H(it.ConflictText)}</span>");
                 if (!string.IsNullOrWhiteSpace(it.WarningText))
@@ -99,7 +90,7 @@ namespace HpskSite.Services.Schedule
         public static string Footer(string? contactName = null, string? contactPhone = null)
         {
             var contact = string.IsNullOrWhiteSpace(contactName) ? ""
-                : $"Frågor om uppdraget: <b>{PlanningNotifier.H(contactName)}</b>"
+                : $"Frågor om placeringen: <b>{PlanningNotifier.H(contactName)}</b>"
                   + (string.IsNullOrWhiteSpace(contactPhone) ? "" : $", <a href=\"tel:{PlanningNotifier.H(contactPhone)}\">{PlanningNotifier.H(contactPhone)}</a>")
                   + ". Du kan svara på det här mejlet. ";
             return contact

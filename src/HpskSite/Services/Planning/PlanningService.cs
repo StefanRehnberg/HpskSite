@@ -69,7 +69,7 @@ namespace HpskSite.Services.Planning
                                                  ("StaffAssignment", "InviteNonce"), ("Planning", "StaffsForCompetitionId"),
                                                  ("Planning", "ShootBeforeMin"), ("Planning", "ShootDurationMin"), ("Planning", "ShootAfterMin"),
                                                  ("Planning", "ShooterMode"), ("StaffAssignment", "BatchId"), ("FaltskyttePatrolMember", "Locked"),
-                                                 ("Planning", "WholeDayRoles") })
+                                                 ("Planning", "WholeDayRoles"), ("StaffAssignment", "NotifiedAt") })
                 if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
                     missing.Add(table + "." + col);
             return missing;

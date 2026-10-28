@@ -58,7 +58,7 @@ namespace HpskSite.Models.Staffing
 
         /// <summary>
         /// The one word that answers "where is this person in the process":
-        /// Anmäld (volunteered, nothing assigned yet) · Planerad · Inbjuden · Accepterad · Avböjt ·
+        /// Anmäld (volunteered, nothing assigned yet) · Placerad · Meddelad · Anmäld själv ·
         /// Bekräftad · Förberedelser (prep owner only, no day-of role).
         /// </summary>
         public string State { get; set; } = "";
@@ -108,6 +108,8 @@ namespace HpskSite.Models.Staffing
         /// days are otherwise indistinguishable in any per-person view.</summary>
         public string? DayLabel { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
+        /// <summary>Har fått besked om placeringen (null = inlagd men inte meddelad).</summary>
+        public DateTime? NotifiedAt { get; set; }
         public bool IsResponsible { get; set; }
         public bool HasAdminAccess { get; set; }
         public bool CheckedIn { get; set; }
@@ -179,8 +181,8 @@ namespace HpskSite.Models.Staffing
         public int AssignedCount { get; set; }
         /// <summary>Volunteered but holds no roster row — the organiser's actual to-do queue.</summary>
         public int UnassignedVolunteerCount { get; set; }
-        public int NeedsResponseCount { get; set; }
-        public int DeclinedCount { get; set; }
+        /// <summary>Placerade som ännu inte fått besked (NotifiedAt saknas) — det "Meddela" gäller.</summary>
+        public int UnnotifiedCount { get; set; }
         public int ExternalCount { get; set; }
 
         /// <summary>Tävlingsledning read-through: who currently leads, sourced from the roster only, so
@@ -191,20 +193,38 @@ namespace HpskSite.Models.Staffing
     public static class PersonState
     {
         public const string Anmald = "Anmäld";               // volunteered, no role yet → assign them
-        public const string Declined = "Avböjt";
-        public const string Invited = "Inbjuden";
-        public const string Planned = "Planerad";
-        public const string Accepted = "Accepterad";
+        public const string Unplaced = "Ingen placering"; // on the list but holds no placement and has not volunteered
+        public const string Planned = "Placerad";           // placed, not told yet (NotifiedAt null)
+        public const string Notified = "Meddelad";          // placed and told (mail/push with a link to their day page)
+        public const string Accepted = "Anmäld själv";      // signed up by themselves (help-signup) — not a placement the organiser made
         public const string Confirmed = "Bekräftad";
         public const string PrepOnly = "Förberedelser";      // owns prep work, no day-of role
+
+        /// <summary>The state of ONE placement: placed, told, signed up by themselves, or confirmed. A leftover legacy Invited/Declined reads as placed.</summary>
+        public static string OfRow(string? status, DateTime? notifiedAt)
+        {
+            var s = StaffAssignmentStatus.Normalize(status);
+            if (s == StaffAssignmentStatus.Accepted) return Accepted;
+            if (s == StaffAssignmentStatus.Confirmed) return Confirmed;
+            return notifiedAt != null || string.Equals(status, "Invited", StringComparison.OrdinalIgnoreCase) ? Notified : Planned;
+        }
+
+        /// <summary>Worst-first over a person's rows: what the organiser must act on (not told yet) wins over what is settled.</summary>
+        public static string OfRows(IEnumerable<(string? Status, DateTime? NotifiedAt)> rows)
+        {
+            var states = rows.Select(r => OfRow(r.Status, r.NotifiedAt)).ToHashSet();
+            foreach (var s in new[] { Planned, Notified, Accepted, Confirmed })
+                if (states.Contains(s)) return s;
+            return Unplaced;
+        }
 
         /// <summary>Lower sorts first — the organiser sees what needs doing before what is done.</summary>
         public static int Priority(string state) => state switch
         {
             Anmald => 0,
-            Declined => 1,
-            Invited => 2,
-            Planned => 3,
+            Unplaced => 1,
+            Planned => 2,
+            Notified => 3,
             PrepOnly => 4,
             Accepted => 5,
             Confirmed => 6,

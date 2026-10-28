@@ -36,6 +36,12 @@ namespace HpskSite.Models.Staffing
     /// </summary>
     public static class PlanStepRules
     {
+        /// <summary>
+        /// Ska raden räknas som "inlagd men inte meddelad"? NotifiedAt är sanningen (Stefan 2026-10-28) — inte statusen: en placering är Planned både före och efter besked.
+        /// En självanmäld (Accepted) eller bekräftad rad har aldrig något besked att vänta på.
+        /// </summary>
+        public static bool IsUnnotified(string? status, DateTime? notifiedAt) => !StaffAssignmentStatus.IsTold(status, notifiedAt);
+
         /// <summary>"Sekretariat 2, Servering 3, Stationschef 8" — högst sex roller, resten som "m.fl.". Tom när uppdelningen saknas.</summary>
         private static string RoleList(IEnumerable<(string Name, int N)> items)
         {
@@ -77,17 +83,18 @@ namespace HpskSite.Models.Staffing
                         + (f.VolunteersTotal > 0 ? "" : ". Tryck på lägg till i en ruta i Rutnätet"), actions));
             }
 
-            // 3b. Skicka förfrågan — det som lagts in ser ingen förrän det skickats (persontest 8: hon hittade aldrig var man gör det).
+            // 3b. Meddela de inlagda — en placering syns i personens schema så fort den är inlagd, men personen får inget mejl förrän du meddelar
+            // (persontest 8: hon hittade aldrig var man gör det). Stefan 2026-10-28: placeringar tilldelas, de begärs inte — ingen ska godkänna.
             if (f.HasNeeds && f.AssignedTotal > 0)
             {
                 steps.Add(f.PlannedUnsent > 0
-                    ? new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Todo,
-                        $"{f.PlannedUnsent} {(f.PlannedUnsent == 1 ? "inlagd har" : "inlagda har")} ännu ingen förfrågan — de ser inget och får inget mejl förrän du skickar", new[] { "skicka" })
+                    ? new("skicka", "Meddela de inlagda", PlanStepState.Todo,
+                        $"{f.PlannedUnsent} {(f.PlannedUnsent == 1 ? "inlagd har" : "inlagda har")} ännu inte fått besked — placeringen syns i personens schema, men hen får inget mejl förrän du meddelar", new[] { "skicka" })
                     : f.PlannedUnreachable > 0
                         // Anders (persontest 11): "klart" stod där fast två inlagda inte gick att nå alls.
-                        ? new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Todo,
-                            $"{f.PlannedUnreachable} {(f.PlannedUnreachable == 1 ? "inlagd kan" : "inlagda kan")} inte nås — varken konto eller e-post. Lägg till e-post eller koppla till en medlem, så går förfrågan att skicka", new[] { "skicka" })
-                        : new("skicka", "Skicka förfrågan till de inlagda", PlanStepState.Done, "Alla inlagda har fått sin förfrågan", new[] { "skicka" }));
+                        ? new("skicka", "Meddela de inlagda", PlanStepState.Todo,
+                            $"{f.PlannedUnreachable} {(f.PlannedUnreachable == 1 ? "inlagd kan" : "inlagda kan")} inte nås — varken konto eller e-post. Lägg till e-post eller koppla till en medlem, så går det att meddela", new[] { "skicka" })
+                        : new("skicka", "Meddela de inlagda", PlanStepState.Done, "Alla inlagda har fått besked", new[] { "skicka" }));
             }
 
             // 4. Startlistan — bara fält, och bara för den som får bygga om den. Grönt först när någon faktiskt är kontrollerad och inga platser står tomma

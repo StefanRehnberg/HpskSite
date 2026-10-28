@@ -90,15 +90,13 @@ namespace HpskSite.Services.Staffing
             SELECT 1 FROM StaffAssignment sa
               JOIN Planning r ON r.Id = sa.PlanningId AND r.DeletedAt IS NULL AND r.Id = r.FamilyRootId
              WHERE sa.MemberId = @1 AND sa.HasAdminAccess = 1 AND sa.CompetitionId IS NULL
-               AND ISNULL(sa.Status, N'') <> N'Declined'
                AND EXISTS (SELECT 1 FROM Planning f
                              JOIN PlanningLink l ON l.PlanningId = f.Id AND l.TargetKind = N'competition' AND l.TargetId = @0
                             WHERE f.FamilyRootId = r.FamilyRootId AND f.Id <> r.Id AND f.DeletedAt IS NULL))";
 
         /// <summary>
         /// Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.
-        /// <para>En <b>avböjd</b> rad ger ingen familjebehörighet (steg 4–6 L3): behörigheten gäller nu alla veckans tävlingar, så den får
-        /// inte kunna ligga kvar på ett uppdrag som personen tackat nej till. (Den gamla per-tävlingsgrinden är oförändrad.)</para>
+        /// <para>(Ett gammalt "avböjt" fanns förut och gav ingen familjebehörighet; det finns inte längre — Stefan 2026-10-28.)</para>
         /// </summary>
         public bool CarriesFamilyGrant(StaffOwner owner)
         {
@@ -107,7 +105,7 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>
-        /// Planeringarna (delarna) där medlemmen har en ledarroll — skjutledare eller stationschef — och inte tackat nej. Det är den
+        /// Planeringarna (delarna) där medlemmen har en ledarroll — skjutledare eller stationschef. Det är den
         /// rätt att hitta ersättare som <see cref="ReplacementAccessRules"/> ger "för sin del".
         /// </summary>
         public List<int> LedPlanningIds(int memberId)
@@ -115,8 +113,8 @@ namespace HpskSite.Services.Staffing
             if (memberId <= 0) return new List<int>();
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.Fetch<int>(@"SELECT DISTINCT a.PlanningId FROM StaffAssignment a JOIN Planning p ON p.Id = a.PlanningId AND p.DeletedAt IS NULL
-                                               WHERE a.MemberId = @0 AND a.RoleKey IN (@1, @2) AND a.Status <> @3",
-                memberId, ReplacementAccessRules.SkjutledareRole, ReplacementAccessRules.StationschefRole, StaffAssignmentStatus.Declined);
+                                               WHERE a.MemberId = @0 AND a.RoleKey IN (@1, @2)",
+                memberId, ReplacementAccessRules.SkjutledareRole, ReplacementAccessRules.StationschefRole);
         }
 
         /// <summary>Kan en rad i den här planeringen bära "Ge behörighet" för familjen? Ja för en huvudplanering utan tävling med minst en del.</summary>
@@ -386,13 +384,38 @@ namespace HpskSite.Services.Staffing
             return savedId;
         }
 
-        /// <summary>Lightweight status update (e.g. Planned → Invited after a notification) without a full save.</summary>
+        /// <summary>Lightweight status update without a full save.</summary>
         public void SetStatus(int id, StaffOwner owner, string status)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
                 "UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND " + StaffOwner.Where(3),
                 NormalizeStatus(status), DateTime.UtcNow, id, owner.P);
+        }
+
+        /// <summary>
+        /// Meddela: märker raderna som meddelade — villkorat i SQL, så att ett dubbelklick (eller två flikar) bara kan ta varje rad en gång.
+        /// Returnerar de rader som det här anropet tog (de som inte redan var meddelade). Statusen rörs inte: en placering tilldelas, den begärs inte.
+        /// </summary>
+        public List<int> ClaimNotified(IReadOnlyCollection<int> ids)
+        {
+            var claimed = new List<int>();
+            if (ids.Count == 0) return claimed;
+            var now = DateTime.UtcNow;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            foreach (var id in ids)
+                if (scope.Database.Execute(
+                        "UPDATE StaffAssignment SET NotifiedAt = @0 WHERE Id = @1 AND NotifiedAt IS NULL", now, id) > 0)
+                    claimed.Add(id);
+            return claimed;
+        }
+
+        /// <summary>Tar tillbaka märket när inget utskick nådde personen (ingen e-post eller push), så att raden kan meddelas igen.</summary>
+        public void UnclaimNotified(IReadOnlyCollection<int> ids)
+        {
+            if (ids.Count == 0) return;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute("UPDATE StaffAssignment SET NotifiedAt = NULL WHERE Id IN (@ids)", new { ids = ids.ToList() });
         }
 
         public void Delete(int id, StaffOwner owner)
@@ -597,23 +620,6 @@ namespace HpskSite.Services.Staffing
             return true;
         }
 
-        /// <summary>Set an assignment's accept/decline status from a tokened external-invite link (the token is
-        /// the authorization — no member ownership check). Only Accepted/Declined allowed.</summary>
-        public (bool Ok, string? Message) SetInviteResponse(int assignmentId, string status)
-        {
-            var wanted = status switch
-            {
-                StaffAssignmentStatus.Accepted => StaffAssignmentStatus.Accepted,
-                StaffAssignmentStatus.Declined => StaffAssignmentStatus.Declined,
-                _ => null,
-            };
-            if (wanted == null) return (false, "Ogiltigt svar.");
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var n = db.Execute("UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2", wanted, DateTime.UtcNow, assignmentId);
-            return n > 0 ? (true, null) : (false, "Placeringen hittades inte.");
-        }
-
         /// <summary>
         /// Move one assignment to another day, keeping its clock time. Exists because the guards that
         /// refuse to delete a day (or hide a role) while crew sit on it are correct but become a WALL
@@ -763,6 +769,7 @@ namespace HpskSite.Services.Staffing
                     r.Phone = phone;
                     r.RepresentsClubId = null; r.RepresentsRegionId = null;
                     r.Status = StaffAssignmentStatus.Planned;
+                    r.NotifiedAt = null;   // den nya personen har inte fått besked
                     r.CheckedInAt = null;
                     // App access was granted to a login, not to a slot on the roster.
                     r.HasAdminAccess = false;
@@ -893,7 +900,7 @@ namespace HpskSite.Services.Staffing
         /// Steg 6b ("Hitta ersättare"): lämnar <b>ett</b> uppdrag över till en annan medlem. Radens id, dag, tid och roll behålls —
         /// det är samma uppdrag, så kalenderfiler, krockar och historiken följer med. Allt som hörde till personen går: konto,
         /// e-post, telefon, förening, incheckning och behörighet (samma skäl som vid en ersättare, omgång 3 K3). Den nya personen
-        /// ska svara (Invited) och får en ny länk; den tidigare personens namn sparas i <c>OriginalName</c>.
+        /// meddelas (NotifiedAt sätts, statusen blir Planned) och får en ny länk; den tidigare personens namn sparas i <c>OriginalName</c>.
         /// </summary>
         public (bool Ok, string? Message, StaffAssignment? Row, string? OldName, int? OldMemberId) ReplaceHolder(int assignmentId, StaffOwner owner, int newMemberId)
         {
@@ -913,7 +920,8 @@ namespace HpskSite.Services.Staffing
             a.DisplayName = ResolveMemberName(newMemberId);
             a.Email = null; a.Phone = null;                       // null = medlemmens egna (CompetitionPeopleService)
             a.RepresentsClubId = null; a.RepresentsRegionId = null;
-            a.Status = StaffAssignmentStatus.Invited;
+            a.Status = StaffAssignmentStatus.Planned;
+            a.NotifiedAt = DateTime.UtcNow;                       // den nya personen meddelas av anroparen (StaffReplacementService.NotifyAsync)
             a.CheckedInAt = null;
             a.HasAdminAccess = false;
             a.InviteNonce = Guid.NewGuid();                       // länkar till den förra personen slutar gälla
@@ -935,7 +943,7 @@ namespace HpskSite.Services.Staffing
         /// transaktion, så att en gräns som flyttas mellan två skift aldrig lämnar det ena halvt ändrat (Stefan 2026-10-27: "Dela passet" på personens
         /// sida felade och gick inte att hitta; schemat byggs i stället för rutan). Allt prövas före första skrivningen.
         /// <para>Befintliga rader byter bara TID här; en annan person på ett befintligt skift går genom Hitta ersättare, som aviserar båda. Skiften får
-        /// överlappa — behövs två samtidigt är det två på samma tid. Ändrade tider på den som redan fått förfrågan (Inbjuden/Tackat ja) lämnas
+        /// överlappa — behövs två samtidigt är det två på samma tid. Ändrade tider på den som redan fått besked (NotifiedAt, självanmäld eller bekräftad) lämnas
         /// tillbaka så att anroparen kan ge besked.</para>
         /// </summary>
         public CellShiftsResult SaveCellShifts(StaffOwner owner, SaveCellShiftsRequest req, int byMemberId)
@@ -1003,18 +1011,17 @@ namespace HpskSite.Services.Staffing
                 if (it.Id > 0)
                 {
                     var r = rows.Single(x => x.Id == it.Id);
-                    var told = string.Equals(r.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(r.Status, StaffAssignmentStatus.Accepted, StringComparison.OrdinalIgnoreCase);
+                    var told = StaffAssignmentStatus.IsTold(r.Status, r.NotifiedAt);
                     var personChanged = it.MemberId > 0 && r.MemberId != it.MemberId;
                     if (personChanged && !told)
                     {
-                        // Ingen har fått besked om det här skiftet än: personen byts rakt av, och ingen får något mejl förrän förfrågan skickas.
+                        // Ingen har fått besked om det här skiftet än: personen byts rakt av, och ingen får något mejl förrän du meddelar.
                         var nm = _memberService.GetById(it.MemberId);
                         if (nm == null) return CellShiftsResult.Fail("Medlemmen hittades inte.");
                         if (string.IsNullOrEmpty(r.OriginalName)) r.OriginalName = r.DisplayName;
                         r.MemberId = it.MemberId; r.DisplayName = ResolveMemberName(it.MemberId);
                         r.Email = null; r.Phone = null; r.RepresentsClubId = null; r.RepresentsRegionId = null;
-                        r.Status = StaffAssignmentStatus.Planned; r.CheckedInAt = null; r.HasAdminAccess = false; r.InviteNonce = Guid.NewGuid();
+                        r.Status = StaffAssignmentStatus.Planned; r.NotifiedAt = null; r.CheckedInAt = null; r.HasAdminAccess = false; r.InviteNonce = Guid.NewGuid();
                         if (string.Equals(r.OriginalName, r.DisplayName, StringComparison.Ordinal)) r.OriginalName = null;
                         r.ModifiedDate = now;
                         db.Update(r);
@@ -1031,7 +1038,7 @@ namespace HpskSite.Services.Staffing
                     }
                     if (personChanged)
                     {
-                        // Den som redan fått förfrågan byts genom samma väg som Hitta ersättare: den nya personen blir Inbjuden, båda får besked.
+                        // Den som redan fått besked byts genom samma väg som Hitta ersättare: den nya personen meddelas direkt, båda får besked.
                         var rep = ReplaceHolder(r.Id, owner, it.MemberId);
                         if (!rep.Ok) return CellShiftsResult.Fail(rep.Message ?? "Personen kunde inte bytas.");
                         replaced.Add(new ReplacedShift(rep.Row!, rep.OldName, rep.OldMemberId));
@@ -1107,6 +1114,28 @@ namespace HpskSite.Services.Staffing
             var compName = _owners.Name(owner);
             var discipline = _owners.Discipline(owner);
             var role = _roles.Resolve(owner, discipline, a.RoleKey);
+
+            // Alla personens placeringar i samma planering (den länkade först): mejlet listade dem, sidan ska göra det också.
+            var mine = new List<StaffAssignment> { a };
+            var passes = new Dictionary<int, StaffPass>();
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var db = scope.Database;
+                if (a.PlanningId is > 0 && (a.MemberId is > 0 || !string.IsNullOrWhiteSpace(a.Email)))
+                {
+                    var others = a.MemberId is > 0
+                        ? db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE PlanningId = @0 AND MemberId = @1 AND Id <> @2", a.PlanningId, a.MemberId, a.Id)
+                        : db.Fetch<StaffAssignment>("SELECT * FROM StaffAssignment WHERE PlanningId = @0 AND MemberId IS NULL AND LOWER(LTRIM(RTRIM(Email))) = @1 AND Id <> @2",
+                            a.PlanningId, a.Email!.Trim().ToLowerInvariant(), a.Id);
+                    mine.AddRange(others.OrderBy(o => o.StartsAt ?? o.DayDate ?? DateTime.MaxValue).ThenBy(o => o.Id));
+                }
+                var passIds = mine.Where(r => r.PassId is > 0).Select(r => r.PassId!.Value).Distinct().ToList();
+                if (passIds.Count > 0)
+                    passes = db.Fetch<StaffPass>("SELECT * FROM StaffPass WHERE Id IN (@ids)", new { ids = passIds }).ToDictionary(p => p.Id);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: placeringarna för sidan Din placering gick inte att läsa ({Id}).", assignmentId); }
+
             return new InviteResponseModel
             {
                 Valid = true,
@@ -1115,27 +1144,14 @@ namespace HpskSite.Services.Staffing
                 ScopeLabel = BuildScopeLabel(a),
                 ShiftLabel = BuildShiftLabel(a.StartsAt, a.EndsAt),
                 PersonName = a.DisplayName,
-                Status = a.Status,
+                Status = StaffAssignmentStatus.Normalize(a.Status),
+                Placements = mine.Select(r => new InvitePlacement
+                {
+                    RoleName = _roles.Resolve(owner, discipline, r.RoleKey)?.DisplayName ?? r.RoleKey,
+                    ScopeLabel = BuildScopeLabel(r),
+                    When = PlacementNoticeService.WhenText(r, r.PassId is > 0 && passes.TryGetValue(r.PassId.Value, out var ps) ? ps : null),
+                }).ToList(),
             };
-        }
-
-        /// <summary>A member accepts/declines their OWN assignment. Ownership-checked; no comp-staff access needed.</summary>
-        public (bool Ok, string? Message) RespondAsMember(int assignmentId, int memberId, string status)
-        {
-            var wanted = status switch
-            {
-                StaffAssignmentStatus.Accepted => StaffAssignmentStatus.Accepted,
-                StaffAssignmentStatus.Declined => StaffAssignmentStatus.Declined,
-                _ => null,
-            };
-            if (wanted == null) return (false, "Ogiltigt svar.");
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var row = db.SingleOrDefault<StaffAssignment>("SELECT * FROM StaffAssignment WHERE Id = @0", assignmentId);
-            if (row == null) return (false, "Uppdraget hittades inte.");
-            if (row.MemberId != memberId) return (false, "Du kan bara svara på dina egna uppdrag.");
-            db.Execute("UPDATE StaffAssignment SET Status = @0, ModifiedDate = @1 WHERE Id = @2", wanted, DateTime.UtcNow, assignmentId);
-            return (true, null);
         }
 
         /// <summary>Every assignment the member holds, grouped by competition, with their availability windows.</summary>
@@ -1152,8 +1168,8 @@ namespace HpskSite.Services.Staffing
                 rows = scope.Database.Fetch<DutyRow>(@"
                     SELECT sa.MemberId, sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day
                     FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE " + owner.Filter(0, "sa.") + @" AND sa.MemberId > 0 AND ISNULL(sa.Status, '') <> @2",
-                    owner.P, owner.FamilyComp, StaffAssignmentStatus.Declined);
+                    WHERE " + owner.Filter(0, "sa.") + @" AND sa.MemberId > 0",
+                    owner.P, owner.FamilyComp);
             }
             if (rows.Count == 0) return result;
             var names = _roles.For(owner, _owners.Discipline(owner))
@@ -1231,7 +1247,7 @@ namespace HpskSite.Services.Staffing
                             FunctionTitle = r.FunctionTitle,
                             ScopeLabel = BuildScopeLabel(r),
                             ShiftLabel = BuildShiftLabel(r.StartsAt, r.EndsAt),
-                            Status = r.Status,
+                            Status = StaffAssignmentStatus.Normalize(r.Status),
                             IsResponsible = r.IsResponsible,
                         }).ToList();
                 }
@@ -1461,7 +1477,8 @@ namespace HpskSite.Services.Staffing
                 DateKey = (a.StartsAt ?? a.DayDate)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 IsResponsible = a.IsResponsible,
                 HasAdminAccess = a.HasAdminAccess,
-                Status = a.Status,
+                Status = StaffAssignmentStatus.Normalize(a.Status),
+                NotifiedAt = a.NotifiedAt,
                 Note = a.Note,
                 CheckedIn = a.CheckedInAt.HasValue,
                 RepresentsClubId = a.RepresentsClubId,
@@ -1469,7 +1486,7 @@ namespace HpskSite.Services.Staffing
             };
         }
 
-        private static string BuildScopeLabel(StaffAssignment a)
+        internal static string BuildScopeLabel(StaffAssignment a)
         {
             if (string.IsNullOrEmpty(a.ScopeType) || string.Equals(a.ScopeType, StaffScopeType.All, StringComparison.OrdinalIgnoreCase))
                 return "Hela tävlingen";
@@ -1531,13 +1548,6 @@ namespace HpskSite.Services.Staffing
             return null;
         }
 
-        private static string NormalizeStatus(string? s) => s switch
-        {
-            StaffAssignmentStatus.Invited => StaffAssignmentStatus.Invited,
-            StaffAssignmentStatus.Accepted => StaffAssignmentStatus.Accepted,
-            StaffAssignmentStatus.Declined => StaffAssignmentStatus.Declined,
-            StaffAssignmentStatus.Confirmed => StaffAssignmentStatus.Confirmed,
-            _ => StaffAssignmentStatus.Planned,
-        };
+        private static string NormalizeStatus(string? s) => StaffAssignmentStatus.Normalize(s);
     }
 }

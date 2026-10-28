@@ -63,8 +63,8 @@
     var planningId = @planningId;   // P2b: planeringens bemanning, även före kopplingen
     var TOKEN = '@token';
     var PREVIEW = @(preview ? "true" : "false");
-    var STATUS_LABEL = { Planned: 'Ej svarat', Invited: 'Inbjuden', Accepted: 'Tackat ja', Declined: 'Tackat nej', Confirmed: 'Bekräftad' };
-    var STATUS_CLS = { Planned: 'bg-secondary', Invited: 'bg-info text-dark', Accepted: 'bg-success', Declined: 'bg-danger', Confirmed: 'bg-success' };
+    var STATUS_LABEL = { Planned: 'Placerad', Accepted: 'Anmäld', Confirmed: 'Bekräftad' };
+    var STATUS_CLS = { Planned: 'bg-secondary', Accepted: 'bg-success', Confirmed: 'bg-success' };
 
     // Det medlemmen kan anmäla sig till (Stefan 2026-10-23): planens dagar med rollerna som behövs
     // (needDays), plus arrangörens egna "något annat"-tillfällen (slots). Ett val har en nyckel:
@@ -138,10 +138,10 @@
         } catch (e) { q('beHeader').textContent = 'Kunde inte läsa bemanningen.'; }
     }
 
-    // Directed invitations (accept/decline) — kept, separate from volunteering.
+    // Placements the organiser has given you — separate from volunteering. Nothing to answer.
     function renderMine(a) {
         q('beMine').innerHTML = a.length
-            ? '<div class="card"><div class="card-header py-2 fw-semibold">Du är tillfrågad</div><div class="card-body py-2">' + a.map(assignmentHtml).join('') + '</div></div>'
+            ? '<div class="card"><div class="card-header py-2 fw-semibold">Här ser du placeringarna arrangören har gett dig</div><div class="card-body py-2">' + a.map(assignmentHtml).join('') + '</div></div>'
             : '';
     }
     function assignmentHtml(a) {
@@ -149,13 +149,10 @@
         var fn = a.functionTitle ? '<span class="text-muted"> · ' + esc(a.functionTitle) + '</span>' : '';
         var scope = a.scopeLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-geo-alt me-1"></i>' + esc(a.scopeLabel) + '</span>' : '';
         var st = '<span class="badge ' + (STATUS_CLS[a.status] || 'bg-secondary') + ' ms-1">' + esc(STATUS_LABEL[a.status] || a.status) + '</span>';
-        var acc = a.status === 'Accepted', dec = a.status === 'Declined';
+        var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border ms-1"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
         return '<div class="d-flex justify-content-between align-items-start py-2 gap-2 flex-wrap border-bottom">'
-            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + scope + st + '</div>'
-            + '<div class="btn-group btn-group-sm">'
-            + '<button type="button" class="btn ' + (acc ? 'btn-success' : 'btn-outline-success') + '" onclick="beRespond(' + a.id + ',\'Accepted\')">Tacka ja</button>'
-            + '<button type="button" class="btn ' + (dec ? 'btn-danger' : 'btn-outline-danger') + '" onclick="beRespond(' + a.id + ',\'Declined\')">Tacka nej</button>'
-            + '</div></div>';
+            + '<div>' + star + '<span class="fw-semibold">' + esc(a.roleName) + '</span>' + fn + scope + shift + st + '</div>'
+            + '</div>';
     }
 
     function isOn(key) { return Object.prototype.hasOwnProperty.call(checked, key); }
@@ -314,11 +311,6 @@
             return await r.json();
         } catch (e) { return { success: false, message: 'Nätverksfel.' }; }
     }
-
-    window.beRespond = async function (id, status) {
-        var d = await post('/mina-uppdrag/respond', { assignmentId: id, status: status });
-        if (d.success) await load(); else alert(d.message || 'Kunde inte spara.');
-    };
 
     window.beSave = async function () {
         if (PREVIEW) return;

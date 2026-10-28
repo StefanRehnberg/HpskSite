@@ -88,11 +88,10 @@ namespace HpskSite.Services.Schedule
                       JOIN Planning p ON p.Id = sa.PlanningId AND p.DeletedAt IS NULL
                       LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
                      WHERE sa.MemberId = @0 AND sa.PlanningId IS NOT NULL
-                       AND (sa.Status IS NULL OR sa.Status <> @1)
-                       AND (@2 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) >= @2)
-                       AND (@3 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) <= @3)
+                       AND (@1 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) >= @1)
+                       AND (@2 IS NULL OR COALESCE(CAST(sa.StartsAt AS date), CAST(sa.DayDate AS date), CAST(sp.PassDate AS date)) <= @2)
                        AND " + WeekFamilySql,
-                    memberId, StaffAssignmentStatus.Declined, from?.Date, to?.Date);
+                    memberId, from?.Date, to?.Date);
             }
             catch (Exception ex)
             {
@@ -182,7 +181,6 @@ namespace HpskSite.Services.Schedule
             var e = it.Entry;
             var iv = e.Interval;
             var isAssignment = e.Kind == PersonWeekKind.Assignment;
-            var invited = isAssignment && string.Equals(e.Status, StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase);
 
             string timeLabel;
             if (iv is { AllDay: true }) timeLabel = "Heldag";
@@ -194,7 +192,7 @@ namespace HpskSite.Services.Schedule
             if (isAssignment)
             {
                 link = e.CompetitionId is > 0 ? $"/bemanna?c={e.CompetitionId}" : e.PlanningId is > 0 ? $"/bemanna?p={e.PlanningId}" : null;
-                linkText = invited ? "Svara på inbjudan" : "Uppdraget";
+                linkText = "Uppdraget";
             }
             else if (e.Kind == PersonWeekKind.Start && e.CompetitionId is > 0)
             {
@@ -213,7 +211,6 @@ namespace HpskSite.Services.Schedule
                 DayKey = day.DayKey,
                 DayLabel = day.DayLabel,
                 Status = e.Status,
-                NeedsResponse = invited,
                 SortHint = iv is { } w ? (int)w.Start.TimeOfDay.TotalMinutes : 0,
                 Link = link,
                 LinkText = linkText,

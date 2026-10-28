@@ -60,9 +60,9 @@ namespace HpskSite.Services.Staffing
                 var rows = scope.Database.Fetch<RoleDayCount>(@"
                     SELECT sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE)) AS Day, COUNT(*) AS N
                     FROM StaffAssignment sa LEFT JOIN StaffPass sp ON sp.Id = sa.PassId
-                    WHERE " + StaffOwner.Where(0, "sa.") + @" AND ISNULL(sa.Status, '') <> @1
+                    WHERE " + StaffOwner.Where(0, "sa.") + @"
                     GROUP BY sa.RoleKey, COALESCE(CAST(sa.StartsAt AS DATE), sa.DayDate, CAST(sp.PassDate AS DATE))",
-                    owner.P, StaffAssignmentStatus.Declined);
+                    owner.P);
                 foreach (var r in rows)
                     if (r.Day is { } d) assigned[(r.RoleKey.ToLowerInvariant(), d.Date)] = r.N;
             }

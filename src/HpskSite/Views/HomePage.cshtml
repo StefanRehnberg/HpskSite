@@ -392,10 +392,6 @@ else
                                             {
                                                 <span class="text-muted">· @it.Where</span>
                                             }
-                                            @if (it.NeedsResponse)
-                                            {
-                                                <span class="badge bg-warning text-dark ms-1">Svara</span>
-                                            }
                                             @if (it.HasConflict)
                                             {
                                                 <span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>
@@ -489,10 +485,6 @@ else
         <div class="card mb-4 border-success-subtle">
             <div class="card-header bg-success-subtle d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span class="fw-semibold"><i class="bi bi-person-badge me-2 text-success"></i>Dina funktionärsuppdrag</span>
-                @if (staff.NeedsResponseCount > 0)
-                {
-                    <span class="badge bg-warning text-dark">@staff.NeedsResponseCount att svara på</span>
-                }
             </div>
             <div class="card-body">
                 @if (staffVisibleCount > 0)
@@ -506,8 +498,7 @@ else
                                     @if (!string.IsNullOrEmpty(it.CompDate)) { <span class="text-muted small ms-1">· @it.CompDate</span> }
                                     <span class="text-muted small d-block">@it.RoleSummary</span>
                                 </span>
-                                @if (it.NeedsResponse) { <span class="badge bg-warning text-dark">Svara <i class="bi bi-arrow-right"></i></span> }
-                                else if (it.IsPast) { <span class="badge bg-secondary-subtle text-secondary-emphasis border">Genomförd</span> }
+                                @if (it.IsPast) { <span class="badge bg-secondary-subtle text-secondary-emphasis border">Genomförd</span> }
                                 else { <i class="bi bi-chevron-right text-muted"></i> }
                             </a>
                         }

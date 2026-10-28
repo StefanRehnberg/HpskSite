@@ -39,9 +39,23 @@ namespace HpskSite.Models.Staffing
         public static bool StillValid(Guid? tokenNonce, Guid? rowNonce) => rowNonce == tokenNonce;
     }
 
-    /// <summary>Model for the chromeless external accept/decline page (/mina-uppdrag/svar?t=…).</summary>
+    /// <summary>En placering på den skrivskyddade sidan "Din placering".</summary>
+    public class InvitePlacement
+    {
+        public string RoleName { get; set; } = "";
+        public string ScopeLabel { get; set; } = "";
+        /// <summary>"lördag 14 november 08:00–13:00" eller "… hela dagen"; tom när raden saknar dag.</summary>
+        public string When { get; set; } = "";
+    }
+
+    /// <summary>Model for the chromeless external READ-ONLY page "Din placering" (/mina-uppdrag/svar?t=…). Äldre länkar hade ja/nej — de visar nu
+    /// samma skrivskyddade sida (Stefan 2026-10-28: placeringar tilldelas, de godkänns inte).</summary>
     public class InviteResponseModel
     {
+        /// <summary>Ett vänligt besked överst (till exempel när en gammal sida skickat ett svar som inte längre behövs).</summary>
+        public string? Notice { get; set; }
+        /// <summary>Alla personens placeringar i samma planeringsfamilj (den länkade först).</summary>
+        public List<InvitePlacement> Placements { get; set; } = new();
         public bool Valid { get; set; }
         public string Token { get; set; } = "";
         public string CompName { get; set; } = "";

@@ -105,6 +105,8 @@ namespace HpskSite.Models.Staffing
         public string? To { get; set; }
         public string? ScopeLabel { get; set; }
         public string Status { get; set; } = StaffAssignmentStatus.Planned;
+        /// <summary>Har fått besked om placeringen (null = inlagd men inte meddelad).</summary>
+        public DateTime? NotifiedAt { get; set; }
         public bool IsResponsible { get; set; }
         public bool IsExternal { get; set; }        // no member account → no schedule, no push
         /// <summary>What the organiser first typed, when an identity change has since replaced it.

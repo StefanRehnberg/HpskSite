@@ -34,9 +34,7 @@
     function draw() {
         if (!rows.length) { box.innerHTML = '<span class="text-muted small">Inga kommande uppdrag att lämna över i din del.</span>'; return; }
         box.innerHTML = '<ul class="list-group list-group-flush">' + rows.map(function (r) {
-            var state = r.open
-                ? '<span class="badge text-bg-warning fw-normal ms-1">' + (r.status === 'Declined' ? 'Har tackat nej' : 'Ingen utsedd') + '</span>'
-                : (r.status === 'Invited' ? '<span class="badge text-bg-light border fw-normal ms-1">Väntar på svar</span>' : '');
+            var state = r.open ? '<span class="badge text-bg-warning fw-normal ms-1">Ingen utsedd</span>' : '';
             return '<li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2 flex-wrap">'
                 + '<span><b>' + esc(r.role) + '</b> ' + esc(r.when) + '<br><span class="text-muted small">' + esc(r.holder) + '</span>' + state + '</span>'
                 + '<button type="button" class="btn btn-sm ' + (r.open ? 'btn-primary' : 'btn-outline-secondary') + ' flex-shrink-0" data-ld-find="' + r.id + '">'
@@ -81,7 +79,7 @@
                         + (c.phone ? '<a class="d-block small" href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '')
                         + (c.comment ? '<span class="d-block text-muted small">' + esc(c.comment) + '</span>' : '')
                         + '</span></label>';
-                }).join('') + '</div><p class="small text-muted mt-2 mb-0">Den som tar över får besked och står som Inbjuden tills hen svarat. '
+                }).join('') + '</div><p class="small text-muted mt-2 mb-0">Den som tar över får besked om placeringen. '
                     + 'Den som hade uppdraget får också veta att hen inte ska komma.</p>'
                 : '<p class="mb-0">Ingen har anmält sig till den dagen ännu. Hör av dig till den som bemannar.</p>')
             + '<div class="text-danger small mt-2" id="ldErr" role="alert"></div></div>'

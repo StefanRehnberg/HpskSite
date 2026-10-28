@@ -107,11 +107,10 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void En_obesvarad_inbjudan_ber_om_svar_med_lank_till_planeringen_nar_tavling_saknas()
+        public void En_placering_lankar_till_planeringen_nar_tavling_saknas_och_ber_inte_om_svar()
         {
-            var it = Week(Asg("a1", Lor, 8, 12, "Servering", "Gemensamt", planning: 1, comp: null, status: "Invited")).Days.Single().Items.Single();
-            it.NeedsResponse.Should().BeTrue();
-            it.LinkText.Should().Be("Svara på inbjudan");
+            var it = Week(Asg("a1", Lor, 8, 12, "Servering", "Gemensamt", planning: 1, comp: null, status: "Planned")).Days.Single().Items.Single();
+            it.LinkText.Should().Be("Uppdraget");
             it.Link.Should().Be("/bemanna?p=1");
         }
 
@@ -201,16 +200,15 @@ namespace HpskSite.Tests
             => StaffWeekDigest.DayFor(new DateTime(2028, 8, 11, 18, 30, 0)).Should().Be(new DateTime(2028, 8, 12));
 
         [Theory]
-        [InlineData(null, false)]
-        [InlineData("", false)]
-        [InlineData("Planned", false)]      // pennad, ingen har bett personen — ett utkast ska inte mejlas
-        [InlineData("Accepted", true)]
-        [InlineData("Confirmed", true)]
-        [InlineData("Invited", true)]       // den som tagit över ett pass och inte svarat ska ändå veta att hen väntas
-        [InlineData("Declined", false)]
-        [InlineData("declined", false)]
-        public void Pennade_och_avbojda_far_ingen_paminnelse_men_inbjudna_far_(string? status, bool expected)
-            => StaffWeekDigest.Remindable(status).Should().Be(expected);
+        [InlineData(null, false, false)]
+        [InlineData("", false, false)]
+        [InlineData("Planned", false, false)]     // inlagd men ingen har meddelat personen — ett utkast ska inte påminnas
+        [InlineData("Planned", true, true)]       // meddelad: personen ska påminnas kvällen före
+        [InlineData("Accepted", false, true)]     // anmäld själv
+        [InlineData("Confirmed", false, true)]
+        [InlineData("Declined", false, false)]    // ett gammalt värde som skulle ligga kvar är en vanlig, ej meddelad placering
+        public void Bara_den_som_ar_meddelad_eller_sjalvanmald_far_paminnelse(string? status, bool notified, bool expected)
+            => StaffWeekDigest.Remindable(status, notified ? new DateTime(2028, 8, 1) : null).Should().Be(expected);
 
         [Fact]
         public void Sparren_ar_en_per_person_och_dag_oavsett_familj()
@@ -233,19 +231,19 @@ namespace HpskSite.Tests
         {
             var f = StaffWeekDigest.Footer("Anna Ek", "070-123 45 67");
             f.Should().Contain("Anna Ek").And.Contain("tel:070-123 45 67").And.Contain("kan svara").And.Contain("inaktuellt");
-            StaffWeekDigest.Footer().Should().NotContain("Frågor om uppdraget").And.Contain("inaktuellt");
+            StaffWeekDigest.Footer().Should().NotContain("Frågor om placeringen").And.Contain("inaktuellt");
             StaffWeekDigest.Footer("<b>x</b>", null).Should().Contain("&lt;b&gt;x&lt;/b&gt;");
         }
 
         [Fact]
-        public void En_obesvarad_inbjudan_sager_att_man_inte_svarat_och_lankar_till_svaret()
+        public void Kvallsmejlet_ber_inte_om_svar_pa_en_placering()
         {
             var lor = new DateTime(2028, 8, 12);
             var e = new PersonWeekEntry("a9", PersonWeekKind.Assignment, lor, StaffInterval.From(lor, TimeSpan.FromHours(8), TimeSpan.FromHours(12)), null,
-                "Markör (Fält)", 10, null, "Markör", "Fält", "Invited");
+                "Markör (Fält)", 10, null, "Markör", "Fält", "Planned");
             var week = MyWeekService.ToSchedule(1, "SM", PersonWeek.Build(new[] { e }, lor, lor), null, null, lor.AddDays(-1));
             var html = StaffWeekDigest.Inner(week, lor, "https://pistol.nu/mitt-schema?p=1", "https://pistol.nu");
-            html.Should().Contain("Du har inte svarat").And.Contain("https://pistol.nu/bemanna?p=10");
+            html.Should().Contain("08:00").And.NotContain("svarat").And.NotContain("Svara");
         }
 
         [Fact]

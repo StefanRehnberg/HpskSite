@@ -21,7 +21,6 @@ namespace HpskSite.Models.Staffing
             if (mine.StartsAt is not DateTime s || mine.EndsAt is not DateTime e || e <= s) return new(null, null);
             var near = others.Where(o => o.Id != mine.Id && SameCell(mine, o) && o.StartsAt is not null && o.EndsAt is not null
                     && o.EndsAt > o.StartsAt && o.StartsAt.Value.Date == s.Date
-                    && !string.Equals(o.Status, StaffAssignmentStatus.Declined, StringComparison.OrdinalIgnoreCase)
                     && !SamePerson(mine, o)).ToList();
 
             var next = near.Where(o => o.StartsAt >= e && o.StartsAt - e <= MaxGap).OrderBy(o => o.StartsAt).ThenBy(o => o.Id).FirstOrDefault();

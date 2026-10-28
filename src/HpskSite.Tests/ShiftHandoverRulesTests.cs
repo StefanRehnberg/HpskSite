@@ -66,13 +66,6 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Den_som_tackat_nej_är_ingen_avlösare()
-        {
-            var anna = A("Anna", 8, 11); var berit = A("Berit", 11, 14, status: "Declined");
-            ShiftHandoverRules.For(anna, new[] { anna, berit }).After.Should().BeNull();
-        }
-
-        [Fact]
         public void Samma_person_är_inte_sin_egen_avlösare()
         {
             var anna = A("Anna", 8, 11, member: 5); var igen = A("Anna", 11, 14, member: 5);

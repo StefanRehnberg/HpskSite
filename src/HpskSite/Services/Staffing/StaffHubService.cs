@@ -43,9 +43,6 @@ namespace HpskSite.Services
                         CompDate = g.CompDate,
                         IsPast = isPast,
                         RoleSummary = string.Join(", ", g.Assignments.Select(a => a.RoleName).Distinct()),
-                        // Answering an invitation after the comp is meaningless — don't nag about it.
-                        NeedsResponse = !isPast && g.Assignments.Any(a =>
-                            string.Equals(a.Status, Models.Staffing.StaffAssignmentStatus.Invited, StringComparison.OrdinalIgnoreCase)),
                     });
                 }
                 // Volunteering for a finished comp is pointless, so open sign-ups get no grace window.
@@ -81,16 +78,10 @@ namespace HpskSite.Services
         public int? OpenFirstCompetitionId { get; set; }
         /// <summary>P2b: anmälningssidan för den första öppningen (/bemanna?p= eller ?c=).</summary>
         public string? OpenFirstPath { get; set; }
-        public int NeedsResponseCount => Assignments.Count(a => a.NeedsResponse);
 
         /// <summary>
         /// The rows this card should still show once the home page's "Ditt schema" card has taken over
         /// some competitions — pass it that card's <c>ShownCompetitionIds</c> (null = suppress nothing).
-        ///
-        /// A row where the member still owes a response is NEVER suppressed: an unanswered invitation is
-        /// a to-do, and hiding it behind a timeline is how it gets forgotten. Because only
-        /// already-answered rows drop out, <see cref="NeedsResponseCount"/> stays consistent with what's
-        /// on screen.
         ///
         /// Lives here rather than in the view on purpose: the equivalent Razor needed explicit generic
         /// type arguments, which Razor mis-parses as HTML tags inside an @ code block.
@@ -99,7 +90,7 @@ namespace HpskSite.Services
         {
             if (suppressedCompetitionIds == null || suppressedCompetitionIds.Count == 0) return Assignments;
             return Assignments
-                .Where(a => a.NeedsResponse || !suppressedCompetitionIds.Contains(a.CompetitionId))
+                .Where(a => !suppressedCompetitionIds.Contains(a.CompetitionId))
                 .ToList();
         }
     }
@@ -112,7 +103,6 @@ namespace HpskSite.Services
         public string CompName { get; set; } = "";
         public string? CompDate { get; set; }
         public string RoleSummary { get; set; } = "";
-        public bool NeedsResponse { get; set; }
         /// <summary>Comp day has passed but it's still inside the grace window — show it muted.</summary>
         public bool IsPast { get; set; }
     }

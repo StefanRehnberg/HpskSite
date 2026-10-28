@@ -44,9 +44,8 @@ namespace HpskSite.Models.Schedule
         /// <summary>"Lördag 8 augusti" or the verbatim skjutlag label.</summary>
         public string DayLabel { get; set; } = "";
 
-        /// <summary>Funktionär only: Planned | Invited | Accepted | Declined.</summary>
+        /// <summary>Funktionär only: Planned | Accepted | Confirmed.</summary>
         public string? Status { get; set; }
-        public bool NeedsResponse { get; set; }
         public bool IsResponsible { get; set; }
 
         public string? Link { get; set; }
