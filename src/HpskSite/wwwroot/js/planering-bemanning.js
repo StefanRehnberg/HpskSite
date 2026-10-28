@@ -22,7 +22,8 @@ window.PlaneringBemanning = (function () {
     const B = {
         grid: null, people: null, meta: null, roles: null, scopes: null, scopeOptions: null, signup: null, help: null,
         q: '', show: '', role: '', byOrg: false, shown: 60,
-        timer: null, seq: 0, editing: null, polling: false
+        timer: null, seq: 0, editing: null, polling: false,
+        weekMap: null, wTok: 0, wp: null, pre: null, solo: null
     };
     const STATUS = { Planned: 'Planerad', Invited: 'Inbjuden', Accepted: 'Accepterad', Declined: 'Avböjt', Confirmed: 'Bekräftad' };
     const STATUS_CLS = { Planned: 'off', Invited: 'wait', Accepted: 'blue', Declined: 'no', Confirmed: 'ok' };
@@ -49,8 +50,9 @@ window.PlaneringBemanning = (function () {
     // Servern ger varje dels egna, oförändrade rutnät; här läggs de ihop till samma form som ett enskilt rutnät
     // (columns = familjens dagar, rows = alla delars rader i delordning), så ritningen är densamma.
     const family = () => !!(A && A.S() && A.S().planning && (A.S().planning.subPlannings || []).length);
-    // Veckan (personens dag med egna starter och krockar) hör till en familj — och till varje planering som hör ihop med en tävling:
-    // där finns startlistan, och "jobbar hen när hen själv ska skjuta?" är frågan (persontestet, scenario 6). Servern läser veckan för en ensam planering.
+    // Personens dag för dag (egna starter och krockar) finns på personens sida under Personer — för en familj, och för varje planering som
+    // hör ihop med en tävling: där finns startlistan, och "jobbar hen när hen själv ska skjuta?" är frågan (persontestet, scenario 6).
+    // Det här är bara villkoret för att HÄMTA datan; den är ingen flik. Servern läser veckan för en ensam planering.
     const weekTab = () => family() || !!(A && A.S() && A.S().planning && A.S().planning.competition);
     function familyGrid(f) {
         const g = { family: true, columns: f.columns || [], rows: [], parts: [], hiddenParts: f.hiddenParts || 0, familyClashes: f.familyClashes || [],
@@ -104,8 +106,9 @@ window.PlaneringBemanning = (function () {
 
     // ---------------------------------------------------------------- adressen
     function hp() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
-    function part() { const d = hp().get('del'); return d === 'personer' || d === 'hitta' || (d === 'veckan' && weekTab()) ? d : 'rutnat'; }
-    function personKeyParam() { return part() === 'personer' || part() === 'veckan' ? (hp().get('person') || '') : ''; }
+    // En gammal adress (#del=veckan) landar i Personer, med samma person om en angavs.
+    function part() { const d = hp().get('del'); return d === 'veckan' ? 'personer' : (d === 'personer' || d === 'hitta' ? d : 'rutnat'); }
+    function personKeyParam() { return part() === 'personer' ? (hp().get('person') || '') : ''; }
     function nav(del, person) {
         let h = '#vy=bemanning';
         if (del && del !== 'rutnat') h += '&del=' + del;
@@ -128,6 +131,7 @@ window.PlaneringBemanning = (function () {
 
     async function draw() {
         const seq = ++B.seq, p = part(), pk = personKeyParam();
+        if (hp().get('del') === 'veckan') history.replaceState(null, '', '#vy=bemanning&del=personer' + (pk ? '&person=' + encodeURIComponent(pk) : ''));
         A.setActions([]);
         const body = $('plBody');
         body.innerHTML = switchHtml(p) + '<div id="plbArea">' + A.spinner() + '</div>';
@@ -141,8 +145,7 @@ window.PlaneringBemanning = (function () {
                     else A.showMsg('Startlistan kan inte byggas om härifrån: planeringen är inte kopplad till en fälttävling, eller så saknar du tävlingens personalbehörighet.', 'warning');
                 }
             }
-            else if (p === 'personer') { await loadPeople(); if (seq !== B.seq) return; pk ? drawPerson(pk) : drawPeople(); }
-            else if (p === 'veckan') { await (pk ? drawWeekPerson(pk, seq) : drawWeek(seq)); }
+            else if (p === 'personer') { await loadPeople(); if (seq !== B.seq) return; if (pk) drawPerson(pk); else { drawPeople(); loadWeekList(seq); } }
             else { await loadPeople(); if (seq !== B.seq) return; await drawFind(seq); }
         } catch (e) {
             if (seq !== B.seq) return;
@@ -152,8 +155,7 @@ window.PlaneringBemanning = (function () {
     }
     function switchHtml(p) {
         const b = (k, l) => `<button type="button" class="btn ${p === k ? 'btn-primary' : 'btn-outline-primary'}" data-plb-part="${k}" aria-pressed="${p === k}">${l}</button>`;
-        // Steg 3: i en huvudplanering med delar visar "Veckan" varje persons dag för dag över alla delar.
-        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${weekTab() ? b('veckan', 'Veckan') : ''}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
+        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
     }
 
     // Omgång 2 steg 4: grenen väljs när planeringen skapas och styr bara vilka roller som föreslås — därför står den här,
@@ -701,7 +703,7 @@ window.PlaneringBemanning = (function () {
             html: `<p class="pl-help mb-2">Välj det som passar er. Det är förvalet för alla — en enskild person kan få ett eget läge nedan.</p>
                 <div class="list-group mb-3" role="radiogroup" aria-label="Hur funktionärer som skjuter hanteras">${r.modes.map(radio).join('')}</div>
                 ${(r.overrides || []).length ? `<div class="small fw-semibold mb-1">Egna undantag</div><ul class="list-unstyled small mb-2" id="plbSmOver">${r.overrides.map(o => `<li class="d-flex justify-content-between gap-2 py-1 border-bottom"><span>${esc(o.name)} — ${esc(titleOf(o.mode))}</span><button type="button" class="btn btn-link btn-sm p-0" data-sm-clear="${o.memberId}">Ta bort</button></li>`).join('')}</ul>` : ''}
-                <p class="pl-help small mb-0">Ett eget läge sätter du på personen: öppna personen under Personer eller Veckan.</p>`,
+                <p class="pl-help small mb-0">Ett eget läge sätter du på personen: öppna personen under Personer.</p>`,
             onOpen: b => {
                 b.addEventListener('click', async e => {
                     const c = e.target.closest('[data-sm-clear]'); if (!c) return;
@@ -719,7 +721,7 @@ window.PlaneringBemanning = (function () {
             }
         });
     }
-    // Ett eget läge för en person (Veckan, personens sida).
+    // Ett eget läge för en person (personens sida).
     async function openPersonShooterMode(memberId, name) {
         const r = await sget('GetShooterMode').catch(() => null);
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte läsa inställningen.'), 'danger'); return; }
@@ -1430,7 +1432,10 @@ window.PlaneringBemanning = (function () {
     // ================================================================ Personer
     function peopleSummary() {
         const m = B.meta || {};
-        const parts = [`${m.totalPeople || 0} personer`, `${m.assignedCount || 0} placerade`];
+        const extra = extraPeople().length;
+        const parts = [`${(m.totalPeople || 0) + extra} personer`, `${(m.assignedCount || 0) + extra} placerade`];
+        const hard = B.weekMap ? [...B.weekMap.values()].filter(w => w.clashes > 0).length : 0;
+        if (hard) parts.push(`<span class="text-danger fw-semibold">${hard} med krock</span>`);
         if (m.needsResponseCount) parts.push(`${m.needsResponseCount} väntar på svar`);
         if (m.externalCount) parts.push(`${m.externalCount} utan konto`);
         return parts.join(' · ');
@@ -1438,7 +1443,7 @@ window.PlaneringBemanning = (function () {
     function matches(p) {
         const asg = p.assignments || [];
         if (B.show === 'queue' && !((p.volunteer || (p.availabilityLabels || []).length) && asg.length === 0)) return false;
-        if (B.show === 'assigned' && !asg.length) return false;
+        if (B.show === 'assigned' && !asg.length && !p.weekOnly) return false;
         if (B.show === 'invited' && !asg.some(a => a.status === 'Invited')) return false;
         if (B.show === 'declined' && !asg.some(a => a.status === 'Declined')) return false;
         if (B.show === 'prep' && !(p.prep || []).length) return false;
@@ -1461,7 +1466,7 @@ window.PlaneringBemanning = (function () {
             { label: 'E-postlista…', icon: 'bi-envelope', fn: openEmailList },
         ]);
         const m = B.meta || {};
-        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>placera någon</b>? Tryck på <b>lägg till</b> i rätt ruta i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>, eller på <b>Placera</b> vid personen här.</p>`;
+        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>placera någon</b>? Tryck på <b>lägg till</b> i rätt ruta i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>, eller på <b>Placera</b> vid personen här.${weekTab() ? ' Ett rött märke betyder krock: någon jobbar medan hen själv ska skjuta, eller har två placeringar på samma tid. Öppna personen för dag för dag.' : ''}</p>`;
         if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att bli placerade. De väntar på att du fördelar rollerna.</div>
             ${B.show === 'queue' ? '' : '<button type="button" class="btn btn-sm btn-warning" data-plb-show="queue">Visa dem</button>'}</div>`;
         if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till sin plats — platsen behöver fyllas.</div>
@@ -1492,19 +1497,19 @@ window.PlaneringBemanning = (function () {
         const asg = p.assignments || [];
         let chips = asg.slice(0, 3).map(a => `<span class="pl-role">${a.isResponsible ? '<i class="bi bi-star-fill text-warning me-1" aria-label="Ansvarig"></i>' : ''}${esc(a.roleName)}${a.dayLabel ? ` <span class="plb-dim">· ${esc(a.dayLabel)}</span>` : ''}</span>`).join(' ');
         if (asg.length > 3) chips += ` <span class="pl-role">+${asg.length - 3}</span>`;
-        if (!asg.length) chips = p.volunteer
+        if (!asg.length) chips = p.weekOnly ? '<span class="plb-dim small">Placerad i en annan del</span>' : p.volunteer
             ? '<span class="text-warning-emphasis small"><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>Anmäld — inte placerad än</span>'
             : ((p.availabilityLabels || []).length ? '<span class="text-warning-emphasis small">Har angett tider — inte placerad än</span>'
                 : ((p.prep || []).length ? '<span class="plb-dim small">Bara förberedelser</span>' : '<span class="plb-dim small">—</span>'));
-        const state = `<span class="pl-state ${STATE_CLS[p.state] || 'off'}">${esc(p.state)}</span>`;
+        const state = p.weekOnly ? '' : `<span class="pl-state ${STATE_CLS[p.state] || 'off'}">${esc(p.state)}</span>`;
         const startsLine = (p.starts || []).length ? `<div class="plb-dim small" data-plb-starts>Skjuter själv: ${p.starts.map(esc).join(', ')}</div>` : '';
-        const menu = p.readOnly ? '' : A.rowMenu([
+        const menu = (p.readOnly || p.weekOnly) ? '' : A.rowMenu([
             { label: 'Öppna ' + first(p.displayName), fn: () => nav('personer', p.key) },
             { label: 'Placera på en plats…', fn: () => openAssignment({ person: p }) },
             asg.some(a => !a.readOnly) && (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringarna…', fn: () => notifyPerson(p) },
         ]);
         const call = p.phone ? ` <a class="btn btn-sm btn-outline-success" href="tel:${esc(p.phone)}" title="Ring ${esc(p.displayName)}" aria-label="Ring ${esc(p.displayName)}"><i class="bi bi-telephone" aria-hidden="true"></i></a>` : '';
-        return `<tr><td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-plb-person="${esc(p.key)}">${esc(p.displayName)}</button>
+        return `<tr><td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-plb-person="${esc(p.key)}">${esc(p.displayName)}</button>${weekBadges(p)}
                 ${p.hasAdminAccess ? ' <i class="bi bi-shield-lock text-warning" title="Får hantera tävlingen" aria-label="Får hantera tävlingen"></i>' : ''}
                 ${p.isExternal ? ' <span class="badge text-bg-light border fw-normal" title="Saknar konto på pistol.nu">utan konto</span>' : ''}
                 ${!B.byOrg && orgOf(p) !== 'Ingen förening' ? `<div class="plb-dim small">${esc(orgOf(p))}</div>` : ''}${startsLine}
@@ -1515,8 +1520,9 @@ window.PlaneringBemanning = (function () {
     }
     function drawPeopleRows() {
         const host = $('plbPeople'); if (!host) return;
-        let list = (B.people || []).filter(matches);
-        const total = (B.people || []).length;
+        const everyone = allPeople();
+        let list = everyone.filter(matches);
+        const total = everyone.length;
         $('plbCount').textContent = list.length === total ? `${total} personer` : `Visar ${list.length} av ${total}`;
         if (!list.length) {
             host.innerHTML = `<p class="pl-help mb-0">${total ? 'Ingen person matchar.' : 'Ingen är placerad än. Sätt in folk i rutnätet, eller använd Hitta funktionärer.'}</p>`;
@@ -1545,7 +1551,46 @@ window.PlaneringBemanning = (function () {
     function findPerson(key) {
         return (B.people || []).find(x => x.key === key)
             || (B.people || []).find(x => (x.displayName || '').toLowerCase() === String(key).replace(/^n:/, ''))
+            || extraPeople().find(x => x.key === key)
+            || (B.solo && B.solo.key === key ? B.solo : null)
             || null;
+    }
+    function personGone() {
+        A.setHead('Bemanning', '');
+        area().innerHTML = `<p class="mb-2"><a href="#vy=bemanning&del=personer" data-plb-back>← Alla personer</a></p>
+            <div class="pl-card"><p class="mb-0">Personen finns inte längre i bemanningen.</p></div>`;
+    }
+    // En person som bara är placerad i en annan del av familjen står inte i huvudplaneringens egen lista: hen läses ur personens vecka.
+    async function drawPersonFromWeek(key) {
+        const seq = B.seq;
+        area().innerHTML = A.spinner();
+        let d = null;
+        try { d = await sget('GetFamilyPersonWeek', { personKey: key }); } catch (e) { d = null; }
+        if (seq !== B.seq || personKeyParam() !== key) return;
+        if (d && d.success) { B.solo = weekOnlyPerson(d); B.pre = d; drawPerson(key); } else personGone();
+    }
+    const placeCount = p => p.weekOnly ? p.weekCount : ((B.weekMap && family() && B.weekMap.get(p.key)) ? B.weekMap.get(p.key).assignments : (p.assignments || []).length);
+    // Åtgärderna på personens sida. Kopplingar gäller hela familjen (identityPost); veckans data (wk) tillför "Ångra koppling…" när
+    // namnet inte stod i huvudplaneringen, och det egna läget som skjutande funktionär.
+    function personActions(p, wk) {
+        if (p.readOnly) return [];
+        const asg = p.assignments || [], editable = asg.filter(a => !a.readOnly), own = !p.weekOnly;
+        const orig = (asg.find(a => a.originalName) || {}).originalName;
+        const canUndo = family() && wk && !wk.isExternal && !(orig && orig !== p.displayName);
+        const shooter = wk && !wk.isExternal && wk.memberId > 0 && linked();
+        return [
+            own && { label: 'Placera ' + first(p.displayName) + '…', icon: 'bi-plus-lg', fn: () => openAssignment({ person: p }) },
+            own && editable.length && (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringarna…', icon: 'bi-send', fn: () => notifyPerson(p) },
+            own && { divider: true },
+            { label: 'Byt namn…', icon: 'bi-pencil', fn: () => openRenamePerson(p) },
+            !p.memberId && { label: 'Koppla till en medlem…', icon: 'bi-person-check', fn: () => openLinkPerson(p) },
+            own && { label: p.email ? 'Ändra e-post…' : 'Lägg till e-post…', icon: 'bi-envelope', fn: () => openEmailPerson(p) },
+            own && asg.length && { divider: true },
+            own && editable.length && { label: 'Lämna över alla placeringar till någon annan…', icon: 'bi-arrow-left-right', fn: () => openReplace(p) },
+            (canUndo || shooter) && { divider: true },
+            canUndo && { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoIdentity(p) },
+            shooter && { label: 'Hur gör hen som skjutande funktionär…', icon: 'bi-bullseye', fn: () => openPersonShooterMode(wk.memberId, wk.name) },
+        ];
     }
     // ---- Omgång 3 steg 9: tävlar själv (avsikterna) ----
     async function shootData() {
@@ -1601,27 +1646,17 @@ window.PlaneringBemanning = (function () {
     function drawPerson(key) {
         const p = findPerson(key);
         if (!p) {
-            A.setHead('Bemanning', '');
-            area().innerHTML = `<p class="mb-2"><a href="#vy=bemanning&del=personer" data-plb-back>← Alla personer</a></p>
-                <div class="pl-card"><p class="mb-0">Personen finns inte längre i bemanningen.</p></div>`;
+            if (family()) drawPersonFromWeek(key); else personGone();
             return;
         }
+        const ro = p.readOnly || p.weekOnly;   // en person som bara står i en annan del ändras i den delen och i Rutnätet
         const asg = p.assignments || [];
         const editable = asg.filter(a => !a.readOnly);
         const sub = [p.clubName ? esc(p.clubName) : '', p.memberId ? 'Medlem på pistol.nu' : '<span class="text-warning-emphasis">Saknar konto på pistol.nu</span>'].filter(Boolean).join(' · ');
         A.setHead(p.displayName, sub);
-        A.setActions(p.readOnly ? [] : [
-            { label: 'Placera ' + first(p.displayName) + '…', icon: 'bi-plus-lg', fn: () => openAssignment({ person: p }) },
-            editable.length && (p.memberId || p.email) && { label: 'Skicka förfrågan om placeringarna…', icon: 'bi-send', fn: () => notifyPerson(p) },
-            { divider: true },
-            { label: 'Byt namn…', icon: 'bi-pencil', fn: () => openRenamePerson(p) },
-            !p.memberId && { label: 'Koppla till en medlem…', icon: 'bi-person-check', fn: () => openLinkPerson(p) },
-            { label: p.email ? 'Ändra e-post…' : 'Lägg till e-post…', icon: 'bi-envelope', fn: () => openEmailPerson(p) },
-            asg.length && { divider: true },
-            editable.length && { label: 'Lämna över alla placeringar till någon annan…', icon: 'bi-arrow-left-right', fn: () => openReplace(p) },
-        ]);
+        A.setActions(personActions(p, null));
 
-        let h = `<p class="mb-3"><a href="#vy=bemanning&del=personer" data-plb-back>← Alla personer</a></p>`;
+        let h = `<p class="mb-3"><a href="#vy=bemanning&del=personer" data-plb-back>← Alla personer</a></p><div id="plbWeekTop"></div>`;
         const orig = (asg.find(a => a.originalName) || {}).originalName;
         if (orig && orig !== p.displayName) h += `<div class="pl-next"><div class="t">Hette <b>${esc(orig)}</b> när hen skrevs in i planen.</div><button type="button" class="btn btn-sm btn-outline-secondary" data-plb-undo>Ångra kopplingen</button></div>`;
 
@@ -1633,14 +1668,14 @@ window.PlaneringBemanning = (function () {
             h += `<div class="pl-card"><h2>Hur når vi ${esc(first(p.displayName))}?</h2>
                 <p class="pl-help mb-2">Utan konto på pistol.nu får hen inget eget schema och inga påminnelser. Med e-post kan hen åtminstone få förfrågan.</p>
                 ${contact.length ? `<p class="mb-2">${contact.join(' · ')}</p>` : '<p class="mb-2 text-danger">Varken konto eller e-post — hen kan inte nås genom pistol.nu.</p>'}
-                <div class="d-flex gap-2 flex-wrap"><button type="button" class="btn btn-sm btn-outline-primary" data-plb-link>Koppla till en medlem…</button><button type="button" class="btn btn-sm btn-outline-secondary" data-plb-email>${p.email ? 'Ändra e-post…' : 'Lägg till e-post…'}</button></div></div>`;
+                <div class="d-flex gap-2 flex-wrap"><button type="button" class="btn btn-sm btn-outline-primary" data-plb-link>Koppla till en medlem…</button>${p.weekOnly ? '' : `<button type="button" class="btn btn-sm btn-outline-secondary" data-plb-email>${p.email ? 'Ändra e-post…' : 'Lägg till e-post…'}</button>`}</div></div>`;
         } else if (contact.length) {
             h += `<p class="mb-3">${contact.join(' · ')}</p>`;
         }
 
         // Uppdragen
-        h += `<div class="pl-card"><div class="pl-cardh"><h2>Placeringar (${asg.length})</h2></div>`;
-        h += asg.length ? `<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th scope="col">Roll</th><th scope="col">När</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th></tr></thead><tbody>`
+        h += `<div class="pl-card"><div class="pl-cardh"><h2>Placeringar (${p.weekOnly ? p.weekCount : asg.length})</h2></div>`;
+        h += p.weekOnly ? `<p class="pl-help mb-0">${esc(first(p.displayName))} är placerad i en annan del av veckan. Placeringarna ändras i Rutnätet och syns dag för dag nedan.</p>` : asg.length ?`<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th scope="col">Roll</th><th scope="col">När</th><th scope="col" class="d-none d-sm-table-cell">Läge</th><th scope="col" class="text-end"><span class="visually-hidden">Åtgärder</span></th></tr></thead><tbody>`
             + asg.map(a => {
                 const menu = a.readOnly ? `<span class="badge text-bg-light border fw-normal">${esc(p.sourceLabel || 'Stationer-fliken')}</span>` : A.rowMenu([
                     { label: 'Ändra placeringen…', fn: () => openAssignment({ id: a.id, person: p }) },
@@ -1660,9 +1695,12 @@ window.PlaneringBemanning = (function () {
             : '<p class="pl-help mb-0">Inga placeringar än.</p>';
         h += '</div>';
 
+        // Personens dag för dag, egna starter och krockar — läses efter att sidan ritats (loadWeekCards).
+        h += '<div id="plbWeek"></div>';
+
         // Behörighet — när planeringen är kopplad till en tävling, eller är en huvudplanering med delar (steg 5: gäller då alla
         // veckans tävlingar). Annars finns ingen tävling att hantera.
-        if ((linked() || family()) && !p.readOnly) {
+        if ((linked() || family()) && !ro) {
             h += `<div class="pl-card"><h2>Behörighet</h2>` + (p.memberId
                 ? `<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" id="plbAccess"${p.hasAdminAccess ? ' checked' : ''}>
                     <label class="form-check-label" for="plbAccess">${linked() ? 'Får hantera tävlingen i pistol.nu' : 'Får hantera alla veckans tävlingar i pistol.nu'}</label>
@@ -1675,7 +1713,7 @@ window.PlaneringBemanning = (function () {
 
         // Ställer upp för
         const reps = p.representChoices || [];
-        if (!p.readOnly) {
+        if (!ro) {
             const repVal = p.representsId ? (p.representsType + ':' + p.representsId) : '';
             h += `<div class="pl-card"><h2>Ställer upp för</h2>` + (reps.length
                 ? `<label class="visually-hidden" for="plbRep">Förening</label><select class="form-select" id="plbRep" style="max-width:420px">
@@ -1697,6 +1735,7 @@ window.PlaneringBemanning = (function () {
 
         area().innerHTML = h;
         loadShootCard(p);
+        loadWeekCards(p, sub);
         const acc = $('plbAccess');
         if (acc) acc.addEventListener('change', async () => {
             // Steg 4–6 UX: en kraftig behörighet ska inte slås på med ett klick — i huvudplaneringen frågar vi först.
@@ -1734,14 +1773,7 @@ window.PlaneringBemanning = (function () {
         });
         area().querySelector('[data-plb-link]')?.addEventListener('click', () => openLinkPerson(p));
         area().querySelector('[data-plb-email]')?.addEventListener('click', () => openEmailPerson(p));
-        area().querySelector('[data-plb-undo]')?.addEventListener('click', async () => {
-            try {
-                const r = await spost('UndoPersonIdentity', { personKey: p.key });
-                if (!r.success) { A.failMsg(r, 'Det gick inte att ångra.'); return; }
-                A.showMsg('Personen har sitt gamla namn igen.');
-                nav('personer');
-            } catch (e) { A.showMsg(esc(e.message), 'danger'); }
-        });
+        area().querySelector('[data-plb-undo]')?.addEventListener('click', () => undoIdentity(p));
     }
 
     // ---- medlemssökning i en dialog: lista under fältet, ett klick väljer ----
@@ -1775,13 +1807,13 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Byt namn', okLabel: 'Spara', wide: false,
             html: `<label class="form-label" for="plbPName">Namn</label><input type="text" class="form-control" id="plbPName" maxlength="200" value="${esc(p.displayName)}">
-                <p class="pl-help small mt-1 mb-0">Gäller alla ${(p.assignments || []).length} placeringar.</p>`,
+                <p class="pl-help small mt-1 mb-0">Gäller alla ${placeCount(p)} placeringar${family() ? ' i hela veckan' : ''}.</p>`,
             onOpen: b => { const i = b.querySelector('#plbPName'); i.focus(); i.select(); },
             onOk: async b => {
                 const v = b.querySelector('#plbPName').value.trim();
                 if (!v) return 'Skriv ett namn.';
                 if (v === p.displayName) return true;
-                const r = await spost('ApplyPersonIdentity', { personKey: p.key, newName: v });
+                const r = await identityPost({ personKey: p.key, newName: v });
                 if (!r.success) return r.message || 'Namnet kunde inte bytas.';
                 await loadPeople();
                 nav('personer', p.memberId ? p.key : 'n:' + v.toLowerCase());
@@ -1797,14 +1829,14 @@ window.PlaneringBemanning = (function () {
                 <input type="search" class="form-control" id="plbLinkQ" autocomplete="off" value="${esc(p.displayName)}">
                 <div class="list-group mt-1 d-none" id="plbLinkRes"></div>
                 <div class="mt-2" id="plbLinkPicked"></div>
-                <p class="pl-help small mt-2 mb-0">Alla ${(p.assignments || []).length} placeringar kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
+                <p class="pl-help small mt-2 mb-0">Alla ${placeCount(p)} placeringar${family() ? ' i hela veckan' : ''} kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
             onOpen: b => {
                 const i = b.querySelector('#plbLinkQ'); i.focus(); i.dispatchEvent(new Event('input'));
                 wireMemberSearch(b, '#plbLinkQ', '#plbLinkRes', m => { picked = m; b.querySelector('#plbLinkPicked').innerHTML = `Vald: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
             },
             onOk: async () => {
                 if (!picked) return 'Välj en medlem i listan.';
-                const r = await spost('ApplyPersonIdentity', { personKey: p.key, memberId: picked.memberId });
+                const r = await identityPost({ personKey: p.key, memberId: picked.memberId });
                 if (!r.success) return r.message || 'Det gick inte att koppla.';
                 await loadPeople();
                 nav('personer', 'm:' + picked.memberId);
@@ -1855,8 +1887,8 @@ window.PlaneringBemanning = (function () {
                 const typed = b.querySelector('#plbRepQ').value.trim();
                 if (!picked && !typed) return 'Skriv eller välj vem som tar över.';
                 // Omgång 3 (K3): hela identiteten byts — utan kontaktuppgifter står den nya utan e-post och telefon, aldrig med den förras.
-                const r = await spost('ApplyPersonIdentity', picked
-                    ? { personKey: p.key, memberId: picked.memberId, isReplacement: true }
+                const r = await identityPost(picked
+                    ?{ personKey: p.key, memberId: picked.memberId, isReplacement: true }
                     : { personKey: p.key, newName: typed, isReplacement: true,
                         email: b.querySelector('#plbRepEmail').value.trim(), phone: b.querySelector('#plbRepPhone').value.trim() });
                 if (!r.success) return r.message || 'Det gick inte att lämna över.';
@@ -2698,48 +2730,49 @@ window.PlaneringBemanning = (function () {
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
 
-    // ================================================================ Veckan (steg 3)
-    // Personens vecka över familjen: en rad per människa, och per människa dag för dag alla uppdrag i alla delar, egna
-    // starter och avsikter, med krockar och för korta platsbyten. Valideringsytan — rutnätet är författarytan, så här
-    // ändras inget utom vem personen är (kopplingen gäller hela familjen).
+    // ================================================================ Personens vecka (på personens sida under Personer)
+    // Dag för dag alla placeringar i alla delar, egna starter och avsikter, med krockar och för korta platsbyten, och lediga fönster att
+    // skjuta i. Läses för sig (GetFamilyPersonWeek) efter att sidan ritats — saknas den ritas sidan ändå. Valideringsytan: placeringarna
+    // ändras i tabellen på sidan och i Rutnätet; här ändras inget utom vem personen är (kopplingen gäller hela familjen).
     const WEEK_ICON = { Assignment: 'bi-person-badge', Start: 'bi-bullseye', Intent: 'bi-flag' };
     const CLASH_TEXT = { Overlap: ['text-bg-danger', 'krockar med'], TightTravel: ['text-bg-warning', 'kort tid att ta sig till/från'], Intent: ['text-bg-light border', 'tänker tävla samma dag:'] };
-    async function drawWeek(seq) {
-        const d = await sget('GetFamilyWeek');
-        if (seq !== B.seq) return;
-        if (!d.success) throw new Error(d.message || 'Veckan kunde inte läsas.');
-        B.week = d.people || [];
-        B.weekStarts = d.startsIncluded !== false;
-        paintWeek();
+    // En person som bara är placerad i en annan del av familjen står inte i huvudplaneringens egen lista — hen läggs till ur veckans lista.
+    function weekOnlyPerson(w) {
+        return { key: w.key, displayName: w.name, memberId: w.memberId > 0 ? w.memberId : null, isExternal: !!w.isExternal,
+            assignments: [], weekOnly: true, weekCount: w.assignments || 0, readOnly: false, clubName: '', state: '' };
     }
-    function weekRows() {
-        const q = (B.wq || '').trim().toLowerCase();
-        const list = (B.week || []).filter(p => !q || p.name.toLowerCase().indexOf(q) >= 0);
-        if (!list.length) return `<p class="plb-dim p-3 mb-0">${(B.week || []).length ? 'Ingen heter så.' : 'Ingen är placerad i veckan än.'}</p>`;
-        return `<div class="list-group list-group-flush">${list.map(p => `<button type="button" class="list-group-item list-group-item-action d-flex flex-wrap gap-2 align-items-baseline" data-plbw-person="${esc(p.key)}">
-            <span class="fw-semibold${p.isExternal ? ' text-warning-emphasis' : ''}">${esc(p.name)}</span>
-            ${p.clashes ? `<span class="badge text-bg-danger fw-normal">${p.clashes} ${p.clashes === 1 ? 'krock' : 'krockar'}</span>` : ''}
-            ${p.warnings ? `<span class="badge text-bg-warning fw-normal">${p.warnings} ${p.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''}
-            <span class="plb-dim small ms-auto">${p.assignments} ${p.assignments === 1 ? 'placering' : 'placeringar'} · ${esc((p.days || []).map(d => d.label).join(', '))}</span></button>`).join('')}</div>`;
+    function extraPeople() {
+        if (!family() || !B.weekMap) return [];
+        const have = new Set((B.people || []).map(p => p.key));
+        const out = [];
+        B.weekMap.forEach(w => { if (!have.has(w.key)) out.push(weekOnlyPerson(w)); });
+        return out;
     }
-    function paintWeek() {
-        const list = B.week || [], hard = list.filter(p => p.clashes > 0).length;
-        A.setHead('Bemanning', `${list.length} ${list.length === 1 ? 'person' : 'personer'}` + (hard ? ` · <span class="text-danger fw-semibold">${hard} med krock</span>` : ''));
-        A.setActions([]);
-        area().innerHTML = `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Varje persons vecka över alla delar. Öppna en person för dag för dag, egna starter och platsbyten. ${B.weekStarts ? 'Krock betyder att någon jobbar medan hen själv ska skjuta, eller har två placeringar på samma tid.' : 'Egna starter räknas först när du öppnar personen.'}</p>
-            <label class="visually-hidden" for="plbwQ">Sök person</label>
-            <input type="search" class="form-control mb-2" id="plbwQ" placeholder="Sök person" autocomplete="off" value="${esc(B.wq || '')}">
-            <div class="border rounded" id="plbwRows">${weekRows()}</div>`;
-        $('plbwQ').addEventListener('input', e => { B.wq = e.target.value; $('plbwRows').innerHTML = weekRows(); });
+    const allPeople = () => (B.people || []).concat(extraPeople());
+    // Krock- och varningsmärkena i listan: läses efter att listan ritats, så att den aldrig väntar på dem. Saknas de ritas listan som förut.
+    async function loadWeekList(seq) {
+        if (!weekTab()) return;
+        try {
+            const d = await sget('GetFamilyWeek');
+            if (seq !== B.seq || !d.success) return;
+            B.weekMap = new Map((d.people || []).map(x => [x.key, x]));
+            if (part() === 'personer' && !personKeyParam() && $('plbPeople')) drawPeopleKeepFilter();
+        } catch (e) { /* listan klarar sig utan märkena */ }
     }
-    function weekItemHtml(i) {
-        const clashes = (i.clashes || []).map(c => { const t = CLASH_TEXT[c.kind] || ['text-bg-light border', c.kind]; return `<div class="small mt-1"><span class="badge ${t[0]} fw-normal">${esc(t[1])}</span> ${esc(c.with)}</div>`; }).join('');
-        // Steg 6b: ett uppdrag (sourceKey "a{id}") kan lämnas över — det är där man ser att någon hoppat av.
+    function weekBadges(p) {
+        const w = B.weekMap && B.weekMap.get(p.key);
+        if (!w) return '';
+        return (w.clashes ? ` <span class="badge text-bg-danger fw-normal" data-plb-clash>${w.clashes} ${w.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
+            + (w.warnings ? ` <span class="badge text-bg-warning fw-normal" data-plb-warn>${w.warnings} ${w.warnings === 1 ? 'varning' : 'varningar'}</span>` : '');
+    }
+    // Ett uppdrag som INTE står i personens egen placeringstabell (det ligger i en annan del) kan lämnas över här; de i tabellen har knappen i sin meny.
+    function weekItemHtml(i, ownIds) {
         const rid = i.kind === 'Assignment' && /^a\d+$/.test(i.sourceKey || '') ? i.sourceKey.slice(1) : '';
-        return `<li class="d-flex gap-2 py-2 border-bottom plbw-item" data-kind="${esc(i.kind)}"><i class="bi ${WEEK_ICON[i.kind] || 'bi-dot'} mt-1 ${i.hasClash ? 'text-danger' : 'text-body-secondary'}" aria-hidden="true"></i>
-            <div class="min-w-0 flex-grow-1"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}${i.kind === 'Assignment' && i.status === 'Invited' ? ' <span class="badge text-bg-info fw-normal">Väntar på svar</span>' : ''}</div>
+        const clashes = (i.clashes || []).map(c => { const t = CLASH_TEXT[c.kind] || ['text-bg-light border', c.kind]; return `<div class="small mt-1"><span class="badge ${t[0]} fw-normal">${esc(t[1])}</span> ${esc(c.with)}</div>`; }).join('');
+        return `<li class="d-flex flex-wrap flex-sm-nowrap gap-2 py-2 border-bottom plbw-item" data-kind="${esc(i.kind)}"><i class="bi ${WEEK_ICON[i.kind] || 'bi-dot'} mt-1 ${i.hasClash ? 'text-danger' : 'text-body-secondary'}" aria-hidden="true"></i>
+            <div class="min-w-0 flex-grow-1" style="flex-basis:12rem"><div>${esc(i.label)}${i.endsNextDay ? ' <span class="badge text-bg-light border fw-normal">fortsätter nästa dag</span>' : ''}${i.kind === 'Assignment' && i.status === 'Invited' ? ' <span class="badge text-bg-info fw-normal">Väntar på svar</span>' : ''}</div>
             ${i.place ? `<div class="plb-dim small"><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>${esc(i.place)}</div>` : ''}${clashes}</div>
-            ${rid ? `<button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 align-self-start" data-plbw-repl="${rid}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hitta ersättare</button>` : ''}</li>`;
+            ${rid && !ownIds.has(+rid) ? `<button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0 align-self-start" data-repl="${rid}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Hitta ersättare</button>` : ''}</li>`;
     }
     // Steg 6c (B12): när personen har tid att skjuta själv, per tävling i veckan.
     function shootWindowsHtml(list) {
@@ -2749,78 +2782,65 @@ window.PlaneringBemanning = (function () {
             ${list.map(t => `<div class="mb-2"><b>${esc(t.name)}</b>${t.declared ? ' <span class="badge text-bg-success fw-normal">Tänker tävla</span>' : ''}
                 ${(t.days || []).map(day => `<div class="small plbw-win"><span class="plb-dim">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}:</span> ${day.windows.length ? day.windows.map(w => esc(w.from + '–' + w.to)).join(', ') : '<span class="text-danger">ingen ledig tid</span>'}</div>`).join('')}</div>`).join('')}</div>`;
     }
-    async function drawWeekPerson(key, seq) {
-        const d = await sget('GetFamilyPersonWeek', { personKey: key });
-        if (seq !== B.seq) return;
-        const back = '<button type="button" class="btn btn-link p-0 mb-2" data-plbw-back><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Alla personer</button>';
-        if (!d.success) { A.setHead('Bemanning', ''); A.setActions([]); area().innerHTML = back + `<div class="pl-card"><p class="mb-0">${esc(d.message || 'Personen kunde inte läsas.')}</p></div>`; return; }
-        B.wp = d;
-        A.setHead(d.name, `${d.assignments} ${d.assignments === 1 ? 'placering' : 'placeringar'}`
-            + (d.clashes ? ` · <span class="text-danger fw-semibold">${d.clashes} ${d.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
-            + (d.warnings ? ` · <span class="text-warning-emphasis fw-semibold">${d.warnings} ${d.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''));
-        A.setActions([d.isExternal ? { label: 'Koppla till en medlem…', icon: 'bi-link-45deg', fn: () => openWeekLink(d, null) } : { label: 'Ångra koppling…', icon: 'bi-arrow-counterclockwise', fn: () => undoWeekLink(d) },
-            !d.isExternal && d.memberId > 0 && linked() && { label: 'Hur gör hen som skjutande funktionär…', icon: 'bi-bullseye', fn: () => openPersonShooterMode(d.memberId, d.name) }]);
-        let h = back;
-        const m = d.match;
-        if (d.isExternal && m && !m.looksLikeTwoPeople && ((m.candidates || []).length || (m.inPlan || []).length)) {
-            h += `<div class="pl-next warn" id="plbwMatch"><div class="t"><b>Är det här någon du känner igen?</b> ${esc(d.name)} saknar konto. Kopplingen gäller alla placeringar i hela veckan.</div>
-                <div class="d-flex flex-wrap gap-1 mt-1">${(m.candidates || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-primary" data-plbw-cand="${i}">Koppla till ${esc(c.name)}${c.clubName ? ' · ' + esc(c.clubName) : ''}</button>`).join('')}
-                ${(m.inPlan || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-secondary" data-plbw-inplan="${i}">Samma person som ${esc(c.name)}</button>`).join('')}</div></div>`;
-        } else if (d.isExternal) h += `<p class="pl-help small"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${esc(d.name)} saknar konto på pistol.nu — inget eget schema och inga påminnelser förrän hen är kopplad.</p>`;
-        h += (d.days || []).map(day => `<div class="pl-card plbw-day" data-date="${esc(day.date)}"><h2 class="h6 mb-1">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}</h2>
-            ${(day.carriedIn || []).map(c => `<div class="plb-dim small"><i class="bi bi-moon me-1" aria-hidden="true"></i>Från kvällen före: ${esc(c.label)}</div>`).join('')}
-            <ul class="list-unstyled mb-0">${(day.items || []).map(weekItemHtml).join('')}</ul></div>`).join('');
-        h += shootWindowsHtml(d.shootWindows);
-        h += '<p class="pl-help small mt-2"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Placeringarna ändras i<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>.</p>';
-        area().innerHTML = h;
+    // Kopplingen: hela familjen när planeringen är en familj (samma person kan stå i flera delar), annars den här planeringen.
+    async function identityPost(body) {
+        const r = await spost(family() ? 'ApplyFamilyPersonIdentity' : 'ApplyPersonIdentity', body);
+        if (r && r.success) {
+            B.weekMap = null;
+            if (r.skipped) A.showMsg(r.skipped + ' del' + (r.skipped === 1 ? '' : 'ar') + ' fick du inte ändra och rördes inte.', 'warning');
+        }
+        return r;
     }
-    async function applyWeekLink(d, body, goKey) {
-        const r = await spost('ApplyFamilyPersonIdentity', Object.assign({ personKey: d.key }, body));
-        if (!r.success) return r.message || 'Det gick inte att koppla.';
-        A.showMsg('Klart — ' + r.affected + (r.affected === 1 ? ' placering' : ' placeringar') + ' i veckan uppdaterade.' + (r.skipped ? ' ' + r.skipped + ' del' + (r.skipped === 1 ? '' : 'ar') + ' fick du inte ändra och rördes inte.' : ''), 'success');
-        nav('veckan', goKey);
-        return true;
-    }
-    function openWeekLink(d) {
-        let picked = null;
-        A.formModal({
-            title: 'Koppla ' + d.name + ' till en medlem', okLabel: 'Koppla', wide: false,
-            html: `<label class="form-label" for="plbLinkQ">Sök medlem</label><input type="search" class="form-control" id="plbLinkQ" autocomplete="off" value="${esc(d.name)}">
-                <div class="list-group mt-1 d-none" id="plbLinkRes"></div><div class="mt-2" id="plbLinkPicked"></div>
-                <p class="pl-help small mt-2 mb-0">Alla ${d.assignments} placeringar i hela veckan kopplas till medlemmen. Namnet blir medlemmens, och det gamla namnet går att få tillbaka.</p>`,
-            onOpen: b => {
-                const i = b.querySelector('#plbLinkQ'); i.focus(); i.dispatchEvent(new Event('input'));
-                wireMemberSearch(b, '#plbLinkQ', '#plbLinkRes', m => { picked = m; b.querySelector('#plbLinkPicked').innerHTML = `Vald: <b>${esc(m.memberName)}</b>${m.clubName ? ' · ' + esc(m.clubName) : ''}`; });
-            },
-            onOk: async () => picked ? applyWeekLink(d, { memberId: picked.memberId }, 'm:' + picked.memberId) : 'Välj en medlem i listan.'
-        });
-    }
-    async function undoWeekLink(d) {
+    async function undoIdentity(p) {
         try {
-            const r = await spost('UndoFamilyPersonIdentity', { personKey: d.key });
+            const r = await spost(family() ? 'UndoFamilyPersonIdentity' : 'UndoPersonIdentity', { personKey: p.key });
             if (!r.success) { A.failMsg(r, 'Det gick inte att ångra.'); return; }
+            B.weekMap = null;
             A.showMsg('Personen har sitt gamla namn igen.');
-            nav('veckan');
+            nav('personer');
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
-    document.addEventListener('click', async e => {
-        if (!A || !A.isActive() || part() !== 'veckan') return;
-        const t = e.target.closest('[data-plbw-person],[data-plbw-back],[data-plbw-cand],[data-plbw-inplan],[data-plbw-repl]');
-        if (!t || !$('plBody').contains(t)) return;
-        e.preventDefault();
-        if (t.dataset.plbwRepl && B.wp) { const key = B.wp.key; openFindReplacement({ id: parseInt(t.dataset.plbwRepl, 10) }, { key }, () => nav('veckan', key)); }
-        else if (t.dataset.plbwPerson) nav('veckan', t.dataset.plbwPerson);
-        else if (t.hasAttribute('data-plbw-back')) nav('veckan');
-        else if (t.dataset.plbwCand != null && B.wp) {
-            const c = ((B.wp.match || {}).candidates || [])[parseInt(t.dataset.plbwCand, 10)]; if (!c) return;
-            const res = await applyWeekLink(B.wp, { memberId: c.memberId }, 'm:' + c.memberId);
-            if (typeof res === 'string') A.showMsg(esc(res), 'danger');
-        } else if (t.dataset.plbwInplan != null && B.wp) {
-            const c = ((B.wp.match || {}).inPlan || [])[parseInt(t.dataset.plbwInplan, 10)]; if (!c) return;
-            const res = await applyWeekLink(B.wp, c.memberId > 0 ? { memberId: c.memberId } : { newName: c.name }, c.memberId > 0 ? 'm:' + c.memberId : 'n:' + c.name.trim().toLowerCase());
-            if (typeof res === 'string') A.showMsg(esc(res), 'danger');
-        }
-    });
+    async function loadWeekCards(p, sub) {
+        if (!weekTab()) return;
+        const tok = ++B.wTok;
+        let d = null;
+        if (B.pre && B.pre.key === p.key) { d = B.pre; B.pre = null; }
+        else { try { d = await sget('GetFamilyPersonWeek', { personKey: p.key }); } catch (e) { d = null; } }
+        if (tok !== B.wTok || !$('plbWeek')) return;
+        if (!d || !d.success) { ['plbWeekTop', 'plbWeek'].forEach(i => { const x = $(i); if (x) x.remove(); }); return; }
+        B.wp = d;
+        A.setHead(p.displayName, sub + (d.clashes ? ` · <span class="text-danger fw-semibold">${d.clashes} ${d.clashes === 1 ? 'krock' : 'krockar'}</span>` : '')
+            + (d.warnings ? ` · <span class="text-warning-emphasis fw-semibold">${d.warnings} ${d.warnings === 1 ? 'varning' : 'varningar'}</span>` : ''));
+        A.setActions(personActions(p, d));
+        const top = $('plbWeekTop'), m = d.match;
+        if (top && !p.readOnly && d.isExternal && m && !m.looksLikeTwoPeople && ((m.candidates || []).length || (m.inPlan || []).length)) {
+            top.innerHTML = `<div class="pl-next warn" id="plbwMatch"><div class="t"><b>Är det här någon du känner igen?</b> ${esc(d.name)} saknar konto. Kopplingen gäller alla placeringar${family() ? ' i hela veckan' : ''}.</div>
+                <div class="d-flex flex-wrap gap-1 mt-1">${(m.candidates || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-primary" data-cand="${i}">Koppla till ${esc(c.name)}${c.clubName ? ' · ' + esc(c.clubName) : ''}</button>`).join('')}
+                ${(m.inPlan || []).map((c, i) => `<button type="button" class="btn btn-sm btn-outline-secondary" data-inplan="${i}">Samma person som ${esc(c.name)}</button>`).join('')}</div></div>`;
+            const go = async (body, goKey) => {
+                const r = await identityPost(Object.assign({ personKey: d.key }, body));
+                if (!r.success) { A.showMsg(esc(r.message || 'Det gick inte att koppla.'), 'danger'); return; }
+                A.showMsg('Klart — ' + (r.affected != null ? r.affected + (r.affected === 1 ? ' placering' : ' placeringar') + ' uppdaterade.' : 'kopplingen är gjord.'), 'success');
+                await loadPeople(); nav('personer', goKey);
+            };
+            top.querySelectorAll('[data-cand]').forEach(b => b.addEventListener('click', () => {
+                const c = (m.candidates || [])[parseInt(b.dataset.cand, 10)]; if (c) go({ memberId: c.memberId }, 'm:' + c.memberId);
+            }));
+            top.querySelectorAll('[data-inplan]').forEach(b => b.addEventListener('click', () => {
+                const c = (m.inPlan || [])[parseInt(b.dataset.inplan, 10)]; if (!c) return;
+                go(c.memberId > 0 ? { memberId: c.memberId } : { newName: c.name }, c.memberId > 0 ? 'm:' + c.memberId : 'n:' + c.name.trim().toLowerCase());
+            }));
+        } else if (top) top.innerHTML = '';
+        const ownIds = new Set((p.assignments || []).map(a => a.id));
+        const days = (d.days || []).map(day => `<div class="pl-card plbw-day" data-date="${esc(day.date)}"><h2 class="h6 mb-1">${esc(day.label.charAt(0).toUpperCase() + day.label.slice(1))}</h2>
+            ${(day.carriedIn || []).map(c => `<div class="plb-dim small"><i class="bi bi-moon me-1" aria-hidden="true"></i>Från kvällen före: ${esc(c.label)}</div>`).join('')}
+            <ul class="list-unstyled mb-0">${(day.items || []).map(i => weekItemHtml(i, ownIds)).join('')}</ul></div>`).join('');
+        $('plbWeek').innerHTML = days
+            ? `<p class="pl-help small mb-2"><i class="bi bi-calendar2-week me-1" aria-hidden="true"></i>Dag för dag${family() ? ', över alla delar' : ''}, med egna starter. Krock betyder att hen jobbar medan hen själv ska skjuta, eller har två placeringar på samma tid.</p>` + days + shootWindowsHtml(d.shootWindows)
+            : shootWindowsHtml(d.shootWindows);
+        $('plbWeek').querySelectorAll('[data-repl]').forEach(b => b.addEventListener('click', () =>
+            openFindReplacement({ id: parseInt(b.dataset.repl, 10) }, { key: p.key }, () => nav('personer', p.key))));
+    }
 
     // ================================================================ Klick i delen (delegerat)
     document.addEventListener('click', e => {
@@ -2833,7 +2853,7 @@ window.PlaneringBemanning = (function () {
         else if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
         else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
-        else if (t.dataset.plbPerson) { nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
+        else if (t.dataset.plbPerson) { nav('personer', t.dataset.plbPerson); }
         else if (t.hasAttribute('data-plb-sched')) { const r = (B.grid.rows || [])[+t.dataset.plbSched], c = (B.grid.columns || [])[+t.dataset.col]; if (r && c) openSchedule(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));
@@ -2854,8 +2874,7 @@ window.PlaneringBemanning = (function () {
         const p = part(), pk = personKeyParam();
         try {
             if (p === 'rutnat') { await loadGrid(); drawGrid(); }
-            else if (p === 'personer') { await loadPeople(); B.grid = null; pk ? drawPerson(pk) : drawPeopleKeepFilter(); }
-            else if (p === 'veckan') await draw();
+            else if (p === 'personer') { await loadPeople(); B.grid = null; if (pk) drawPerson(pk); else { drawPeopleKeepFilter(); loadWeekList(B.seq); } }
             else { await loadPeople(); await drawFind(B.seq); }
         } catch (e) { A.showMsg(esc(e.message), 'danger'); }
     }
