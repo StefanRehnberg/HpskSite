@@ -68,11 +68,13 @@ namespace HpskSite.Models.Staffing
             // 3. Fyll platserna — när något behövs.
             if (f.HasNeeds)
             {
-                var actions = f.VolunteersTotal > 0 ? new[] { "laggin", "forslag" } : new[] { "laggin" };
+                // Folk läggs in med "lägg till" i rutorna — ingen egen dialog. Finns anmälda funktionärer kan förslaget fylla platserna åt en.
+                var actions = f.VolunteersTotal > 0 ? new[] { "forslag" } : Array.Empty<string>();
                 steps.Add(f.PlacesMissing == 0
                     ? new("fyll", "Fyll platserna", PlanStepState.Done, "Alla platser är fyllda", actions)
                     : new("fyll", "Fyll platserna", PlanStepState.Todo, $"{f.PlacesMissing} av {f.PlacesNeeded} {(f.PlacesNeeded == 1 ? "plats" : "platser")} saknar folk"
-                        + (byRole.Any(r => r.Missing > 0) ? ": " + RoleList(byRole.OrderByDescending(r => r.Missing).Select(r => (r.Name, r.Missing))) : ""), actions));
+                        + (byRole.Any(r => r.Missing > 0) ? ": " + RoleList(byRole.OrderByDescending(r => r.Missing).Select(r => (r.Name, r.Missing))) : "")
+                        + (f.VolunteersTotal > 0 ? "" : ". Tryck på lägg till i en ruta i Rutnätet"), actions));
             }
 
             // 3b. Skicka förfrågan — det som lagts in ser ingen förrän det skickats (persontest 8: hon hittade aldrig var man gör det).

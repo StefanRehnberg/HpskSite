@@ -259,232 +259,309 @@ window.PlaneringBemanning = (function () {
             onOk: body => saveRoleChoice(body)
         });
     }
-    // Planera dagen steg 1: "Lägg in flera" — välj roll/station, dag och tid en gång, kryssa i personerna. Varje person prövas på servern:
-    // upptagna hoppas över (och erbjuds sedan "lägg in ändå"), de som redan står där läggs inte in igen. Planerat läge — ingen får något mejl.
-    async function openAssignMany(opts) {
-        opts = opts || {};
+    // ================================================================ Välj person (EN ruta, EN person)
+    // Stefan 2026-10-28, efter UX-granskning: "+ lägg till" i en ruta öppnar en liten dialog som bara gör en sak. Rutan är redan vald, så den frågar inte efter roll, station eller dag.
+    // Ett tryck på ett namn lägger in personen (planerat läge, inget mejl). Behöver rutan fler står dialogen kvar; är den full stängs den. Tid frågas inte i förväg:
+    // "hela dagen" om inget annat sägs, eller hålet i skiftschemat. Anmälda funktionärer visas först; skyttarna ligger bakom en länk och övriga medlemmar nås med sökningen.
+    const firstName = n => String(n || '').trim().split(/\s+/)[0] || 'Personen';
+    function openPickPerson(row, col) {
+        const pid = row.planningId || A.ID;
+        const need = needFor(row, col.key);
+        const win = col.windowFrom && col.windowTo ? { from: col.windowFrom, to: col.windowTo } : null;
+        const curRow = () => (B.grid.rows || []).find(r => r.roleKey === row.roleKey && (r.scopeKey || '') === (row.scopeKey || '') && r.planningId === row.planningId) || row;
+        const remainingNow = () => Math.max(0, need - filledFor(curRow(), col.key));
+        let remaining = remainingNow();
+        // Är rutan delad i skift med ett hål är hålet förvalt som tid.
+        let from0 = '', to0 = '';
+        const cellRows = ((row.cells || {})[col.key] || []).filter(e => e.status !== 'Declined');
+        if (win && cellRows.some(e => hmMin(e.from) != null && hmMin(e.to) != null)) {
+            const h = scHoles(cellRows.map(e => ({ from: e.from, to: e.to, status: e.status })), { from: hmMin(win.from), to: hmMin(win.to) }, need);
+            if (h.length) { from0 = minHm(h[0].from); to0 = minHm(h[0].to); }
+        }
+        let cands = [], members = [], q = '', showShooters = false, last = null, timer = null, seq = 0, pending = null;
+        const title = `${row.roleName}${row.scopeLabel ? ' · ' + row.scopeLabel : ''}${col.key ? ' · ' + col.label : ''}`;
+        const modal = A.formModal({
+            title, wide: false, cancelLabel: 'Klar',
+            html: `<div class="small mb-2" id="ppTimeLine"></div>
+                <div class="row g-2 mb-2 d-none" id="ppTimeBox">
+                    <div class="col-6"><label class="form-label small mb-0" for="ppFrom">Från klockan</label><input type="text" class="form-control form-control-sm" id="ppFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8" value="${esc(from0)}"></div>
+                    <div class="col-6"><label class="form-label small mb-0" for="ppTo">Till klockan</label><input type="text" class="form-control form-control-sm" id="ppTo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 12" value="${esc(to0)}"></div>
+                    <div class="col-12 pl-help small">Lämna båda tomma för hela dagen. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="ppSched">Flera personer efter varandra? Öppna skiftschemat</button></div>
+                </div>
+                <div class="small mb-2" id="ppDone" aria-live="polite"></div>
+                <input type="search" class="form-control mb-2" id="ppQ" placeholder="Sök namn" autocomplete="off" aria-label="Sök namn">
+                <div class="alert alert-warning py-2 small d-none" id="ppConfirm" role="alert"></div>
+                <div id="ppList" style="max-height:50vh;overflow:auto"><div class="small plb-dim">Hämtar…</div></div>
+                <div class="text-danger small mt-2" id="ppErr" role="alert"></div>`,
+            onOpen: b => {
+                const $b = s => b.querySelector(s);
+                const times = () => ({ f: normTime($b('#ppFrom').value), t: normTime($b('#ppTo').value) });
+                const paintTime = () => {
+                    const { f, t } = times();
+                    $b('#ppTimeLine').innerHTML = (f && t ? `Gäller <b>${esc(f)}–${esc(t)}</b>${f === from0 && t === to0 ? ' (hålet i schemat)' : ''}` : 'Gäller <b>hela dagen</b>')
+                        + ' · <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="ppTimeBtn">Ändra tid</button>';
+                };
+                const paintDone = () => {
+                    $b('#ppDone').innerHTML = (last ? `Inlagd: <b>${esc(last.name)}</b>${last.id ? ' · <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-pp-undo>Ångra</button>' : ''}` : '')
+                        + (need > 0 ? `${last ? ' · ' : ''}<span class="fw-semibold">${remaining === 0 ? (from0 ? 'Antalet är uppnått, men det finns ett hål i schemat' : 'Rutan är full') : `${remaining} av ${need} ${need === 1 ? 'plats' : 'platser'} kvar`}</span>` : '');
+                };
+                // En rad: den som redan är placerad visar var (och en eventuell krock efter det), annars krock, annars egen start, annars föreningen.
+                const sub = c => {
+                    const p = (c.placements || []).filter(Boolean);
+                    const clash = c.free === false && c.conflict ? c.conflict.label : '';
+                    if (p.length) return { t: 'Står på ' + p.join('; ') + (clash ? ' · ' + clash : ''), warn: !!clash };
+                    if (clash) return { t: clash, warn: true };
+                    return { t: candSub(c) };
+                };
+                const cmp = (a, c) => (a.roleMatch ? 0 : 1) - (c.roleMatch ? 0 : 1) || (a.free === false ? 1 : 0) - (c.free === false ? 1 : 0) || a.name.localeCompare(c.name, 'sv');
+                const btn = (c, attr) => { const s = c.t !== undefined ? c : sub(c); return `<button type="button" class="list-group-item list-group-item-action py-2${c.free === false ? ' plb-cand-busy' : ''}" style="min-height:48px" ${attr}><span class="fw-semibold">${esc(c.name)}</span>${s.t ? `<span class="d-block small ${s.warn ? 'text-warning-emphasis' : 'text-body-secondary'}">${esc(s.t)}</span>` : ''}</button>`; };
+                const paint = () => {
+                    const live = cands.filter(c => !c.alreadyHere).slice().sort(cmp);
+                    const list = $b('#ppList');
+                    let html = '';
+                    if (q.length >= 2) {
+                        if (live.length) html += `<div class="list-group">${live.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
+                        if (members.length) html += `<div class="small fw-semibold mt-2 mb-1">Övriga medlemmar</div><div class="list-group">${members.map((m, i) => btn({ name: m.memberName, t: m.clubName || '' }, `data-ppm="${i}"`)).join('')}</div>`;
+                        html += `<div class="list-group mt-2"><button type="button" class="list-group-item list-group-item-action py-2" style="min-height:48px" data-ppname><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Lägg in »${esc(q)}« utan konto</button></div>`;
+                    } else {
+                        const vols = live.filter(c => c.volunteer && !(c.assignedToday > 0));
+                        const placed = live.filter(c => c.assignedToday > 0);
+                        const shooters = live.filter(c => !c.volunteer && !(c.assignedToday > 0));
+                        if (vols.length) html += `<div class="small fw-semibold mb-1">Anmälda funktionärer</div><div class="list-group">${vols.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
+                        const shooterList = `<div class="small fw-semibold mt-2 mb-1">Skyttar i tävlingen</div><div class="list-group">${shooters.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div>`;
+                        if (!vols.length && shooters.length) html += `<p class="small plb-dim mb-1">Ingen har anmält sig som funktionär. Här är skyttarna i tävlingen.</p>${shooterList}`;
+                        else if (vols.length && shooters.length) html += showShooters ? shooterList : `<button type="button" class="btn btn-link btn-sm p-0 mt-2" data-pp-shooters>Visa skyttarna i tävlingen (${shooters.length})</button>`;
+                        if (placed.length) html += `<details class="mt-2"><summary class="small fw-semibold">Redan placerade den dagen (${placed.length})</summary><div class="list-group mt-1">${placed.map(c => btn(c, `data-pp="${c.memberId}"`)).join('')}</div></details>`;
+                        if (!html) html = '<p class="small plb-dim mb-0">Ingen att visa. Sök efter ett namn, så hittar du alla medlemmar.</p>';
+                    }
+                    list.innerHTML = html;
+                };
+                const fetchCands = async () => {
+                    const my = ++seq;
+                    const { f, t } = times();
+                    const qs = { planningId: pid, roleKey: row.roleKey, date: col.key, scopeKey: row.scopeKey || '', take: 200, onlyVolunteers: 'false' };
+                    if (f && t) { qs.from = f; qs.to = t; } else if (win) { qs.from = win.from; qs.to = win.to; }   // utan tid prövas mot dagens fönster, så att krockar syns direkt
+                    if (q.length >= 2) qs.q = q;
+                    let r = null; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
+                    if (my !== seq) return;
+                    if (!r || !r.success) { $b('#ppList').innerHTML = `<div class="small text-danger">${esc((r && r.message) || 'Kunde inte läsa listan.')}</div>`; return; }
+                    cands = r.candidates || []; members = [];
+                    if (q.length >= 2) {
+                        try {
+                            const d = await sget('SearchMembers', { query: q }); if (my !== seq) return;
+                            const known = new Set(cands.map(c => c.memberId));
+                            members = ((d && d.members) || []).filter(m => !known.has(m.memberId)).slice(0, 8);
+                        } catch (e) { members = []; }
+                    }
+                    paint();
+                };
+                const askForce = (p, label) => {
+                    pending = p;
+                    const n = esc(firstName(p.name));
+                    $b('#ppConfirm').innerHTML = `${n}: ${esc(label)}. Lägg in ${n} ändå?<span class="d-block mt-1"><button type="button" class="btn btn-sm btn-warning" data-pp-force>Lägg in ändå</button> <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-pp-time>Ändra tid</button></span>`;
+                    $b('#ppConfirm').classList.remove('d-none');
+                };
+                const doAdd = async (p, force) => {
+                    const err = $b('#ppErr'); err.textContent = '';
+                    $b('#ppConfirm').classList.add('d-none'); pending = null;
+                    const { f, t } = times();
+                    if (f === null || t === null) { err.textContent = 'Skriv klockslagen till exempel 8 eller 8:30.'; return; }
+                    if (!!f !== !!t) { err.textContent = 'Skriv både från och till, eller ingen tid alls.'; return; }
+                    if (p.free === false && !force) { askForce(p, p.conflict ? p.conflict.label : 'är upptagen'); return; }
+                    let id = 0;
+                    try {
+                        if (p.noAccount || p.outside) {
+                            const r = await spost('SaveAssignment', { id: 0, memberId: p.outside ? p.memberId : 0, displayName: p.name, roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null,
+                                startsAt: f && col.key ? col.key + ' ' + f : null, endsAt: t && col.key ? col.key + ' ' + t : null, dayDate: col.key || null, status: 'Planned' }, pid);
+                            if (!r.success) { err.textContent = r.message || 'Det gick inte att lägga in.'; return; }
+                            id = r.id || 0;
+                        } else {
+                            const d = await spost('AssignMany', { roleKey: row.roleKey, scopeType: row.scopeType || null, scopeKey: row.scopeKey || null, date: col.key, from: f || null, to: t || null, memberIds: [p.memberId], force: !!force }, pid);
+                            if (!d.success) { err.textContent = d.message || 'Det gick inte att lägga in.'; return; }
+                            if (d.added.length) id = d.added[0].id;
+                            else { const s = (d.skipped || [])[0]; if (s && s.clash) { askForce(p, s.reason); return; } err.textContent = s ? `${p.name}: ${s.reason}` : 'Det gick inte att lägga in.'; return; }
+                        }
+                    } catch (e) { err.textContent = e.message || 'Det gick inte att lägga in.'; return; }
+                    const before = remaining;
+                    last = { id, name: p.name };
+                    await loadGrid(); drawGrid();
+                    remaining = remainingNow();
+                    if (need > 0 && before > 0 && remaining === 0) { modal.hide(); A.showMsg(`${esc(p.name)} är inlagd. Rutan är full.`, 'success'); return; }
+                    paintDone(); q = ''; $b('#ppQ').value = ''; await fetchCands();
+                };
+                const find = target => {
+                    const a = target.closest('[data-pp]'); if (a) return cands.find(c => String(c.memberId) === a.dataset.pp);
+                    const m = target.closest('[data-ppm]'); if (m) { const x = members[parseInt(m.dataset.ppm, 10)]; return x ? { memberId: x.memberId, name: x.memberName, outside: true } : null; }
+                    if (target.closest('[data-ppname]')) return { name: q.trim(), noAccount: true };
+                    return null;
+                };
+                b.addEventListener('click', async e => {
+                    if (e.target.closest('#ppTimeBtn') || e.target.closest('[data-pp-time]')) {
+                        $b('#ppTimeBox').classList.remove('d-none'); $b('#ppConfirm').classList.add('d-none'); $b('#ppFrom').focus(); return;
+                    }
+                    if (e.target.closest('[data-pp-shooters]')) { showShooters = true; paint(); return; }
+                    if (e.target.closest('#ppSched')) { openSchedule(curRow(), col); return; }
+                    if (e.target.closest('[data-pp-force]')) { if (pending) await doAdd(pending, true); return; }
+                    if (e.target.closest('[data-pp-undo]')) {
+                        if (!last || !last.id) return;
+                        const d = await spost('DeleteAssignment', { id: last.id }, pid).catch(() => null);
+                        if (!d || !d.success) { $b('#ppErr').textContent = (d && d.message) || 'Det gick inte att ångra.'; return; }
+                        last = null; await loadGrid(); drawGrid(); remaining = remainingNow(); paintDone(); await fetchCands(); return;
+                    }
+                    const p = find(e.target); if (p) await doAdd(p, false);
+                });
+                ['#ppFrom', '#ppTo'].forEach(s => $b(s).addEventListener('change', () => { paintTime(); fetchCands(); }));
+                $b('#ppQ').addEventListener('input', () => { q = $b('#ppQ').value.trim(); clearTimeout(timer); timer = setTimeout(fetchCands, 250); });
+                paintTime(); paintDone();
+                if (window.matchMedia('(min-width: 768px)').matches) $b('#ppQ').focus();   // på telefonen skulle tangentbordet täcka listan
+                fetchCands();
+            }
+        });
+    }
+
+    // ================================================================ Lägg in en namnlista
+    // För den som har namnen på papper eller i ett mejl (en stor tävling, en gång): klistra in, kontrollera träffarna, välj var de ska stå. Nås bara ur Åtgärder och
+    // ur tipset i Hitta funktionärer — aldrig ur en ruta, och aldrig för den som bara ska lägga in en person.
+    function openNameList() {
         const rows = (B.grid.rows || []).map((r, i) => ({ r, i })).filter(x => !B.grid.family || x.r.planningId);
         const cols = (B.grid.columns || []).filter(c => c.key);
         if (!rows.length) { A.showMsg('Lägg till en roll först.', 'warning'); return; }
         if (!cols.length) { A.showMsg('Lägg till en dag först.', 'warning'); return; }
         const rowLabel = x => `${x.r.roleName}${x.r.scopeLabel ? ' · ' + x.r.scopeLabel : ''}`;
-        // Förvald rad: den med störst brist (behov minus bemannat över dagarna) — det är dit man vill lägga folk. Annars första raden som inte
-        // är Tävlingsledning (den bemannas av den som skapade planeringen).
-        const shortage = x => cols.reduce((a, c) => a + Math.max(0, needFor(x.r, c.key) - filledFor(x.r, c.key)), 0);
-        let startIdx = 0, best = 0;
-        rows.forEach((x, k) => { const s = shortage(x); if (s > best) { best = s; startIdx = k; } });
-        if (best === 0) startIdx = Math.max(0, rows.findIndex(x => x.r.roleKey !== 'tavlingsledning'));
-        // Kommer man från rutan vid en cell: samma roll, station och dag som där.
-        if (opts.row) { const k = rows.findIndex(x => x.r.roleKey === opts.row.roleKey && (x.r.scopeKey || '') === (opts.row.scopeKey || '') && x.r.planningId === opts.row.planningId); if (k >= 0) startIdx = k; }
-        const startDay = opts.col ? Math.max(0, cols.findIndex(c => c.key === opts.col.key)) : 0;
-        let cands = [];
-        const sel = new Set();
-        const pinned = [], names = [], selNames = new Set();   // personer som lagts till för hand: medlemmar utanför listan, och namn som text
-        A.formModal({
-            title: opts.row ? `Lägg till i ${rowLabel({ r: opts.row })}${opts.col && opts.col.key ? ' · ' + opts.col.label : ''}` : 'Lägg in flera', okLabel: opts.row ? 'Lägg till' : 'Lägg in alla på den här stationen', wide: true,
-            html: `<div class="row g-2 mb-2">
-                    <div class="col-sm-5"><label class="form-label small mb-0" for="plbMnRow">Roll och station</label><select class="form-select form-select-sm" id="plbMnRow">${rows.map((x, k) => `<option value="${k}"${k === startIdx ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}</select></div>
-                    <div class="col-sm-3"><label class="form-label small mb-0" for="plbMnDay">Dag</label><select class="form-select form-select-sm" id="plbMnDay">${cols.map((c, k) => `<option value="${k}"${k === startDay ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
-                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnFrom">Från klockan</label><input type="text" class="form-control form-control-sm" id="plbMnFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8"></div>
-                    <div class="col-6 col-sm-2"><label class="form-label small mb-0" for="plbMnTo">Till klockan</label><input type="text" class="form-control form-control-sm" id="plbMnTo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 12"></div>
-                </div>
-                <div class="d-flex flex-wrap gap-3 align-items-center mb-1">
-                    <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnVol" role="switch"><label class="form-check-label" for="plbMnVol">Bara de som anmält sig som funktionärer</label></div>
-                    <div class="form-check form-switch small"><input class="form-check-input" type="checkbox" id="plbMnUnplaced" role="switch"><label class="form-check-label" for="plbMnUnplaced">Bara de som inte är placerade den dagen</label></div>
-                    <input type="search" class="form-control form-control-sm" id="plbMnQ" placeholder="Sök namn" style="max-width:200px" autocomplete="off" aria-label="Sök namn">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnFree">Markera alla lediga</button>
-                    <span class="small plb-dim" id="plbMnCount" aria-live="polite"></span>
-                </div>
-                <div class="mb-2"><label class="form-label small mb-0" for="plbMnX">Någon som inte finns i listan?</label>
-                    <div class="d-flex flex-wrap gap-2"><input type="search" class="form-control form-control-sm" id="plbMnX" placeholder="Sök en medlem, eller skriv ett namn" autocomplete="off" style="max-width:320px">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="plbMnXAdd">Lägg till i listan</button></div>
-                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" id="plbMnPasteBtn" aria-expanded="false" aria-controls="plbMnPaste">Eller klistra in flera namn på en gång…</button>
-                    <div class="list-group mt-1 d-none" id="plbMnXRes" style="max-width:320px"></div></div>
-                <div class="border rounded p-2 mb-2" id="plbMnPaste" style="display:none">
-                    <label class="form-label small mb-1" for="plbMnPasteText">Ett namn per rad. Har pappret klass, patrull eller starttid efter ett | hjälper det när flera heter lika.</label>
-                    <textarea class="form-control form-control-sm mb-1" id="plbMnPasteText" rows="4" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
-                    <button type="button" class="btn btn-sm btn-primary" id="plbMnPasteGo">Hitta personerna</button>
-                    <div class="small mt-2" id="plbMnPasteRes" aria-live="polite"></div>
-                </div>
-                <div class="list-group plb-many-list" id="plbMnList" style="max-height:40vh;overflow:auto"><div class="list-group-item small plb-dim">Hämtar…</div></div>
-                <div class="small mt-2"><button type="button" class="btn btn-link btn-sm p-0" id="plbMnSched">Flera skift under dagen? Öppna skiftschemat</button></div>
-                <div class="pl-help small mt-1 mb-0">Utan tid gäller placeringen hela dagen och ledigheten räknas inte. Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>
-                <div class="text-danger small mt-1" id="plbMnErr" role="alert"></div>`,
-            onOpen: b => {
-                let timer = null;
-                const cur = () => ({ x: rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c: cols[parseInt(b.querySelector('#plbMnDay').value, 10)] });
-                // Rollen som läggs in syns vid knappen och följer valet överst (persontest 6b: den förvalda rollen var fel och märktes inte).
-                const roleNote = () => { const el = b.querySelector('#plbMnAsRole'); if (el) el.innerHTML = `De läggs in som <b>${esc(cur().x.r.roleName)}</b>. Fel roll? Byt under "Roll och station" överst. <b>Fördela</b> sprider dem över alla stationer; knappen längst ned lägger <b>alla på samma station</b> (${esc(rowLabel(cur().x))}).`; };
-                const paint = () => {
-                    const { x } = cur();
-                    roleNote();
-                    const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
-                    const known = !!(from && to);
-                    // Hela listan ritas om vid varje kryss: bevara vilken ruta som hade fokus och hur långt listan var rullad, annars börjar tangentbordsanvändaren om överst.
-                    const listEl = b.querySelector('#plbMnList');
-                    const focusedMn = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.mn : null;
-                    const scrolled = listEl.scrollTop;
-                    const onlyFree = b.querySelector('#plbMnUnplaced').checked;
-                    const shown = [...pinned.filter(p => !cands.some(c => c.memberId === p.memberId)), ...cands].filter(c => !onlyFree || !(c.assignedToday > 0));
-                    const textRows = names.map((n, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small"><input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mnn="${k}"${selNames.has(k) ? ' checked' : ''}><span><span class="fw-semibold">${esc(n)}</span> <span class="badge text-bg-light border fw-normal">som text</span><span class="d-block plb-dim">Ingen kallelse och ingen kontroll mot egen start</span></span></label>`).join('');
-                    b.querySelector('#plbMnList').innerHTML = textRows + (shown.length ? shown.map((c, k) => `<label class="list-group-item d-flex gap-2 align-items-start py-1 small plb-cand${c.free === false ? ' plb-cand-busy' : ''}">
-                        <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-mn="${c.memberId}"${sel.has(c.memberId) ? ' checked' : ''}${c.alreadyHere ? ' disabled' : ''}>
-                        <span><span class="fw-semibold">${esc(c.name)}</span> ${candBadges(c, known)}${candSub(c) ? `<span class="d-block plb-dim">${esc(candSub(c))}</span>` : ''}
-                        ${candPlaced(c)}${c.free === false && c.conflict ? `<span class="d-block text-warning-emphasis">${esc(c.conflict.label)}</span>` : ''}</span></label>`).join('')
-                        : (names.length ? '' : '<div class="list-group-item small plb-dim">Ingen i listan. Slå av reglaget för att se alla anmälda, eller sök under "Någon som inte finns i listan".</div>'));
-                    listEl.scrollTop = scrolled;
-                    if (focusedMn) { const again = listEl.querySelector(`[data-mn="${focusedMn}"]`); if (again) again.focus({ preventScroll: true }); }
-                    b.querySelector('#plbMnCount').textContent = `${sel.size + selNames.size} markerade · ${shown.length} i listan${(shown.length < cands.length) ? ' (' + (cands.length - shown.length) + ' placerade dolda)' : ''}${cands.length >= 200 ? ' (de första 200)' : ''} · ${rowLabel(x)}`;
-                };
-                const load = async () => {
-                    const { x, c } = cur();
-                    const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
-                    const qs = { planningId: x.r.planningId || A.ID, roleKey: x.r.roleKey, date: c.key, scopeKey: x.r.scopeKey || '', take: 200,
-                        onlyVolunteers: b.querySelector('#plbMnVol').checked ? 'true' : 'false' };
-                    if (from && to) { qs.from = from; qs.to = to; }
-                    const q = b.querySelector('#plbMnQ').value.trim(); if (q) qs.q = q;
-                    let r; try { r = await sget('GetCandidates', qs); } catch (e) { r = null; }
-                    if (!r || !r.success) { b.querySelector('#plbMnList').innerHTML = `<div class="list-group-item small text-danger">${esc((r && r.message) || 'Kunde inte läsa kandidaterna.')}</div>`; return; }
-                    if (!b._first) { b._first = true; if (r.volunteers > 0) { b.querySelector('#plbMnVol').checked = true; return load(); } }
-                    cands = r.candidates || [];
-                    paint();
-                };
-                const later = ms => { clearTimeout(timer); timer = setTimeout(load, ms); };
-                ['#plbMnRow', '#plbMnDay', '#plbMnVol'].forEach(s => b.querySelector(s).addEventListener('change', () => later(0)));
-                ['#plbMnFrom', '#plbMnTo'].forEach(s => b.querySelector(s).addEventListener('change', () => later(0)));
-                b.querySelector('#plbMnQ').addEventListener('input', () => later(250));
-                b.querySelector('#plbMnList').addEventListener('change', e => {
-                    const cb = e.target.closest('[data-mn]'); if (!cb) return;
-                    const id = parseInt(cb.dataset.mn, 10); if (cb.checked) sel.add(id); else sel.delete(id);
-                    paint();
-                });
-                b.querySelector('#plbMnUnplaced').addEventListener('change', () => paint());
-                b.querySelector('#plbMnList').addEventListener('change', e => {
-                    const cb = e.target.closest('[data-mnn]'); if (!cb) return;
-                    const k = parseInt(cb.dataset.mnn, 10); if (cb.checked) selNames.add(k); else selNames.delete(k);
-                    paint();
-                });
-                // Någon utanför listan: sök bland alla medlemmar, eller skriv ett namn som text.
-                let xTimer = null, xList = [];
-                const xBox = b.querySelector('#plbMnXRes'), xIn = b.querySelector('#plbMnX');
-                const xHide = () => { xBox.innerHTML = ''; xBox.classList.add('d-none'); };
-                xIn.addEventListener('input', () => {
-                    clearTimeout(xTimer);
-                    const q = xIn.value.trim();
-                    if (q.length < 2) { xHide(); return; }
-                    xTimer = setTimeout(async () => {
-                        try {
-                            const d = await sget('SearchMembers', { query: q });
-                            xList = (d && d.members) ? d.members.slice(0, 8) : [];
-                            xBox.innerHTML = xList.length ? xList.map((m, i) => `<button type="button" class="list-group-item list-group-item-action py-1 small" data-xi="${i}">${esc(m.memberName)}${m.clubName ? ` <span class="plb-dim">${esc(m.clubName)}</span>` : ''}</button>`).join('')
-                                : '<div class="list-group-item small plb-dim">Ingen medlem heter så. "Lägg till i listan" lägger in namnet som text.</div>';
-                            xBox.classList.remove('d-none');
-                        } catch (er) { xHide(); }
-                    }, 200);
-                });
-                xBox.addEventListener('click', e => {
-                    const bt = e.target.closest('[data-xi]'); if (!bt) return;
-                    const m = xList[parseInt(bt.dataset.xi, 10)]; if (!m) return;
-                    if (!pinned.some(p => p.memberId === m.memberId)) pinned.unshift({ memberId: m.memberId, name: m.memberName, club: m.clubName || '', starts: [] });
-                    sel.add(m.memberId); xIn.value = ''; xHide(); paint();
-                });
-                const addTyped = () => {
-                    const t = xIn.value.trim(); if (!t) return;
-                    if (xList.length === 1 && xList[0].memberName.toLowerCase() === t.toLowerCase()) { xBox.querySelector('[data-xi]').click(); return; }
-                    names.push(t); selNames.add(names.length - 1); xIn.value = ''; xHide(); paint();
-                };
-                b.querySelector('#plbMnXAdd').addEventListener('click', addTyped);
-                xIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } });
-                b.querySelector('#plbMnSched').addEventListener('click', () => {
-                    const { x, c } = cur();
-                    if (!c.key) return;
-                    openSchedule(x.r, colsFor(x.r).find(k => k.key === c.key) || c);
-                });
-                b.querySelector('#plbMnFree').addEventListener('click', () => { cands.filter(c => c.free !== false && !c.alreadyHere).forEach(c => sel.add(c.memberId)); paint(); });
+        const roles = [];
+        rows.forEach(x => { if (!roles.some(y => y.r.roleKey === x.r.roleKey && y.r.planningId === x.r.planningId)) roles.push(x); });
+        const st = { text: '', items: null, sel: new Set(), mode: 'spread', role: '', row: '', day: '0', from: '', to: '' };
+        const who = p => `${esc(p.name)}${p.club ? ' · ' + esc(p.club) : ''}${p.shooterClass ? ' · ' + esc(p.shooterClass) : ''}${p.starts ? ' · skjuter ' + esc(p.starts) : ''}${p.where ? ' · ' + esc(p.where.toLowerCase()) : ''}`;
+        const planOf = () => rows[0].r.planningId;
+        // Byter dialogen steg försvinner knappen som hade fokus; då når Escape inte dialogen. Dialogen tar själv fokus (inget fält, så att tangentbordet inte hoppar fram på telefonen).
+        const refocus = () => { const m = document.getElementById('plFormModal'); if (m && !m.contains(document.activeElement)) m.focus({ preventScroll: true }); };
 
-                // Klistra in en namnlista: raderna matchas mot anmälda och funktionärer. De som hittas markeras; flera med samma namn får ett val; resten redovisas.
-                const pasteBtn = b.querySelector('#plbMnPasteBtn'), pasteBox = b.querySelector('#plbMnPaste'), res = b.querySelector('#plbMnPasteRes');
-                const who = p => `${esc(p.name)}${p.club ? ' · ' + esc(p.club) : ''}${p.shooterClass ? ' · ' + esc(p.shooterClass) : ''}${p.starts ? ' · skjuter ' + esc(p.starts) : ''}${p.where ? ' · ' + esc(p.where.toLowerCase()) : ''}`;
-                pasteBtn.addEventListener('click', () => {
-                    const open = pasteBox.style.display === 'none';
-                    pasteBox.style.display = open ? 'block' : 'none'; pasteBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-                    if (open) b.querySelector('#plbMnPasteText').focus();
-                });
-                if (opts.paste) pasteBtn.click();
-                b.querySelector('#plbMnPasteText').addEventListener('paste', () => setTimeout(() => { if (b.querySelector('#plbMnPasteText').value.trim()) b.querySelector('#plbMnPasteGo').click(); }, 50));
-                b.querySelector('#plbMnPasteGo').addEventListener('click', async () => {
-                    const text = b.querySelector('#plbMnPasteText').value;
-                    if (!text.trim()) { res.innerHTML = '<span class="text-danger">Klistra in minst ett namn.</span>'; return; }
-                    res.textContent = 'Letar…';
-                    const d = await spost('MatchNameList', { text }, rows[parseInt(b.querySelector('#plbMnRow').value, 10)].r.planningId).catch(() => null);
-                    if (!d || !d.success) { res.innerHTML = `<span class="text-danger">${esc((d && d.message) || 'Kunde inte läsa namnlistan.')}</span>`; return; }
-                    const items = d.items || [];
-                    const by = s => items.filter(i => i.status === s);
-                    by('Matched').forEach(i => sel.add(i.chosen.memberId));
-                    const rowsHtml = [];
-                    const okHtml = by('Matched').map(i => `<li class="py-1 border-bottom"><span class="text-success" aria-hidden="true">✓</span> ${who(i.chosen)}</li>`);
-                    by('Ambiguous').forEach((i, k) => rowsHtml.push(`<li class="py-1 border-bottom"><label class="d-block fw-semibold" for="plbMnAmb${k}">${esc(i.query)} — flera heter så, vilken?</label>
-                        <select class="form-select form-select-sm" id="plbMnAmb${k}" data-mnp-amb><option value="">Välj…</option>${i.options.map(o => `<option value="${o.memberId}">${who(o).replace(/<[^>]+>/g, '')}</option>`).join('')}</select></li>`));
-                    by('Suggested').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom"><label><input type="checkbox" class="form-check-input me-1" data-mnp-sug="${i.chosen.memberId}">${esc(i.query)} — menar du <b>${esc(i.chosen.name)}</b>${i.chosen.club ? ' (' + esc(i.chosen.club) + ')' : ''}${i.chosen.starts ? ', skjuter ' + esc(i.chosen.starts) : ''}?</label></li>`));
-                    by('NotFound').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom text-danger">✗ ${esc(i.query)} — hittades inte bland de anmälda${(i.options || []).length ? `<span class="d-block plb-dim">Liknande: ${i.options.map(o => esc(o.name)).join(', ')}</span>` : ''}</li>`));
-                    by('Duplicate').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom plb-dim">${esc(i.query)} — står redan tidigare i listan</li>`));
-                    res.innerHTML = `<p class="mb-1" id="plbMnPasteSum"><b>${by('Matched').length} av ${items.length}</b> hittades och är markerade${by('Ambiguous').length ? ` · <b>${by('Ambiguous').length}</b> behöver ditt val` : ''}${by('Suggested').length ? ` · ${by('Suggested').length} nästan` : ''}${by('NotFound').length ? ` · <span class="text-danger">${by('NotFound').length} hittades inte</span>` : ''}. <span class="fw-semibold">Totalt ${sel.size} markerade</span> (tidigare inklistringar ligger kvar).${d.truncated ? ' Bara de första 200 raderna lästes.' : ''}</p>
-                        ${rowsHtml.length ? `<div class="fw-semibold mb-1" id="plbMnPasteAttn">Det här behöver du titta på</div><ul class="list-unstyled mb-2" style="max-height:24vh;overflow:auto">${rowsHtml.join('')}</ul>` : ''}
-                        ${okHtml.length ? `<details><summary>De ${okHtml.length} som hittades och är markerade</summary><ul class="list-unstyled mb-0" style="max-height:20vh;overflow:auto">${okHtml.join('')}</ul></details>` : ''}
-                        <div class="mt-2 p-2 border rounded bg-body-tertiary" id="plbMnDistBox"><button type="button" class="btn btn-sm btn-primary" id="plbMnDistribute">Fördela dem åt mig…</button>
-                            <span class="d-block small mt-1" id="plbMnAsRole"></span>
-                            <span class="d-block small plb-dim mt-1">Sprider de markerade över stationerna, med tider som inte krockar med deras egna starter. Du ser förslaget först — inget läggs in förrän du bekräftar.</span></div>`;
-                    paint();
-                });
-                res.addEventListener('click', e => {
-                    if (!e.target.closest('#plbMnDistribute')) return;
-                    if (!sel.size) { res.insertAdjacentHTML('beforeend', '<div class="text-danger small mt-1" role="alert">Markera minst en person först.</div>'); return; }
-                    const x = rows[parseInt(b.querySelector('#plbMnRow').value, 10)];
-                    openDistribution({ roleKey: x.r.roleKey, roleName: x.r.roleName, planningId: x.r.planningId, memberIds: [...sel] });
-                });
-                res.addEventListener('change', e => {
-                    const sg = e.target.closest('[data-mnp-sug]');
-                    if (sg) { const id = parseInt(sg.dataset.mnpSug, 10); if (sg.checked) sel.add(id); else sel.delete(id); paint(); return; }
-                    const am = e.target.closest('[data-mnp-amb]');
-                    if (am) {
-                        if (am._id) sel.delete(am._id);
-                        am._id = parseInt(am.value, 10) || 0; if (am._id) sel.add(am._id);
-                        paint();
+        function stepNames() {
+            A.formModal({
+                title: 'Lägg in en namnlista', okLabel: 'Nästa', wide: true,
+                html: `<p class="mb-2">Klistra in namnen, ett per rad. Står det klass, patrull eller starttid efter ett <b>|</b> hjälper det när två heter lika.</p>
+                    <textarea class="form-control mb-2" id="nlText" rows="6" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
+                    <button type="button" class="btn btn-sm btn-primary" id="nlGo">Hitta personerna</button>
+                    <div class="small mt-3" id="nlRes" aria-live="polite"></div>`,
+                onOpen: b => {
+                    const text = b.querySelector('#nlText'), res = b.querySelector('#nlRes');
+                    if (st.text) text.value = st.text;
+                    const show = () => {
+                        const items = st.items || [];
+                        const by = s => items.filter(i => i.status === s);
+                        const rowsHtml = [];
+                        const okHtml = by('Matched').map(i => `<li class="py-1 border-bottom"><span class="text-success" aria-hidden="true">✓</span> ${who(i.chosen)}</li>`);
+                        by('Ambiguous').forEach((i, k) => rowsHtml.push(`<li class="py-1 border-bottom"><label class="d-block fw-semibold" for="nlAmb${k}">${esc(i.query)} — flera heter så, vilken?</label>
+                            <select class="form-select form-select-sm" id="nlAmb${k}" data-nl-amb data-k="${k}"><option value="">Välj…</option>${i.options.map(o => `<option value="${o.memberId}"${st.sel.has(o.memberId) ? ' selected' : ''}>${who(o).replace(/<[^>]+>/g, '')}</option>`).join('')}</select></li>`));
+                        by('Suggested').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom"><label><input type="checkbox" class="form-check-input me-1" data-nl-sug="${i.chosen.memberId}"${st.sel.has(i.chosen.memberId) ? ' checked' : ''}>${esc(i.query)} — menar du <b>${esc(i.chosen.name)}</b>${i.chosen.club ? ' (' + esc(i.chosen.club) + ')' : ''}${i.chosen.starts ? ', skjuter ' + esc(i.chosen.starts) : ''}?</label></li>`));
+                        by('NotFound').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom text-danger">✗ ${esc(i.query)} — hittades inte bland de anmälda${(i.options || []).length ? `<span class="d-block plb-dim">Liknande: ${i.options.map(o => esc(o.name)).join(', ')}</span>` : ''}</li>`));
+                        by('Duplicate').forEach(i => rowsHtml.push(`<li class="py-1 border-bottom plb-dim">${esc(i.query)} — står redan tidigare i listan</li>`));
+                        res.innerHTML = `<p class="mb-1" id="nlSum"><b>${by('Matched').length} av ${items.length}</b> hittades${by('Ambiguous').length ? ` · <b>${by('Ambiguous').length}</b> behöver ditt val` : ''}${by('Suggested').length ? ` · ${by('Suggested').length} nästan` : ''}${by('NotFound').length ? ` · <span class="text-danger">${by('NotFound').length} hittades inte</span>` : ''}. <span class="fw-semibold" id="nlCount">${st.sel.size} valda</span>.</p>
+                            ${rowsHtml.length ? `<div class="fw-semibold mb-1" id="nlAttn">Det här behöver du titta på</div><ul class="list-unstyled mb-2" style="max-height:24vh;overflow:auto">${rowsHtml.join('')}</ul>` : ''}
+                            ${okHtml.length ? `<details><summary>De ${okHtml.length} som hittades</summary><ul class="list-unstyled mb-0" style="max-height:20vh;overflow:auto">${okHtml.join('')}</ul></details>` : ''}`;
+                    };
+                    const go = async () => {
+                        st.text = text.value;
+                        if (!st.text.trim()) { res.innerHTML = '<span class="text-danger">Klistra in minst ett namn.</span>'; return; }
+                        res.textContent = 'Letar…';
+                        const d = await spost('MatchNameList', { text: st.text }, planOf()).catch(() => null);
+                        if (!d || !d.success) { res.innerHTML = `<span class="text-danger">${esc((d && d.message) || 'Kunde inte läsa namnlistan.')}</span>`; return; }
+                        st.items = d.items || []; st.sel = new Set();
+                        st.items.filter(i => i.status === 'Matched').forEach(i => st.sel.add(i.chosen.memberId));
+                        show();
+                    };
+                    b.querySelector('#nlGo').addEventListener('click', go);
+                    text.addEventListener('paste', () => setTimeout(() => { if (text.value.trim()) go(); }, 50));
+                    text.addEventListener('input', () => { st.text = text.value; });
+                    res.addEventListener('change', e => {
+                        const sg = e.target.closest('[data-nl-sug]');
+                        if (sg) { const id = parseInt(sg.dataset.nlSug, 10); if (sg.checked) st.sel.add(id); else st.sel.delete(id); }
+                        const am = e.target.closest('[data-nl-amb]');
+                        if (am) { if (am._id) st.sel.delete(am._id); am._id = parseInt(am.value, 10) || 0; if (am._id) st.sel.add(am._id); }
+                        const c = b.querySelector('#nlCount'); if (c) c.textContent = `${st.sel.size} valda`;
+                    });
+                    if (st.items) show();
+                    refocus();
+                },
+                onOk: async b => {
+                    st.text = b.querySelector('#nlText').value;
+                    if (!st.text.trim()) return 'Klistra in minst ett namn.';
+                    if (!st.items) { b.querySelector('#nlGo').click(); return; }
+                    if (!st.sel.size) return 'Ingen av namnen är vald. Välj minst en person.';
+                    stepWhere();
+                }
+            });
+        }
+
+        function stepWhere() {
+            const roleOpts = `<option value="">Välj roll…</option>${roles.map((x, k) => `<option value="${k}"${st.role === String(k) ? ' selected' : ''}>${esc(x.r.roleName)}</option>`).join('')}`;
+            const rowOpts = `<option value="">Välj roll och station…</option>${rows.map((x, k) => `<option value="${k}"${st.row === String(k) ? ' selected' : ''}>${esc(rowLabel(x))}</option>`).join('')}`;
+            A.formModal({
+                title: 'Var ska de stå?', okLabel: st.mode === 'spread' ? 'Nästa' : 'Lägg in', wide: false,
+                html: `<p class="mb-2"><button type="button" class="btn btn-link btn-sm p-0" data-nl-back>← Tillbaka till namnen</button> <span class="plb-dim small">${st.sel.size} ${st.sel.size === 1 ? 'person' : 'personer'}</span></p>
+                    <div class="form-check mb-2"><input class="form-check-input" type="radio" name="nlMode" id="nlSpread" value="spread"${st.mode === 'spread' ? ' checked' : ''}>
+                        <label class="form-check-label" for="nlSpread"><b>Sprid dem över stationerna åt mig</b> <span class="badge text-bg-light border fw-normal">rekommenderas</span>
+                        <span class="d-block small plb-dim">Du ser förslaget först — inget läggs in förrän du bekräftar.</span></label></div>
+                    <div class="mb-3 ms-4" id="nlSpreadBox"><label class="form-label small mb-0" for="nlRole">Som vilken roll?</label><select class="form-select form-select-sm" id="nlRole">${roleOpts}</select></div>
+                    <div class="form-check mb-2"><input class="form-check-input" type="radio" name="nlMode" id="nlSame" value="same"${st.mode === 'same' ? ' checked' : ''}>
+                        <label class="form-check-label" for="nlSame"><b>Alla på samma ställe</b></label></div>
+                    <div class="ms-4" id="nlSameBox">
+                        <div class="mb-2"><label class="form-label small mb-0" for="nlRow">Roll och station</label><select class="form-select form-select-sm" id="nlRow">${rowOpts}</select></div>
+                        <div class="row g-2"><div class="col-12 col-sm-6"><label class="form-label small mb-0" for="nlDay">Dag</label><select class="form-select form-select-sm" id="nlDay">${cols.map((c, k) => `<option value="${k}"${st.day === String(k) ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
+                            <div class="col-6 col-sm-3"><label class="form-label small mb-0" for="nlFrom">Från klockan</label><input type="text" class="form-control form-control-sm" id="nlFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8" value="${esc(st.from)}"></div>
+                            <div class="col-6 col-sm-3"><label class="form-label small mb-0" for="nlTo">Till klockan</label><input type="text" class="form-control form-control-sm" id="nlTo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 12" value="${esc(st.to)}"></div>
+                            <div class="col-12 pl-help small">Utan klockslag gäller placeringen hela dagen.</div></div></div>
+                    <div class="pl-help small mt-3">Personerna står som Planerade — ingen får något mejl förrän du skickar förfrågan.</div>`,
+                onOpen: b => {
+                    const sync = () => {
+                        st.mode = b.querySelector('#nlSame').checked ? 'same' : 'spread';
+                        b.querySelector('#nlSpreadBox').classList.toggle('d-none', st.mode !== 'spread');
+                        b.querySelector('#nlSameBox').classList.toggle('d-none', st.mode !== 'same');
+                        const ok = document.getElementById('plFormOk'); if (ok) ok.textContent = st.mode === 'spread' ? 'Nästa' : 'Lägg in';
+                    };
+                    b.addEventListener('change', e => {
+                        if (e.target.closest('[name=nlMode]')) sync();
+                        st.role = b.querySelector('#nlRole').value; st.row = b.querySelector('#nlRow').value; st.day = b.querySelector('#nlDay').value;
+                        st.from = b.querySelector('#nlFrom').value; st.to = b.querySelector('#nlTo').value;
+                    });
+                    b.addEventListener('click', e => { if (e.target.closest('[data-nl-back]')) stepNames(); });
+                    sync();
+                    refocus();
+                },
+                onOk: async b => {
+                    st.role = b.querySelector('#nlRole').value; st.row = b.querySelector('#nlRow').value; st.day = b.querySelector('#nlDay').value;
+                    const ids = [...st.sel];
+                    if (st.mode === 'spread') {
+                        if (st.role === '') return 'Välj vilken roll de ska ha.';
+                        const x = roles[parseInt(st.role, 10)];
+                        openDistribution({ roleKey: x.r.roleKey, roleName: x.r.roleName, planningId: x.r.planningId, memberIds: ids, back: stepWhere });
+                        return;
                     }
-                });
-                load();
-            },
-            onOk: async b => {
-                const x = rows[parseInt(b.querySelector('#plbMnRow').value, 10)], c = cols[parseInt(b.querySelector('#plbMnDay').value, 10)];
-                const from = normTime(b.querySelector('#plbMnFrom').value), to = normTime(b.querySelector('#plbMnTo').value);
-                if (from === null || to === null) return 'Skriv klockslagen till exempel 8 eller 8:30.';
-                const typedNames = [...selNames].map(k => names[k]).filter(Boolean);
-                if (!sel.size && !typedNames.length) return 'Kryssa i minst en person.';
-                if (typedNames.length && (from || to) && !c.key) return 'Tider kräver en dag.';
-                const body = { roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null, date: c.key, from: from || null, to: to || null, memberIds: [...sel] };
-                const d = sel.size ? await spost('AssignMany', body, x.r.planningId) : { success: true, added: [], skipped: [] };
-                if (!d.success) return d.message || 'Det gick inte att lägga in.';
-                let added = d.added.length;
-                const asText = [];
-                for (const nm of typedNames) {
-                    const r = await spost('SaveAssignment', { id: 0, memberId: 0, displayName: nm, roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null,
-                        startsAt: from && c.key ? c.key + ' ' + from : null, endsAt: to && c.key ? c.key + ' ' + to : null, dayDate: c.key || null, status: 'Planned' }, x.r.planningId);
-                    if (r.success) added++; else d.skipped.push({ name: nm, reason: r.message || 'gick inte att lägga in', memberId: 0 });
+                    if (st.row === '') return 'Välj roll och station.';
+                    const x = rows[parseInt(st.row, 10)], c = cols[parseInt(st.day, 10)];
+                    const from = normTime(b.querySelector('#nlFrom').value), to = normTime(b.querySelector('#nlTo').value);
+                    if (from === null || to === null) return 'Skriv klockslagen till exempel 8 eller 8:30.';
+                    if (!!from !== !!to) return 'Skriv både från och till, eller inget klockslag alls.';
+                    const body = { roleKey: x.r.roleKey, scopeType: x.r.scopeType || null, scopeKey: x.r.scopeKey || null, date: c.key, from: from || null, to: to || null, memberIds: ids };
+                    const d = await spost('AssignMany', body, x.r.planningId);
+                    if (!d.success) return d.message || 'Det gick inte att lägga in.';
+                    let added = d.added.length;
+                    const clashes = d.skipped.filter(s => s.clash), others = d.skipped.filter(s => !s.clash);
+                    let forced = 0;
+                    if (clashes.length && await A.plConfirm(`${clashes.length} ${clashes.length === 1 ? 'person är' : 'personer är'} upptagna`,
+                        clashes.slice(0, 6).map(s => `${s.name}: ${s.reason}`).join('\n') + (clashes.length > 6 ? `\n…och ${clashes.length - 6} till` : '') + (added ? `\n\nDe andra ${added} är redan inlagda.` : '') + '\n\nLägg in dem ändå? Väljer du Avbryt lämnas de utanför.', 'Lägg in ändå')) {
+                        const f = await spost('AssignMany', Object.assign({}, body, { memberIds: clashes.map(s => s.memberId), force: true }), x.r.planningId);
+                        if (f.success) { forced = f.added.length; added += forced; }
+                    }
+                    await loadGrid(); drawGrid();
+                    const left = clashes.length - forced + others.length;
+                    A.showMsg(`${added} ${added === 1 ? 'person lades' : 'personer lades'} in${forced ? ` (${forced} trots att de var upptagna)` : ''}.`
+                        + (left ? ` ${left} hoppades över: ${[...clashes.slice(forced), ...others].slice(0, 4).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}${left > 4 ? '…' : ''}.` : ''), left ? 'warning' : 'success');
+                    return true;
                 }
-                const clashes = d.skipped.filter(s => s.clash), others = d.skipped.filter(s => !s.clash);
-                let forced = 0;
-                if (clashes.length && await A.plConfirm(`${clashes.length} ${clashes.length === 1 ? 'person är' : 'personer är'} upptagna`,
-                    clashes.slice(0, 6).map(s => `${s.name}: ${s.reason}`).join('\n') + (clashes.length > 6 ? `\n…och ${clashes.length - 6} till` : '') + (added ? `\n\nDe andra ${added} är redan inlagda.` : '') + '\n\nLägg in dem ändå? Väljer du Avbryt lämnas de utanför.', 'Lägg in ändå')) {
-                    const f = await spost('AssignMany', Object.assign({}, body, { memberIds: clashes.map(s => s.memberId), force: true }), x.r.planningId);
-                    if (f.success) { forced = f.added.length; added += forced; }
-                }
-                await loadGrid(); drawGrid();
-                const left = clashes.length - forced + others.length;
-                A.showMsg(`${added} ${added === 1 ? 'person lades' : 'personer lades'} in${forced ? ` (${forced} trots att de var upptagna)` : ''}.`
-                    + (left ? ` ${left} hoppades över: ${[...clashes.slice(forced), ...others].slice(0, 4).map(s => esc(s.name) + ' (' + esc(s.reason) + ')').join('; ')}${left > 4 ? '…' : ''}.` : ''), left ? 'warning' : 'success');
-                return true;
-            }
-        });
+            });
+        }
+        stepNames();
     }
 
     // Bandets steg "Skicka förfrågan till de inlagda": alla Planerade uppdrag med kontaktväg får sin förfrågan (samma ändpunkt och samma mejl som "Skicka förfrågan" på en person).
@@ -509,8 +586,8 @@ window.PlaneringBemanning = (function () {
     }
 
     // Planera dagen: "Fördela dem åt mig". De namngivna personerna (ur den inklistrade listan) sprids över rollens stationer och dagens block med tider som inte krockar med deras
-    // egna starter. Förslaget visas först (inget är inlagt), du kryssar bort det du inte vill ha, och allt kan ångras. Öppnas ur "Lägg in flera" och ersätter då dess innehåll.
-    async function openDistribution({ roleKey, roleName, planningId, memberIds }) {
+    // egna starter. Förslaget visas först (inget är inlagt), du kryssar bort det du inte vill ha, och allt kan ångras. Öppnas ur "Lägg in en namnlista" (steg 2) och ersätter då dess innehåll.
+    async function openDistribution({ roleKey, roleName, planningId, memberIds, back }) {
         let r = null, blockMinutes = 0;   // 0 = servern väljer åt användaren (3, 2 eller 1,5 timme: det som placerar flest)
         const sel = new Set();
         const fetchPlan = () => spost('PreviewDistribution', { roleKey, memberIds, blockMinutes }, planningId).catch(() => null);
@@ -557,7 +634,7 @@ window.PlaneringBemanning = (function () {
         };
         A.formModal({
             title: 'Fördela dem åt mig', okLabel: 'Lägg in förslaget', wide: true,
-            html: `<div class="alert alert-warning py-2 small mb-2" id="plbDsBanner"><b>Förslag — inget är inlagt än.</b> Ingen funktionär ser något och ingen får något mejl förrän du lagt in och skickat förfrågan.</div><div id="plbDsBody"></div>`,
+            html: `${back ? '<p class="mb-2"><button type="button" class="btn btn-link btn-sm p-0" data-ds-back>← Tillbaka</button></p>' : ''}<div class="alert alert-warning py-2 small mb-2" id="plbDsBanner"><b>Förslag — inget är inlagt än.</b> Ingen funktionär ser något och ingen får något mejl förrän du lagt in och skickat förfrågan.</div><div id="plbDsBody"></div>`,
             onOpen: b => {
                 b.addEventListener('change', e => {
                     const cb = e.target.closest('[data-ds]');
@@ -566,6 +643,7 @@ window.PlaneringBemanning = (function () {
                         draw(b); if (b.querySelector('#plbDsList')) b.querySelector('#plbDsList').scrollTop = sc; if (keep != null) { const again = b.querySelector(`[data-ds="${keep}"]`); if (again) again.focus({ preventScroll: true }); } }
                 });
                 b.addEventListener('click', async e => {
+                    if (back && e.target.closest('[data-ds-back]')) { back(); return; }
                     if (!e.target.closest('#plbDsRecalc')) return;
                     const v = parseInt(b.querySelector('#plbDsBlock').value, 10); blockMinutes = isNaN(v) ? 0 : v; await load(b);
                 });
@@ -875,7 +953,6 @@ window.PlaneringBemanning = (function () {
         behov: { label: 'Sätt antal…', changed: 'Ändra…', fn: () => openNeeds() },
         lage: { label: 'Välj hur ni gör…', changed: 'Ändra…', fn: () => openShooterMode() },
         skjuttid: { label: 'Skjuttid…', fn: () => openShootTime() },
-        laggin: { label: 'Lägg in flera…', fn: () => openAssignMany() },
         forslag: { label: 'Fyll med förslag…', fn: () => openProposal() },
         skicka: { label: 'Skicka förfrågan…', fn: () => openSendRequests() },
         koppla: { label: 'Koppla till medlemmar…', fn: () => openMatch() },
@@ -951,7 +1028,7 @@ window.PlaneringBemanning = (function () {
         A.formModal({
             title: 'Vem behövs, och hur många?', okLabel: 'Spara', wide: false,
             html: `<p class="pl-help small mb-2">${cols.length > 1 ? 'Hur många som behövs varje dag, av varje roll.' : 'Hur många som behövs av varje roll.'} <b>Gäller rollen stationer</b> skriver du hur många på varje station — en ansvarig och en markör på varje station betyder 1 och 1. Tävlingsledning bemannas av den som skapade planeringen.</p>
-                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in i rutans <b>skiftschema</b> (knappen <i>skiftschema</i> i rutan, eller <i>Flera skift under dagen</i> när du klickar lägg till), var och en med klockslag, till exempel 08–11, 11–14 och 14–17. Där ser du vem som står när och var det blir hål, och den som avlöser ser det i sitt schema.</p>
+                <p class="pl-help small mb-2" id="plbNeedsSimult"><b>Antalet är hur många som behövs samtidigt.</b> Behöver en stationschef avlösning under dagen är det fortfarande <b>1</b> — avbytarna lägger du in i rutans <b>skiftschema</b> (knappen <i>skiftschema</i> i rutan), var och en med klockslag, till exempel 08–11, 11–14 och 14–17. Där ser du vem som står när och var det blir hål, och den som avlöser ser det i sitt schema.</p>
                 <table class="table table-sm align-middle mb-2" id="plbNeedsTable"><tbody>${roles.map(line).join('')}</tbody></table>
                 <div class="d-flex gap-2 flex-wrap mb-1"><button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdMoreRoles">Välj fler roller…</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="plbNdOwnRole">Egen roll…</button></div>
@@ -987,7 +1064,7 @@ window.PlaneringBemanning = (function () {
             (g.roleChoices || []).length && { label: 'Välj roller…', icon: 'bi-ui-checks', fn: openChooseRoles },
             { label: 'Lägg till en dag…', icon: 'bi-calendar-plus', fn: () => openDay(null) },
             { header: 'Fyll platserna' },
-            { label: 'Lägg in flera…', icon: 'bi-people', fn: openAssignMany },
+            { label: 'Lägg in en namnlista…', icon: 'bi-clipboard', fn: openNameList },
             !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
             !g.family && linked() && g.patrolPlanAvailable && { header: 'Startlistan' },
             !g.family && linked() && g.patrolPlanAvailable && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
@@ -1106,7 +1183,7 @@ window.PlaneringBemanning = (function () {
                     cls += ' plb-short';
                     tally += `<div class="plb-need text-danger fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>ingen ${holes.map(x => esc(x.from) + '–' + esc(x.to)).join(', ')}</div>`;
                 }
-                // Skiftschemat: knappen syns bara när det finns något att visa — skift, ett hål eller en roll som ska vara bemannad hela skjuttiden. En tom ruta når det via lägg till.
+                // Skiftschemat: knappen syns bara när det finns något att visa — skift, ett hål eller en roll som ska vara bemannad hela skjuttiden. En tom ruta når det via lägg till → Ändra tid.
                 const wholeRole = (g.wholeDayRoles || []).some(k => String(k).toLowerCase() === String(row.roleKey).toLowerCase());
                 const sched = c.key && (entries.length || holes.length || wholeRole)
                     ? `<button type="button" class="plb-add plb-sc" data-plb-sched="${ri}" data-col="${ci}" title="Se och ändra vem som står när"><i class="bi bi-clock" aria-hidden="true"></i> skiftschema</button>` : '';
@@ -1547,7 +1624,7 @@ window.PlaneringBemanning = (function () {
             { label: 'E-postlista…', icon: 'bi-envelope', fn: openEmailList },
         ]);
         const m = B.meta || {};
-        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>lägga in folk</b>? <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-plb-assignmany>Lägg in flera…</button></p>`;
+        let notes = `<p class="pl-help small mb-2" id="plbPeopleHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Här ser du varje person och vad hen ska göra. Vill du <b>placera någon</b>? Tryck på <b>lägg till</b> i rätt ruta i <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-plb-part="rutnat">Rutnätet</button>, eller på <b>Placera</b> vid personen här.</p>`;
         if (m.unassignedVolunteerCount) notes += `<div class="pl-next warn"><div class="t"><b>${m.unassignedVolunteerCount} ${m.unassignedVolunteerCount === 1 ? 'person har' : 'personer har'} anmält sig</b> utan att bli placerade. De väntar på att du fördelar rollerna.</div>
             ${B.show === 'queue' ? '' : '<button type="button" class="btn btn-sm btn-warning" data-plb-show="queue">Visa dem</button>'}</div>`;
         if (m.declinedCount) notes += `<div class="pl-next warn"><div class="t">${m.declinedCount} ${m.declinedCount === 1 ? 'person har' : 'personer har'} tackat nej till sin plats — platsen behöver fyllas.</div>
@@ -2544,7 +2621,7 @@ window.PlaneringBemanning = (function () {
                 <td class="text-end">${A.rowMenu([{ label: 'Ändra…', fn: () => openSlot(s) }, { divider: true }, { label: 'Ta bort…', danger: true, fn: () => deleteSlot(s) }])}</td></tr>`).join('')}</tbody></table></div>`
             : '<p class="pl-help mb-0">Inget utöver rollerna.</p>';
         const volunteers = (B.people || []).filter(p => !!p.volunteer).length, un = (B.meta && B.meta.unassignedVolunteerCount) || 0;
-        area().innerHTML = `<p class="pl-help small mb-2" id="plbFindHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Det här är för att <b>bjuda in</b> klubbar och medlemmar att anmäla sig som funktionärer. Har du namnen själv? <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-plb-assignmany>Lägg in flera…</button></p>
+        area().innerHTML = `<p class="pl-help small mb-2" id="plbFindHint"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Det här är för att <b>bjuda in</b> klubbar och medlemmar att anmäla sig som funktionärer. Har du redan namnen på papper eller i ett mejl? <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-plb-assignmany>Lägg in en namnlista…</button></p>
             <div class="pl-card"><h2>1. Vilka får anmäla sig?</h2>
                 <p class="pl-help">Medlemmar i de klubbar och kretsar du väljer kan anmäla sig. Andra kan du fortfarande sätta in själv i rutnätet.</p>
                 <div class="mb-2">${chips || '<span class="pl-help">Ingen vald än.</span>'}</div>
@@ -2794,13 +2871,13 @@ window.PlaneringBemanning = (function () {
         const t = e.target.closest('[data-plb-part],[data-plb-person],[data-plb-add],[data-plb-sched],[data-plb-move],[data-plb-del],[data-plb-queue],[data-plb-match],[data-plb-show],[data-plb-more],[data-plb-back],[data-plb-scope],[data-plb-unscope],[data-plb-slot],[data-plb-request],[data-plb-copylink],[data-plb-day],[data-plb-shootermode],[data-plb-proposal],[data-plb-assignmany]');
         if (!t || !$('plBody').contains(t)) return;
         e.preventDefault();
-        if (t.hasAttribute('data-plb-assignmany')) openAssignMany();
+        if (t.hasAttribute('data-plb-assignmany')) openNameList();
         else if (t.hasAttribute('data-plb-proposal')) openProposal();
         else if (t.hasAttribute('data-plb-shootermode')) openShooterMode();
         else if (t.hasAttribute('data-plb-day')) { B.phoneDay = t.dataset.plbDay; drawGrid(); }
         else if (t.dataset.plbPart) { B.show = ''; nav(t.dataset.plbPart); }
         else if (t.dataset.plbPerson) { nav(family() && part() !== 'personer' ? 'veckan' : 'personer', t.dataset.plbPerson); }
-        else if (t.hasAttribute('data-plb-add')) { const r = (B.grid.rows || [])[parseInt(t.dataset.plbAdd, 10)], c = (B.grid.columns || [])[parseInt(t.dataset.col, 10)]; if (r && c) openAssignMany({ row: r, col: r && colsFor(r).find(x => x.key === c.key) || c }); }
+        else if (t.hasAttribute('data-plb-add')) { const r = (B.grid.rows || [])[parseInt(t.dataset.plbAdd, 10)], c = (B.grid.columns || [])[parseInt(t.dataset.col, 10)]; if (r && c) openPickPerson(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.hasAttribute('data-plb-sched')) { const r = (B.grid.rows || [])[+t.dataset.plbSched], c = (B.grid.columns || [])[+t.dataset.col]; if (r && c) openSchedule(r, colsFor(r).find(x => x.key === c.key) || c); }
         else if (t.dataset.plbMove) moveEntry(parseInt(t.dataset.plbMove, 10));
         else if (t.dataset.plbDel) removeEntry(parseInt(t.dataset.plbDel, 10));

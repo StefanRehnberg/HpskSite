@@ -147,8 +147,8 @@ namespace HpskSite.Tests
         [Fact]
         public void Forslag_erbjuds_bara_nar_det_finns_anmalda_funktionarer()
         {
-            Step(Facts(vols: 0, missing: 5), "fyll").Actions.Should().Equal("laggin");
-            Step(Facts(vols: 4, missing: 5), "fyll").Actions.Should().Equal("laggin", "forslag");
+            Step(Facts(vols: 0, missing: 5), "fyll").Actions.Should().BeEmpty();
+            Step(Facts(vols: 4, missing: 5), "fyll").Actions.Should().Equal("forslag");
         }
 
         [Fact]
@@ -162,7 +162,8 @@ namespace HpskSite.Tests
                 var steps = PlanStepRules.Derive(f);
                 steps.Should().NotBeEmpty();
                 steps.Select(s => s.Key).Should().OnlyHaveUniqueItems();
-                steps.Should().OnlyContain(s => s.Text.Length > 8 && s.Actions.Count > 0 && s.Title.Length > 3, $"{f}");
+                // "Fyll platserna" har ingen egen knapp utan anmälda funktionärer: folk läggs in med lägg till i rutan, och steget säger det i texten.
+                steps.Should().OnlyContain(s => s.Text.Length > 8 && (s.Actions.Count > 0 || s.Key == "fyll") && s.Title.Length > 3, $"{f}");
                 steps.Select(s => s.Key).First().Should().Be("behov");
             }
         }
@@ -189,7 +190,8 @@ namespace HpskSite.Tests
         [Fact]
         public void Utan_uppdelning_per_roll_ar_texten_som_forut()
         {
-            Step(Facts(needed: 12, missing: 5), "fyll").Text.Should().Be("5 av 12 platser saknar folk");
+            Step(Facts(needed: 12, missing: 5), "fyll").Text.Should().Be("5 av 12 platser saknar folk. Tryck på lägg till i en ruta i Rutnätet");
+            Step(Facts(needed: 12, missing: 5, vols: 3), "fyll").Text.Should().Be("5 av 12 platser saknar folk");
             Step(Facts(needed: 12), "behov").Text.Should().Be("12 platser behövs");
         }
 
