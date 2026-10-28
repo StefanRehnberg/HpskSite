@@ -3337,6 +3337,12 @@
                 <div class="pl-help small">Då ser alla inloggade medlemmar namnet, ungefär när och var, och vem som är sammankallande — men inget av innehållet.
                     Den som ber om att få vara med kommer in först när du har godkänt. Avstängt: bara de inbjudna vet att planeringen finns.</div></div>` : ''}
             <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>
+            ${p.competition && window.PlaneringBemanning ? `<div class="pl-card" style="max-width:720px" id="stStaffing"><h2>Bemanning</h2>
+                <p class="pl-help small">Gäller hela bemanningen: förslagen, krockarna och kandidatlistorna. Ställs in en gång för tävlingen. En enskild persons eget läge sätter du på personen under Bemanning.</p>
+                <div class="mb-3"><div class="fw-semibold">Funktionärer som skjuter</div><div class="small" id="stShooterMode">Hämtar…</div>
+                    <button type="button" class="btn btn-outline-primary btn-sm mt-1" data-st-staff="lage">Ändra…</button></div>
+                <div><div class="fw-semibold">Skjuttid</div><div class="small" id="stShootTime">Hämtar…</div>
+                    <button type="button" class="btn btn-outline-primary btn-sm mt-1" data-st-staff="skjuttid">Ändra…</button></div></div>` : ''}
             ${S.me.canManage ? `<div class="pl-card" style="max-width:720px"><h2>Uppgifterna</h2>
                 <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="stDoneMeet"${p.doneAtMeetingsOnly ? ' checked' : ''}>
                 <label class="form-check-label fw-semibold" for="stDoneMeet">Om en uppgift är utförd beslutas på mötena</label>
@@ -3352,6 +3358,14 @@
                 <button class="btn btn-outline-primary" id="stForbundetSave">Spara adressen</button></div><span id="stForbundetSaved" class="pl-help small"></span></div>` : ''}`;
         bindNotify();
         datePicker($('stStart')); datePicker($('stEnd'));
+        if ($('stStaffing')) {
+            const fill = async () => {
+                try { const s = await window.PlaneringBemanning.settingsSummary(STAFF_API); if ($('stShooterMode')) { $('stShooterMode').textContent = s.mode; $('stShootTime').textContent = s.time; } }
+                catch (e) { if ($('stShooterMode')) { $('stShooterMode').textContent = 'Kunde inte läsas'; $('stShootTime').textContent = 'Kunde inte läsas'; } }
+            };
+            fill();
+            $('stStaffing').addEventListener('click', e => { const b = e.target.closest('[data-st-staff]'); if (b) window.PlaneringBemanning.openSetting(STAFF_API, b.dataset.stStaff, fill); });
+        }
         $('stDoneMeet')?.addEventListener('change', async e => {
             const r = await post('SetDoneAtMeetingsOnly', { value: e.target.checked ? '1' : '0' });
             if (!r.success) { failMsg(r); e.target.checked = !e.target.checked; return; }

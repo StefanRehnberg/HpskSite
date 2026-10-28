@@ -12,8 +12,8 @@ namespace HpskSite.Tests
     public class PlanStepRulesTests
     {
         private static PlanFacts Facts(bool roles = true, bool needs = true, int needed = 24, int missing = 0, bool linked = true, int vols = 0, string? mode = null,
-            bool falt = false, int startClashes = 0, int clashes = 0, int assignedPeople = 12, int withStart = 5, int assignedTotal = 0, int unsent = 0, int unlinked = 0)
-            => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes, null, assignedPeople, withStart, assignedTotal, unsent, 0, unlinked);
+            bool falt = false, int startClashes = 0, int clashes = 0, int assignedPeople = 12, int withStart = 5, int assignedTotal = 0, int unsent = 0, int unlinked = 0, int registered = 0)
+            => new(roles, needs, needed, missing, linked, vols, mode, falt, startClashes, clashes, null, assignedPeople, withStart, assignedTotal, unsent, 0, unlinked, registered);
 
         private static PlanStep Step(PlanFacts f, string key) => PlanStepRules.Derive(f).Single(s => s.Key == key);
 
@@ -101,7 +101,19 @@ namespace HpskSite.Tests
         public void Gron_startlista_sager_hur_manga_som_kontrollerats()
         {
             Step(Facts(falt: true, assignedPeople: 12, withStart: 5, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 placerade som också skjuter krockar med sin egen start");
-            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 placerade medlemmarna skjuter i tävlingen");
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 0, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 12 placerade medlemmarna är anmäld till tävlingen");
+        }
+
+        // Stefan 2026-10-28: funktionärerna ÄR anmälda, men startlistan är inte gjord. Då är kontrollen inte klar och texten säger inte att ingen tävlar.
+        [Fact]
+        public void Anmalda_utan_startlista_ar_inte_kontrollerade_och_steget_sager_det()
+        {
+            var s = Step(Facts(falt: true, assignedPeople: 12, withStart: 0, registered: 7, mode: "x"), "startlista");
+            s.State.Should().Be(PlanStepState.Todo);
+            s.Text.Should().Contain("7 av de 12 placerade medlemmarna är anmälda till tävlingen, men startlistan är inte gjord än");
+            s.Text.Should().NotContain("skjuter i tävlingen").And.NotContain("ingen start krockar");
+            // Finns starter är det de som räknas, som förut.
+            Step(Facts(falt: true, assignedPeople: 12, withStart: 5, registered: 7, mode: "x"), "startlista").Text.Should().Contain("Ingen av de 5 placerade som också skjuter krockar");
         }
 
         // Anders (persontest 11): en fritextperson har ingen identitet att matcha en start mot. Texten får inte påstå att hen kontrollerats, och steget är inte grönt.

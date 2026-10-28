@@ -16,7 +16,7 @@ namespace HpskSite.Controllers
         /// Fyller "Dagens plan" och platsräkningen ur rutnätssvaret. Platser = behov minus bemannat per roll och dag (per pass när dagen har flera pass) — samma regel som sidans
         /// rubrik förut räknade i JS; nu EN räkning här som både bandet och rubriken läser.
         /// </summary>
-        private static void DerivePlanSteps(GridResponse resp, StaffOwner owner, ISet<int>? membersWithStart = null)
+        private static void DerivePlanSteps(GridResponse resp, StaffOwner owner, ISet<int>? membersWithStart = null, ISet<int>? membersRegistered = null)
         {
             // Vilka som har placeringar, hur många placeringar som ännu inte meddelats (NotifiedAt saknas; självanmälda och bekräftade räknas inte), och hur många av personerna som också skjuter.
             // Tävlingsledning bemannas av den som skapade planeringen och räknas inte: annars stod "klart" på startlistan och "Alla inlagda har fått besked" innan någon lagts in (persontest 12).
@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
             var assignedKeys = live.Select(e => e.MemberId is > 0 ? "m" + e.MemberId : "n" + (e.DisplayName ?? "").Trim().ToLowerInvariant()).Distinct().Count();
             var unlinkedNames = StaffingPlaces.Unlinked(resp);
             var withStart = membersWithStart == null ? 0 : live.Where(e => e.MemberId is > 0 && membersWithStart.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
+            var registered = membersRegistered == null ? 0 : live.Where(e => e.MemberId is > 0 && membersRegistered.Contains(e.MemberId.Value)).Select(e => e.MemberId!.Value).Distinct().Count();
             var unsent = live.Count(e => PlanStepRules.IsUnnotified(e.Status, e.NotifiedAt) && !e.ReadOnly && e.HasContact);
             var unreachable = live.Count(e => PlanStepRules.IsUnnotified(e.Status, e.NotifiedAt) && !e.ReadOnly && !e.HasContact);
             var (needed, missing, perRole) = StaffingPlaces.Count(resp);
@@ -39,7 +40,7 @@ namespace HpskSite.Controllers
                 ShooterModeTitle: ShooterModeRules.IsValid(resp.ShooterMode) ? ShooterModeRules.Describe(resp.ShooterMode!).Title : null,
                 PatrolPlanAvailable: resp.PatrolPlanAvailable, StartClashes: startClashes, Clashes: allClashes,
                 ByRole: perRole.Where(kv => kv.Value.Needed > 0).Select(kv => new RolePlaces(kv.Key, kv.Value.Needed, kv.Value.Missing)).ToList(),
-                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent, PlannedUnreachable: unreachable, Unlinked: unlinkedNames);
+                AssignedPeople: assignedKeys, PeopleWithStart: withStart, AssignedTotal: live.Count, PlannedUnsent: unsent, PlannedUnreachable: unreachable, Unlinked: unlinkedNames, PeopleRegistered: registered);
             resp.PlanSteps = PlanStepRules.Derive(facts);
         }
 

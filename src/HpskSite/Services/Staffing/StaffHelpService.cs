@@ -220,6 +220,55 @@ namespace HpskSite.Services.Staffing
             }
         }
 
+        /// <summary>
+        /// Arrangören lägger till en medlem som funktionär UTAN roll, dag eller tid (Stefan 2026-10-28: "jag vet inte nödvändigtvis vilka roller som behövs"):
+        /// en anmälan som gäller "var det behövs" alla planeringens dagar, hela dagen. Hen visas bland de anmälda funktionärerna när du placerar i rutnätet.
+        /// Finns redan en anmälan läggs bara de dagar som saknas till; hens egna val och kommentar rörs inte. Returnerar antalet dagar som lades till.
+        /// </summary>
+        public int AddOrganizerVolunteer(StaffOwner owner, int memberId, string memberName)
+        {
+            var days = _days.GetDays(owner).Select(d => d.DayDate.Date).Distinct().ToList();
+            if (days.Count == 0)
+            {
+                var (start, end) = _owners.Span(owner);
+                if (start is { } s && s != default)
+                {
+                    var last = end is { } e && e != default && e >= s ? e.Date : s.Date;
+                    if ((last - s.Date).TotalDays > 30) last = s.Date;
+                    for (var d = s.Date; d <= last; d = d.AddDays(1)) days.Add(d);
+                }
+            }
+            if (days.Count == 0) return 0;
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var existing = db.FirstOrDefault<StaffHelpSignup>("SELECT * FROM StaffHelpSignup WHERE " + StaffOwner.Where(0) + " AND MemberId = @1", owner.P, memberId);
+            var choices = existing == null ? new List<HelpSlotChoice>() : ParseChoices(existing.SlotsJson);
+            var added = 0;
+            foreach (var day in days)
+            {
+                var key = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (choices.Any(c => c.IsDayChoice && string.Equals((c.Date ?? "").Trim(), key, StringComparison.Ordinal) && string.IsNullOrWhiteSpace(c.RoleKey) && (c.Times ?? new()).Count == 0)) continue;
+                choices.Add(new HelpSlotChoice { SlotId = 0, Date = key, RoleKey = "", Times = new() });
+                added++;
+            }
+            var now = DateTime.UtcNow;
+            var json = JsonConvert.SerializeObject(choices);
+            if (existing != null)
+            {
+                existing.SlotsJson = json; existing.ModifiedDate = now;
+                if (string.IsNullOrWhiteSpace(existing.MemberName)) existing.MemberName = memberName;
+                db.Update(existing);
+            }
+            else
+                db.Insert(new StaffHelpSignup
+                {
+                    PlanningId = owner.PlanningIdOrNull, CompetitionId = owner.CompetitionIdOrNull, MemberId = memberId, MemberName = memberName,
+                    Comment = "Tillagd av arrangören", SlotsJson = json, CreatedDate = now, ModifiedDate = now,
+                });
+            return added;
+        }
+
         // ---- manager review ----
 
         public List<HelpSignupReviewView> GetReview(StaffOwner owner)

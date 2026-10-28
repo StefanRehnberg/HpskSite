@@ -382,6 +382,8 @@ namespace HpskSite.Models.Staffing
         /// <summary>Ett nytt skifts person; på ett befintligt skift byter ett annat id person. Samma id som skiftet har betyder ingen ändring och används för krockkontrollen av ny tid.</summary>
         public int MemberId { get; set; }
         public string? DisplayName { get; set; }
+        /// <summary>Frivillig e-post för ett nytt skift åt någon utan konto (en medlem använder sin egen). Ignoreras om <see cref="MemberId"/> är satt.</summary>
+        public string? Email { get; set; }
         /// <summary>"8", "8:30", "08:00" — tomt (men skickat) i båda = hela dagen. Utelämnat i båda på ett befintligt skift = tiderna behålls.</summary>
         public string? From { get; set; }
         public string? To { get; set; }

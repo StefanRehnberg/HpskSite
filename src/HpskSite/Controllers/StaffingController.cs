@@ -261,13 +261,15 @@ namespace HpskSite.Controllers
                     try
                     {
                         // Vilka som har en egen start i tävlingen (familjen): "ingen av de N krockar" räknas bara på dem.
-                        ISet<int>? starters = null;
+                        ISet<int>? starters = null, registered = null;
                         if (owner.HasCompetition)
                         {
                             try { starters = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().StartsByMember(owner).Where(kv => kv.Value.Count > 0).Select(kv => kv.Key).ToHashSet(); }
                             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: starters for plan steps failed for planning {Planning}", pid); }
+                            try { registered = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().RegistrationsByMember(owner).Keys.ToHashSet(); }
+                            catch (Exception ex) { _logger.LogWarning(ex, "Staffing: registrations for plan steps failed for planning {Planning}", pid); }
                         }
-                        DerivePlanSteps(resp, owner, starters);
+                        DerivePlanSteps(resp, owner, starters, registered);
                     }
                     catch (Exception ex) { _logger.LogWarning(ex, "Staffing: plan steps failed for planning {Planning}", pid); }
                 }
@@ -366,9 +368,13 @@ namespace HpskSite.Controllers
             {
                 var starts = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().StartsByMember(owner);
                 var sv = CultureInfo.GetCultureInfo("sv-SE");
-                foreach (var row in p.People.Where(r => r.MemberId is > 0 && r.Assignments.Count > 0))
-                    if (starts.TryGetValue(row.MemberId!.Value, out var w))
+                var registered = HttpContext.RequestServices.GetRequiredService<StaffBusyReader>().RegistrationsByMember(owner);
+                foreach (var row in p.People.Where(r => r.MemberId is > 0))
+                {
+                    if (registered.TryGetValue(row.MemberId!.Value, out var reg)) row.Registered = reg;
+                    if (row.Assignments.Count > 0 && starts.TryGetValue(row.MemberId!.Value, out var w))
                         row.Starts = w.OrderBy(x => x.Start).Select(x => x.Start.ToString("ddd d MMM 'kl' HH:mm", sv)).Distinct().Take(4).ToList();
+                }
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Staffing: starts for the people view failed for competition {Competition}", competitionId); }
             return Json(new

@@ -428,8 +428,10 @@ window.PlaneringBemanning = (function () {
         })));
         if (!todo.length) { A.showMsg('Alla inlagda har redan fått besked.', 'success'); return; }
         const people = new Set(todo.map(e => e.memberId ? 'm' + e.memberId : 'n' + (e.displayName || '').toLowerCase())).size;
+        // "N personer, M placeringar": talet M är ALLA placeringar, fördelade på personerna. Förut stod det "med sina 33 placeringar" som om en enda person hade 33.
+        const total = `${todo.length} ${todo.length === 1 ? 'placering' : 'placeringar'}`;
         if (!await A.plConfirm(`Meddela ${people} ${people === 1 ? 'person' : 'personer'}?`,
-            `Varje person får ETT mejl (och en notis, om hen har konto) med sina ${todo.length === people ? 'placeringar' : todo.length + ' placeringar'} och en knapp till sin tävlingsdagssida. Ingen behöver svara. Det går inte att ta tillbaka när det är skickat.`, 'Meddela')) return;
+            `Det gäller ${total}${people > 1 ? ', fördelade på personerna' : ''}. Varje person får ETT mejl (och en notis, om hen har konto) som listar hens egna placeringar och har en knapp till hens tävlingsdagssida. Ingen behöver svara. Det går inte att ta tillbaka när det är skickat.`, 'Meddela')) return;
         let r;
         try { r = await sendNotice(todo.map(e => e.id)); } catch (err) { r = { ok: false, text: err.message }; }
         await loadGrid(); drawGrid();
@@ -700,6 +702,23 @@ window.PlaneringBemanning = (function () {
     });
 
     // Planera dagen: hur gör ni med funktionärer som också skjuter? Fyra svar i klartext som ett förval för planeringen — och ett eget läge per person.
+    // Inställningarna för funktionärer som skjuter och skjuttid bor under planeringens Inställningar (Stefan 2026-10-28) — de gäller hela bemanningen,
+    // inte rutnätet. Stegen i bandet är kvar som genväg. Skalet (planering.js) ber om en sammanfattning och öppnar dialogerna härifrån.
+    let afterSetting = null;
+    async function settingsSummary(api) {
+        A = A || api;
+        const [m, t] = await Promise.all([sget('GetShooterMode').catch(() => null), sget('GetShootTime').catch(() => null)]);
+        const title = k => ((m && m.modes) || []).find(x => x.key === k);
+        return {
+            mode: m && m.success ? (m.mode && title(m.mode) ? title(m.mode).title : 'Inte valt än') : 'Kunde inte läsas',
+            time: t && t.success ? `${t.before} min före, ${t.duration} min skjutning, ${t.after} min efter${t.isOwn ? '' : ' (grenens förval)'}` : 'Kunde inte läsas',
+        };
+    }
+    function openSetting(api, which, after) {
+        A = A || api;
+        afterSetting = after || null;
+        return which === 'lage' ? openShooterMode() : openShootTime();
+    }
     async function openShooterMode() {
         const r = await sget('GetShooterMode').catch(() => null);
         if (!r || !r.success) { A.showMsg(esc((r && r.message) || 'Kunde inte läsa inställningen.'), 'danger'); return; }
@@ -725,7 +744,8 @@ window.PlaneringBemanning = (function () {
                 if (!sel) return 'Välj ett av alternativen.';
                 const d = await spost('SetShooterMode', { mode: sel.value });
                 if (!d.success) return d.message || 'Det gick inte att spara.';
-                await loadGrid(); drawGrid();
+                if (A.isActive()) { await loadGrid(); drawGrid(); } else B.grid = null;   // från Inställningar finns inget rutnät att rita om
+                if (afterSetting) afterSetting();
                 return true;
             }
         });
@@ -778,8 +798,9 @@ window.PlaneringBemanning = (function () {
                 const same = before === d.before && duration === d.duration && after === d.after;
                 const res = await spost('SetShootTime', { before, duration, after, reset: same });
                 if (!res.success) return res.message || 'Skjuttiden kunde inte sparas.';
-                await loadGrid(); drawGrid();
+                if (A.isActive()) { await loadGrid(); drawGrid(); } else B.grid = null;   // från Inställningar finns inget rutnät att rita om
                 A.showMsg('Skjuttiden är sparad. Krockarna räknas om.', 'success');
+                if (afterSetting) afterSetting();
                 return true;
             }
         });
@@ -916,9 +937,7 @@ window.PlaneringBemanning = (function () {
             !g.family && linked() && (g.volunteersTotal || 0) > 0 && { label: 'Fyll med förslag…', icon: 'bi-magic', fn: openProposal },
             !g.family && linked() && g.patrolPlanAvailable && { header: 'Startlistan' },
             !g.family && linked() && g.patrolPlanAvailable && { label: 'Bygg startlistan runt funktionärerna…', icon: 'bi-diagram-2', fn: openPatrolPlan },
-            linked() && { header: 'Inställningar' },
-            linked() && { label: 'Funktionärer som skjuter…', icon: 'bi-bullseye', fn: openShooterMode },
-            linked() && { label: 'Skjuttid…', icon: 'bi-stopwatch', fn: openShootTime },
+            linked() && { label: 'Inställningar för bemanningen…', icon: 'bi-gear', fn: () => { A.go('installningar'); setTimeout(() => { const el = $('stStaffing'); if (el) el.scrollIntoView({ block: 'start' }); }, 500); } },
             { divider: true },
             { label: 'Skriv ut bemanningen', icon: 'bi-printer', fn: () => window.open('/tavlingsplanering/blad?p=' + A.ID + '&vy=bemanning', '_blank', 'noopener') },
         ]);
@@ -1510,7 +1529,10 @@ window.PlaneringBemanning = (function () {
             : ((p.availabilityLabels || []).length ? '<span class="text-warning-emphasis small">Har angett tider — inte placerad än</span>'
                 : ((p.prep || []).length ? '<span class="plb-dim small">Bara förberedelser</span>' : '<span class="plb-dim small">—</span>'));
         const state = p.weekOnly ? '' : `<span class="pl-state ${STATE_CLS[p.state] || 'off'}">${esc(p.state)}</span>`;
-        const startsLine = (p.starts || []).length ? `<div class="plb-dim small" data-plb-starts>Skjuter själv: ${p.starts.map(esc).join(', ')}</div>` : '';
+        // Anmäld är inte samma sak som en start: utan startlista finns inga tider, men hen tävlar ändå (Stefan 2026-10-28).
+        const regText = p.registered ? `Anmäld till tävlingen${p.registered.length ? ' (' + p.registered.map(esc).join(', ') + ')' : ''}` : '';
+        const startsLine = (p.starts || []).length ? `<div class="plb-dim small" data-plb-starts>Skjuter själv: ${p.starts.map(esc).join(', ')}</div>`
+            : (regText ? `<div class="plb-dim small" data-plb-registered>${regText}</div>` : '');
         const menu = (p.readOnly || p.weekOnly) ? '' : A.rowMenu([
             { label: 'Öppna ' + first(p.displayName), fn: () => nav('personer', p.key) },
             { label: 'Placera på en plats…', fn: () => openAssignment({ person: p }) },
@@ -1617,7 +1639,9 @@ window.PlaneringBemanning = (function () {
             + (mine.length ? `<ul class="list-unstyled mb-0">${mine.map(i => { const t = byId.get(i.targetPlanningId) || {};
                 return `<li><i class="bi bi-bullseye me-1" aria-hidden="true"></i><b>${esc(t.name || '')}</b>${i.classes ? ' · ' + esc(i.classes) : ''}${when(t) ? ` <span class="plb-dim small">· ${esc(when(t))}</span>` : ''}</li>`; }).join('')}</ul>
                 <p class="pl-help small mt-2 mb-0">Placeringar samma dagar visas som krockar i rutnätet.</p>`
-                : `<p class="pl-help mb-0">${esc(first(p.displayName))} har inte sagt att hen tänker tävla i någon av veckans tävlingar.</p>`);
+                : (p.registered
+                    ? `<p class="pl-help mb-0"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>${esc(first(p.displayName))} är <b>anmäld till tävlingen</b>${p.registered.length ? ' (' + p.registered.map(esc).join(', ') + ')' : ''}.${(p.starts || []).length ? '' : ' Egna starttider syns först när startlistan är gjord.'}</p>`
+                    : `<p class="pl-help mb-0">${esc(first(p.displayName))} är inte anmäld till tävlingen och har inte sagt att hen tänker tävla i någon av veckans tävlingar.</p>`));
         const btn = box.querySelector('[data-plb-shoot]');
         if (btn) btn.addEventListener('click', () => openShoot(p, r, mine));
     }
@@ -2026,6 +2050,10 @@ window.PlaneringBemanning = (function () {
                 ${clashHtml}<div id="plbScRows">${rowsHtml}</div>`;
             if (S.pick) paintPick();
         };
+        // E-post (frivillig) för en ny person utan konto: syns först när ett namn är skrivet och ingen medlem är vald.
+        const wantsEmail = r => r.isNew && !r.memberId && (r.name || '').trim().length >= 2;
+        const emailBox = (i, r) => wantsEmail(r)
+            ? `<input type="email" class="form-control form-control-sm mt-1 plb-sc-email" data-i="${i}" autocomplete="off" placeholder="E-post (valfritt, för den som inte är medlem)" value="${esc(r.email || '')}" aria-label="E-post (valfritt)">` : '';
         const scRowHtml = (r, i) => {
             const who = r.isNew || r.swapping
                 ? `<input type="text" class="form-control form-control-sm plb-sc-name" data-i="${i}" autocomplete="off" placeholder="${r.swapping ? 'Sök en medlem' : 'Sök medlem eller skriv ett namn'}" value="${esc(r.isNew ? r.name : (r.swapName || ''))}" aria-label="Person">`
@@ -2036,7 +2064,7 @@ window.PlaneringBemanning = (function () {
                 : `<input type="text" class="form-control form-control-sm plb-sc-from" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="från" value="${esc(r.from)}" aria-label="Från klockan">
                     <span>–</span><input type="text" class="form-control form-control-sm plb-sc-to" data-i="${i}" data-hpsk-time inputmode="decimal" style="width:5.2rem" placeholder="till" value="${esc(r.to)}" aria-label="Till klockan">`;
             return `<div class="plb-sc-row border rounded p-2 mb-2${S.pick && S.pick.i === i ? ' border-primary' : ''}" data-i="${i}"><div class="d-flex flex-wrap align-items-center gap-2">
-                <div class="flex-grow-1" style="min-width:11rem">${who}${r.warn ? `<div class="small text-warning-emphasis">${esc(r.warn)}</div>` : ''}</div>${times}
+                <div class="flex-grow-1" style="min-width:11rem">${who}${r.warn ? `<div class="small text-warning-emphasis">${esc(r.warn)}</div>` : ''}<div class="plb-sc-emailslot" data-i="${i}">${emailBox(i, r)}</div></div>${times}
                 <button type="button" class="btn btn-sm btn-outline-danger" data-sc-del="${i}" aria-label="Ta bort skiftet" title="Ta bort skiftet"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
                 <div class="plb-sc-pickbox mt-2" data-i="${i}"></div></div>`;
         };
@@ -2157,7 +2185,9 @@ window.PlaneringBemanning = (function () {
                 if (r.isNew) {
                     if (!(r.name || '').trim() && !f && !t) continue;   // en tom rad som aldrig fylldes i
                     if (!(r.name || '').trim()) return `Välj eller skriv vem som tar skiftet ${f}–${t}, eller ta bort det.`;
-                    shifts.push({ id: 0, memberId: r.memberId || 0, displayName: r.name.trim(), from: f, to: t });
+                    const em = r.memberId ? '' : (r.email || '').trim();
+                    if (em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return `E-postadressen till ${r.name.trim()} ser inte rätt ut.`;
+                    shifts.push({ id: 0, memberId: r.memberId || 0, displayName: r.name.trim(), email: em || null, from: f, to: t });
                 } else if (!r.locked && (f !== r.orig.from || t !== r.orig.to || (r.memberId && r.memberId !== r.orig.memberId))) {
                     if (r.swapping && !r.memberId) return 'Välj en medlem att byta till, eller avbryt bytet genom att ladda om dialogen.';
                     shifts.push({ id: r.id, memberId: r.memberId || 0, from: f, to: t });
@@ -2201,9 +2231,15 @@ window.PlaneringBemanning = (function () {
                     }
                 });
                 b.addEventListener('input', e => {
-                    const t = e.target; if (!t.classList.contains('plb-sc-name')) return;
+                    const t = e.target;
+                    if (t.classList.contains('plb-sc-email')) { const er = S.rows[+t.dataset.i]; if (er) er.email = t.value; return; }
+                    if (!t.classList.contains('plb-sc-name')) return;
                     const i = +t.dataset.i, r = S.rows[i]; if (!r) return;
-                    if (r.swapping) r.swapName = t.value; else { r.name = t.value; r.memberId = 0; r.warn = ''; }
+                    if (r.swapping) r.swapName = t.value; else {
+                        r.name = t.value; r.memberId = 0; r.warn = '';
+                        const slot = body.querySelector(`.plb-sc-emailslot[data-i="${i}"]`);   // e-postfältet visas/döljs utan att namnfältet ritas om
+                        if (slot && !!slot.firstElementChild !== wantsEmail(r)) slot.innerHTML = emailBox(i, r);
+                    }
                     S.clash = null;
                     if (!S.pick || S.pick.i !== i) { pickOpen(i, t.value.trim()); return; }
                     S.pick.q = t.value.trim(); S.pick.page = 0; S.pick.list = null; paintPickList(); loadPick(250);
@@ -2363,7 +2399,10 @@ window.PlaneringBemanning = (function () {
         if (full && full.shiftLabel && full.shiftLabel.indexOf('–') > -1) {
             const parts = full.shiftLabel.split('–'); from = parts[0].replace('från ', '').trim(); to = (parts[1] || '').trim();
         }
+        // Läget (Placerad / Anmäld själv / Bekräftad) sätts av systemet, inte här: det avgör också om personen räknas som meddelad.
         const status = full ? asStatus(full.status) : 'Planned';
+        // "Lägg till en funktionär" (ingen person vald i förväg, ingen befintlig placering): rollen är valfri. Utan roll anmäls en medlem som funktionär.
+        const addMode = !full && !person;
         const has = person && (person.assignments || []).length
             ? `<div class="pl-help small mb-3">${esc(first(person.displayName))} har redan: ${(person.assignments || []).map(a => esc(a.label || a.roleName)).join(' · ')}</div>` : '';
         A.formModal({
@@ -2378,21 +2417,23 @@ window.PlaneringBemanning = (function () {
                         <div class="list-group mt-1 d-none" id="plbWhoRes"></div>
                         <label class="form-label mt-2 small" for="plbWhoPhone">Telefon <span class="plb-dim">(valfritt)</span></label>
                         <input type="tel" class="form-control form-control-sm" id="plbWhoPhone" autocomplete="off" style="max-width:220px">
+                        <label class="form-label mt-2 small" for="plbWhoEmail">E-post <span class="plb-dim">(valfritt, för den som inte är medlem)</span></label>
+                        <input type="email" class="form-control form-control-sm" id="plbWhoEmail" autocomplete="off" placeholder="namn@exempel.se" style="max-width:320px">
+                        <div class="pl-help small">Med e-post kan du meddela hen om placeringen. En medlem behöver ingen: hen nås via sitt konto.</div>
                     </div></div>
                 ${has}
                 <div class="row g-2">
-                    <div class="col-sm-6"><label class="form-label" for="plbARole">Roll</label>
-                        <select class="form-select" id="plbARole"><option value="">Välj roll</option>${roles.map(r => `<option value="${esc(r.key)}"${r.key === rk ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select></div>
+                    <div class="col-sm-6"><label class="form-label" for="plbARole">Roll${addMode ? ' <span class="plb-dim">(valfritt)</span>' : ''}</label>
+                        <select class="form-select" id="plbARole"><option value="">${addMode ? 'Ingen roll än' : 'Välj roll'}</option>${roles.map(r => `<option value="${esc(r.key)}"${r.key === rk ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select></div>
                     <div class="col-sm-6"><label class="form-label" for="plbADay">Dag</label>
                         <select class="form-select" id="plbADay">${dayOptions(curDay, '', true)}</select></div>
                     <div class="col-6 col-sm-3"><label class="form-label" for="plbAFrom">Från</label><input type="text" class="form-control" id="plbAFrom" data-hpsk-time inputmode="decimal" placeholder="t.ex. 8" value="${esc(from)}"></div>
                     <div class="col-6 col-sm-3"><label class="form-label" for="plbATo">Till</label><input type="text" class="form-control" id="plbATo" data-hpsk-time inputmode="decimal" placeholder="t.ex. 16" value="${esc(to)}"></div>
-                    <div class="col-sm-6"><label class="form-label" for="plbAStatus">Läge</label>
-                        <select class="form-select" id="plbAStatus">${Object.keys(STATUS).map(k => `<option value="${k}"${k === status ? ' selected' : ''}>${STATUS[k]}</option>`).join('')}</select></div>
                 </div>
-                <p class="pl-help small mt-1 mb-3">Utan tider gäller placeringen hela dagen.</p>
-                <label class="form-label" for="plbANote">Anteckning <span class="plb-dim">(valfritt)</span></label>
-                <textarea class="form-control" id="plbANote" rows="2">${esc(full ? (full.note || '') : '')}</textarea>`,
+                <p class="pl-help small mt-1 mb-3" id="plbAHelp">${addMode ? 'Utan roll anmäls personen som funktionär, så att du kan placera hen i rutnätet där hen behövs. Med en roll placeras hen direkt. Utan tider gäller placeringen hela dagen.' : 'Utan tider gäller placeringen hela dagen.'}</p>
+                <div id="plbANoteBox"><label class="form-label" for="plbANote">Meddelande till den placerade <span class="plb-dim">(valfritt)</span></label>
+                <textarea class="form-control" id="plbANote" rows="2" placeholder="t.ex. Ta med hörselskydd">${esc(full ? (full.note || '') : '')}</textarea>
+                <div class="pl-help small">Hen ser det i sitt schema (Mitt schema).</div></div>`,
             onOpen: b => {
                 const change = b.querySelector('#plbWhoChange');
                 if (change) change.addEventListener('click', () => {
@@ -2407,13 +2448,33 @@ window.PlaneringBemanning = (function () {
                     memberId = m.memberId; q.value = m.memberName;
                     if (m.phone && !b.querySelector('#plbWhoPhone').value) b.querySelector('#plbWhoPhone').value = m.phone;
                 });
-                (locked ? b.querySelector('#plbARole') : q).focus();
+                // Utan roll finns varken dag, tid eller meddelande att ställa in: fälten är avstängda tills en roll väljs.
+                const roleSel = b.querySelector('#plbARole');
+                const syncRole = () => {
+                    const off = addMode && !roleSel.value;
+                    ['#plbADay', '#plbAFrom', '#plbATo', '#plbANote'].forEach(s => { const el = b.querySelector(s); if (el) el.disabled = off; });
+                    b.querySelector('#plbANoteBox').style.opacity = off ? '.55' : '';
+                };
+                roleSel.addEventListener('change', syncRole); syncRole();
+                (locked ? roleSel : q).focus();
             },
             onOk: async b => {
                 const name = locked ? lockedName : b.querySelector('#plbWhoQ').value.trim();
                 if (!name) return 'Välj eller skriv en person.';
                 const role = b.querySelector('#plbARole').value;
+                if (!role && addMode) {
+                    if (!memberId) return 'Utan roll går det bara för en medlem. Sök och välj en medlem, eller välj en roll för att placera någon utan konto.';
+                    const v = await spost('AddVolunteer', { memberId });
+                    if (!v.success) return v.message || 'Det gick inte att lägga till.';
+                    await loadPeople();
+                    A.showMsg(`${esc(v.name || name)} är tillagd som funktionär. Placera hen i rutnätet där hen behövs.`, 'success');
+                    await refreshPart();
+                    return true;
+                }
                 if (!role) return 'Välj en roll.';
+                // E-post för den som inte är medlem (frivillig); en medlem använder sin egen.
+                const emailIn = !full && !locked && !memberId ? b.querySelector('#plbWhoEmail').value.trim() : '';
+                if (emailIn && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailIn)) return 'E-postadressen ser inte rätt ut.';
                 const day = b.querySelector('#plbADay').value;
                 const norm = v => window.hpskNormalizeTime ? window.hpskNormalizeTime(v) : v.trim();
                 const f = norm(b.querySelector('#plbAFrom').value), t = norm(b.querySelector('#plbATo').value);
@@ -2426,7 +2487,7 @@ window.PlaneringBemanning = (function () {
                     memberId: memberId || 0,
                     displayName: name,
                     phone: full ? (full.phone || null) : (locked ? (person && person.phone) || null : (b.querySelector('#plbWhoPhone').value.trim() || null)),
-                    email: full ? (full.email || null) : (locked && person ? person.email || null : null),
+                    email: full ? (full.email || null) : (locked && person ? person.email || null : (emailIn || null)),
                     roleKey: role,
                     functionTitle: full ? (full.functionTitle || null) : null,
                     scopeType: full ? (full.scopeType || null) : null,
@@ -2439,7 +2500,7 @@ window.PlaneringBemanning = (function () {
                     dayDate: day || null,
                     isResponsible: full ? !!full.isResponsible : false,
                     hasAdminAccess: full ? !!full.hasAdminAccess : !!(person && person.hasAdminAccess),
-                    status: b.querySelector('#plbAStatus').value,
+                    status,
                     note: b.querySelector('#plbANote').value.trim() || null,
                     allowDuplicate: !!b.dataset.allowDup
                 };
@@ -2915,5 +2976,5 @@ window.PlaneringBemanning = (function () {
         finally { B.polling = false; }
     }
 
-    return { render, leave };
+    return { render, leave, settingsSummary, openSetting };
 })();

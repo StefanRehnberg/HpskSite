@@ -14,9 +14,31 @@ namespace HpskSite.Services.Staffing
         private readonly PlanningService _planning;
         private readonly StartWindowReader _starts;
 
-        public StaffBusyReader(PlanningService planning, StartWindowReader starts)
+        private readonly Umbraco.Cms.Infrastructure.Scoping.IScopeProvider _scopes;
+
+        public StaffBusyReader(PlanningService planning, StartWindowReader starts, Umbraco.Cms.Infrastructure.Scoping.IScopeProvider scopes)
         {
-            _planning = planning; _starts = starts;
+            _planning = planning; _starts = starts; _scopes = scopes;
+        }
+
+        private sealed class RegRow { public int MemberId { get; set; } public string? ClassKey { get; set; } }
+
+        /// <summary>
+        /// Vilka medlemmar som är ANMÄLDA till tävlingarna bemanningen gäller, med sina klasser (visningsnamn). En anmälan är inte en start: startlistan kan saknas helt.
+        /// Därför säger bemanningen "anmäld" och "har en start" var för sig (Stefan 2026-10-28: funktionärerna är anmälda men listan visade att ingen tävlar).
+        /// </summary>
+        public Dictionary<int, List<string>> RegistrationsByMember(StaffOwner owner)
+        {
+            var comps = CompetitionsOf(owner);
+            var result = new Dictionary<int, List<string>>();
+            if (comps.Count == 0) return result;
+            List<RegRow> rows;
+            using (var s = _scopes.CreateScope(autoComplete: true))
+                rows = s.Database.Fetch<RegRow>($@"SELECT r.MemberId, c.ClassKey FROM CompetitionRegistration r
+                    LEFT JOIN CompetitionRegistrationClass c ON c.RegistrationId = r.Id WHERE r.CompetitionId IN ({string.Join(",", comps)}) AND r.IsActive = 1 AND r.MemberId > 0");
+            foreach (var g in rows.GroupBy(x => x.MemberId))
+                result[g.Key] = g.Select(x => x.ClassKey).Where(c => !string.IsNullOrEmpty(c)).Distinct().Select(c => HpskSite.Models.ShootingClasses.DisplayName(c!)).ToList();
+            return result;
         }
 
         /// <summary>Tävlingarna som ägarens bemanning gäller: den egna, och för en planering i en familj alla tävlingar som familjens delar bemannar.</summary>

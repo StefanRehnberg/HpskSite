@@ -979,6 +979,8 @@ namespace HpskSite.Services.Staffing
                 if (t == null) return CellShiftsResult.Fail(err!);
                 if (it.Id <= 0 && it.MemberId <= 0 && string.IsNullOrWhiteSpace(it.DisplayName))
                     return CellShiftsResult.Fail("Välj eller skriv en person för varje nytt skift.");
+                if (it.Id <= 0 && it.MemberId <= 0 && !string.IsNullOrWhiteSpace(it.Email) && !LooksLikeEmail(it.Email))
+                    return CellShiftsResult.Fail($"E-postadressen till {(it.DisplayName ?? "personen").Trim()} ser inte rätt ut.");
                 planned.Add((it, t.Value.Start, t.Value.End));
             }
             if (upserts.Where(u => u.Id > 0).Select(u => u.Id).Intersect(deletes).Any())
@@ -1063,6 +1065,7 @@ namespace HpskSite.Services.Staffing
                     MemberId = it.MemberId > 0 ? it.MemberId : null,
                     DisplayName = name!,
                     Phone = phone,
+                    Email = it.MemberId <= 0 && !string.IsNullOrWhiteSpace(it.Email) ? it.Email.Trim() : null,
                     RoleKey = req.RoleKey,
                     ScopeType = scopeType,
                     ScopeKey = scopeKey,
@@ -1078,6 +1081,14 @@ namespace HpskSite.Services.Staffing
                 db.Execute("DELETE FROM StaffAssignment WHERE Id IN (@ids) AND " + StaffOwner.Where(1), new { ids = deletes }, owner.P);
             scope.Complete();
             return new CellShiftsResult(true, null, changed, replaced);
+        }
+
+        /// <summary>Enkel kontroll av en e-postadress som arrangören skriver in (frivillig uppgift): en adress med @ och en punkt i domänen.</summary>
+        public static bool LooksLikeEmail(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            try { var a = new System.Net.Mail.MailAddress(s.Trim()); return a.Address == s.Trim() && a.Host.Contains('.'); }
+            catch (FormatException) { return false; }
         }
 
         public sealed record ChangedShift(StaffAssignment Row, string Before);

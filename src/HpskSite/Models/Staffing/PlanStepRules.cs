@@ -19,7 +19,7 @@ namespace HpskSite.Models.Staffing
     public sealed record PlanFacts(bool HasRoles, bool HasNeeds, int PlacesNeeded, int PlacesMissing, bool Linked, int VolunteersTotal, string? ShooterModeTitle,
         bool PatrolPlanAvailable, int StartClashes, int Clashes, IReadOnlyList<RolePlaces>? ByRole = null,
         int AssignedPeople = 0, int PeopleWithStart = 0, int AssignedTotal = 0, int PlannedUnsent = 0, int PlannedUnreachable = 0,
-        int Unlinked = 0);
+        int Unlinked = 0, int PeopleRegistered = 0);
 
     /// <summary>Platser per roll (summerat över dagar och stationer) — så att stegen kan säga VILKA roller som saknar folk, och så att ett orimligt antal (8 på varje av åtta stationer) syns som en siffra på sin rad.</summary>
     public sealed record RolePlaces(string Name, int Needed, int Missing);
@@ -106,7 +106,9 @@ namespace HpskSite.Models.Staffing
                 var members = Math.Max(0, f.AssignedPeople - f.Unlinked);
                 var who = f.PeopleWithStart > 0
                     ? $"Ingen av de {f.PeopleWithStart} placerade som också skjuter krockar med sin egen start"
-                    : members > 0 ? $"Ingen av de {members} placerade medlemmarna skjuter i tävlingen, så ingen start krockar" : "";
+                    : members > 0 ? $"Ingen av de {members} placerade medlemmarna är anmäld till tävlingen, så ingen start krockar" : "";
+                // Anmäld är inte samma sak som en start: utan startlista finns inga starter att kontrollera mot (Stefan 2026-10-28: funktionärerna ÄR anmälda).
+                var registeredNoStart = f.PeopleWithStart == 0 && f.PeopleRegistered > 0;
                 var unlinkedText = f.Unlinked > 0
                     ? $"{f.Unlinked} {(f.Unlinked == 1 ? "namn är inte kopplat till en medlem och går" : "namn är inte kopplade till en medlem och går")} inte att kontrollera"
                     : "";
@@ -114,6 +116,10 @@ namespace HpskSite.Models.Staffing
                     steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, $"{f.StartClashes} {(f.StartClashes == 1 ? "start krockar" : "starter krockar")} med en placering — bygg om startlistan runt funktionärerna", new[] { "startlista" }));
                 else if (f.AssignedPeople == 0)
                     steps.Add(new("startlista", "Startlistan", PlanStepState.Todo, "Ingen är inlagd än, så det finns inget att kontrollera mot startlistan", new[] { "startlista" }));
+                else if (registeredNoStart)
+                    steps.Add(new("startlista", "Startlistan", PlanStepState.Todo,
+                        $"{f.PeopleRegistered} av de {members} placerade medlemmarna är anmälda till tävlingen, men startlistan är inte gjord än. Krockar mot egna starter går inte att kontrollera förrän den finns"
+                        + (f.Unlinked > 0 ? $". {char.ToUpper(unlinkedText[0]) + unlinkedText[1..]}" : ""), new[] { "startlista" }));
                 else if (f.Unlinked > 0)
                     steps.Add(new("startlista", "Startlistan", PlanStepState.Todo,
                         (who.Length > 0 ? who + ". " : "") + char.ToUpper(unlinkedText[0]) + unlinkedText[1..],

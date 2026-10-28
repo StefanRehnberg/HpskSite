@@ -33,6 +33,9 @@ namespace HpskSite.Models.Staffing
         /// <summary>När personen själv skjuter i tävlingen ("lör 22 aug kl 11:30"), tidigast först — bara för dem med uppdrag, och bara när bemanningens Personer-flik läses.</summary>
         public List<string> Starts { get; set; } = new();
 
+        /// <summary>Anmäld till tävlingen (med klasser, om de finns) — skilt från <see cref="Starts"/>: en anmäld har ingen start förrän startlistan är gjord. Null = inte anmäld.</summary>
+        public List<string>? Registered { get; set; }
+
         /// <summary>Compact "Markör · Skjutlag 2 · tavlor 1–8" summary of every roster row, for one-line display.</summary>
         public List<string> RoleLabels { get; set; } = new();
 

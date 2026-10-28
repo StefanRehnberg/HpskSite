@@ -72,6 +72,42 @@ namespace HpskSite.Controllers
             return found;
         }
 
+        public class AddVolunteerRequest
+        {
+            public int CompetitionId { get; set; }
+            public int MemberId { get; set; }
+        }
+
+        /// <summary>
+        /// Lägger till en medlem som funktionär utan roll: en anmälan "var det behövs" alla dagar. Hen syns bland de anmälda funktionärerna och i
+        /// Personer som anmäld men inte placerad. Personer utan konto kan inte anmälas (en anmälan kräver en medlem) — de placeras direkt i rutnätet.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddVolunteer([FromBody] AddVolunteerRequest request)
+        {
+            if (request == null || !HasOwnerKey(request.CompetitionId) || request.MemberId <= 0)
+                return Json(new { success = false, message = "Välj en medlem." });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            var owner = await OwnerAsync(request.CompetitionId);
+            if (owner == null) return Json(new { success = false, message = "Ingen behörighet" });
+            var name = MemberDisplayName(request.MemberId);
+            if (name == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
+            try
+            {
+                var added = _help.AddOrganizerVolunteer(owner, request.MemberId, name);
+                if (added == 0 && !_help.GetReview(owner).Any(r => r.MemberId == request.MemberId))
+                    return Json(new { success = false, message = "Planeringen har inga dagar än. Lägg till en dag i rutnätet först." });
+                return Json(new { success = true, added, name });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Staffing: AddVolunteer failed for planning {Planning}", owner.PlanningIdOrNull);
+                return Json(new { success = false, message = "Kunde inte lägga till funktionären." });
+            }
+        }
+
         public class SetRoleWholeDayRequest
         {
             public int CompetitionId { get; set; }
