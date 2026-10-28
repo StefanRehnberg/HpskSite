@@ -2,11 +2,6 @@
    Rutnätets mått kommer från den gamla bemanningssidan: rollkolumnen står still när rutnätet rullar i sidled,
    och kolumnbredden bestäms av ANTALET dagar (sätts i js), aldrig av ett långt namn i en ruta. */
 
-.plb-switch { display: inline-flex; flex-wrap: nowrap; }
-@media (max-width: 575.98px) {
-    .plb-switch { display: flex; width: 100%; }
-    .plb-switch .btn { flex: 1 1 0; white-space: normal; line-height: 1.2; padding-left: .4rem; padding-right: .4rem; }
-}
 .plb-dim { color: var(--bs-secondary-color); }
 .pl-state.no { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
 
@@ -83,7 +78,7 @@
 .plb-grid td.plb-offday { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(var(--bs-secondary-rgb), .08) 6px 7px); text-align: center; vertical-align: middle; }
 
 @media print {
-    .plb-switch, .plb-add, .plb-mini, .plb-grip { display: none !important; }
+    .plb-add, .plb-mini, .plb-grip { display: none !important; }
 }
 
 /* Steg 4-6 UX: chattknappen ligger fast i hogerkanten pa telefon och tackte tider i personens vecka och i fonsterkortet. */

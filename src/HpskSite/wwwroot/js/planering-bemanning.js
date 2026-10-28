@@ -139,7 +139,8 @@ window.PlaneringBemanning = (function () {
         if (hp().get('del') === 'veckan') history.replaceState(null, '', '#vy=bemanning&del=personer' + (pk ? '&person=' + encodeURIComponent(pk) : ''));
         A.setActions([]);
         const body = $('plBody');
-        body.innerHTML = switchHtml(p) + '<div id="plbArea">' + A.spinner() + '</div>';
+        body.innerHTML = '<div id="plbArea">' + A.spinner() + '</div>';
+        if (A.rail) A.rail();   // menyn markerar delen som visas (länkar i texten byter del utan att gå via menyn)
         try {
             if (p === 'rutnat') {
                 await loadGrid(); if (seq !== B.seq) return; drawGrid();
@@ -158,11 +159,6 @@ window.PlaneringBemanning = (function () {
             area().innerHTML = `<div class="pl-card"><p class="text-danger mb-0">${esc(e.message || 'Bemanningen kunde inte läsas.')}</p></div>`;
         }
     }
-    function switchHtml(p) {
-        const b = (k, l) => `<button type="button" class="btn ${p === k ? 'btn-primary' : 'btn-outline-primary'}" data-plb-part="${k}" aria-pressed="${p === k}">${l}</button>`;
-        return `<div class="btn-group plb-switch mb-3" role="group" aria-label="Bemanningens delar">${b('rutnat', 'Rutnät')}${b('personer', 'Personer')}${b('hitta', 'Hitta funktionärer')}</div>`;
-    }
-
     // Omgång 2 steg 4: grenen väljs när planeringen skapas och styr bara vilka roller som föreslås — därför står den här,
     // där den verkar, och inte under Inställningar. En kopplad planering följer tävlingens gren.
     function disciplineLine() {

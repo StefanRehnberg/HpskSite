@@ -242,12 +242,18 @@
             && (s.me.canEdit || hasOwnCompetition(s)) },
         // Stationerna (Stefan 2026-10-24): fältskyttets stationer — föreningarna, delarna och helheten — på en egen plats.
         { key: 'stationer', label: 'Stationerna', group: 'Tävlingen', need: s => !TOKEN && stationsWanted(s) },
+        // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad. Den står FÖRE Bemanning: en grupp
+        // ritas där dess första punkt står, så alla i Tävlingen måste ligga intill varandra (annars ritas gruppen två gånger).
+        { key: 'dagsprogram', label: 'Dagsprogram', group: 'Tävlingen', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
         // Omgång 2 (2026-10-24): bemanningen är en del i planeringen, inte en egen sida (planering-bemanning.js).
         // Omgång 3 (K8): platsen syns för alla som är med — den som inte kan ändra får veta vem som sköter bemanningen
         // och sina egna uppdrag, i stället för att delen tyst saknas.
-        { key: 'bemanning', label: 'Bemanning', group: 'Tävlingen', need: s => !TOKEN && (s.me.canEdit || s.me.isParticipant) },
-        // Dagsprogrammet hör till tävlingen och är fortfarande en egen sida — finns när planeringen är kopplad.
-        { key: 'dagsprogram', label: 'Dagsprogram', group: 'Tävlingen', href: s => s.planning.agendaUrl, need: s => s.me.canEdit && !TOKEN && !!s.planning.agendaUrl },
+        // Stefan 2026-10-28: den som kan ändra har en grupp i menyn med tre punkter (delen väljs med &del= i adressen) i stället för en flikrad
+        // inne i vyn. Den som bara är med har en enda punkt, för hen finns bara "vem sköter bemanningen" och de egna uppdragen.
+        { key: 'bemanning', label: 'Bemanning', group: 'Tävlingen', need: s => !TOKEN && !s.me.canEdit && s.me.isParticipant },
+        { key: 'bemanning', part: 'rutnat', label: 'Rutnät', group: 'Bemanning', need: s => !TOKEN && s.me.canEdit },
+        { key: 'bemanning', part: 'personer', label: 'Personer', group: 'Bemanning', need: s => !TOKEN && s.me.canEdit },
+        { key: 'bemanning', part: 'hitta', label: 'Hitta funktionärer', group: 'Bemanning', need: s => !TOKEN && s.me.canEdit },
         // Dina notiser ligger överst i Inställningar — alla som är med har den, den som kan ändra även planeringens.
         { key: 'installningar', label: 'Inställningar', need: s => s.me.isParticipant || s.me.canEdit },
     ];
@@ -259,10 +265,13 @@
 
     function hashParams() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
     function hashView() { return hashParams().get('vy') || ''; }
-    function go(v) {
-        if (location.hash !== '#vy=' + v) history.pushState(null, '', '#vy=' + v);
+    function go(v, part) {
+        const h = '#vy=' + v + (part && part !== 'rutnat' ? '&del=' + part : '');
+        if (location.hash !== h) history.pushState(null, '', h);
         render(v);
     }
+    // Vilken del av Bemanning adressen pekar på (en gammal #del=veckan landar i Personer).
+    function bemanningPart() { const d = hashParams().get('del'); return d === 'veckan' ? 'personer' : (d === 'personer' || d === 'hitta' ? d : 'rutnat'); }
     // Ett möte har en egen sida (#vy=mote&id=N) — rälsen visar Möten.
     function goMeeting(id) {
         const h = '#vy=mote&id=' + id;
@@ -288,7 +297,7 @@
         e.preventDefault();
         if (a.dataset.plFilter) tkFilter = a.dataset.plFilter;
         dropStaleMsg(a.dataset.plGo);
-        go(a.dataset.plGo);
+        go(a.dataset.plGo, a.dataset.plPart);
     });
 
     function unreadCount() {
@@ -310,11 +319,14 @@
         const counts = { meddelanden: unreadCount(), moten: votesOwed(), uppgifter: myOpenTasks(), beslut: decisionsOwed(), deltagare: s.me.pendingRequests || 0 };
         const here = RAIL_ONLY || (view === 'mote' ? 'moten' : view);
         const base = RAIL_ONLY ? '/tavlingsplanering/' + ID : '';
+        // Bemanningens tre punkter delar vy och skiljs åt av delen i adressen; bara den del som visas är markerad.
+        const herePart = here === 'bemanning' ? bemanningPart() : '';
+        const isHere = v => v.key === here && (!v.part || v.part === herePart);
         const link = v => v.href
             // En egen sida (dagsprogrammet): en vanlig länk, i samma flik.
-            ? `<a href="${esc(v.href(s))}" class="pl-nav${v.key === here ? ' on' : ''}">${esc(v.label)}</a>`
-            : `<a href="${base}#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
-                + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>';
+            ? `<a href="${esc(v.href(s))}" class="pl-nav${isHere(v) ? ' on' : ''}">${esc(v.label)}</a>`
+            : `<a href="${base}#vy=${v.key}${v.part && v.part !== 'rutnat' ? '&del=' + v.part : ''}" class="pl-nav${isHere(v) ? ' on' : ''}" data-pl-go="${v.key}"${v.part ? ` data-pl-part="${v.part}"` : ''}>${esc(v.label)}`
+                + (counts[v.key] && !v.part ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>';
         // En grupp visas bara med det man har; utan något i den syns inte heller rubriken.
         const shown = VIEWS.filter(v => !v.need || v.need(s));
         const html = [];
@@ -325,12 +337,13 @@
         });
         // Expertgruppen N7: på telefon tog rälsen hela första skärmen. Där fälls den ihop bakom en knapp som säger var man
         // är och hur mycket som väntar; datorn visar den som förut (knappen döljs i CSS).
-        const cur = VIEWS.find(v => v.key === here);
+        const cur = VIEWS.find(v => isHere(v) && (!v.need || v.need(s))) || VIEWS.find(v => v.key === here);
         const waiting = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
         // Ett val fäller ihop menyn — men pollningens omritning (samma plats) låter en utfälld meny stå kvar.
         const navEl = $('plRail').closest('.pl-rail');
-        if (railHere !== here) navEl?.classList.remove('open');
-        railHere = here;
+        const hereKey = here + ':' + herePart;   // ett byte av del inom Bemanning fäller också ihop telefonens meny
+        if (railHere !== hereKey) navEl?.classList.remove('open');
+        railHere = hereKey;
         const isOpen = !!navEl?.classList.contains('open');
         $('plRail').innerHTML = `<button type="button" class="pl-railtoggle" data-rail-toggle aria-expanded="${isOpen}" aria-controls="plRailNav">
                 <span><i class="bi bi-list me-2" aria-hidden="true"></i>Meny · <b>${esc(cur ? cur.label : 'Översikt')}</b></span>
@@ -452,6 +465,8 @@
     const STAFF_API = {
         ID, req, token, esc, spinner, setHead, setActions, rowMenu, formModal, plConfirm, showMsg, failMsg, datePicker,
         S: () => S, isActive: () => view === 'bemanning', go,
+        // Bemanningen byter del utan att läsa om sidan (länkar i texten): menyn måste följa med.
+        rail: () => { if (S) renderRail(); },
     };
     // Dagsprogrammets sida (RAIL_ONLY) har eget innehåll men samma Åtgärder och dialoger: den får skalets API när det är klart.
     if (RAIL_ONLY && typeof window.plOnShell === 'function') window.plOnShell(STAFF_API);
