@@ -115,9 +115,7 @@ namespace HpskSite.Models.Staffing
                 if (left > 0)
                 {
                     leftBySlot[s.Key] = left;
-                    reasonBySlot[s.Key] = (x.Count == 0
-                        ? (people.Any(p => Eligible(p, s)) ? "Alla som anmält sig är upptagna den tiden" : "Ingen har anmält sig som funktionär den dagen")
-                        : $"Bara {x.Count} av de anmälda {(x.Count == 1 ? "är ledig" : "är lediga")} den tiden", x.Count);
+                    reasonBySlot[s.Key] = (UnfilledReason(people.Count(p => Eligible(p, s)), x.Count, proposed.Count(r => r.SlotKey == s.Key)), x.Count);
                 }
             }
 
@@ -172,6 +170,28 @@ namespace HpskSite.Models.Staffing
             return new SolverResult(
                 proposed.OrderBy(r => r.Date).ThenBy(r => r.Interval.Start).ThenBy(r => r.SlotKey, StringComparer.Ordinal).ThenBy(r => r.Name, Sv).ToList(),
                 unfilled.OrderBy(u => u.Date).ThenBy(u => u.Interval.Start).ThenBy(u => u.SlotKey, StringComparer.Ordinal).ToList());
+        }
+
+        /// <summary>
+        /// Varför en lucka inte gick att fylla. <paramref name="registered"/> = de anmälda som alls kan komma i fråga, <paramref name="couldStand"/> = av dem de som
+        /// inte hindrades av en placering eller egen start den tiden INNAN förslaget började fördela. Efter fördelningen är de upptagna av förslaget, så texten
+        /// säger det rakt ut i stället för att kalla dem lediga (Stefan 2026-10-28: "då är de väl inte lediga?").
+        /// </summary>
+        public static string UnfilledReason(int registered, int couldStand, int usedHere)
+        {
+            if (registered == 0) return "Ingen har anmält sig som funktionär den dagen";
+            var blocked = registered - couldStand;
+            if (couldStand == 0)
+                return registered == 1 ? "Den som anmält sig har redan en annan placering eller en egen start den tiden"
+                    : $"Alla {registered} som anmält sig har redan en annan placering eller en egen start den tiden";
+            var elsewhere = couldStand - usedHere;
+            var who = couldStand == 1 ? "hen" : "alla";
+            var use = usedHere == 0 ? $"men {(couldStand == 1 ? "hen behövs" : "alla behövs")} på andra platser i förslaget"
+                : elsewhere == 0 ? $"och {who} är med på den här platsen i förslaget"
+                : $"{usedHere} är med på den här platsen i förslaget och {elsewhere} behövs på andra platser";
+            var blockedText = blocked == 0 ? "" : blocked == 1 ? " Den andra har redan en annan placering eller en egen start den tiden."
+                : $" De övriga {blocked} har redan en annan placering eller en egen start den tiden.";
+            return $"{couldStand} av {registered} anmälda kan stå här, {use}." + blockedText;
         }
 
         /// <summary>

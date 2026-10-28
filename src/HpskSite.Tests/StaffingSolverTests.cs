@@ -123,7 +123,24 @@ namespace HpskSite.Tests
             var res = StaffingSolver.Solve(new[] { slot }, new[] { free, notVol, busy });
             res.Proposed.Select(r => r.MemberId).Should().Equal(1);
             res.Unfilled.Single().Missing.Should().Be(1);
-            res.Unfilled.Single().Reason.Should().Contain("Bara 1 av de anmälda är ledig");
+            res.Unfilled.Single().Reason.Should().Be("1 av 2 anmälda kan stå här, och hen är med på den här platsen i förslaget. Den andra har redan en annan placering eller en egen start den tiden.");
+        }
+
+        [Fact]
+        public void Skalet_sager_att_de_som_kan_std_har_tagits_av_andra_platser_och_kallar_dem_inte_lediga()
+        {
+            // 3 anmälda kan stå på båda platserna (13–15), men ingen kan stå på båda samtidigt: den första platsen tar dem, den andra blir utan.
+            var a = new SolverSlot("a", "stationsmarkor", "Stationsmarkör", "Station", "1", "Station 1", D, Iv(13, 15), null, 2);
+            var b = new SolverSlot("b", "stationsmarkor", "Stationsmarkör", "Station", "2", "Station 2", D, Iv(13, 15), null, 2);
+            var people = new[] { 1, 2, 3 }.Select(i => new SolverPerson(i, "P" + i, true, new HashSet<string> { "stationsmarkor" }, new List<BusyItem>(), 0)).ToArray();
+            var res = StaffingSolver.Solve(new[] { a, b }, people);
+            res.Placed.Should().Be(3);
+            var reason = res.Unfilled.Single().Reason;
+            reason.Should().Contain("3 av 3 anmälda kan stå här").And.Contain("behövs");
+            reason.Should().NotContain("ledig");
+            StaffingSolver.UnfilledReason(30, 11, 0).Should().Be("11 av 30 anmälda kan stå här, men alla behövs på andra platser i förslaget. De övriga 19 har redan en annan placering eller en egen start den tiden.");
+            StaffingSolver.UnfilledReason(0, 0, 0).Should().Be("Ingen har anmält sig som funktionär den dagen");
+            StaffingSolver.UnfilledReason(5, 0, 0).Should().Be("Alla 5 som anmält sig har redan en annan placering eller en egen start den tiden");
         }
 
         [Fact]
@@ -158,7 +175,7 @@ namespace HpskSite.Tests
             var p = new SolverPerson(1, "P", true, new HashSet<string>(), new List<BusyItem> { new(BusyKind.Assignment, Iv(8, 13), "annat") }, 0);
             var res = StaffingSolver.Solve(new[] { slot }, new[] { p });
             res.Proposed.Should().BeEmpty();
-            res.Unfilled.Single().Should().Match<UnfilledSlot>(u => u.Missing == 3 && u.Reason.Contains("upptagna"));
+            res.Unfilled.Single().Should().Match<UnfilledSlot>(u => u.Missing == 3 && u.Reason == "Den som anmält sig har redan en annan placering eller en egen start den tiden");
             var none = StaffingSolver.Solve(new[] { slot }, Array.Empty<SolverPerson>());
             none.Unfilled.Single().Reason.Should().Contain("Ingen har anmält sig");
         }
