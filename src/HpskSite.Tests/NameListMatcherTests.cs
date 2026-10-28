@@ -37,6 +37,8 @@ namespace HpskSite.Tests
         [InlineData("1. Björn Johansson")]
         [InlineData("- Björn Johansson | A2 | patrull 1 09:00")]
         [InlineData("Björn Johansson\tA2")]
+        [InlineData("Björn Johansson; A2; patrull 1 09:00")]
+        [InlineData("Johansson, Björn; A2")]
         public void Stavningsvarianter_ger_samma_person(string line)
         {
             var m = One(line);
@@ -68,6 +70,10 @@ namespace HpskSite.Tests
         [Theory]
         [InlineData("Erik Pettersson | C2", 2)]
         [InlineData("Erik Pettersson | A2", 1)]
+        [InlineData("Erik Pettersson; C2", 2)]
+        [InlineData("Erik Pettersson; A2", 1)]
+        [InlineData("Erik Pettersson;patrull 16 11:30", 2)]
+        [InlineData("Erik Pettersson ; patrull 1 09:00", 1)]
         [InlineData("Erik Pettersson | patrull 16 11:30", 2)]
         [InlineData("Erik Pettersson | patrull 1 09:00", 1)]
         [InlineData("Erik Pettersson (Varbergs)", 2)]

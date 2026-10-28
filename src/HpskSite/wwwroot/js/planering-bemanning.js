@@ -439,8 +439,8 @@ window.PlaneringBemanning = (function () {
         function stepNames() {
             A.formModal({
                 title: 'Lägg in en namnlista', okLabel: 'Nästa', wide: true,
-                html: `<p class="mb-2">Klistra in namnen, ett per rad. Står det klass, patrull eller starttid efter ett <b>|</b> hjälper det när två heter lika.</p>
-                    <textarea class="form-control mb-2" id="nlText" rows="6" placeholder="Anna Persson | B1 | patrull 10 10:30"></textarea>
+                html: `<p class="mb-2">Klistra in namnen, ett per rad. Står det klass, patrull eller starttid efter ett <b>semikolon (;)</b> hjälper det när två heter lika.</p>
+                    <textarea class="form-control mb-2" id="nlText" rows="6" placeholder="Anna Persson; B1; patrull 10 10:30"></textarea>
                     <button type="button" class="btn btn-sm btn-primary" id="nlGo">Hitta personerna</button>
                     <div class="small mt-3" id="nlRes" aria-live="polite"></div>`,
                 onOpen: b => {

@@ -49,7 +49,7 @@ namespace HpskSite.Services.Staffing
             return result;
         }
 
-        /// <summary>Namndelen och resten (tips). Avskiljare: |, tabb, ; och parentes. "Efternamn, Förnamn" vänds.</summary>
+        /// <summary>Namndelen och resten (tips). Avskiljare: ; (det som dialogen föreslår — | finns inte på ett svenskt tangentbord), tabb, | och parentes. "Efternamn, Förnamn" vänds.</summary>
         internal static (string Name, string Hints) Parse(string line)
         {
             var s = Regex.Replace(line.Trim(), @"^\s*(\d+[\.\)]|[-•*])\s+", "");
