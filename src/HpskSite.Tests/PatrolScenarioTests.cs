@@ -51,6 +51,48 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void The_builder_sets_followers_and_wishes_on_the_registrations_like_real_registrations_carry_them()
+        {
+            var s = Small(); s.Followers = 8; s.WishEarly = 6; s.WishLate = 4;
+            Assert.Null(ScenarioBuilder.Validate(s));
+            var b = ScenarioBuilder.Build(s);
+            var followers = b.Regs.Where(r => r.JoinMemberId != null).ToList();
+            Assert.Equal(8, followers.Count);
+            foreach (var f in followers)
+            {
+                var group = FaltPatrolAdapter.GroupOf(f.MemberClass);
+                var partner = b.Regs.FirstOrDefault(r => r.MemberId == f.JoinMemberId && FaltPatrolAdapter.GroupOf(r.MemberClass) == group);
+                Assert.NotNull(partner);                       // kamraten är anmäld i samma vapengrupp
+                Assert.Equal(f.MemberClub, partner!.MemberClub);   // och tävlar för samma klubb
+            }
+            Assert.All(followers.GroupBy(f => (f.JoinMemberId, FaltPatrolAdapter.GroupOf(f.MemberClass))), g => Assert.True(g.Count() <= 2));
+            Assert.Equal(6, b.Regs.Where(r => StartPreference.Normalize(r.StartPreference) == StartPreference.Early).Select(r => r.MemberId).Distinct().Count());
+            Assert.Equal(4, b.Regs.Where(r => StartPreference.Normalize(r.StartPreference) == StartPreference.Late).Select(r => r.MemberId).Distinct().Count());
+            var tooMany = Small(); tooMany.Followers = 500;
+            Assert.NotNull(ScenarioBuilder.Validate(tooMany));
+        }
+
+        [Fact]
+        public void The_plan_for_a_scenario_with_followers_keeps_every_requirement_or_names_why_not()
+        {
+            var s = Small(); s.Followers = 8; s.WishEarly = 6; s.WishLate = 4;
+            var (pv, b) = Run(s, iterations: 20000);
+            var plan = pv.Plan;
+            Assert.Equal(8, plan.LinksTotal + plan.LinkIssues.Count);   // varje krav är antingen med i planen eller redovisat med namn
+            Assert.True(plan.LinksMet == plan.LinksTotal || plan.LinkIssues.Count > 0, "ett krav höll inte och ingen sa något");
+            // Oberoende kontroll ur patrullerna: varje följare ligger i samma patrull som sin kamrat (i den klassen).
+            var at = plan.Patrols.SelectMany(p => p.Members.Where(m => !m.IsDns).Select(m => (m.MemberId, Group: FaltPatrolAdapter.GroupOf(m.ShootingClass), p.PatrolNumber))).ToList();
+            var held = b.Regs.Where(r => r.JoinMemberId != null).Count(f =>
+            {
+                var g = FaltPatrolAdapter.GroupOf(f.MemberClass);
+                var mine = at.FirstOrDefault(x => x.MemberId == f.MemberId && x.Group == g); var theirs = at.FirstOrDefault(x => x.MemberId == f.JoinMemberId && x.Group == g);
+                return mine.PatrolNumber != 0 && mine.PatrolNumber == theirs.PatrolNumber;
+            });
+            Assert.Equal(plan.LinksMet, held);
+            Assert.True(plan.WishesTotal > 0 && plan.WishesMet <= plan.WishesTotal);
+        }
+
+        [Fact]
         public void Practice_names_are_invented_and_never_a_member_name()
         {
             var b = ScenarioBuilder.Build(Small());

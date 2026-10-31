@@ -218,6 +218,18 @@
             <div class="sc-err" id="scStaffErr" hidden></div>
           </div>
         </fieldset>
+        <fieldset>
+          <legend><label class="mb-0"><input type="checkbox" id="scWishOn"> Nybörjare med kamrat och önskemål om starttid</label></legend>
+          <div id="scWishBox" hidden>
+            <div class="pg-hint mb-1">Så som anmälan bär dem. En nybörjare måste gå i samma patrull som en kamrat i samma klass och klubb (hårt krav). Ett önskemål om tidig eller sen start är bara ett önskemål.</div>
+            <div class="sc-grid">
+              <div><label for="scFollowers">Nybörjare som ska gå med någon</label><input class="form-control" id="scFollowers" type="number" min="0" max="1000" inputmode="numeric"></div>
+              <div><label for="scWishEarly">Önskar tidig start</label><input class="form-control" id="scWishEarly" type="number" min="0" max="1000" inputmode="numeric"></div>
+              <div><label for="scWishLate">Önskar sen start</label><input class="form-control" id="scWishLate" type="number" min="0" max="1000" inputmode="numeric"></div>
+            </div>
+            <div class="sc-err" id="scWishErr" hidden></div>
+          </div>
+        </fieldset>
         <details id="scBana">
           <summary>Banan och varianten</summary>
           <div class="sc-grid">

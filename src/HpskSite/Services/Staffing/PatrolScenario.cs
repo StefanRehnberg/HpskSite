@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Faltskytte.Services;
+﻿using HpskSite.CompetitionTypes.Faltskytte.Services;
 using HpskSite.CompetitionTypes.Faltskytte.Models;
 using HpskSite.Models.ViewModels.Competition;
 using HpskSite.Models.Staffing;
@@ -30,6 +30,11 @@ namespace HpskSite.Services.Staffing
         /// <summary>Skyttar som är reserver (ingen fast start) respektive ska skjuta tidigt (funktionärspatrull / skjuter först).</summary>
         public int Reserves { get; set; }
         public int Early { get; set; }
+        /// <summary>Nybörjare som måste gå i samma patrull som en annan person i samma klass och klubb (högst 2 följare per person). Kamraten väljs deterministiskt ur gruppen.</summary>
+        public int Followers { get; set; }
+        /// <summary>Personer som önskar tidig respektive sen start (mjuka önskemål på anmälan, inte funktionärernas "skjuter först").</summary>
+        public int WishEarly { get; set; }
+        public int WishLate { get; set; }
         /// <summary>Banan: antal stationer. Utan bana körs en enda station, så en övning anger alltid en. Skjuttiderna per klass är motorns förval; rundtiden anges för sig i inställningarna.</summary>
         public int Stations { get; set; } = 8;
         /// <summary>Tävlingsdagen (yyyy-MM-dd). Tom = dagens datum.</summary>
@@ -76,6 +81,7 @@ namespace HpskSite.Services.Staffing
             }
             if ((s.Jobs?.Count ?? 0) > 50 || (s.Jobs?.Sum(j => Math.Max(0, j.N)) ?? 0) > MaxJobs) return "För många uppdrag.";
             if (s.Reserves < 0 || s.Early < 0) return "Antalet reserver och tidiga kan inte vara negativt.";
+            if (s.Followers < 0 || s.WishEarly < 0 || s.WishLate < 0) return "Antalet som går med någon eller har önskemål kan inte vara negativt.";
             // Dubbelstarter ryms bara om varje grupps dubbla ryms i gruppens starter (ingen skjuter tre grupper). Förut klipptes de tyst.
             var n = new Dictionary<string, int> { ["C"] = s.C, ["B"] = s.B, ["A"] = s.A, ["R"] = s.R };
             var doubles = 0;
@@ -102,6 +108,7 @@ namespace HpskSite.Services.Staffing
             var persons = counts.Sum() - doubles - extraStarts;
             var staff = (s.Jobs?.Sum(j => Math.Max(0, j.N)) ?? 0) + s.Reserves + s.Early;
             if (staff > persons) return $"Uppdrag, reserver och tidiga ({staff}) är fler än personerna ({persons}).";
+            if (s.WishEarly + s.WishLate + s.Followers > persons) return $"Önskemål och nybörjare med kamrat ({s.WishEarly + s.WishLate + s.Followers}) är fler än personerna ({persons}).";
             return null;
         }
 
@@ -169,6 +176,27 @@ namespace HpskSite.Services.Staffing
             {
                 seq[g] = seq.GetValueOrDefault(g) + 1;
                 regs.Add(new CompetitionRegistration { MemberId = id, MemberClass = ClassIds[g][(seq[g] - 1) % 3], MemberName = Name(id), MemberClub = Club(id), IsActive = true });
+            }
+            // Önskemål om starttid och "gå i samma patrull som" sätts på anmälningarna på samma sätt som riktiga anmälningar bär dem (StartPreference, JoinMemberId),
+            // så labbet går genom exakt samma kod som en riktig tävling. Samma klubb och samma vapengrupp gäller per konstruktion (Club(id), kamraten väljs ur gruppen).
+            {
+                var rw = new Random(s.Seed * 17 + 3);
+                var people = starts.Select(x => x.Id).Distinct().OrderBy(_ => rw.Next()).ToList();
+                var cursorW = 0;
+                foreach (var id in people.Skip(cursorW).Take(Math.Max(0, s.WishEarly))) foreach (var i in Enumerable.Range(0, starts.Count).Where(i => starts[i].Id == id)) regs[i].StartPreference = HpskSite.Models.StartPreference.Early;
+                cursorW += Math.Max(0, s.WishEarly);
+                foreach (var id in people.Skip(cursorW).Take(Math.Max(0, s.WishLate))) foreach (var i in Enumerable.Range(0, starts.Count).Where(i => starts[i].Id == id)) regs[i].StartPreference = HpskSite.Models.StartPreference.Late;
+                cursorW += Math.Max(0, s.WishLate);
+                var followers = new Dictionary<(int Partner, string G), int>(); var isFollower = new HashSet<(int Id, string G)>();
+                foreach (var f in people.Skip(cursorW).Take(Math.Max(0, s.Followers)))
+                {
+                    var fi = Enumerable.Range(0, starts.Count).FirstOrDefault(i => starts[i].Id == f && !isFollower.Contains((f, starts[i].Group)));
+                    var g = starts[fi].Group;
+                    var candidates = Enumerable.Range(0, starts.Count).Where(i => starts[i].Group == g && starts[i].Id != f && Club(starts[i].Id) == Club(f) && !isFollower.Contains((starts[i].Id, g)) && followers.GetValueOrDefault((starts[i].Id, g)) < HpskSite.Models.Registrations.RegistrationJoinRule.MaxFollowersPerPartner).ToList();
+                    if (candidates.Count == 0) continue;
+                    var partner = starts[candidates[rw.Next(candidates.Count)]].Id;
+                    regs[fi].JoinMemberId = partner; isFollower.Add((f, g)); followers[(partner, g)] = followers.GetValueOrDefault((partner, g)) + 1;
+                }
             }
             var ids = starts.Select(x => x.Id).Distinct().OrderBy(_ => rng.Next()).ToList();
             var cursor = 0;

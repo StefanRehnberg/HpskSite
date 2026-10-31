@@ -416,6 +416,7 @@
     { id: 'trol25', name: 'Trollenäs 2025', sc: { C: 189, B: 27, A: 94, R: 34, Also: [A2('C', 'A', 56), A2('C', 'R', 17), A2('C', 'B', 11), A2('B', 'A', 2), A2('A', 'R', 1)], Multi: [{ Groups: 'CBA', N: 7 }, { Groups: 'CAR', N: 10 }, { Groups: 'CBR', N: 2 }] }, size: '7', int: '8', first: '08:00', rm: '90' },
     { id: 'skane', name: 'Skånemästerskap 2025', sc: { C: 168, B: 11, A: 83, R: 17, Also: [A2('C', 'A', 79), A2('C', 'R', 17), A2('C', 'B', 11)] }, size: '8', int: '10', first: '08:00', rm: '105' },
     { id: 'martens', name: 'Mårtenträffen (många skjuter tre klasser)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }] }, size: '8', int: '8', first: '08:00', rm: '75' },
+    { id: 'newbies', name: 'Nybörjare med kamrat och önskemål (Mårtenträffen + 10 nybörjare, 12 önskemål)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }], Followers: 10, WishEarly: 8, WishLate: 4 }, size: '8', int: '8', first: '08:00', rm: '75' },
     { id: 'staff', name: 'Svårt, med funktionärer (Mårtenträffen + uppdrag)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }], Jobs: [{ N: 12, From: '09:00', To: '12:00' }], Reserves: 3, Early: 4 }, size: '8', int: '8', first: '08:00', rm: '75' },
     { id: 'four', name: 'Stresstest: många skjuter alla fyra klasserna', sc: { C: 24, B: 16, A: 16, R: 8, Multi: [{ Groups: 'CBAR', N: 8 }, { Groups: 'CBA', N: 8 }], Stations: 6 } },
     { id: 'ssm26a', big: true, name: 'SSM 2026 dag 1 (C och B)', sc: { C: 153, B: 69, Also: [A2('C', 'B', 68)] }, size: '8', int: '8', first: '09:00', rm: '100' },
@@ -477,10 +478,13 @@
     set('scSeed', sc.Seed); set('scSt', sc.Stations); set('scRes', sc.Reserves || ''); set('scEarly', sc.Early || '');
     const j = (sc.Jobs || [])[0]; set('scJobN', j ? j.N : ''); $('scJobMode').value = j && j.From === '12:00' ? 'pm' : 'am';   // en funktionär som är upptagen hela dagen hinner inte skjuta, så det finns bara förmiddag eller eftermiddag
     $('scStaffOn').checked = !!j || sc.Reserves > 0 || sc.Early > 0;
+    set('scFollowers', sc.Followers || ''); set('scWishEarly', sc.WishEarly || ''); set('scWishLate', sc.WishLate || '');
+    $('scWishOn').checked = sc.Followers > 0 || sc.WishEarly > 0 || sc.WishLate > 0;
   }
   function fieldsToSc() {
     const n = id => gv(id), m = $('scJobMode').value, base = scOfRows(rowsNow());
-    const staff = $('scStaffOn').checked, jn = staff ? n('scJobN') : 0;
+    const staff = $('scStaffOn').checked, jn = staff ? n('scJobN') : 0, wish = $('scWishOn').checked;
+    base.Followers = wish ? n('scFollowers') : 0; base.WishEarly = wish ? n('scWishEarly') : 0; base.WishLate = wish ? n('scWishLate') : 0;
     return fullSc(Object.assign(base, {
       Seed: Math.max(1, n('scSeed')), Reserves: staff ? n('scRes') : 0, Early: staff ? n('scEarly') : 0, Stations: n('scSt') || 8,
       Jobs: jn > 0 ? [{ N: jn, From: m === 'am' ? '09:00' : '12:00', To: m === 'am' ? '12:00' : '15:00' }] : [],
@@ -497,6 +501,9 @@
     document.querySelectorAll('#scRows [data-row] select').forEach(s => [...s.options].forEach(o => { o.disabled = o.value !== s.value && used.has(o.value); }));
     $('scAddRow').disabled = used.size >= COMBOS.length;
     let errors = 0;
+    const wishOn = $('scWishOn').checked; $('scWishBox').hidden = !wishOn;
+    const wishNeed = wishOn ? gv('scFollowers') + gv('scWishEarly') + gv('scWishLate') : 0, wishBad = wishOn && wishNeed > m.persons;
+    setHtml($('scWishErr'), wishBad ? 'Nybörjare och önskemål är ' + wishNeed + ' men det finns bara ' + m.persons + ' personer.' : ''); $('scWishErr').hidden = !wishBad; if (wishBad) errors++;
     const staffOn = $('scStaffOn').checked; $('scStaffBox').hidden = !staffOn;
     const jn = gv('scJobN'), rs = gv('scRes'), er = gv('scEarly'), need = jn + rs + er;
     if (staffOn && need > m.persons) { errors++; errAt('scStaff', 'Uppdrag, reserver och tidiga är ' + need + ' men det finns bara ' + m.persons + ' personer. <button type="button" class="btn btn-sm btn-outline-primary" data-staffmax="1">Sänk till ' + m.persons + '</button>'); } else errAt('scStaff', '');
