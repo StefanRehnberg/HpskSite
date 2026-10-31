@@ -100,6 +100,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             // Carried so start-list generators can honour an early/late wish.
                             // Per CLASS, which is how the wish is stored and how it is asked for.
                             StartPreference = classEntry.StartPreference ?? "",
+                            JoinMemberId = classEntry.JoinMemberId,
                             IsSubCompetition = reg.IsSubCompetition
                         });
                     }

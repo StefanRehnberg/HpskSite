@@ -80,6 +80,78 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             return result;
         }
 
+        public sealed record LinkSetupResult(Dictionary<string, string> Together, Dictionary<string, int> Wish, List<string> Problems);
+
+        /// <summary>
+        /// Krav "gå i samma patrull som" och mjuka önskemål om starttid ur anmälningarna (en rad per klassanmälan). Kravet gäller vapengruppen (alla C är samma grupp).
+        /// Ett krav som inte kan tillämpas (kamraten är DNS, reserv eller inte längre anmäld i gruppen) lämnas utanför motorn och redovisas med namn i <see cref="LinkSetupResult.Problems"/>:
+        /// generatorn bryter aldrig tyst och ändrar aldrig anmälan. Önskemål gäller bara om alla klassanmälningar i samma start vill samma sak.
+        /// </summary>
+        public static LinkSetupResult LinkSetup(IReadOnlyList<CompetitionRegistration> regs, ISet<int> reserves, ISet<string> dnsKeys)
+        {
+            var together = new Dictionary<string, string>(); var wish = new Dictionary<string, int>(); var problems = new List<string>();
+            string NameOf(int id) => regs.FirstOrDefault(r => r.MemberId == id)?.MemberName ?? $"Medlem {id}";
+            var startKeys = regs.Select(r => new Start(r.MemberId, GroupOf(r.MemberClass)).Key).ToHashSet();
+            foreach (var g in regs.GroupBy(r => new Start(r.MemberId, GroupOf(r.MemberClass)).Key))
+            {
+                var ranks = g.Select(r => HpskSite.Models.StartPreference.Rank(r.StartPreference)).Where(x => x != HpskSite.Models.StartPreference.RankNone).Distinct().ToList();
+                if (ranks.Count == 1 && !dnsKeys.Contains(g.Key)) wish[g.Key] = ranks[0] == HpskSite.Models.StartPreference.RankEarly ? -1 : 1;
+            }
+            var seen = new HashSet<string>();
+            foreach (var r in regs.Where(r => r.JoinMemberId is > 0))
+            {
+                var group = GroupOf(r.MemberClass); var other = r.JoinMemberId!.Value;
+                var me = new Start(r.MemberId, group).Key; var you = new Start(other, group).Key;
+                if (!seen.Add(me + ">" + you)) continue;
+                var what = $"{NameOf(r.MemberId)} ska gå i samma patrull som {NameOf(other)} i klass {group}";
+                if (reserves.Contains(r.MemberId) || reserves.Contains(other)) { problems.Add(what + ", men en av dem är reserv utan fast start. Kravet följs inte."); continue; }
+                if (dnsKeys.Contains(me) || dnsKeys.Contains(you)) { problems.Add(what + ", men en av dem är DNS. Kravet följs inte."); continue; }
+                if (!startKeys.Contains(you)) { problems.Add(what + $", men {NameOf(other)} är inte anmäld i klassen längre. Kravet följs inte."); continue; }
+                if (!together.ContainsKey(me)) together[me] = you; else if (!together.ContainsKey(you)) together[you] = me;   // två kamrater i samma grupp (dubbel C): den andra läggs som omvänd kant, klumpen blir densamma
+            }
+            return new LinkSetupResult(together, wish, problems);
+        }
+
+        /// <summary>Hur det gick: krav som höll och inte höll (med namn), och önskemål som uppfylldes. Ett önskemål räknas bara på personens första (tidig) respektive sista (sen) start; uppfyllt = i första respektive sista tredjedelen av gruppens patruller.</summary>
+        static (int LinksTotal, int LinksMet, List<string> LinkIssues, int WishesTotal, int WishesMet, List<string> WishesMissed) Outcome(PlanResult res, LinkSetupResult setup, IReadOnlyList<CompetitionRegistration> regs, DateTime day)
+        {
+            string NameOf(int id) => regs.FirstOrDefault(r => r.MemberId == id)?.MemberName ?? $"Medlem {id}";
+            var at = new Dictionary<string, int>();
+            for (var i = 0; i < res.Patrols.Count; i++) foreach (var z in res.Patrols[i].P) at[z.Key] = i;
+            int linksMet = 0, linksTotal = 0; var issues = new List<string>(setup.Problems);
+            foreach (var kv in setup.Together)
+            {
+                if (!at.TryGetValue(kv.Key, out var a) || !at.TryGetValue(kv.Value, out var b)) continue;
+                linksTotal++;
+                if (a == b) linksMet++;
+                else
+                {
+                    var s1 = Start0(kv.Key); var s2 = Start0(kv.Value);
+                    issues.Add($"{NameOf(s1.Id)} och {NameOf(s2.Id)} kunde inte placeras i samma patrull i klass {s1.G} (patrull {a + 1} och {b + 1}).");
+                }
+            }
+            int wTotal = 0, wMet = 0; var missed = new List<string>();
+            var startsOf = res.Patrols.SelectMany((q, i) => q.P.Select(z => (z, i))).GroupBy(t => t.z.Id).ToDictionary(g => g.Key, g => g.ToList());
+            foreach (var kv in setup.Wish)
+            {
+                if (!at.TryGetValue(kv.Key, out var idx)) continue;
+                var s = Start0(kv.Key);
+                var own = startsOf[s.Id];
+                var first = own.Min(t => res.Patrols[t.i].S); var last = own.Max(t => res.Patrols[t.i].S);
+                var mine = res.Patrols[idx].S;
+                if (kv.Value < 0 ? Math.Abs(mine - first) > 1e-9 : Math.Abs(mine - last) > 1e-9) continue;   // ett önskemål om tidig start räknas bara på första starten, sen på sista
+                var times = res.Patrols.Where(q => q.P.Any(z => z.G == s.G)).Select(q => q.S).Distinct().OrderBy(t => t).ToList();
+                if (times.Count < 2) continue;
+                wTotal++;
+                var pos = times.IndexOf(mine) / (double)(times.Count - 1);
+                if (kv.Value < 0 ? pos <= 1.0 / 3 + 1e-9 : pos >= 2.0 / 3 - 1e-9) wMet++;
+                else missed.Add($"{NameOf(s.Id)} ({s.G}) ville starta {(kv.Value < 0 ? "tidigt" : "sent")} men startar {At(day, mine):HH:mm}" + (own.Count > 1 ? ", eftersom hen skjuter flera klasser" : ""));
+            }
+            return (linksTotal, linksMet, issues, wTotal, wMet, missed);
+        }
+
+        static Start Start0(string key) { var i = key.IndexOf('|'); return new Start(int.Parse(key[..i], System.Globalization.CultureInfo.InvariantCulture), key[(i + 1)..]); }
+
         static string Label(IEnumerable<string> groups) => string.Join("+", groups.Distinct().OrderBy(g => Array.IndexOf(FaltPatrolEngine.Groups, g) is var i and >= 0 ? i : 99).ThenBy(g => g, StringComparer.Ordinal));
 
         public static (PlanParams Params, List<EPatrol> Input, Dictionary<string, CompetitionRegistration> RegByKey) Build(
@@ -140,6 +212,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     if (l.IsDns) p.Dns[st.Key] = Mins(l.StartTime, day); else p.Locked[st.Key] = Mins(l.StartTime, day);
                 }
             }
+            var link = LinkSetup(regs, reserves, p.Dns.Keys.ToHashSet());
+            p.Together = link.Together; p.Wish = link.Wish;
             var input = new List<EPatrol> { new() { N = 1, S = open, E = open + shootWindow, P = starts } };
             return (p, input, regByKey);
         }
@@ -190,7 +264,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 }
             }
             else res = FaltPatrolEngine.Generate("fält", input, p);
-            if (res.Q == null || res.Q.Hard == 0 || res.Q.Under == 0 || res.Q.Coll > 0 || res.Invalid != null || res.Blocked != null) break;
+            // Extra platser hjälper både mot för kort vila och mot ett krav "samma patrull" som inte fick plats; de provas bara när inget annat hårt fel (krock) är orsaken.
+            if (res.Q == null || res.Q.Hard == 0 || (res.Q.Under == 0 && res.Q.Link == 0) || res.Q.Coll > 0 || res.Invalid != null || res.Blocked != null) break;
             }
             engineResult = res;
             if (res.Invalid != null) throw new ArgumentException(string.Join("; ", res.Invalid));
@@ -275,8 +350,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     res.Q.Under, rr.UnderWish.Count, rr.NeedAdd, rr.Mixed, res.Q.Coll, ordered.Count > 0 ? ordered.Max(x => x.StartTime)?.ToString("HH:mm") : null, ordered.Count > 0 ? Hm(rr.LastEnd) : null);
                 timeline = new PlanTimeline(tps, persons, pauses, kpi, Math.Round(Math.Max(p.R, p.N * p.Interval), 0), stationInfo);
             }
+            var outcome = Outcome(res, LinkSetup(regs, reserves, p.Dns!.Keys.ToHashSet()), regs, day);
             return new PatrolPlan
             {
+                LinksTotal = outcome.LinksTotal, LinksMet = outcome.LinksMet, LinkIssues = outcome.LinkIssues, WishesTotal = outcome.WishesTotal, WishesMet = outcome.WishesMet, WishesMissed = outcome.WishesMissed,
                 Timeline = timeline, Metrics = metrics, Patrols = ordered, Unavoidable = unavoidable, ReservesLeftOut = reservesLeft, LockedKept = lockedByKey.Count(kv => !kv.Value.IsDns && regKeys.Contains(kv.Key)),
                 LockedDropped = dropped, LockedOverflow = overflow, Ungrouped = res.Ungrouped,
             };

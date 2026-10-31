@@ -73,7 +73,7 @@
   function render() {
     if (!R) return;
     const keep = { x: $('pgScroll').scrollLeft, y: $('pgScroll').scrollTop };
-    renderStatus(); probeFixes(); renderLegend(); renderPicture(); renderScrape(); renderMoves(); renderMore(); renderSel();
+    renderStatus(); renderNotes(); probeFixes(); renderLegend(); renderPicture(); renderScrape(); renderMoves(); renderMore(); renderSel();
     { const t0 = T(R), est = t0 && t0.roundMin; if (est && P.rm && +P.rm < est - 0.5) { $('pgRoundHint').textContent = 'Stationerna tar tillsammans minst ' + Math.round(est) + ' min (' + t0.stations.length + ' stationer × tiden mellan patruller), så rundan räknas som ' + Math.round(est) + ' min och inte ' + P.rm + '. Öka tiden mellan patruller eller ange en längre rundtid för att ändra det.'; } else if (est) { $('pgRoundMin').placeholder = Math.round(est); $('pgRoundHint').textContent = P.rm ? 'Tid för en hel runda på banan (du har angett den).' : 'Tid för en hel runda på banan. Just nu uppskattad till ' + Math.round(est) + ' min (10 min per station). Ange den uppmätta tiden för ett säkrare resultat: den styr hur länge skyttar med flera starter måste vänta mellan klasserna.'; } }
     if (lastServer) { if (!P.size) $('pgSize').placeholder = lastServer.patrolSize; if (!P.int) $('pgInt').placeholder = lastServer.intervalMinutes; if (!P.first && lastServer.firstStart) $('pgFirst').value = lastServer.firstStart.slice(11, 16); }
     ['vSta', 'vTl', 'vList'].forEach(id => $(id).setAttribute('aria-pressed', String(({ vSta: 'sta', vTl: 'tl', vList: 'list' })[id] === view)));
@@ -307,6 +307,21 @@
     $('pgMovesPane').innerHTML = h;
   }
   function kpiRows(r) { const k = T(r) && T(r).kpi, m = r.metrics || {}; if (!k) return []; return [['Patruller', k.patrols], ['Starter', k.starts], ['Skyttar med flera starter', k.multi], ['Väntar mer än 1 timme', m.waitOverHour || 0], ['Längsta väntan över vilan', dur(k.maxWaitMin)], ['Under minsta vila', k.underMin], ['Under önskad vila', k.underWish], ['Patruller som kan behöva extra tid', k.needAdd], ['Krockar vid station', k.collisions], ['Sista start / klart ca', (k.lastStart || '–') + ' / ' + (k.lastEnd || '–')]]; }
+  // Krav "gå i samma patrull som" (hårt) och önskemål om starttid (mjukt) ur anmälningarna: det som inte gick redovisas med namn, aldrig tyst.
+  function renderNotes() {
+    const box = $('pgNotes'), l = R.links || { total: 0, met: 0, issues: [] }, w = R.wishes || { total: 0, met: 0, missed: [] };
+    let h = '';
+    if (l.total > 0 || (l.issues || []).length) {
+      const bad = (l.issues || []).length > 0;
+      h += '<div class="alert ' + (bad ? 'alert-warning' : 'alert-success') + ' py-2 mb-2" id="pgLinks"><b>Gå i samma patrull som:</b> ' + l.met + ' av ' + l.total + ' krav håller.' +
+        (bad ? '<ul class="mb-0 mt-1">' + l.issues.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>';
+    }
+    if (w.total > 0) {
+      h += '<div class="alert alert-light border py-2 mb-2" id="pgWishes"><b>Önskemål om starttid:</b> ' + w.met + ' av ' + w.total + ' uppfyllda. Det är bara önskemål: vilokraven och skyttar med flera starter går före.' +
+        ((w.missed || []).length ? '<details class="mt-1"><summary>Vilka som inte fick sitt önskemål (' + w.missed.length + ')</summary><ul class="mb-0">' + w.missed.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></details>' : '') + '</div>';
+    }
+    box.innerHTML = h; box.hidden = !h;
+  }
   function renderMore() {
     const r = R, t = T(r), tips = [], add = (c, w, text) => tips.push('<li class="' + c + '"><b>' + w + '</b> ' + text + '</li>');
     if (t) { const need = t.patrols.filter(p => p.addMin > 0);

@@ -41,6 +41,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public List<string> LockedOverflow { get; init; } = new();
         /// <summary>Anmälda vars vapenklass inte finns i någon befintlig grupp — de placeras inte, och redovisas ("Namn (klass)").</summary>
         public List<string> Ungrouped { get; init; } = new();
+        /// <summary>Krav "gå i samma patrull som": antal som gällde och antal som höll, och med namn de som inte gick (eller som inte kunde tillämpas: kamraten DNS, reserv eller inte anmäld).</summary>
+        public int LinksTotal { get; init; }
+        public int LinksMet { get; init; }
+        public List<string> LinkIssues { get; init; } = new();
+        /// <summary>Önskemål om tidig/sen start som gällde (första respektive sista starten), hur många som uppfylldes, och med namn de som inte gjorde det.</summary>
+        public int WishesTotal { get; init; }
+        public int WishesMet { get; init; }
+        public List<string> WishesMissed { get; init; } = new();
         /// <summary>Mått ur den avancerade generatorn (null = den enkla planeraren, som inte räknar dem).</summary>
         public PlanMetrics? Metrics { get; init; }
         /// <summary>Tidsbilden för sidan (patrullstaplar, skyttar med flera starter, KPI); null för den enkla planeraren.</summary>

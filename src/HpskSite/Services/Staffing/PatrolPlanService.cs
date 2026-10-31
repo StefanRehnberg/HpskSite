@@ -127,7 +127,7 @@ namespace HpskSite.Services.Staffing
 
             var fp = new List<string> { $"set:{settings.PatrolSize}/{settings.IntervalMinutes}/{settings.FirstStart:s}/{settings.WeaponGrouping}/{settings.MultiClassGapMinutes}/{settings.KeepFitting}/{OptionsKey(options)}",
                 $"shoot:{shoot.BeforeMinutes}/{shoot.DurationMinutes}/{shoot.AfterMinutes}" };
-            fp.AddRange(regs.OrderBy(r => r.MemberId).ThenBy(r => r.MemberClass, StringComparer.Ordinal).Select(r => $"r:{r.MemberId}|{r.MemberClass}"));
+            fp.AddRange(regs.OrderBy(r => r.MemberId).ThenBy(r => r.MemberClass, StringComparer.Ordinal).Select(r => $"r:{r.MemberId}|{r.MemberClass}|{HpskSite.Models.StartPreference.Normalize(r.StartPreference)}|{r.JoinMemberId}"));   // önskemål och kompis hör till underlaget: ändras de efter förhandsvisningen ska Tillämpa säga ifrån
             fp.AddRange(patrols.OrderBy(p => p.Id).Select(p => $"p:{p.Id}|{p.PatrolNumber}|{p.StartTime:s}|{p.WeaponGroup}|{p.DepartedAt:s}"));
             fp.AddRange(members.OrderBy(m => m.Id).Select(m => $"m:{m.Id}|{m.PatrolId}|{m.MemberId}|{m.ShootingClass}|{m.Position}|{m.Locked}|{m.Status}"));
             fp.AddRange(jobs.OrderBy(k => k.Key).SelectMany(k => k.Value.Select(v => $"j:{k.Key}|{v.Start:s}|{v.End:s}|{v.AllDay}")));

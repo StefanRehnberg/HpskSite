@@ -20,6 +20,12 @@ namespace HpskSite.Models.ViewModels.Competition
         /// </summary>
         public string StartPreference { get; set; } = "";
 
+        /// <summary>
+        /// Fältskytte: den andra medlemmen (samma klubb) som den här starten måste gå i samma patrull som (<see cref="HpskSite.Models.ShootingClassEntry.JoinMemberId"/>).
+        /// Per klassanmälan; null = inget krav.
+        /// </summary>
+        public int? JoinMemberId { get; set; }
+
         public override string ToString()
         {
             return $"{this.MemberName} - {this.MemberClass}";

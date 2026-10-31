@@ -108,6 +108,8 @@ namespace HpskSite.Controllers
                     timeline = pv.Plan.Timeline,
                     reservesLeftOut = pv.Plan.ReservesLeftOut,
                     lockedKept = pv.Plan.LockedKept, lockedDropped = pv.Plan.LockedDropped, lockedOverflow = pv.Plan.LockedOverflow,
+                    links = new { total = pv.Plan.LinksTotal, met = pv.Plan.LinksMet, issues = pv.Plan.LinkIssues },
+                    wishes = new { total = pv.Plan.WishesTotal, met = pv.Plan.WishesMet, missed = pv.Plan.WishesMissed },
                     undoable = owner != null ? (int?)svc.LatestUndoable(owner) : null,
                     practice = practice != null,
                 });
