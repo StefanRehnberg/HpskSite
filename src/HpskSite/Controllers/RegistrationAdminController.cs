@@ -313,23 +313,23 @@ namespace HpskSite.Controllers
                         {
                             var key = c.Class.Trim();
                             existingByClass.TryGetValue(key, out var existing);
-                            return new HpskSite.Models.ShootingClassEntry
-                            {
-                                Class = key,
-                                StartPreference = c.StartPreference
-                                    ?? existing?.StartPreference
-                                    ?? request.StartPreference
-                                    ?? "Inget",
-                                TeamNumber = c.TeamNumber ?? existing?.TeamNumber
-                            };
+                            // Utgå från den befintliga posten så att varje fält som inte nämns bevaras (Copy bär alla fält).
+                            var entry = existing?.Copy() ?? new HpskSite.Models.ShootingClassEntry();
+                            entry.Class = key;
+                            entry.StartPreference = c.StartPreference
+                                ?? existing?.StartPreference
+                                ?? request.StartPreference
+                                ?? "Inget";
+                            entry.TeamNumber = c.TeamNumber ?? existing?.TeamNumber;
+                            return entry;
                         })
                         .ToList()
                     : existingClasses
-                        .Select(c => new HpskSite.Models.ShootingClassEntry
+                        .Select(c =>
                         {
-                            Class = c.Class,
-                            StartPreference = request.StartPreference ?? c.StartPreference ?? "Inget",
-                            TeamNumber = c.TeamNumber
+                            var entry = c.Copy();
+                            entry.StartPreference = request.StartPreference ?? c.StartPreference ?? "Inget";
+                            return entry;
                         })
                         .ToList();
 

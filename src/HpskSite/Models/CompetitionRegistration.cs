@@ -12,6 +12,15 @@ namespace HpskSite.Models
         public string Class { get; set; } = "";
         public string StartPreference { get; set; } = "No Preference";
         public int? TeamNumber { get; set; }
+
+        /// <summary>
+        /// En kopia med ALLA fält. Varje ställe som bygger om en klassanmälan utgår från den (eller från en befintlig post via den), så ett nytt fält aldrig tappas tyst:
+        /// anmälan sparas som DELETE + INSERT av klassraderna och ersätts hela vid omanmälan. <c>ShootingClassEntryCopyTests</c> fäller bygget om ett fält saknas här.
+        /// </summary>
+        public ShootingClassEntry Copy() => new()
+        {
+            Class = Class, StartPreference = StartPreference, TeamNumber = TeamNumber
+        };
     }
 
     public class CompetitionRegistrationDocument : BasePage

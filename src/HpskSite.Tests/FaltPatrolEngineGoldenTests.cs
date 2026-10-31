@@ -5,8 +5,10 @@ using Xunit;
 namespace HpskSite.Tests
 {
     /// <summary>
-    /// Golden master: C#-motorn ska ge SAMMA lista som prototypens JS-motor (notes/patrullgenerator-prototyp, genererad av golden_gen.js) på anonymiserade riktiga listor.
-    /// Samma slumptal och evalueringsordning, så listan ska vara identisk, inte bara närliggande. Faller ett fall: kör prototypens sviter och golden_gen.js på nytt innan filen ersätts.
+    /// Golden master: C#-motorn ger samma lista som förra gången på anonymiserade riktiga listor (id och klass, inga namn). C#-motorn är sin egen referens: prototypen (notes/patrullgenerator-prototyp)
+    /// var facit till och med 2026-10-31 men följs inte längre (Stefan 2026-10-31), så NextFirst och senare regler finns bara här.
+    /// Faller ett fall: undersök om ändringen är avsiktlig. Är den det, skapa om facit med HPSK_REGEN_GOLDEN=1 (Regenerate_golden_from_the_engine_only_when_asked) och granska git diff på filen.
+    /// Mot facit kör motorn som produktionen (NextFirst på). ExtraSlots-slingan ligger i adaptern och prövas av FaltPatrolAdapterTests.
     /// </summary>
     public class FaltPatrolEngineGoldenTests
     {
@@ -83,29 +85,77 @@ namespace HpskSite.Tests
             P = q.GetProperty("p").EnumerateArray().Select(z => new Start(z[0].GetInt32(), z[1].GetString()!)).ToList(),
         }).ToList();
 
-        [Theory]
-        [MemberData(nameof(Cases))]
-        public void Engine_matches_the_prototype(string name)
+        /// <summary>Kör ett fall som produktionen gör (NextFirst på, som i adaptern). Ger resultatet och, för "keep"-fall, de tre räknarna.</summary>
+        static (PlanResult G, int? Kept, int? Moved, int? Unlocked) Run(JsonElement c)
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(GoldenPath));
-            var c = doc.RootElement.EnumerateArray().First(x => x.GetProperty("name").GetString() == name);
             var ds = c.GetProperty("ds"); var id = ds.GetProperty("id").GetString()!;
             var patrols = PatrolsOf(ds.GetProperty("patrols"));
-            var p = ParamsOf(c.GetProperty("params"));
-            var exp = c.GetProperty("out");
-            PlanResult g;
+            var p = ParamsOf(c.GetProperty("params")); p.NextFirst = true;
             if (c.GetProperty("kind").GetString() == "keep")
             {
                 var ch = c.GetProperty("change");
                 var add = ch.GetProperty("add").EnumerateArray().Select(z => new Start(z[0].GetInt32(), z[1].GetString()!)).ToList();
                 var rem = ch.GetProperty("remove").EnumerateArray().Select(x => x.GetString()!).ToHashSet();
                 var k = FaltPatrolEngine.RebuildKeep(id, patrols, p, add, rem);
-                g = k.G;
-                Assert.Equal(exp.GetProperty("kept").GetInt32(), k.Kept);
-                Assert.Equal(exp.GetProperty("moved").GetInt32(), k.Moved);
-                Assert.Equal(exp.GetProperty("unlocked").GetInt32(), k.Unlocked);
+                return (k.G, k.Kept, k.Moved, k.Unlocked);
             }
-            else g = FaltPatrolEngine.Generate(id, patrols, p);
+            return (FaltPatrolEngine.Generate(id, patrols, p), null, null, null);
+        }
+
+        static string SourceGoldenPath([System.Runtime.CompilerServices.CallerFilePath] string here = "") => Path.Combine(Path.GetDirectoryName(here)!, "Faltskytte", "golden-patrol-engine.json");
+
+        /// <summary>
+        /// Skapar om facit ur C#-motorn. Körs bara med HPSK_REGEN_GOLDEN=1, och ENDAST efter att en avsiktlig ändring i motorns beteende har granskats
+        /// (jämför före och efter med git diff på filen). Indata (listor och inställningar) rörs inte, bara "out".
+        /// </summary>
+        [Fact]
+        public void Regenerate_golden_from_the_engine_only_when_asked()
+        {
+            if (Environment.GetEnvironmentVariable("HPSK_REGEN_GOLDEN") != "1") return;
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(GoldenPath));
+            using var ms = new MemoryStream();
+            using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+            {
+                w.WriteStartArray();
+                foreach (var c in doc.RootElement.EnumerateArray())
+                {
+                    var (g, kept, moved, unlocked) = Run(c);
+                    w.WriteStartObject();
+                    foreach (var pr in c.EnumerateObject()) { if (pr.Name == "out") continue; w.WritePropertyName(pr.Name); pr.Value.WriteTo(w); }
+                    w.WritePropertyName("out"); w.WriteStartObject();
+                    w.WritePropertyName("patrols"); w.WriteStartArray();
+                    foreach (var q in g.Patrols)
+                    {
+                        w.WriteStartObject(); w.WriteNumber("n", q.N); w.WriteNumber("s", q.S);
+                        w.WritePropertyName("p"); w.WriteStartArray();
+                        foreach (var s in q.P) { w.WriteStartArray(); w.WriteNumberValue(s.Id); w.WriteStringValue(s.G); w.WriteEndArray(); }
+                        w.WriteEndArray(); w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteBoolean("infeasible", g.Infeasible); w.WriteNumber("hard", g.Q?.Hard ?? 0); w.WriteNumber("soft", g.Q?.Soft ?? 0);
+                    if (g.Blocked == null) w.WriteNull("blocked"); else w.WriteString("blocked", g.Blocked);
+                    if (kept != null) { w.WriteNumber("kept", kept.Value); w.WriteNumber("moved", moved!.Value); w.WriteNumber("unlocked", unlocked!.Value); }
+                    w.WriteEndObject(); w.WriteEndObject();
+                }
+                w.WriteEndArray();
+            }
+            File.WriteAllBytes(SourceGoldenPath(), ms.ToArray());
+        }
+
+        [Theory]
+        [MemberData(nameof(Cases))]
+        public void Engine_matches_the_golden_master(string name)
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(GoldenPath));
+            var c = doc.RootElement.EnumerateArray().First(x => x.GetProperty("name").GetString() == name);
+            var exp = c.GetProperty("out");
+            var (g, kept, moved, unlocked) = Run(c);
+            if (kept != null)
+            {
+                Assert.Equal(exp.GetProperty("kept").GetInt32(), kept);
+                Assert.Equal(exp.GetProperty("moved").GetInt32(), moved);
+                Assert.Equal(exp.GetProperty("unlocked").GetInt32(), unlocked);
+            }
 
             var ep = exp.GetProperty("patrols").EnumerateArray().ToList();
             Assert.Equal(ep.Count, g.Patrols.Count);

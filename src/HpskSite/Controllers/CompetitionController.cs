@@ -427,17 +427,25 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Build shooting classes array with per-class preferences and team assignments
-                var shootingClassEntries = selectedClassesList.Select(sc => new ShootingClassEntry
-                {
-                    Class = sc,
-                    StartPreference = startPreferencesDict.ContainsKey(sc) ? startPreferencesDict[sc] : startPreference,
-                    TeamNumber = teamAssignments.TryGetValue(sc, out var tn) ? tn : null
-                }).ToList();
-
                 // Befintlig anmälan — via anmälningslagringen (sajtstrukturen fas 1a), som läser alla
                 // anmälningar oavsett om de publicerats.
                 var existingRegistration = _registrations.FindForMember(competitionId, targetMember.Id);
+
+                // Build shooting classes array with per-class preferences and team assignments.
+                // ⚠️ En omanmälan ersätter hela klasslistan. Det som en klass redan har (önskemål om starttid, och varje fält som tillkommer)
+                //    bärs därför över från den befintliga posten och skrivs bara över när anmälan uttryckligen nämner klassen:
+                //    förut skrevs ett tidigare önskemål över med "Inget" varje gång någon lade till en klass.
+                var previousEntries = existingRegistration?.Classes ?? new List<ShootingClassEntry>();
+                var shootingClassEntries = selectedClassesList.Select(sc =>
+                {
+                    var previous = previousEntries.FirstOrDefault(e => string.Equals((e.Class ?? "").Trim(), sc, StringComparison.OrdinalIgnoreCase));
+                    var entry = previous?.Copy() ?? new ShootingClassEntry();
+                    entry.Class = sc;
+                    if (startPreferencesDict.TryGetValue(sc, out var chosenPreference)) entry.StartPreference = chosenPreference;
+                    else if (previous == null) entry.StartPreference = startPreference;
+                    entry.TeamNumber = teamAssignments.TryGetValue(sc, out var tn) ? tn : null;
+                    return entry;
+                }).ToList();
 
                 HpskSite.Models.Registrations.RegistrationRecord registration;
                 bool isUpdate = false;

@@ -28,7 +28,16 @@ let existingRegistrations = [];
 let weaponClassConflicts = {}; // Map of weapon class → existing registration details
 
 // Preference storage
-let classPreferences = {}; // Store preferences for each selected class
+let classPreferences = {}; // Store preferences for each selected class (ONLY what the user touched in this session)
+// Önskemål som redan ligger på skyttens befintliga anmälan, per klass. Skickas aldrig om utan att skytten ändrat dem:
+// servern behåller det som redan finns för en klass som inte nämns (annars skrevs ett tidigare önskemål över med "Inget" vid varje omanmälan).
+let existingClassPrefs = {};
+function normalizeStartPreference(v) {
+    const s = String(v || '').trim().toLowerCase();
+    if (s === 'tidig start' || s === 'tidig' || s === 'early') return 'Tidig Start';
+    if (s === 'sen start' || s === 'sen' || s === 'late') return 'Sen Start';
+    return 'Inget';
+}
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -622,9 +631,9 @@ async function submitRegistrationForm() {
             const checkedRadio = document.querySelector(`input[name="${groupName}"]:checked`);
             if (checkedRadio) {
                 const classId = checkedRadio.value;
-                const startPreference = classPreferences[classId] || 'Inget';
                 selectedClasses.push(classId);
-                startPreferencesMap[classId] = startPreference;
+                // Bara det skytten faktiskt ställt in skickas med; övriga klasser behåller sitt befintliga önskemål på servern.
+                if (classPreferences[classId] !== undefined) startPreferencesMap[classId] = classPreferences[classId];
             }
         });
 
@@ -883,7 +892,9 @@ function openPreferenceModal(classId, className, classGroup) {
     document.getElementById('preferenceClassGroup').value = classGroup;
 
     // Load existing preferences if any
-    const existingPreference = classPreferences[classId] || 'Inget';
+    const existingPreference = classPreferences[classId] !== undefined
+        ? classPreferences[classId]
+        : normalizeStartPreference(existingClassPrefs[classId]);
 
     document.getElementById('startPreference').value = existingPreference;
 
@@ -1686,6 +1697,8 @@ async function queryExistingRegistrations() {
                         if (!weaponClassConflicts[weaponClass]) {
                             weaponClassConflicts[weaponClass] = [];
                         }
+
+                        existingClassPrefs[classEntry.class] = classEntry.startPreference;
 
                         // Store class info with registration reference
                         weaponClassConflicts[weaponClass].push({

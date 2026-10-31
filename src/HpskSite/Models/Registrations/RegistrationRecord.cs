@@ -63,10 +63,7 @@ namespace HpskSite.Models.Registrations
         {
             Id = Id, CompetitionId = CompetitionId, MemberId = MemberId, MemberName = MemberName,
             ClubId = ClubId, LegacyClubText = LegacyClubText,
-            Classes = Classes.Select(c => new ShootingClassEntry
-            {
-                Class = c.Class, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber
-            }).ToList(),
+            Classes = Classes.Select(c => c.Copy()).ToList(),
             ClassesFromLegacyScalar = ClassesFromLegacyScalar,
             RegistrationDate = RegistrationDate, CreatedDate = CreatedDate, RegisteredBy = RegisteredBy, IsActive = IsActive,
             IsSubCompetition = IsSubCompetition, IsCheckedIn = IsCheckedIn, InvoiceId = InvoiceId,
