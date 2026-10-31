@@ -38,6 +38,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         public int? Iters, Stall, ImproveSeed;
         /// <summary>Extra platser sist i varje block (tomma tas bort efteråt): ger skyttar med flera starter i ett blandat block något att vänta på. 0 = som prototypen.</summary>
         public int ExtraSlots;
+        /// <summary>
+        /// Hårda krav "samma patrull": startnyckel (id|grupp) → partnerns startnyckel. Kedjor och cykler blir EN klump (union-find) inom samma vapengrupp. En klump placeras som en enhet
+        /// (kapacitet = antal medlemmar, vila och uppdrag för alla); går det inte räknas brutna par i <see cref="Qual.Link"/> (ingår i Hard) i stället för att tyst splittras.
+        /// Klumpmedlemmar flyttas aldrig av förbättringen. Tomt/null = som förut (golden-fallen oförändrade).
+        /// </summary>
+        public Dictionary<string, string>? Together;
+        /// <summary>
+        /// Mjuka önskemål per start (id|grupp): -1 tidig start, +1 sen start. Gäller bara personens första (tidig) respektive sista (sen) start. Ger aldrig förtur som funktionärernas Early/Late (Pri)
+        /// och påverkar aldrig Hard eller vilokraven; bara ordningen inom en klass av lika svåra starter.
+        /// </summary>
+        public Dictionary<string, int>? Wish;
         /// <summary>Avbrott utifran (tidsgrans, avbruten forfragan). Motorn kastar OperationCanceledException; aldrig en delvis lista.</summary>
         public CancellationToken Ct;
         public PlanParams Clone() => (PlanParams)MemberwiseClone();
@@ -58,7 +69,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
 
     public sealed class Qual
     {
-        public RunResult? R; public int Hard, Under, Coll, StaffBad, Cap; public double Over, Soft, D1, D2, E1, E2;
+        public RunResult? R; public int Hard, Under, Coll, StaffBad, Cap, Link; public double Over, Soft, D1, D2, E1, E2;
     }
     public sealed record DnsOut(int Id, string G, double T);
     public sealed class PauseOut { public int At; public double Min, Ext, Set; public int Hard; public int? Before; }
@@ -245,7 +256,38 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             double soft = 0; foreach (var z in r.Persons) soft += RestSoft(z.Pairs.Select(y => (y.Slack, y.Cross)), p);
             soft += (r.LastStart - p.Open) * SoftEnd[p.Prio];
             var over = d1 + d2;
-            return new Qual { R = r, Hard = r.Under.Count + r.Collisions + sb + cap + (over > 0.5 ? 1 : 0), Under = r.Under.Count, Coll = r.Collisions, StaffBad = sb, Cap = cap, Over = over, Soft = soft, D1 = d1, D2 = d2, E1 = e1, E2 = e2 };
+            var link = LinkBroken(patrols, p);
+            return new Qual { R = r, Hard = r.Under.Count + r.Collisions + sb + cap + link + (over > 0.5 ? 1 : 0), Under = r.Under.Count, Coll = r.Collisions, StaffBad = sb, Cap = cap, Link = link, Over = over, Soft = soft, D1 = d1, D2 = d2, E1 = e1, E2 = e2 };
+        }
+
+        /// <summary>Antal krav "samma patrull" där båda finns i planen men ligger i olika patruller. Ett krav vars ena part inte är med (DNS, reserv) räknas inte.</summary>
+        static int LinkBroken(List<EPatrol> patrols, PlanParams p)
+        {
+            if (p.Together == null || p.Together.Count == 0) return 0;
+            var at = new Dictionary<string, int>();
+            for (var i = 0; i < patrols.Count; i++) foreach (var z in patrols[i].P) at[z.Key] = i;
+            var bad = 0;
+            foreach (var kv in p.Together) if (at.TryGetValue(kv.Key, out var a) && at.TryGetValue(kv.Value, out var b) && a != b) bad++;
+            return bad;
+        }
+
+        /// <summary>Union-find över kraven "samma patrull": nyckel → klump-id för varje komponent med minst två startar i samma vapengrupp.</summary>
+        static Dictionary<string, int> BuildClumps(PlanParams p, HashSet<string> present)
+        {
+            var result = new Dictionary<string, int>();
+            if (p.Together == null || p.Together.Count == 0) return result;
+            var parent = new Dictionary<string, string>();
+            string Find(string x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            foreach (var kv in p.Together)
+            {
+                if (!present.Contains(kv.Key) || !present.Contains(kv.Value) || kv.Key == kv.Value) continue;
+                if (Tg(kv.Key[(kv.Key.IndexOf('|') + 1)..]) != Tg(kv.Value[(kv.Value.IndexOf('|') + 1)..])) continue;   // bara inom samma vapengrupp
+                parent.TryAdd(kv.Key, kv.Key); parent.TryAdd(kv.Value, kv.Value);
+                var ra = Find(kv.Key); var rb = Find(kv.Value); if (ra != rb) parent[ra] = rb;
+            }
+            var ids = new Dictionary<string, int>();
+            foreach (var k in parent.Keys.OrderBy(x => x, StringComparer.Ordinal)) { var root = Find(k); if (!ids.TryGetValue(root, out var id)) ids[root] = id = ids.Count; result[k] = id; }
+            return result;
         }
 
         static bool Better(Qual a, Qual b) => a.Hard != b.Hard ? a.Hard < b.Hard : Math.Abs(a.Over - b.Over) > 0.5 ? a.Over < b.Over : a.Soft < b.Soft;
@@ -299,6 +341,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         {
             public int Id; public string G = ""; public double? Fixed; public List<(double A, double B)>? Staff; public bool Pat, Early, Late, Pri, HasLater;
             public int Bi, NLater, NextOrd, Rank; public Ent? Prev; public double Tm, Dm;
+            /// <summary>Klump = skyttar som ska stå i samma patrull (Together), -1 = ingen. ERank = rank efter att klumpmedlemmar delar rank och ingen ligger före sin egen tidigare start. WishRank: -1 tidig, 1 sen (mjukt önskemål), 0 inget.</summary>
+            public int Clump = -1, ERank, WishRank;
         }
         sealed class Meta
         {
@@ -384,6 +428,22 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                     e.Rank = e.Prev != null && e.Prev.Bi == e.Bi ? e.Prev.Rank + 1 : 0;
                 }
             }
+            // Klumpar (krav "samma patrull") och mjuka önskemål. Utan Together/Wish är det här ett tomt varv: ERank = Rank, Clump = -1, WishRank = 0.
+            var clumpOf = BuildClumps(p, ents.Select(e => e.Id + "|" + e.G).ToHashSet());
+            foreach (var e in ents)
+            {
+                e.Clump = clumpOf.TryGetValue(e.Id + "|" + e.G, out var cid) ? cid : -1;
+                e.ERank = e.Rank;
+                if (p.Wish != null && p.Wish.TryGetValue(e.Id + "|" + e.G, out var w)) e.WishRank = w < 0 && e.Prev == null ? -1 : w > 0 && !e.HasLater ? 1 : 0;
+            }
+            // Klumpmedlemmar delar rank (den högsta), och ingen start ligger före sin egen tidigare start i samma block.
+            for (var pass = 0; pass < 12; pass++)
+            {
+                var changed = false;
+                foreach (var grp in ents.Where(e => e.Clump >= 0).GroupBy(e => e.Clump)) { var r = grp.Max(e => e.ERank); foreach (var e in grp) if (e.ERank != r) { e.ERank = r; changed = true; } }
+                foreach (var e in ents) if (e.Prev != null && e.Prev.Bi == e.Bi && e.ERank <= e.Prev.ERank) { e.ERank = e.Prev.ERank + 1; changed = true; }
+                if (!changed) break;
+            }
             var fixedAll = meta.SelectMany(b => b.Xt.Select(x => x.T)).ToList(); double? fixedMax = fixedAll.Count > 0 ? fixedAll.Max() : null;
             double GlideAt(int k) => p.GlideEvery > 0 && p.GlideMin > 0 && (k + 1) % p.GlideEvery == 0 ? p.GlideMin : 0;
             var gapsAfter = new double[total + 64];
@@ -445,39 +505,88 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                         }
                     bool SamePatrol(Ent e, int j) => byPerson[e.Id].Any(o => o != e && o.Bi == bi && slot.TryGetValue(o, out var sj) && sj == j);
                     bool OkSlot(Ent e, int j) => cap[j] > 0 && (j >= np || e.Pat) && !Forbidden(e, arr[j], mb.D) && !SamePatrol(e, j);
-                    var maxRank = Math.Max(0, mb.List.Count > 0 ? mb.List.Max(e => e.Rank) : 0);
-                    for (var rk = 0; rk <= maxRank; rk++)
+                    var maxRank = Math.Max(0, mb.List.Count > 0 ? mb.List.Max(e => e.ERank) : 0);
+                    // Väljer plats för en enhet (en skytt, eller en klump som måste stå i samma patrull). Kedjan av reservplaner är den ursprungliga; för en enhet på en medlem är den identisk med förut.
+                    int ChooseSlot(List<Ent> M, double aw, double am, bool lateSeek, bool wishLate)
                     {
-                        var items = mb.List.Where(e => e.Rank == rk && e.Fixed == null).Select(e =>
+                        var size = M.Count; var k = -1;
+                        bool Cap(int j) => cap[j] > size - 1;
+                        bool Seat(int j) => M.All(m => j >= np || m.Pat);
+                        bool Ok(int j) => Cap(j) && Seat(j) && M.All(m => !Forbidden(m, arr[j], mb.D) && !SamePatrol(m, j));
+                        if (lateSeek || wishLate)
+                        {
+                            // Ett sent önskemål (mjukt) tar aldrig de reserverade extraplatserna sist i blocket; funktionärernas Late gör det som förut.
+                            var top = lateSeek ? times.G - 1 : Math.Max(np, times.G - 1 - mb.Spare);
+                            foreach (var lim in new[] { aw, am }) { if (k >= 0) break; for (var j = top; j >= np; j--) if (Ok(j) && arr[j] >= lim - 1e-9) { k = j; break; } }
+                        }
+                        if (k < 0) for (var j = 0; j < arr.Count; j++) if (Ok(j) && arr[j] >= aw - 1e-9) { k = j; break; }
+                        if (k < 0) { for (var j = 0; j < arr.Count; j++) if (Ok(j) && arr[j] >= am - 1e-9) { k = j; break; } if (k >= 0) wishFail++; }
+                        if (k < 0) for (var j = 0; j < arr.Count; j++) if (Cap(j) && Seat(j) && M.All(m => !SamePatrol(m, j)) && arr[j] >= am - 1e-9) { k = j; break; }
+                        if (k < 0) { hard++; for (var j = arr.Count - 1; j >= 0; j--) if (Ok(j)) { k = j; break; } }
+                        if (k < 0) for (var j = arr.Count - 1; j >= 0; j--) if (Cap(j) && Seat(j)) { k = j; break; }
+                        if (k < 0) for (var j = arr.Count - 1; j >= 0; j--) if (Cap(j)) { k = j; break; }
+                        if (k < 0) k = arr.Count - 1;
+                        return k;
+                    }
+                    (List<Ent> M, double aw, double am) ItemOf(List<Ent> M)
+                    {
+                        double aw = double.NegativeInfinity, am = double.NegativeInfinity;
+                        foreach (var e in M)
                         {
                             double pv = double.NegativeInfinity;
                             if (e.Prev != null) pv = e.Prev.Bi < bi ? e.Prev.Tm + e.Prev.Dm : slot.TryGetValue(e.Prev, out var ps2) ? arr[ps2] + mb.D : double.NegativeInfinity;
-                            return (e, aw: e.Prev != null ? pv + p.VilaW : double.NegativeInfinity, am: e.Prev != null ? pv + p.Vila : double.NegativeInfinity);
-                        }).ToList();
-                        int Cls((Ent e, double aw, double am) x) => x.e.Pri ? -1 : double.IsNegativeInfinity(x.aw) ? (x.e.HasLater && p.Smart ? 0 : 2) : 1;
+                            aw = Math.Max(aw, e.Prev != null ? pv + p.VilaW : double.NegativeInfinity); am = Math.Max(am, e.Prev != null ? pv + p.Vila : double.NegativeInfinity);
+                        }
+                        return (M, aw, am);
+                    }
+                    for (var rk = 0; rk <= maxRank; rk++)
+                    {
+                        // Enheter: varje skytt för sig, och varje klump (krav "samma patrull") som EN enhet med alla sina medlemmar. Utan klumpar är alla enheter en medlem och ordningen som förut.
+                        var items = mb.List.Where(e => e.ERank == rk && e.Fixed == null && e.Clump < 0).Select(e => ItemOf(new List<Ent> { e })).ToList();
+                        foreach (var grp in mb.List.Where(e => e.ERank == rk && e.Fixed == null && e.Clump >= 0).GroupBy(e => e.Clump)) items.Add(ItemOf(grp.ToList()));
+                        int Cls((List<Ent> M, double aw, double am) x) => x.M.Any(e => e.Pri) ? -1 : double.IsNegativeInfinity(x.aw) ? (x.M.Any(e => e.HasLater) && p.Smart ? 0 : 2) : 1;
                         // JS-jämförelsen: a || b || c || d där NaN och 0 är falska (-Infinity - -Infinity = NaN faller till id).
-                        double Cmp((Ent e, double aw, double am) x, (Ent e, double aw, double am) y)
+                        double Cmp((List<Ent> M, double aw, double am) x, (List<Ent> M, double aw, double am) y)
                         {
                             double d = Cls(x) - Cls(y); if (d != 0 && !double.IsNaN(d)) return d;
-                            d = Cls(x) == 0 ? y.e.NLater - x.e.NLater : 0; if (d != 0 && !double.IsNaN(d)) return d;
-                            if (p.NextFirst && Cls(x) == 0) { d = x.e.NextOrd - y.e.NextOrd; if (d != 0) return d; }
+                            d = y.M.Count - x.M.Count; if (d != 0) return d;   // klumpar före lösa skyttar: de behöver flera platser i samma patrull
+                            d = Cls(x) == 0 ? y.M.Max(e => e.NLater) - x.M.Max(e => e.NLater) : 0; if (d != 0 && !double.IsNaN(d)) return d;
+                            if (p.NextFirst && Cls(x) == 0) { d = x.M.Min(e => e.NextOrd) - y.M.Min(e => e.NextOrd); if (d != 0) return d; }
+                            d = x.M[0].WishRank - y.M[0].WishRank; if (d != 0) return d;   // mjukt önskemål: tidig före ingen före sen, efter att fler-starter-regeln fått gå först
                             d = x.aw - y.aw; if (d != 0 && !double.IsNaN(d)) return d;
-                            return x.e.Id - y.e.Id;
+                            return x.M[0].Id - y.M[0].Id;
                         }
                         items = InsertionSort(items, Cmp);
                         foreach (var x in items)
                         {
-                            var k = -1;
-                            if (x.e.Late) foreach (var lim in new[] { x.aw, x.am }) { if (k >= 0) break; for (var j = times.G - 1; j >= np; j--) if (OkSlot(x.e, j) && arr[j] >= lim - 1e-9) { k = j; break; } }
-                            if (k < 0) for (var j = 0; j < arr.Count; j++) if (OkSlot(x.e, j) && arr[j] >= x.aw - 1e-9) { k = j; break; }
-                            if (k < 0) { for (var j = 0; j < arr.Count; j++) if (OkSlot(x.e, j) && arr[j] >= x.am - 1e-9) { k = j; break; } if (k >= 0) wishFail++; }
-                            if (k < 0) for (var j = 0; j < arr.Count; j++) if (cap[j] > 0 && (j >= np || x.e.Pat) && !SamePatrol(x.e, j) && arr[j] >= x.am - 1e-9) { k = j; break; }
-                            if (k < 0) { hard++; for (var j = arr.Count - 1; j >= 0; j--) if (OkSlot(x.e, j)) { k = j; break; } }
-                            if (k < 0) for (var j = arr.Count - 1; j >= 0; j--) if (cap[j] > 0 && (j >= np || x.e.Pat)) { k = j; break; }
-                            if (k < 0) for (var j = arr.Count - 1; j >= 0; j--) if (cap[j] > 0) { k = j; break; }
-                            if (k < 0) k = arr.Count - 1;
-                            if (Forbidden(x.e, arr[k], mb.D)) hard++;
-                            cap[k]--; slot[x.e] = k;
+                            var M = x.M; var size = M.Count;
+                            if (size > 1 || M[0].Clump >= 0)
+                            {
+                                // En klump (även när den ensamma som återstår att placera har en partner som redan ligger fast): alla medlemmar i samma patrull. Ligger en medlem redan fast (manuellt låst) är det den patrullen.
+                                var fixedJ = mb.List.Where(e => e.Clump == M[0].Clump && e.Fixed != null).Select(e => slot[e]).Distinct().ToList();
+                                var ku = -1;
+                                if (fixedJ.Count == 1) { var jf = fixedJ[0]; if (cap[jf] > size - 1 && M.All(m => !SamePatrol(m, jf))) ku = jf; }
+                                else if (fixedJ.Count == 0 && Enumerable.Range(0, arr.Count).Any(j => cap[j] > size - 1)) ku = ChooseSlot(M, x.aw, x.am, M.Any(e => e.Late), M.Any(e => e.WishRank > 0));
+                                if (ku >= 0)
+                                {
+                                    foreach (var m in M) { if (Forbidden(m, arr[ku], mb.D)) hard++; slot[m] = ku; }
+                                    cap[ku] -= size;
+                                    continue;
+                                }
+                                // Går inte att samla (ingen patrull rymmer dem, eller medlemmar låsta på olika tider): placera dem var för sig. Brottet räknas i Qual.Link, aldrig tyst.
+                                foreach (var m in M)
+                                {
+                                    var xm = ItemOf(new List<Ent> { m });
+                                    var km = ChooseSlot(xm.M, xm.aw, xm.am, m.Late, m.WishRank > 0);
+                                    if (Forbidden(m, arr[km], mb.D)) hard++;
+                                    cap[km]--; slot[m] = km;
+                                }
+                                continue;
+                            }
+                            var e1 = M[0];
+                            var k = ChooseSlot(M, x.aw, x.am, e1.Late, e1.WishRank > 0);
+                            if (Forbidden(e1, arr[k], mb.D)) hard++;
+                            cap[k]--; slot[e1] = k;
                         }
                     }
                     return new TryRes { Times = times, Slot = slot, WishFail = wishFail, Hard = hard, Delta = delta };
@@ -549,6 +658,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                 {
                     BlockStart = goff.ToList(), GridN = GN, LockedKeys = lockedKeys, Pre = pre, Staff = staff,
                     PatIds = ents.Where(e => e.Pat).Select(e => e.Id).ToHashSet(), EarlyIds = ents.Where(e => e.Early || e.Late).Select(e => e.Id).ToHashSet(), HasPatIds = true,
+                    LinkKeys = ents.Where(e => e.Clump >= 0).Select(e => e.Id + "|" + e.G).ToHashSet(),
                 };
                 for (var round = 0; round < 3; round++)
                 {
@@ -592,6 +702,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         {
             public List<int> BlockStart = new(); public int GridN, Pre; public HashSet<string> LockedKeys = new(); public Dictionary<int, List<(double A, double B)>> Staff = new();
             public HashSet<int> PatIds = new(), EarlyIds = new(); public bool HasPatIds;
+            /// <summary>Starter som ingår i en klump (krav "samma patrull"): förbättringen flyttar dem aldrig, så ett par inte kan slitas isär efter att placeringen lyckats.</summary>
+            public HashSet<string> LinkKeys = new();
         }
 
         sealed class Rng
@@ -623,7 +735,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             var blk = P.Select((_, i) => i >= dsx.GridN ? 999 : dsx.BlockStart.Count(s => s <= i) - 1).ToArray();
             // Smart placering gäller alltid: förstastarten för en skytt med flera starter flyttas aldrig av förbättringen.
             var pinned = new HashSet<string>();
-            bool IsLocked(Start z) => dsx.LockedKeys.Contains(z.Key) || dsx.EarlyIds.Contains(z.Id) || pinned.Contains(z.Key);
+            bool IsLocked(Start z) => dsx.LockedKeys.Contains(z.Key) || dsx.EarlyIds.Contains(z.Id) || pinned.Contains(z.Key) || dsx.LinkKeys.Contains(z.Key);
             var times = P.Select(q => q.S).ToArray();
             var dur = P.Select(_ => D0).ToArray();
             { var r0 = Run(P, p); foreach (var q in r0.Ps) dur[q.N - 1] = q.Dur; }
@@ -757,6 +869,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             if (staff.Count > 0) foreach (var q in cur) foreach (var z in q.P) if (staff.TryGetValue(z.Id, out var sf) && sf.Any(j => q.E > j.A - pl.JobBuf && q.S < j.B + pl.JobBuf)) bad.Add(z.Key);
             if (policy == "full" && p.PatrolIds != null && p.Pre > 0) foreach (var q in cur) foreach (var z in q.P) if (p.PatrolIds.Contains(z.Id) && !(q.Pre || q.S < p.Open)) bad.Add(z.Key);
             foreach (var q in cur) foreach (var z in q.P.Skip((int)PatrolCap(q, pl))) bad.Add(z.Key);
+            // Ett krav "samma patrull" som inte längre håller (partnerna ligger i olika patruller) låser ingen av dem: båda placeras om tillsammans.
+            if (p.Together != null)
+            {
+                var curAt = new Dictionary<string, int>(); for (var i = 0; i < cur.Count; i++) foreach (var z in cur[i].P) curAt[z.Key] = i;
+                foreach (var kv in p.Together) if (curAt.TryGetValue(kv.Key, out var ia) && curAt.TryGetValue(kv.Value, out var ib) && ia != ib) { bad.Add(kv.Key); bad.Add(kv.Value); }
+            }
             var locked = p.Locked != null ? new Dictionary<string, double>(p.Locked) : new Dictionary<string, double>();
             var kept = new List<string>();
             foreach (var q in cur) foreach (var z in q.P)
