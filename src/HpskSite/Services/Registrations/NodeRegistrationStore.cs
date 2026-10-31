@@ -452,6 +452,10 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
 
         private static void WriteClasses(IContent node, RegistrationRecord r)
         {
+            // Nodlagringen är en återställningsväg (anmälningarna ligger i tabell): den bär inte "gå i samma patrull som" (JoinMemberId).
+            // Hellre ett tydligt fel än ett krav som tyst försvinner.
+            if (r.Classes.Any(c => c.JoinMemberId != null))
+                throw new NotSupportedException("Anmälningar lagrade som noder kan inte bära valet 'gå i samma patrull som' (JoinMemberId). Använd tabellagringen.");
             // En äldre anmälan med EN klass i de skalära egenskaperna skrivs tillbaka i samma form.
             if (r.ClassesFromLegacyScalar && r.Classes.Count == 1)
             {
@@ -468,7 +472,8 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
                && a.Classes.Zip(b.Classes).All(p =>
                    p.First.Class == p.Second.Class
                    && (p.First.StartPreference ?? "") == (p.Second.StartPreference ?? "")
-                   && p.First.TeamNumber == p.Second.TeamNumber);
+                   && p.First.TeamNumber == p.Second.TeamNumber
+                   && p.First.JoinMemberId == p.Second.JoinMemberId);
 
         private static void SetIfExists(IContent node, string alias, object? value)
         {

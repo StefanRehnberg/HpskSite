@@ -38,6 +38,8 @@ namespace HpskSite.Services.Registrations
                     missing.Add(t);
             if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.CompetitionTeam', 'LegacyRegistrationDocId') IS NULL THEN 0 ELSE 1 END") == 0)
                 missing.Add("CompetitionTeam.LegacyRegistrationDocId");
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.CompetitionRegistrationClass', 'JoinMemberId') IS NULL THEN 0 ELSE 1 END") == 0)
+                missing.Add("CompetitionRegistrationClass.JoinMemberId (add-registration-class-join-member.sql)");
             if (db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM sys.index_columns ic
                     JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
                     WHERE i.object_id = OBJECT_ID('dbo.CompetitionFeeChoice') AND i.is_primary_key = 1") != 2)

@@ -14,12 +14,18 @@ namespace HpskSite.Models
         public int? TeamNumber { get; set; }
 
         /// <summary>
+        /// Fältskytte: MemberId för en annan medlem i samma klubb som den här starten ska gå i samma patrull som (nybörjare som använder klubbens vapen).
+        /// Gäller just den här klassanmälan; olika klasser kan ha olika personer. Null = inget krav. Bara id: namnet slås upp vid visning.
+        /// </summary>
+        public int? JoinMemberId { get; set; }
+
+        /// <summary>
         /// En kopia med ALLA fält. Varje ställe som bygger om en klassanmälan utgår från den (eller från en befintlig post via den), så ett nytt fält aldrig tappas tyst:
         /// anmälan sparas som DELETE + INSERT av klassraderna och ersätts hela vid omanmälan. <c>ShootingClassEntryCopyTests</c> fäller bygget om ett fält saknas här.
         /// </summary>
         public ShootingClassEntry Copy() => new()
         {
-            Class = Class, StartPreference = StartPreference, TeamNumber = TeamNumber
+            Class = Class, StartPreference = StartPreference, TeamNumber = TeamNumber, JoinMemberId = JoinMemberId
         };
     }
 

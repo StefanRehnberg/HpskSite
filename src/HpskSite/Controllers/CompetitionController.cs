@@ -174,6 +174,24 @@ namespace HpskSite.Controllers
         }
 
         // Helper method to detect AJAX requests
+        /// <summary>{ "C-Vet": 1234, "A1": 0 } → klass → medlems-id (0 = ta bort). Ogiltig JSON ger tomt (ingen ändring).</summary>
+        private static Dictionary<string, int> ParseJoinChoices(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(json)?.ToDictionary(k => k.Key.Trim(), v => v.Value, StringComparer.OrdinalIgnoreCase)
+                       ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch { return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); }
+        }
+
+        /// <summary>Anmälans klubb ("Tävlar för"); en äldre anmälan utan klubb faller tillbaka på medlemmens huvudklubb.</summary>
+        private int JoinClubOf(HpskSite.Models.Registrations.RegistrationRecord r)
+            => r.ClubId > 0 ? r.ClubId : _memberClubService.GetPrimaryClubId(_memberService.GetById(r.MemberId));
+
+        private string JoinNameOf(int memberId) => _memberService.GetById(memberId)?.Name ?? "Den personen";
+
         private bool IsAjaxRequest()
         {
             return Request.Headers["X-Requested-With"] == "XMLHttpRequest" ||
@@ -193,7 +211,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> RegisterForCompetition(int competitionId,
             string selectedClasses = "", string startPreference = "Inget", int? targetMemberId = null,
             string startPreferencesJson = "", bool isSubCompetition = false,
-            string teamAssignmentsJson = "", int? representingClubId = null, bool? clubPays = null)
+            string teamAssignmentsJson = "", int? representingClubId = null, bool? clubPays = null, string joinWithJson = "")
         {
             try
             {
@@ -446,6 +464,36 @@ namespace HpskSite.Controllers
                     entry.TeamNumber = teamAssignments.TryGetValue(sc, out var tn) ? tn : null;
                     return entry;
                 }).ToList();
+
+                // Fältskytte: "måste gå i samma patrull som" per klass, { klass: medlemsid }. En klass som inte nämns behåller sitt värde (Copy ovan);
+                // 0 tar bort valet. Servern prövar reglerna själv (RegistrationJoinRule): klienten är aldrig enda spärren.
+                var joinChoices = ParseJoinChoices(joinWithJson);
+                if (joinChoices.Count > 0)
+                {
+                    if (!string.Equals(competition.CompetitionType, "Faltskytte", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var notField = "Att gå i samma patrull som någon annan gäller bara fältskytte.";
+                        if (IsAjaxRequest()) return Json(new { success = false, message = notField });
+                        TempData["Error"] = notField;
+                        return RedirectToCurrentUmbracoPage();
+                    }
+                    var selfForJoin = existingRegistration?.Clone() ?? new HpskSite.Models.Registrations.RegistrationRecord { CompetitionId = competitionId, MemberId = targetMember.Id };
+                    selfForJoin.ClubId = clubId ?? (existingRegistration?.ClubId > 0 ? existingRegistration.ClubId : _memberClubService.GetPrimaryClubId(targetMember));
+                    var allForJoin = _registrations.List(competitionId);
+                    foreach (var entry in shootingClassEntries)
+                    {
+                        if (!joinChoices.TryGetValue(entry.Class, out var chosen)) continue;
+                        if (chosen <= 0) { entry.JoinMemberId = null; continue; }
+                        var joinError = HpskSite.Models.Registrations.RegistrationJoinRule.Check(selfForJoin, entry.Class, chosen, allForJoin, JoinClubOf, JoinNameOf);
+                        if (joinError != null)
+                        {
+                            if (IsAjaxRequest()) return Json(new { success = false, message = joinError });
+                            TempData["Error"] = joinError;
+                            return RedirectToCurrentUmbracoPage();
+                        }
+                        entry.JoinMemberId = chosen;
+                    }
+                }
 
                 HpskSite.Models.Registrations.RegistrationRecord registration;
                 bool isUpdate = false;

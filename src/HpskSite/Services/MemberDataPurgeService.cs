@@ -174,6 +174,10 @@ namespace HpskSite.Services
             // Medlemmens egen förfrågan om att få vara med i en planering: namn och skäl tas bort.
             ("PlanningRequest", "MemberId",
                 "Name = N'Borttagen medlem', Message = NULL, ProposedRepresents = NULL"),
+            // Fältskytte (2026-10-31): "gå i samma patrull som" pekar på en annan medlem men tillhör den som valde. Vid gallring/sammanslagning
+            // släpps pekaren (NULL, eller flyttas till kontot som blir kvar) och raden står kvar. ClearSql får inte vara tom (satsen blir "SET x = NULL, " = syntaxfel),
+            // därför en neutral tilldelning.
+            ("CompetitionRegistrationClass", "JoinMemberId", "ClassKey = ClassKey"),
         };
 
         /// <summary>

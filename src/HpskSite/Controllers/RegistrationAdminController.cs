@@ -1703,6 +1703,60 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Fältskytte: sätt eller ta bort "måste gå i samma patrull som" per klass (en klubbkamrat). Eget smalt endpoint av samma skäl som SetStartPreference:
+        /// det skriver JoinMemberId och inget annat, och kan aldrig ändra avgift, plats eller klasser. Reglerna prövas av <see cref="HpskSite.Models.Registrations.RegistrationJoinRule"/>
+        /// mot den ANMÄLDAS klubb (inte administratörens). Gäller vid nästa nybygge av startlistan.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetJoinWith([FromBody] SetJoinWithRequest request)
+        {
+            try
+            {
+                if (request == null || request.RegistrationId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+                if (!string.Equals(competition.CompetitionType, "Faltskytte", StringComparison.OrdinalIgnoreCase))
+                    return Json(new { success = false, message = "Att gå i samma patrull som någon annan gäller bara fältskytte." });
+                if (!await CanManageCompetitionDeskAsync(competition, request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att ändra vem skytten ska gå med." });
+                var registration = _registrations.Get(request.CompetitionId, request.RegistrationId);
+                if (registration == null)
+                    return Json(new { success = false, message = "Anmälan hittades inte i denna tävling." });
+
+                var wanted = (request.Joins ?? new List<JoinWithEntry>())
+                    .Where(j => !string.IsNullOrWhiteSpace(j.Class))
+                    .GroupBy(j => j.Class!.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().MemberId, StringComparer.OrdinalIgnoreCase);
+                if (wanted.Count == 0) return Json(new { success = false, message = "Inga klasser angavs." });
+
+                var unknown = wanted.Keys.Where(k => !registration.Classes.Any(c => string.Equals(c.Class?.Trim(), k, StringComparison.OrdinalIgnoreCase))).ToList();
+                if (unknown.Count > 0)
+                    return Json(new { success = false, message = $"Anmälan saknar klassen {string.Join(", ", unknown.Select(HpskSite.Models.ShootingClasses.DisplayName))}." });
+
+                int ClubOf(HpskSite.Models.Registrations.RegistrationRecord r) => r.ClubId > 0 ? r.ClubId : _memberClubService.GetPrimaryClubId(_memberService.GetById(r.MemberId));
+                string NameOf(int id) => _memberService.GetById(id)?.Name ?? "Den personen";
+                var all = _registrations.List(request.CompetitionId);
+                foreach (var entry in registration.Classes)
+                {
+                    if (!wanted.TryGetValue(entry.Class?.Trim() ?? "", out var memberId)) continue;
+                    if (memberId <= 0) { entry.JoinMemberId = null; continue; }
+                    var error = HpskSite.Models.Registrations.RegistrationJoinRule.Check(registration, entry.Class ?? "", memberId, all, ClubOf, NameOf);
+                    if (error != null) return Json(new { success = false, message = error });
+                    entry.JoinMemberId = memberId;
+                }
+                _registrations.Save(registration);
+                return Json(new { success = true, joins = registration.Classes.Select(c => new { @class = c.Class, memberId = c.JoinMemberId }) });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Resolve a payment reference from a bank statement to something on the Anmälningar tab.
         ///
         /// Individual invoices are numbered "{competitionId}-{memberId}-{seq}" and appear on the
@@ -2783,6 +2837,20 @@ namespace HpskSite.Controllers
             public int CompetitionId { get; set; }
             public int RegistrationId { get; set; }
             public List<StartPreferenceEntry>? Preferences { get; set; }
+        }
+
+        public class SetJoinWithRequest
+        {
+            public int CompetitionId { get; set; }
+            public int RegistrationId { get; set; }
+            public List<JoinWithEntry>? Joins { get; set; }
+        }
+
+        /// <summary>En klass och vilken medlem den ska gå i samma patrull som (0 = ta bort valet).</summary>
+        public class JoinWithEntry
+        {
+            public string? Class { get; set; }
+            public int MemberId { get; set; }
         }
 
         /// <summary>One class's start wish. Preference is normalized server-side, so any of the

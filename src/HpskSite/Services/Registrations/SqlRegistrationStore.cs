@@ -193,10 +193,10 @@ WHERE Id = @0 AND CompetitionId = @1",
                 for (var i = 0; i < classes.Count; i++)
                 {
                     db.Execute(@"
-INSERT INTO dbo.CompetitionRegistrationClass (RegistrationId, SortOrder, ClassKey, StartPreference, TeamNumber)
-VALUES (@0, @1, @2, @3, @4)",
+INSERT INTO dbo.CompetitionRegistrationClass (RegistrationId, SortOrder, ClassKey, StartPreference, TeamNumber, JoinMemberId)
+VALUES (@0, @1, @2, @3, @4, @5)",
                         id, i, classes[i].Class, string.IsNullOrWhiteSpace(classes[i].StartPreference) ? "Inget" : classes[i].StartPreference,
-                        classes[i].TeamNumber);
+                        classes[i].TeamNumber, classes[i].JoinMemberId);
                 }
             }
             catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627
@@ -238,7 +238,8 @@ VALUES (@0, @1, @2, @3, @4)",
                 {
                     Class = key,
                     StartPreference = string.IsNullOrWhiteSpace(c!.StartPreference) ? "Inget" : c.StartPreference.Trim(),
-                    TeamNumber = c.TeamNumber
+                    TeamNumber = c.TeamNumber,
+                    JoinMemberId = c.JoinMemberId is > 0 ? c.JoinMemberId : null
                 });
             }
             return result;
@@ -256,11 +257,11 @@ VALUES (@0, @1, @2, @3, @4)",
             {
                 var inList = string.Join(",", batch.Select((_, i) => "@" + i));
                 foreach (var c in db.Fetch<ClassRow>(
-                             $"SELECT RegistrationId, SortOrder, ClassKey, StartPreference, TeamNumber FROM dbo.CompetitionRegistrationClass WHERE RegistrationId IN ({inList}) ORDER BY RegistrationId, SortOrder",
+                             $"SELECT RegistrationId, SortOrder, ClassKey, StartPreference, TeamNumber, JoinMemberId FROM dbo.CompetitionRegistrationClass WHERE RegistrationId IN ({inList}) ORDER BY RegistrationId, SortOrder",
                              batch.Cast<object>().ToArray()))
                 {
                     if (!classes.TryGetValue(c.RegistrationId, out var list)) classes[c.RegistrationId] = list = new();
-                    list.Add(new ShootingClassEntry { Class = c.ClassKey, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber });
+                    list.Add(new ShootingClassEntry { Class = c.ClassKey, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber, JoinMemberId = c.JoinMemberId });
                 }
             }
 
@@ -315,6 +316,7 @@ VALUES (@0, @1, @2, @3, @4)",
             public string ClassKey { get; set; } = "";
             public string StartPreference { get; set; } = "Inget";
             public int? TeamNumber { get; set; }
+            public int? JoinMemberId { get; set; }
         }
 
         private sealed class PairRow
