@@ -4333,7 +4333,7 @@ async function openStartPreferenceModal(registrationId) {
 function renderStartPreferenceRows(reg) {
     const host = document.getElementById('startPreferenceRows');
     const classes = (reg.shootingClasses || [])
-        .map(sc => ({ id: (sc.class || sc.className || '').trim(), pref: normalizeStartPreference(sc.startPreference) }))
+        .map(sc => ({ id: (sc.class || sc.className || '').trim(), pref: normalizeStartPreference(sc.startPreference), join: sc.joinMemberId || 0 }))
         .filter(c => c.id);
 
     startPrefRowKeys = [];
@@ -4365,13 +4365,18 @@ function renderStartPreferenceRows(reg) {
         host.innerHTML = classes.map((c, i) => {
             const norm = normalizeShootingClass(c.id);
             const label = window.formatAgeSpan ? window.formatAgeSpan(norm) : norm;
-            return startPrefRowHtml(i, escapeAttr(label), c.pref, null);
+            const row = startPrefRowHtml(i, escapeAttr(label), c.pref, null);
+            return isFaltCompetition ? row.replace(/<\/div>\s*$/, joinRowHtml(i, c.id, c.join) + '</div>') : row;
         }).join('');
     }
 
+    if (isFaltCompetition && !walkInSpringskytteEnabled) loadAdminJoinCandidates(reg);
     document.getElementById('startPreferenceFootnote').innerHTML = walkInSpringskytteEnabled
         ? '<i class="bi bi-info-circle me-1"></i>Önskemålet styr sorteringen nästa gång startlistan genereras. '
           + 'Tidiga önskemål läggs först i sin vapengrupp, sena sist.'
+        : isFaltCompetition
+        ? '<i class="bi bi-info-circle me-1"></i>Önskemålet om starttid läses av patrullgeneratorn nästa gång startlistan byggs. Det är bara ett önskemål: vilokraven och skyttar med flera starter går före, och ju fler starter en skytt har desto svårare är det att tillgodose. '
+          + '"Gå i samma patrull som" är ett hårt krav (samma klubb, anmäld i samma vapengrupp). Ändringar flyttar ingen som redan har en patrull.'
         : '<i class="bi bi-info-circle me-1"></i>Den här tävlingsformens startlistegenerator sorterar ännu inte '
           + 'på önskemål — noteringen syns i listan, i filtret och i CSV-exporten.';
 }
@@ -4396,7 +4401,59 @@ function startPrefRowHtml(index, label, pref, existingStart) {
         </div>`;
 }
 
+// Fältskytte: "gå i samma patrull som" per klass i adminens önskemålsruta (samma ruta som starttidsönskemålet; eget smalt endpoint SetJoinWith, som aldrig rör avgift eller klasser).
+function joinRowHtml(index, classId, current) {
+    return `
+            <div class="d-flex align-items-center gap-2 mt-1">
+                <label class="small mb-0" style="min-width:130px" for="startJoinSel_${index}">Gå i samma patrull som</label>
+                <select class="form-select form-select-sm start-join-select" id="startJoinSel_${index}" data-row="${index}" data-class="${escapeAttr(classId)}" data-current="${current || 0}">
+                    <option value="0">Ingen</option>
+                </select>
+            </div>`;
+}
+
+async function loadAdminJoinCandidates(reg) {
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    for (const sel of document.querySelectorAll('#startPreferenceRows .start-join-select')) {
+        const current = parseInt(sel.dataset.current, 10) || 0;
+        try {
+            const resp = await fetch(`/umbraco/surface/Competition/GetJoinCandidates?competitionId=${competitionId}&classId=${encodeURIComponent(sel.dataset.class)}&targetMemberId=${encodeURIComponent(reg.memberId)}`,
+                { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await resp.json();
+            const list = d && d.success && Array.isArray(d.candidates) ? d.candidates : [];
+            list.forEach(c => { const o = document.createElement('option'); o.value = String(c.memberId); o.textContent = c.name; sel.appendChild(o); });
+            if (current > 0 && !list.some(c => c.memberId === current)) { const o = document.createElement('option'); o.value = String(current); o.textContent = 'Nuvarande val (är inte längre anmäld i klassen)'; sel.appendChild(o); }
+            sel.value = String(current);
+        } catch (e) { /* listan förblir tom; valet Ingen finns kvar */ }
+    }
+}
+
+// Sparar ändrade kamrater först; går något fel visas det med namn och inget annat sparas.
 async function saveStartPreference() {
+    if (isFaltCompetition) {
+        const registrationId = parseInt(document.getElementById('startPreferenceRegistrationId').value, 10);
+        const joins = [];
+        document.querySelectorAll('#startPreferenceRows .start-join-select').forEach(sel => {
+            if ((parseInt(sel.value, 10) || 0) !== (parseInt(sel.dataset.current, 10) || 0)) joins.push({ class: sel.dataset.class, memberId: parseInt(sel.value, 10) || 0 });
+        });
+        if (joins.length > 0) {
+            const errEl = document.getElementById('startPreferenceError');
+            const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+            const resp = await fetch('/umbraco/surface/RegistrationAdmin/SetJoinWith', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+                body: JSON.stringify({ competitionId, registrationId, joins })
+            });
+            const data = await resp.json();
+            if (!data.success) { errEl.textContent = data.message || 'Kunde inte spara vem skytten ska gå med.'; errEl.classList.remove('d-none'); return; }
+            const reg = (competitionRegistrations || []).find(r => r.id === registrationId);
+            if (reg && Array.isArray(reg.shootingClasses)) joins.forEach(j => { const sc = reg.shootingClasses.find(s => String(s.class || '').toLowerCase() === j.class.toLowerCase()); if (sc) sc.joinMemberId = j.memberId || null; });
+        }
+    }
+    return saveStartPreferenceCore();
+}
+
+async function saveStartPreferenceCore() {
     const registrationId = parseInt(document.getElementById('startPreferenceRegistrationId').value, 10);
     const btn = document.getElementById('startPreferenceSaveBtn');
     const errEl = document.getElementById('startPreferenceError');
@@ -5378,6 +5435,7 @@ const walkInDirektplaceringEnabled = @(dpEnabled ? "true" : "false");
 // the free slots of an existing start list; the flag drives the post-registration call to
 // AssignSpringskytteWalkInStartTime.
 const walkInSpringskytteEnabled = @(springskytteEnabled ? "true" : "false");
+const isFaltCompetition = @(compType == "Faltskytte" ? "true" : "false");
 
 // Free slots for the current modal session, grouped by weapon class (A/C). Each entry is
 // { time, nodeId, kind }. Populated on open from GetSpringskytteFreeSlots.

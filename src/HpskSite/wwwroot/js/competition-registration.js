@@ -32,6 +32,15 @@ let classPreferences = {}; // Store preferences for each selected class (ONLY wh
 // Önskemål som redan ligger på skyttens befintliga anmälan, per klass. Skickas aldrig om utan att skytten ändrat dem:
 // servern behåller det som redan finns för en klass som inte nämns (annars skrevs ett tidigare önskemål över med "Inget" vid varje omanmälan).
 let existingClassPrefs = {};
+// Fältskytte: "gå i samma patrull som" per klass (klass -> medlems-id, 0 = ingen). classJoin = bara det skytten rört i den här sessionen; existingClassJoin = det som redan ligger på anmälan.
+let classJoin = {};
+let existingClassJoin = {};
+const isFieldCompetition = () => /falt/i.test(String((window.CompetitionConfig && window.CompetitionConfig.competitionType) || ''));
+// Pennan vid varje klass öppnar önskemålsrutan: den får en text för skärmläsare och en titel (förut en ikon utan något av det).
+document.addEventListener('DOMContentLoaded', () => {
+    const text = 'Önskemål om starttid' + (isFieldCompetition() ? ' och kamrat i patrullen' : '') + ' för den här klassen';
+    document.querySelectorAll('button[data-class][onclick*="openPreferenceModal"]').forEach(b => { b.setAttribute('aria-label', text); b.title = text; });
+});
 function normalizeStartPreference(v) {
     const s = String(v || '').trim().toLowerCase();
     if (s === 'tidig start' || s === 'tidig' || s === 'early') return 'Tidig Start';
@@ -107,7 +116,7 @@ function initializeRegistrationModal() {
                     }
 
                     // Clear stored preferences for this class
-                    delete classPreferences[classId];
+                    delete classPreferences[classId]; delete classJoin[classId];
 
                     // Update UI after deselection
                     updateClassAvailability();
@@ -133,7 +142,7 @@ function initializeRegistrationModal() {
                                 editButton.classList.add('text-secondary');
                                 editButton.innerHTML = '<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>';
                             }
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -164,7 +173,7 @@ function initializeRegistrationModal() {
                                 otherEditButton.innerHTML = '<i class="bi bi-pencil"></i>';
                             }
                             // Clear stored preferences for deselected classes
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -205,7 +214,7 @@ function initializeRegistrationModal() {
                     }
 
                     // Clear stored preferences for this class
-                    delete classPreferences[classId];
+                    delete classPreferences[classId]; delete classJoin[classId];
 
                     // Update UI after deselection
                     updateClassAvailability();
@@ -231,7 +240,7 @@ function initializeRegistrationModal() {
                                 editButton.classList.add('text-secondary');
                                 editButton.innerHTML = '<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>';
                             }
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -269,7 +278,7 @@ function initializeRegistrationModal() {
                                 otherEditButton.innerHTML = '<i class="bi bi-pencil"></i>';
                             }
                             // Clear stored preferences for deselected classes
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -310,7 +319,7 @@ function initializeRegistrationModal() {
                     }
 
                     // Clear stored preferences for this class
-                    delete classPreferences[classId];
+                    delete classPreferences[classId]; delete classJoin[classId];
 
                     // Update UI after deselection
                     updateClassAvailability();
@@ -336,7 +345,7 @@ function initializeRegistrationModal() {
                                 editButton.classList.add('text-secondary');
                                 editButton.innerHTML = '<i class="bi bi-pencil" style="font-size: 0.8rem;"></i>';
                             }
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -374,7 +383,7 @@ function initializeRegistrationModal() {
                                 otherEditButton.innerHTML = '<i class="bi bi-pencil"></i>';
                             }
                             // Clear stored preferences for deselected classes
-                            delete classPreferences[otherClassId];
+                            delete classPreferences[otherClassId]; delete classJoin[otherClassId];
                         }
                     });
 
@@ -808,6 +817,11 @@ async function submitAllClassesRegistration(classIds, startPreferencesMap) {
     // Set start preferences as JSON object mapping class → preference
     formData.append('startPreferencesJson', JSON.stringify(startPreferencesMap));
 
+    // Fältskytte: "gå i samma patrull som", bara det skytten rört för de valda klasserna (övriga behåller sitt val på servern)
+    const joinMap = {};
+    classIds.forEach(cid => { if (classJoin[cid] !== undefined) joinMap[cid] = classJoin[cid]; });
+    if (Object.keys(joinMap).length > 0) formData.append('joinWithJson', JSON.stringify(joinMap));
+
     // Direktplacering: include team assignments
     if (window.CompetitionConfig?.isDirektplacering) {
         const teamAssignments = collectDpTeamAssignments();
@@ -898,6 +912,13 @@ function openPreferenceModal(classId, className, classGroup) {
 
     document.getElementById('startPreference').value = existingPreference;
 
+    // Fältskytte: välj vem man ska gå i samma patrull som (bara klubbkamrater som redan är anmälda i klassen)
+    const joinSection = document.getElementById('joinSection');
+    if (joinSection) {
+        joinSection.hidden = !isFieldCompetition();
+        if (isFieldCompetition()) loadJoinCandidates(classId);
+    }
+
     // Show modal
     const preferenceModalEl = document.getElementById('preferenceModal');
     if (preferenceModalEl) {
@@ -907,9 +928,35 @@ function openPreferenceModal(classId, className, classGroup) {
     }
 }
 
+async function loadJoinCandidates(classId) {
+    const sel = document.getElementById('joinWith'), empty = document.getElementById('joinEmpty');
+    if (!sel) return;
+    const none = '<option value="0">Ingen, jag behöver inte någon</option>';
+    sel.innerHTML = none; if (empty) empty.hidden = true;
+    const current = classJoin[classId] !== undefined ? classJoin[classId] : (existingClassJoin[classId] || 0);
+    try {
+        const rep = document.getElementById('representingClubRow'), repSel = document.getElementById('representingClubSelect');
+        let url = `/umbraco/surface/Competition/GetJoinCandidates?competitionId=${encodeURIComponent(COMPETITION_ID)}&classId=${encodeURIComponent(classId)}`;
+        if (typeof selectedTargetMemberId !== 'undefined' && selectedTargetMemberId) url += `&targetMemberId=${encodeURIComponent(selectedTargetMemberId)}`;
+        if (rep && !rep.classList.contains('d-none') && repSel && repSel.value) url += `&representingClubId=${encodeURIComponent(repSel.value)}`;
+        const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+        const d = await resp.json();
+        const list = d && d.success && Array.isArray(d.candidates) ? d.candidates : [];
+        list.forEach(c => { const o = document.createElement('option'); o.value = String(c.memberId); o.textContent = c.name; sel.appendChild(o); });
+        // Ett redan valt val som inte längre finns i listan syns kvar, så det aldrig försvinner tyst.
+        if (current > 0 && !list.some(c => c.memberId === current)) { const o = document.createElement('option'); o.value = String(current); o.textContent = 'Nuvarande val (är inte längre anmäld i klassen)'; sel.appendChild(o); }
+        sel.value = String(current || 0);
+        if (empty) empty.hidden = list.length > 0;
+    } catch (e) { if (empty) empty.hidden = false; }
+}
+
 function savePreferences() {
     const classId = document.getElementById('preferenceClassId').value;
     const preference = document.getElementById('startPreference').value;
+
+    // Fältskytte: kamraten för just den här klassen (0 = ingen)
+    const joinSel = document.getElementById('joinWith'), joinSection = document.getElementById('joinSection');
+    if (joinSel && joinSection && !joinSection.hidden) classJoin[classId] = parseInt(joinSel.value, 10) || 0;
 
     // Store preferences
     classPreferences[classId] = preference;
@@ -917,7 +964,7 @@ function savePreferences() {
     // Update button appearance to show it has been configured
     const button = document.querySelector(`button[data-class*="${classId}"]`);
     if (button) {
-        if (preference !== 'Inget') {
+        if (preference !== 'Inget' || (classJoin[classId] || 0) > 0) {
             button.classList.remove('text-secondary');
             button.classList.add('text-primary');
             button.innerHTML = '<i class="bi bi-gear-fill" style="font-size: 0.8rem;"></i>';
@@ -1699,6 +1746,7 @@ async function queryExistingRegistrations() {
                         }
 
                         existingClassPrefs[classEntry.class] = classEntry.startPreference;
+                        existingClassJoin[classEntry.class] = classEntry.joinMemberId || 0;
 
                         // Store class info with registration reference
                         weaponClassConflicts[weaponClass].push({

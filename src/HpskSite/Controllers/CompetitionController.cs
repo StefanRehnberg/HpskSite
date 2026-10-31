@@ -186,6 +186,39 @@ namespace HpskSite.Controllers
             catch { return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); }
         }
 
+        /// <summary>
+        /// Fältskytte: klubbkamrater som skytten kan välja att gå i samma patrull som i en klass: aktivt anmälda i SAMMA vapengrupp, tävlar för samma klubb som anmälan gäller, inte skytten själv,
+        /// och inte redan valda av så många att de är fullbokade. Bara id och namn. Reglerna prövas om på servern vid sparandet (<see cref="HpskSite.Models.Registrations.RegistrationJoinRule"/>).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetJoinCandidates(int competitionId, string classId = "", int? targetMemberId = null, int? representingClubId = null)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null || !string.Equals(competition.CompetitionType, "Faltskytte", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(classId))
+                return Json(new { success = true, candidates = Array.Empty<object>() });
+            var currentData = _memberService.GetById(currentMember.Key);
+            if (currentData == null) return Json(new { success = false, message = "Kunde inte hämta användardata." });
+            var target = currentData;
+            if (targetMemberId is > 0 && targetMemberId != currentData.Id)
+            {
+                target = _memberService.GetById(targetMemberId.Value);
+                if (target == null || !await MayRegisterOnBehalfOfAsync(target, currentData.Id, competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att välja åt den medlemmen." });
+            }
+            var existing = _registrations.FindForMember(competitionId, target.Id);
+            var clubId = representingClubId is > 0 ? _memberClubService.ResolveRegistrationClubId(target, representingClubId) : existing?.ClubId > 0 ? existing.ClubId : _memberClubService.GetPrimaryClubId(target);
+            var group = HpskSite.Models.Registrations.RegistrationJoinRule.GroupOf(classId);
+            var all = _registrations.List(competitionId).Where(r => r.IsActive && r.MemberId != target.Id).ToList();
+            var candidates = all
+                .Where(r => r.Classes.Any(c => HpskSite.Models.Registrations.RegistrationJoinRule.GroupOf(c.Class) == group) && JoinClubOf(r) == clubId)
+                .Where(r => all.Sum(o => o.Classes.Count(c => c.JoinMemberId == r.MemberId && HpskSite.Models.Registrations.RegistrationJoinRule.GroupOf(c.Class) == group && o.MemberId != target.Id)) < HpskSite.Models.Registrations.RegistrationJoinRule.MaxFollowersPerPartner)
+                .Select(r => new { memberId = r.MemberId, name = JoinNameOf(r.MemberId) })
+                .OrderBy(x => x.name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            return Json(new { success = true, group, candidates });
+        }
+
         /// <summary>Anmälans klubb ("Tävlar för"); en äldre anmälan utan klubb faller tillbaka på medlemmens huvudklubb.</summary>
         private int JoinClubOf(HpskSite.Models.Registrations.RegistrationRecord r)
             => r.ClubId > 0 ? r.ClubId : _memberClubService.GetPrimaryClubId(_memberService.GetById(r.MemberId));
@@ -1921,7 +1954,8 @@ namespace HpskSite.Controllers
                             @class = sc.Class,
                             className = ShootingClasses.GetById(sc.Class)?.Name ?? sc.Class,
                             startPreference = sc.StartPreference,
-                            teamNumber = sc.TeamNumber
+                            teamNumber = sc.TeamNumber,
+                            joinMemberId = sc.JoinMemberId
                         }).ToList();
 
                         return new

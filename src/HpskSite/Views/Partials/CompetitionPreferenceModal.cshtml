@@ -1,4 +1,4 @@
-<!-- Start Preference and Notes Modal -->
+﻿<!-- Start Preference and Notes Modal -->
 <div class="modal fade" id="preferenceModal" tabindex="-1" aria-labelledby="preferenceModalLabel" aria-hidden="true">
 	<div class="modal-dialog">
 		<div class="modal-content">
@@ -24,6 +24,17 @@
 					</small>
 				</div>
 
+					<div class="mb-3" id="joinSection" hidden>
+						<label for="joinWith" class="form-label">Gå i samma patrull som:</label>
+						<select class="form-select" id="joinWith" aria-describedby="joinHelp">
+							<option value="0">Ingen, jag behöver inte någon</option>
+						</select>
+						<div class="small text-muted mt-1" id="joinEmpty" hidden>Inga klubbkamrater är anmälda i den här klassen ännu. Be den du vill gå med att anmäla sig först, så kan du välja hen här.</div>
+						<small class="form-text text-muted" id="joinHelp">
+							Är du ny och använder klubbens vapen behöver du ofta en erfaren klubbkamrat i samma patrull. Välj vem som ska gå med dig i den här klassen. Personen måste vara anmäld i samma klass och tävla för samma klubb som du.
+							Vi lägger er i samma patrull. Om det inte går att få ihop får arrangören veta det och hör av sig till dig.
+						</small>
+					</div>
 			</div>
 			<div class="modal-footer">
 				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
