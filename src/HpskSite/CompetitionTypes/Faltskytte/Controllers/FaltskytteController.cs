@@ -43,6 +43,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly FaltskytteConfigurationService _configurations;
 
+        private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
+
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -66,10 +68,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            FaltskytteConfigurationService configurations)
+            FaltskytteConfigurationService configurations,
+            HpskSite.Services.Hosting.DatabaseLock dbLock)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _competitions = competitions;
+            _dbLock = dbLock;
             _configurations = configurations;
             _registrations = registrations;
             _results = results;
@@ -519,8 +523,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var patrols = await db.FetchAsync<FaltskyttePatrol>(
-                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+            var patrols = (await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId))
+                .Where(p => HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.IsPatrolPublished(true, competition.FaltskyttePublishedGroups, p.WeaponGroup)).ToList();   // per vapengrupp
             var patrolIds = patrols.Select(p => p.Id).ToList();
             var members = patrolIds.Any()
                 ? await db.FetchAsync<FaltskyttePatrolMember>(
@@ -546,7 +551,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }).ToList()
             }).ToList();
 
-            return Json(new { success = true, published = true, patrols = result });
+            return Json(new { success = true, published = true, publishedGroups = competition.FaltskyttePublishedGroups ?? "", patrols = result });
         }
 
         /// <summary>Marks/unmarks a patrol as sent off from the start line (staff-gated).</summary>
@@ -1856,6 +1861,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             var weaponGroup = !string.IsNullOrEmpty(request.ShootingClass)
                 ? (ShootingClasses.GetWeaponClassCode(request.ShootingClass) is { Length: > 0 } code ? code : "C")
@@ -1881,8 +1888,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             // capacity, so a did-not-start seat is reused before spilling to a new patrol.
             var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
                 @"SELECT p.* FROM FaltskyttePatrol p
-                  WHERE p.CompetitionId = @0 AND p.WeaponGroup = @1
-                  AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < @2
+                  WHERE p.CompetitionId = @0 AND " + HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.GroupMatchSql("p.WeaponGroup", "@1") + @"
+                  AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < COALESCE(p.Capacity, @2)
                   ORDER BY p.PatrolNumber DESC",
                 request.CompetitionId, weaponGroup, patrolSize);
 
@@ -2035,6 +2042,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 if (!await IsAuthorizedForCompetition(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
+            using (var _gdb = _umbracoDatabaseFactory.CreateDatabase())
+            {
+                var _why = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.ForceNeededMessage(_gdb, _competitions, request.CompetitionId);
+                if (_why != null && !request.Force) return Json(new { success = false, needsForce = true, message = _why });
+                if (_why != null) _logger.LogWarning("Patruller ändras med force i tävling {Comp}: {Why}", request.CompetitionId, _why);
+            }
 
                 var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
@@ -2165,6 +2180,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
+            using (var _gdb = _umbracoDatabaseFactory.CreateDatabase())
+            {
+                var _why = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.ForceNeededMessage(_gdb, _competitions, request.CompetitionId);
+                if (_why != null && !request.Force) return Json(new { success = false, needsForce = true, message = _why });
+                if (_why != null) _logger.LogWarning("Patruller ändras med force i tävling {Comp}: {Why}", request.CompetitionId, _why);
+            }
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await db.ExecuteAsync(
@@ -2182,6 +2205,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
+            using (var _gdb = _umbracoDatabaseFactory.CreateDatabase())
+            {
+                var _why = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.ForceNeededMessage(_gdb, _competitions, request.CompetitionId);
+                if (_why != null && !request.Force) return Json(new { success = false, needsForce = true, message = _why });
+                if (_why != null) _logger.LogWarning("Patruller ändras med force i tävling {Comp}: {Why}", request.CompetitionId, _why);
+            }
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await db.ExecuteAsync(
@@ -2242,6 +2273,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
@@ -2292,6 +2325,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await db.ExecuteAsync("DELETE FROM FaltskyttePatrolMember WHERE PatrolId = @0", request.PatrolId);
@@ -2306,6 +2341,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
@@ -2349,6 +2386,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await db.ExecuteAsync("DELETE FROM FaltskyttePatrolMember WHERE Id = @0", request.PatrolMemberId);
@@ -2367,6 +2406,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", request.PatrolMemberId);
@@ -2415,6 +2456,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
             if (request.Position < 1 || request.Position > 99)
                 return Json(new { success = false, message = "Ogiltig plats." });
 
@@ -2440,6 +2483,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             await MoveMemberToPatrolSeat(db, request.PatrolMemberId, request.TargetPatrolId);
@@ -2471,6 +2516,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             // Via anmälningslagringen (sajtstrukturen fas 1a). Anmälan måste höra till den här
             // tävlingen — en anmälan identifieras av (tävling, id).
@@ -2544,7 +2591,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     createdNew = true;
                 }
                 else if (explicitPatrolId.HasValue
-                    && (string.IsNullOrEmpty(explicitPatrolGroup) || explicitPatrolGroup == weaponGroup))
+                    && HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.GroupMatches(explicitPatrolGroup, weaponGroup))
                 {
                     patrolId = explicitPatrolId.Value;
                     patrolNumber = await db.ExecuteScalarAsync<int>(
@@ -2557,8 +2604,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
                         @"SELECT p.* FROM FaltskyttePatrol p
                           WHERE p.CompetitionId = @0
-                          AND (p.WeaponGroup = @1 OR p.WeaponGroup = '' OR p.WeaponGroup IS NULL)
-                          AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < @2
+                          AND (" + HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.GroupMatchSql("p.WeaponGroup", "@1") + @" OR p.WeaponGroup = '' OR p.WeaponGroup IS NULL)
+                          AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < COALESCE(p.Capacity, @2)
                           ORDER BY p.PatrolNumber ASC",
                         request.CompetitionId, weaponGroup, walkInPatrolSize);
 
@@ -2735,6 +2782,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             var changes = await RenumberAllPatrolsAsync(db, request.CompetitionId);
@@ -2839,6 +2888,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             foreach (var pmId in request.PatrolMemberIds)
@@ -2853,6 +2904,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
+            using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
+            if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             // Dialogen frågar bara efter ett klockslag ("HH:mm") och byggde tiden på DAGENS datum, och en tom
@@ -2868,7 +2921,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 startTime = day + requested.TimeOfDay;
             }
             await db.ExecuteAsync(
-                "UPDATE FaltskyttePatrol SET StartTime = COALESCE(@0, StartTime), Label = @1 WHERE Id = @2 AND CompetitionId = @3",
+                "UPDATE FaltskyttePatrol SET StartTimeChangedUtc = CASE WHEN @0 IS NOT NULL AND (StartTime IS NULL OR StartTime <> @0) THEN GETUTCDATE() ELSE StartTimeChangedUtc END, StartTime = COALESCE(@0, StartTime), Label = @1 WHERE Id = @2 AND CompetitionId = @3",
                 startTime,
                 string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim(),
                 request.PatrolId,
@@ -2975,6 +3028,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 saved = _competitions.Update(request.CompetitionId, null, c =>
                 {
                     c.FaltskyttePatrolsPublished = request.Publish;
+                    c.FaltskyttePublishedGroups = request.Publish && request.Groups is { Count: > 0 } ? string.Join(",", request.Groups.Select(g => g.Trim()).Where(g => g.Length > 0 && g.Length <= 8).Distinct().OrderBy(g => g, StringComparer.Ordinal)) : null;
                     if (request.CloseRegistration != null) c.CloseRegistrationOnStartList = request.CloseRegistration.Value;
                 });
             }
@@ -3047,8 +3101,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var patrols = await db.FetchAsync<FaltskyttePatrol>(
-                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
+            var patrols = (await db.FetchAsync<FaltskyttePatrol>(
+                "WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId))
+                .Where(p => HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.IsPatrolPublished(true, competition.FaltskyttePublishedGroups, p.WeaponGroup)).ToList();   // per vapengrupp
 
             var patrolIds = patrols.Select(p => p.Id).ToList();
             var allMembers = patrolIds.Any()
@@ -3070,7 +3125,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     }).ToList()
             }).ToList();
 
-            return Json(new { success = true, published = true, patrols = result });
+            return Json(new { success = true, published = true, publishedGroups = competition.FaltskyttePublishedGroups ?? "", patrols = result });
         }
     }
 }

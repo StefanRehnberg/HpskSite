@@ -59,6 +59,14 @@
                     <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
                         <i class="bi bi-plus-circle me-1"></i>Skapa patrull
                     </button>
+                    @* Den avancerade vägen (Stefan 2026-10-30): en egen sida där man laborerar med vila, dagens slut, uppdelning, lås och jämför två förslag innan något sparas.
+                       "Generera patruller" ovan är den enkla vägen och räcker för en klubbtävling med en start per skytt. Visas för alla tävlingar (kräver ingen planering). *@
+                    @if (int.TryParse(competitionId, out var compIdForGenerator))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm" href="/patrullgenerator/@compIdForGenerator" title="Avancerad: ställ in vila, dagens slut och uppdelning, jämför två förslag och se vem som flyttas innan något sparas. För en enkel startlista räcker Generera patruller.">
+                            <i class="bi bi-sliders me-1"></i>Patrullgenerator (avancerad)
+                        </a>
+                    }
                     @* Planera dagen: startlistan byggs om runt funktionärernas uppdrag (förhandsvisning, säkerhetskopia, ångra). Dialogen bor i planeringens Bemanning och öppnas direkt
                        härifrån; planeringen och tävlingen prövar själva vem som får göra det. Visas bara när tävlingen har en planering. *@
                     @if (int.TryParse(competitionId, out var compIdForPlanning) && PlanningSvc.ForCompetition(compIdForPlanning) != null)
@@ -250,6 +258,7 @@
     var compId = document.querySelector('.faltskytte-startlist-management')?.dataset.competitionId;
     var allPatrols = []; // Cache for rendering
     var isPublished = false;
+    var publishedGroupsCsv = '';   // vilka vapengrupper som är publicerade ("C,B"); tom = hela listan (om publicerad)
     var faltPatrolSize = 6; // Default; updated when generating
     var _faltHasResults = false;
 
@@ -309,6 +318,17 @@
         });
     }
 
+    // Ingen spärr är absolut: svarar servern needsForce visas skälet och användaren får bekräfta och försöka igen med force.
+    function apiPostForce(endpoint, body) {
+        return apiPost(endpoint, body).then(function(data) {
+            if (data && data.needsForce) {
+                if (!confirm(data.message + '\n\nFortsätta ändå?')) return { success: false, cancelled: true };
+                return apiPost(endpoint, Object.assign({}, body, { force: true }));
+            }
+            return data;
+        });
+    }
+
     function apiGet(endpoint) {
         return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) {
             if (!r.ok) return r.text().then(function(t) { throw new Error('Server ' + r.status + ': ' + t.substring(0, 200)); });
@@ -365,6 +385,7 @@
         try {
             var data = await apiGet('GetPublicPatrols?competitionId=' + compId);
             isPublished = data.published || false;
+            publishedGroupsCsv = data.publishedGroups || '';
         } catch(e) { isPublished = false; }
 
         var badge = document.getElementById('faltPublishBadge');
@@ -372,8 +393,10 @@
         var unpubBtn = document.getElementById('faltUnpublishBtn');
         if (isPublished) {
             badge.className = 'badge bg-success ms-2';
-            badge.textContent = 'Publicerad';
-            pubBtn.style.display = 'none';
+            // Per vapengrupp: "Publicerad (C)" och möjlighet att publicera fler grupper senare.
+            var partial = !!publishedGroupsCsv;
+            badge.textContent = partial ? 'Publicerad: ' + publishedGroupsCsv.split(',').join(', ') : 'Publicerad';
+            pubBtn.style.display = partial && allPatrols.length > 0 ? '' : 'none';
             unpubBtn.style.display = allPatrols.length > 0 ? '' : 'none';
         } else {
             badge.className = 'badge bg-warning text-dark ms-2';
@@ -520,7 +543,7 @@
         if (ids.length === 0) return;
         var data = await apiPost('BulkMoveShooters', { competitionId: parseInt(compId), patrolMemberIds: ids, targetPatrolId: targetId });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltBulkRemove = async function() {
@@ -540,7 +563,7 @@
         if (!confirm('Ta bort skytten från patrullen?')) return;
         var data = await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: pmId });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     // DNS: keep the shooter on record but flag them did-not-start, which frees their seat so a late
@@ -548,14 +571,14 @@
     window.faltSetDns = async function(pmId, isDns) {
         var data = await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: pmId, isDns: isDns });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltSetPosition = async function(pmId, position) {
         if (!confirmIfResultsExist('Byta plats')) return;
         var data = await apiPost('SetShooterPosition', { competitionId: parseInt(compId), patrolMemberId: pmId, position: position });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltBulkDns = async function() {
@@ -574,7 +597,7 @@
         if (!confirm('Ta bort hela patrullen och alla dess skyttar?')) return;
         var data = await apiPost('DeletePatrol', { competitionId: parseInt(compId), patrolId: patrolId });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltCreatePatrol = function() {
@@ -607,7 +630,7 @@
         bootstrap.Modal.getInstance(document.getElementById('faltCreatePatrolModal'))?.hide();
         var data = await apiPost('CreatePatrol', { competitionId: parseInt(compId), weaponGroup: wg, afterPatrolNumber: afterNum > 0 ? afterNum : null });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltEditPatrol = async function(patrolId, currentTime, currentLabel) {
@@ -625,7 +648,7 @@
         if (newLabel === null) return;
         var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt ? dt.toISOString() : null, label: newLabel });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
     // Backward-compat shim in case any legacy caller remains
     window.faltEditPatrolTime = function(patrolId, currentTime) { return window.faltEditPatrol(patrolId, currentTime, ''); };
@@ -639,23 +662,31 @@
         // close som null: grinden är härledd (val OCH publicerad lista), så anmälan öppnas igen av
         // sig själv, och att nollställa valet här vore att radera inställningen som sidoeffekt.
         var close = null;
+        var groups = null;
         if (pub) {
+            // Per vapengrupp ("C först, B senare"): en kryssruta per grupp som finns i listan; de som redan är publicerade är förkryssade.
+            var codes = []; (allPatrols || []).forEach(function(p) { String(p.weaponGroup || '').split('+').forEach(function(c) { c = c.trim(); if (c && c !== '?' && codes.indexOf(c) < 0) codes.push(c); }); });
+            codes.sort();
+            var already = (publishedGroupsCsv || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);
             var res = await window.hpskAskPublishStartList({
                 title: 'Publicera patrullistan',
-                body: 'Patrullistan blir synlig för alla på tävlingssidan, och skyttarna planerar efter tiderna.',
+                body: 'De valda grupperna blir synliga för alla på tävlingssidan, och skyttarna planerar efter tiderna. Publicerade grupper ligger fast och byggs inte om av patrullgeneratorn.',
                 confirmLabel: 'Publicera',
                 alreadyPublished: isPublished,
-                currentlyClosed: window.hpskCloseRegistrationCurrent === true
+                currentlyClosed: window.hpskCloseRegistrationCurrent === true,
+                groups: codes.length > 1 ? codes.map(function(c) { return { code: c, label: 'Vapengrupp ' + c, checked: !isPublished || already.length === 0 || already.indexOf(c) >= 0 }; }) : null
             });
             if (!res.proceed) return;
             close = res.close;
+            groups = res.groups || null;
         } else {
             if (!confirm('Avpublicera patrullistan?\n\nSjälvanmälan öppnas igen om den stängdes vid publiceringen.')) return;
         }
 
-        var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub, closeRegistration: close });
+        var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub, closeRegistration: close, groups: groups });
         if (data.success) {
             isPublished = pub;
+            publishedGroupsCsv = pub && groups && groups.length ? groups.join(',') : '';
             if (close === true || close === false) window.hpskCloseRegistrationCurrent = close;
             updatePublishUI();
             // Servern svarar success även när patrullistan publicerades men inställningen inte kunde
@@ -818,7 +849,7 @@
 
         var multiClassGap = parseInt(document.getElementById('faltGenMultiClassGap').value) || 0;
         try {
-            var data = await apiPost('GeneratePatrols', {
+            var data = await apiPostForce('GeneratePatrols', {
                 competitionId: parseInt(compId),
                 patrolSize: patrolSize,
                 patrolIntervalMinutes: interval,
@@ -828,6 +859,7 @@
                 multiClassGapMinutes: multiClassGap
             });
             if (data.success) { loadFaltPatrols(); }
+            else if (data.cancelled) { }
             else { console.error('Generate error:', data.message, data.stackTrace); alert('Fel: ' + (data.message || 'Okänt fel')); }
         } catch(err) { console.error('Generate exception:', err); alert('Fel: ' + err.message); }
     };
@@ -835,17 +867,17 @@
     window.faltDeleteGroupPatrols = async function(weaponGroup) {
         if (!confirmIfResultsExist('Ta bort patruller f\u00f6r ' + weaponGroup)) return;
         if (!confirm('Ta bort alla patruller för vapengrupp ' + weaponGroup + '?')) return;
-        var data = await apiPost('DeletePatrolsByGroup', { competitionId: parseInt(compId), weaponGroup: weaponGroup });
+        var data = await apiPostForce('DeletePatrolsByGroup', { competitionId: parseInt(compId), weaponGroup: weaponGroup });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltDeleteAllPatrols = async function() {
         if (!confirmIfResultsExist('Ta bort alla patruller')) return;
         if (!confirm('Ta bort ALLA patruller?')) return;
-        var data = await apiPost('DeletePatrols', { competitionId: parseInt(compId) });
+        var data = await apiPostForce('DeletePatrols', { competitionId: parseInt(compId) });
         if (data.success) loadFaltPatrols();
-        else alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltRenumberPatrols = async function() {

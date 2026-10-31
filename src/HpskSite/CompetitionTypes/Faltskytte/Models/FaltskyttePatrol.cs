@@ -50,6 +50,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// add-held-to-faltskyttepatrol.sql.
         /// </summary>
         public bool Held { get; set; }
+
+        /// <summary>
+        /// Högsta antal skyttar (utan DNS) i patrullen, dvs skjutplatserna; null = ingen gräns. Sätts av generatorn (Tillämpa) och kontrolleras vid efteranmälan.
+        /// Requires add-patrol-capacity-and-timechanged.sql.
+        /// </summary>
+        public int? Capacity { get; set; }
+
+        /// <summary>När patrullens starttid senast ändrades (UTC). Mitt schema kan visa "tid ändrad". Null = aldrig ändrad sedan skapandet.</summary>
+        public DateTime? StartTimeChangedUtc { get; set; }
     }
 
     [TableName("FaltskyttePatrolMember")]

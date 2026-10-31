@@ -41,7 +41,27 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public List<string> LockedOverflow { get; init; } = new();
         /// <summary>Anmälda vars vapenklass inte finns i någon befintlig grupp — de placeras inte, och redovisas ("Namn (klass)").</summary>
         public List<string> Ungrouped { get; init; } = new();
+        /// <summary>Mått ur den avancerade generatorn (null = den enkla planeraren, som inte räknar dem).</summary>
+        public PlanMetrics? Metrics { get; init; }
+        /// <summary>Tidsbilden för sidan (patrullstaplar, skyttar med flera starter, KPI); null för den enkla planeraren.</summary>
+        public PlanTimeline? Timeline { get; init; }
     }
+
+    /// <summary>Tid i minuter från tävlingsdagens midnatt (dag 2 = +1440) och som HH:mm.</summary>
+    public sealed record TimelinePatrol(int Number, string Start, string End, double StartMin, double EndMin, Dictionary<string, int> Groups, bool Mixed, double AddMin, double ExtraMin, bool Bad,
+        double[] Arrive, double[] Occupy, int[] CollStations);
+    /// <summary>En station i banan: nummer (1-baserat läge i listan) och namn ur konfigurationen.</summary>
+    public sealed record TimelineStationInfo(int Index, int Number, string? Name);
+    public sealed record TimelineStart(int Patrol, string Group, string Start, string End);
+    public sealed record TimelinePair(int FromPatrol, int ToPatrol, double SlackMin, double IdleMin, bool Cross);
+    public sealed record TimelinePerson(int MemberId, string Name, string Club, string Classes, double MinSlackMin, double WaitMin, List<TimelineStart> Starts, List<TimelinePair> Pairs);
+    public sealed record TimelinePause(int? BeforePatrol, double SetMin, double NeedMin, int HardPersons);
+    public sealed record PlanKpi(int Patrols, int Starts, int Multi, double TotalWaitMin, double MaxWaitMin, int UnderMin, int UnderWish, int NeedAdd, int Mixed, int Collisions, string? LastStart, string? LastEnd);
+    public sealed record PlanTimeline(List<TimelinePatrol> Patrols, List<TimelinePerson> Persons, List<TimelinePause> Pauses, PlanKpi Kpi, double RoundMin, List<TimelineStationInfo> Stations);
+
+    /// <summary>Utfallet i tre frågor: följs reglerna, när är vi klara, hur har skyttarna det. Namn på de som bryter, så att sidan kan visa vem.</summary>
+    public sealed record PlanMetrics(bool Feasible, int Hard, int UnderMin, int UnderWish, int Collisions, int WaitOverHour, double OverMinutes, string? LastStart, string? LastEnd,
+        List<string> UnderMinNames, List<string> CollisionPatrols);
 
     /// <summary>
     /// Planera dagen steg 3b: den rena delen av "Bygg startlistan runt funktionärerna". Tar anmälningarna, de låsta skyttarna, uppdragen och

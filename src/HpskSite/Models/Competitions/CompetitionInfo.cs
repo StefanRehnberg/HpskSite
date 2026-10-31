@@ -149,6 +149,8 @@ namespace HpskSite.Models.Competitions
         // ── Tillstånd (följer aldrig med en kopia) ───────────────────────────────────────────
 
         public bool FaltskyttePatrolsPublished { get; set; }
+        /// <summary>Vilka vapengrupper som är publicerade, kommaseparerade koder ("C" eller "C,B"); tom = hela listan. Bara meningsfull när <see cref="FaltskyttePatrolsPublished"/> är sann.</summary>
+        public string? FaltskyttePublishedGroups { get; set; }
         public bool FaltskytteResultsOfficial { get; set; }
         public string? FaltskytteStationManagers { get; set; }
 

@@ -49,7 +49,7 @@ namespace HpskSite.Services.Planning
         public int PurgeBackups(DateTime now)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
-            return s.Database.Execute("IF OBJECT_ID('dbo.FaltskyttePatrolBackup') IS NOT NULL DELETE FROM FaltskyttePatrolBackup WHERE CreatedAt < @0", now.ToUniversalTime().AddDays(-RetentionDays));
+            return s.Database.Execute("IF OBJECT_ID('dbo.FaltskyttePatrolBackup') IS NOT NULL DELETE FROM FaltskyttePatrolBackup WHERE CreatedUtc < @0", now.ToUniversalTime().AddDays(-RetentionDays));
         }
 
         /// <summary>Rensar planeringar som tagits bort för mer än <see cref="RetentionDays"/> dagar sedan, och gamla säkerhetskopior av startlistan.</summary>

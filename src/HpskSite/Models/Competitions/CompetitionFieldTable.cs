@@ -133,6 +133,7 @@ namespace HpskSite.Models.Competitions
             F("faltskytteSelfServiceResults", D, CompetitionFieldShape.Bool, c => c.FaltskytteSelfServiceResults, (c, v) => c.FaltskytteSelfServiceResults = (bool)v!),
 
             F("faltskyttePatrolsPublished", S, CompetitionFieldShape.Bool, c => c.FaltskyttePatrolsPublished, (c, v) => c.FaltskyttePatrolsPublished = (bool)v!),
+            F("faltskyttePublishedGroups", S, CompetitionFieldShape.Text, c => c.FaltskyttePublishedGroups, (c, v) => c.FaltskyttePublishedGroups = (string?)v),
             F("faltskytteResultsOfficial", S, CompetitionFieldShape.Bool, c => c.FaltskytteResultsOfficial, (c, v) => c.FaltskytteResultsOfficial = (bool)v!),
             F("faltskytteStationManagers", S, CompetitionFieldShape.Text, c => c.FaltskytteStationManagers, (c, v) => c.FaltskytteStationManagers = (string?)v),
             F("mergeConfig", S, CompetitionFieldShape.Text, c => c.MergeConfig, (c, v) => c.MergeConfig = (string?)v),

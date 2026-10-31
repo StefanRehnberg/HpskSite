@@ -14,17 +14,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public List<string>? WeaponClasses { get; set; }
         /// <summary>Minimum minutes between patrols for a shooter with multiple weapon classes. 0 = no separation.</summary>
         public int MultiClassGapMinutes { get; set; }
+        /// <summary>Bekräftad: gör det trots resultat/publicerad lista/startad patrull.</summary>
+        public bool Force { get; set; }
     }
 
     public class DeletePatrolsByGroupRequest
     {
         public int CompetitionId { get; set; }
         public string WeaponGroup { get; set; } = "";
+        public bool Force { get; set; }
     }
 
     public class DeletePatrolsRequest
     {
         public int CompetitionId { get; set; }
+        public bool Force { get; set; }
     }
 
     // ── Patrol Editing ────────────────────────────────────────────
@@ -100,6 +104,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     {
         public int CompetitionId { get; set; }
         public bool Publish { get; set; }
+
+        /// <summary>Vilka vapengrupper (koder) som ska vara publicerade. Tom/null = hela listan. Vid Publish=false ignoreras den.</summary>
+        public List<string>? Groups { get; set; }
 
         /// <summary>
         /// Stänga självanmälan på tävlingssidan i samma veva? Null = klienten sa ingenting, och då

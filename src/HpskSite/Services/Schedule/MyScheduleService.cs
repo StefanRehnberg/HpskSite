@@ -465,7 +465,8 @@ namespace HpskSite.Services.Schedule
             var items = new List<ScheduleItem>();
 
             // Same gate as the public /patrullista wall screen — unpublished patrols stay invisible.
-            if (!(_competitions.Get(comp.Id)?.FaltskyttePatrolsPublished ?? false)) return items;
+            var pubInfo = _competitions.Get(comp.Id);
+            if (!(pubInfo?.FaltskyttePatrolsPublished ?? false)) return items;
 
             List<PatrolRow> rows;
             try
@@ -487,6 +488,8 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
 
             foreach (var r in rows)
             {
+                // Listan kan vara publicerad per vapengrupp: en patrull i en opublicerad grupp syns inte i Mitt schema.
+                if (!HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.IsPatrolPublished(true, pubInfo!.FaltskyttePublishedGroups, r.WeaponGroup)) continue;
                 // Patrol StartTime is a full DateTime, so Fältskytte gets true multi-day for free.
                 var (dayKey, dayLabel, _) = ResolveDay(r.StartTime?.Date, r.Label, s);
                 var isDns = string.Equals(r.Status, "DNS", StringComparison.OrdinalIgnoreCase);

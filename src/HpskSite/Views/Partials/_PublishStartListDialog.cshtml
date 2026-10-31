@@ -41,6 +41,13 @@
                 <div class="modal-body">
                     <p id="hpskPublishDlgBody" class="mb-3"></p>
 
+                    @* Fält: publicera per vapengrupp ("C först, B senare"). Visas bara när anroparen skickar `groups`. *@
+                    <div id="hpskPublishDlgGroupsWrap" class="d-none mb-3">
+                        <div class="fw-semibold mb-1">Vilka vapengrupper ska publiceras?</div>
+                        <div id="hpskPublishDlgGroups"></div>
+                        <div class="form-text">Publicerade grupper ligger fast och byggs inte om. Övriga kan du fortsätta bygga och publicera senare.</div>
+                    </div>
+
                     <div class="form-check" id="hpskPublishDlgCloseWrap">
                         <input class="form-check-input" type="checkbox" id="hpskPublishDlgClose" checked>
                         <label class="form-check-label" for="hpskPublishDlgClose">
@@ -125,13 +132,37 @@
 
             var modal = bootstrap.Modal.getOrCreateInstance(el);
 
+            // Vapengrupper (valfritt): en kryssruta per grupp; alla förkryssade = hela listan (tom lista skickas).
+            var groupsWrap = document.getElementById('hpskPublishDlgGroupsWrap');
+            var groupsBox = document.getElementById('hpskPublishDlgGroups');
+            var askGroups = Array.isArray(opts.groups) && opts.groups.length > 0;
+            groupsWrap.classList.toggle('d-none', !askGroups);
+            groupsBox.innerHTML = '';
+            if (askGroups) opts.groups.forEach(function (g) {
+                var row = document.createElement('label');
+                row.className = 'd-flex gap-2 align-items-center';
+                row.style.minHeight = '44px';
+                var cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.className = 'form-check-input hpsk-pub-group'; cb.value = g.code; cb.checked = g.checked !== false;
+                row.appendChild(cb); row.appendChild(document.createTextNode(' ' + (g.label || g.code)));
+                groupsBox.appendChild(row);
+            });
+            function pickedGroups() {
+                if (!askGroups) return null;
+                var all = Array.prototype.slice.call(groupsBox.querySelectorAll('.hpsk-pub-group'));
+                var on = all.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+                return on.length === all.length ? [] : on;   // alla = hela listan
+            }
+
             return new Promise(function (resolve) {
                 resolver = resolve;
 
                 function onConfirm() {
+                    if (askGroups && groupsBox.querySelectorAll('.hpsk-pub-group:checked').length === 0) return;   // minst en grupp
+                    var picked = pickedGroups();
                     cleanup();
                     modal.hide();
-                    settle({ proceed: true, close: askClose ? box.checked : null });
+                    settle({ proceed: true, close: askClose ? box.checked : null, groups: picked });
                 }
                 function onHidden() {
                     cleanup();

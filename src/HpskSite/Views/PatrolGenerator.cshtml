@@ -1,0 +1,241 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var M = ViewData["PatrolGen"] as HpskSite.Controllers.PatrolGeneratorPageModel ?? new HpskSite.Controllers.PatrolGeneratorPageModel();
+    ViewBag.Title = "Patrullgenerator" + (string.IsNullOrEmpty(M.Name) ? "" : " – " + M.Name);
+}
+@* Patrullgeneratorn (avancerad). Ordning på sidan (UX-expertens förenklingsspecifikation 2026-10-30): 1) EN statusrad som svarar "går det ihop?", 2) STATIONSBILDEN, störst och alltid synlig,
+   3) inställningarna bredvid bilden, 4) det som skaver och övrigt bakom ett klick. Skal som Ekonomins (--bs-*, scopat under .pg-page), men bredare. Logiken: wwwroot/js/patrol-generator.js. *@
+<style>
+  .pg-page { --gC: #2f8a74; --gB: #c88a1c; --gA: #3f63b5; --gR: #8d4f9d; --gX: #6c757d; --pg-bad: #cf3a30; --pg-warn: #b8610f; --pg-ok: #2f7d4f; max-width: 1680px; margin: 0 auto; padding: .5rem 16px 2rem; font-size: 15px; }
+  [data-bs-theme="dark"] .pg-page { --gC: #4fb79d; --gB: #e0a93f; --gA: #7b97e0; --gR: #b985c8; --pg-bad: #ff6b60; --pg-warn: #f0963f; --pg-ok: #5cc088; }
+  .pg-page h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+  .pg-page h2 { font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--bs-secondary-color); margin: 0 0 .5rem; }
+  .pg-page .pg-back { display: inline-block; color: var(--bs-secondary-color); text-decoration: none; min-height: 44px; line-height: 44px; }
+  .pg-page .pg-panel { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: 10px; padding: .75rem; min-width: 0; }
+  .pg-page label { font-size: .85rem; color: var(--bs-secondary-color); display: block; margin-bottom: .15rem; }
+  .pg-page .form-control, .pg-page .form-select { min-height: 44px; font-size: 1rem; }
+  .pg-page .btn { min-height: 44px; }
+  .pg-page .pg-hint { color: var(--bs-secondary-color); font-size: .85rem; }
+  .pg-page .pg-bad { color: var(--pg-bad); } .pg-page .pg-warn { color: var(--pg-warn); } .pg-page .pg-ok { color: var(--pg-ok); }
+  .pg-page .pg-status { border-radius: 10px; padding: .75rem 1rem; margin-bottom: .75rem; border: 2px solid var(--pg-ok); background: color-mix(in srgb, var(--pg-ok) 10%, var(--bs-body-bg)); }
+  .pg-page .pg-status.bad { border-color: var(--pg-bad); background: color-mix(in srgb, var(--pg-bad) 10%, var(--bs-body-bg)); }
+  .pg-page .pg-status.wait { border-color: var(--bs-border-color); background: var(--bs-body-bg); }
+  .pg-page .pg-status .big { font-size: 1.2rem; font-weight: 700; }
+  .pg-page .pg-status .nums { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin-top: .25rem; font-size: .95rem; }
+  .pg-page .pg-fixes { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+  .pg-page .pg-main { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pg-page .pg-params { display: flex; flex-direction: column; gap: .5rem; position: sticky; top: 8px; }
+  .pg-page .pg-field { display: flex; flex-direction: column; }
+  .pg-page .pg-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: .5rem; align-items: center; }
+  .pg-page .pg-seg { display: inline-flex; }
+  .pg-page .pg-seg button { border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); padding: 0 14px; min-height: 44px; margin-left: -1px; }
+  .pg-page .pg-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; } .pg-page .pg-seg button:last-child { border-radius: 0 6px 6px 0; }
+  .pg-page .pg-seg button[aria-pressed=true] { background: var(--bs-primary); color: #fff; border-color: var(--bs-primary); }
+  .pg-page .pg-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .8rem; color: var(--bs-secondary-color); margin: .25rem 0; }
+  .pg-page .pg-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .pg-page .pg-scroll { overflow: auto; max-height: 78vh; border: 1px solid var(--bs-border-color); border-radius: 6px; background: var(--bs-tertiary-bg); }
+  .pg-page #pgScroll svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  .pg-page svg text { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10.5px; fill: var(--bs-secondary-color); }
+  .pg-page svg .hit { cursor: pointer; outline: none; }
+  .pg-page svg .hit:focus-visible rect.f { stroke: var(--bs-primary); stroke-width: 2; }
+  .pg-page .pg-more { margin-top: .75rem; display: flex; flex-direction: column; gap: .5rem; }
+  .pg-page .pg-more details { border: 1px solid var(--bs-border-color); border-radius: 8px; padding: 0 .75rem; }
+  .pg-page .pg-more summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+  .pg-page table { width: 100%; font-size: .9rem; }
+  .pg-page th { text-align: left; font-weight: 600; color: var(--bs-secondary-color); padding: .25rem .5rem .25rem 0; }
+  .pg-page td { padding: .3rem .5rem .3rem 0; vertical-align: top; border-top: 1px solid var(--bs-border-color); }
+  .pg-page tr.sel td { background: var(--bs-secondary-bg); }
+  .pg-page .pg-plist { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+  .pg-page .pg-plist button { width: 100%; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 8px; min-height: 44px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); border-radius: 6px; }
+  .pg-page .pg-plist button.sel { border-color: var(--bs-body-color); box-shadow: inset 0 0 0 1px var(--bs-body-color); }
+  .pg-page .pg-plist .sub { grid-column: 1 / -1; color: var(--bs-secondary-color); font-size: .8rem; }
+  .pg-page .pg-moves { list-style: none; padding: 0; margin: 0; } .pg-page .pg-moves li { padding: .35rem 0; border-bottom: 1px solid var(--bs-border-color); }
+  .pg-page .pg-statusrow { display: flex; gap: .75rem; align-items: flex-start; margin-bottom: .75rem; }
+  .pg-page .pg-statusrow .pg-status { flex: 1 1 auto; margin: 0; min-width: 0; }
+  .pg-page .pg-apply { flex: 0 0 auto; max-width: 220px; text-align: right; }
+  .pg-page .pg-apply .btn { white-space: nowrap; }
+  .pg-page .pg-busy { opacity: .5; }
+  .pg-page .pg-cards { display: none; }
+  .pg-page .pg-card { display: block; width: 100%; text-align: left; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; min-height: 44px; }
+  .pg-page .pg-card .bar { height: 10px; border-radius: 3px; display: flex; overflow: hidden; margin: 4px 0; background: var(--bs-secondary-bg); }
+  .pg-page .pg-card.bad { border-color: var(--pg-bad); }
+  .pg-page dialog { border: 1px solid var(--bs-border-color); border-radius: 10px; padding: 1rem; max-width: 520px; width: calc(100% - 32px); background: var(--bs-body-bg); color: var(--bs-body-color); }
+  .pg-page dialog::backdrop { background: rgba(0,0,0,.45); }
+  @@media (max-width: 1000px) { .pg-page .pg-main { grid-template-columns: minmax(0, 1fr); } .pg-page .pg-params { position: static; order: 2; } }
+  @@media (max-width: 760px) {
+    .pg-page { font-size: 16px; }
+    .pg-page .pg-statusrow { flex-direction: column; } .pg-page .pg-apply { max-width: none; text-align: left; } .pg-page .pg-apply .btn { width: 100%; }
+    .pg-page .pg-cards { display: block; }
+    .pg-page .pg-tbl-wide { display: none; }
+  }
+  @@media (prefers-reduced-motion: reduce) { .pg-page * { transition: none !important; } }
+</style>
+<div class="pg-page" id="pgPage" data-competition-id="@M.CompetitionId" data-practice="@(M.Practice ? "1" : "0")" data-published="@(M.Published ? "1" : "0")" data-date="@(M.Date?.ToString("yyyy-MM-dd"))">
+  @Html.AntiForgeryToken()
+  @if (M.Practice)
+  {
+    <a class="pg-back" href="/competitions"><i class="bi bi-arrow-left"></i> Tillbaka till tävlingar</a>
+    <div class="alert alert-warning py-2 mb-2" role="note" id="pgPracticeBanner"><b>Övning.</b> Skyttarna är påhittade, inget sparas och inget publiceras. Sidan och motorn är desamma som för en riktig tävling.</div>
+    <h1>Patrullgenerator <span class="pg-hint fw-normal">· Övning</span> <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="pgScenarioBtn">Skapa testdata</button></h1>
+  }
+  else
+  {
+    <a class="pg-back" href="/competitionmanagement?competitionId=@M.CompetitionId"><i class="bi bi-arrow-left"></i> Tillbaka till tävlingen</a>
+    <h1>Patrullgenerator <span class="pg-hint fw-normal">· @M.Name</span> <a class="btn btn-outline-secondary btn-sm ms-2" id="pgPracticeLink" href="/patrullgenerator/lab">Öva med påhittade skyttar</a></h1>
+  }
+
+  <div class="pg-statusrow">
+    <div class="pg-status wait" id="pgStatus" role="status" aria-live="polite"><div class="big">Räknar…</div></div>
+    <div class="pg-apply" @(M.Practice ? "hidden" : null)><button type="button" class="btn btn-primary" id="pgApply" disabled>Använd förslaget</button><div class="pg-hint" id="pgApplyHint" role="status"></div></div>
+  </div>
+
+
+  <div class="pg-main">
+    <section class="pg-panel pg-params" aria-label="Inställningar" id="pgInputs">
+      <details id="pgParamsBox" open>
+        <summary class="fw-semibold" style="min-height:44px;display:flex;align-items:center;cursor:pointer">Inställningar</summary>
+        <div style="display:flex;flex-direction:column;gap:.5rem">
+          <div class="pg-field"><label for="pgSize">Skyttar per patrull</label><input class="form-control" id="pgSize" type="number" min="1" max="12" inputmode="numeric"><span class="pg-hint">Antal skjutplatser.</span></div>
+          <div class="pg-field"><label for="pgInt">Tid mellan patruller (min)</label><input class="form-control" id="pgInt" type="number" min="1" max="120" inputmode="numeric"></div>
+          <div class="pg-field"><label for="pgFirst">Första start</label><input class="form-control" id="pgFirst" type="time"></div>
+          <div class="pg-field"><label for="pgClose">Dagen ska vara slut senast</label><input class="form-control" id="pgClose" type="time"><span class="pg-hint">Tomt = ingen gräns.</span></div>
+          <div class="pg-field"><label for="pgRest">Minsta vila mellan två starter (min)</label><input class="form-control" id="pgRest" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Gäller skyttar med flera starter samma dag.</span></div>
+          <div class="pg-field"><label for="pgWish">Önskad vila (min)</label><input class="form-control" id="pgWish" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Gärna minst så här lång vila. Tomt = som minsta vila.</span></div>
+          <div class="pg-field"><label for="pgOrder">Vilka klasser skjuts tillsammans?</label><select class="form-select" id="pgOrder"><option value="auto">Välj automatiskt det bästa</option><option value="sep">C, B, A, R var för sig</option><option value="ar">C, B, A och R tillsammans</option><option value="cbar">C och B tillsammans, A och R tillsammans</option><option value="all">Alla blandade</option></select></div>
+          <div class="pg-field"><label for="pgChamp">Mästerskap i en vapengrupp?</label><select class="form-select" id="pgChamp"><option value="">Nej, C först som vanligt</option><option value="B">Ja, B skjuts först</option><option value="A">Ja, A skjuts först</option><option value="R">Ja, R skjuts först</option></select></div>
+          <div class="pg-field"><label for="pgRoundMin">Hur lång tid tar en runda? (min)</label><input class="form-control" id="pgRoundMin" type="number" min="10" max="600" inputmode="numeric"><span class="pg-hint" id="pgRoundHint">Tid för en patrull att gå hela banan. Tomt = uppskattning, 10 min per station.</span></div>
+          <div class="pg-field"><label for="pgPause">Paus mellan klasser (min)</label><input class="form-control" id="pgPause" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Tid mellan sista patrullen i en klass och första i nästa. Tomt = som tiden mellan patruller.</span></div>
+          <div class="pg-field"><label for="pgPauseExt">Får förlängas med (min)</label><input class="form-control" id="pgPauseExt" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Hur mycket pausen får växa för att skyttarna ska hinna vila.</span></div>
+          <div class="pg-field"><label for="pgPrio">Prioritera</label><select class="form-select" id="pgPrio"><option value="0">Kort dag</option><option value="1">Jämn dag</option><option value="2">Mer vila</option></select></div>
+          <details id="pgMore">
+            <summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">Fler inställningar</summary>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="display:flex;gap:.5rem;align-items:center;min-height:44px;color:var(--bs-body-color)"><input type="checkbox" class="form-check-input" id="pgDay2"> Tävlingen går över två dagar</label>
+              <div id="pgDay2Box" hidden style="display:flex;flex-direction:column;gap:.5rem">
+                <div class="pg-field"><label for="pgOpen2">Dag 2 första start</label><input class="form-control" id="pgOpen2" type="time"></div>
+                <div class="pg-field"><label for="pgClose2">Dag 2 slutar senast</label><input class="form-control" id="pgClose2" type="time"></div>
+                <div class="pg-field"><label for="pgBreak">Dag 2 börjar med</label><select class="form-select" id="pgBreak"><option value="1">block 2</option><option value="2">block 3</option><option value="3">block 4</option></select></div>
+              </div>
+              <div class="pg-field"><label for="pgPre">Förstartspatruller (bara funktionärer)</label><input class="form-control" id="pgPre" type="number" min="0" max="10" inputmode="numeric"></div>
+              <div class="pg-field"><label for="pgPreStart">Förstart börjar</label><input class="form-control" id="pgPreStart" type="time"><span class="pg-hint">Tomt = en timme före första start.</span></div>
+              <div class="pg-field"><label for="pgRound">Växlingstid per extra klass i en patrull (sek per station)</label><input class="form-control" id="pgRound" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">När en patrull blandar klasser skjuter klasserna efter varandra vid varje station. Patrullen tar då de andra klassernas skjuttid plus så här många sekunder för varje klass utöver den längsta. En uppskattning tills tiden är mätt.</span></div>
+              <div class="pg-field"><label for="pgGlideN">Paus var n:e patrull</label><input class="form-control" id="pgGlideN" type="number" min="0" max="100" inputmode="numeric"></div>
+              <div class="pg-field"><label for="pgGlideM">Paus (min)</label><input class="form-control" id="pgGlideM" type="number" min="0" max="60" inputmode="numeric"></div>
+              <label style="display:@(M.Practice ? "none" : "flex");gap:.5rem;align-items:center;min-height:44px;color:var(--bs-body-color)"><input type="checkbox" class="form-check-input" id="pgKeep"> Behåll de som redan har en tid som passar</label>
+              <p class="pg-hint mb-0" @(M.Practice ? "hidden" : null)>Stationer och skjuttider hämtas ur banans konfiguration.</p>
+            </div>
+          </details>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-secondary" id="pgReset">Återställ</button>
+            <button type="button" class="btn btn-outline-secondary" id="pgCopy">Kopiera länk</button>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="pg-panel" aria-label="Bild" id="pgViz">
+      <div class="pg-tabs">
+        <span class="pg-seg" role="group" aria-label="Vy">
+          <button type="button" id="vSta" aria-pressed="true">Stationer</button>
+          <button type="button" id="vTl" aria-pressed="false">Patruller</button>
+          <button type="button" id="vList" aria-pressed="false">Tabell</button>
+        </span>
+        <label id="pgFlowBox" class="ms-auto" style="display:flex;gap:.5rem;align-items:center;min-height:44px;color:var(--bs-body-color)"><input type="checkbox" class="form-check-input" id="pgFlow" checked> Visa var skyttarna skjuter före och efter</label>
+      </div>
+      <div class="pg-legend" id="pgLegend"></div>
+      <div class="pg-scroll" id="pgScroll"></div>
+      <div id="pgListPane" hidden></div>
+      <p class="pg-hint mt-2 mb-0" id="pgNote"></p>
+      <div id="pgSelDetail" class="mt-2"></div>
+
+      <div class="pg-more">
+        <details id="pgScrapeBox"><summary id="pgScrapeSum">Skyttar som skaver</summary><div class="pb-2">
+          <div class="d-flex gap-2 flex-wrap mb-2"><select class="form-select" id="pgPSort" style="width:auto" aria-label="Sortera"><option value="slack">Minst marginal först</option><option value="wait">Längst väntan först</option><option value="name">Namn</option></select><input class="form-control" id="pgPFind" type="search" placeholder="Sök namn" style="width:200px"></div>
+          <ul class="pg-plist" id="pgPList"></ul><div id="pgPDetail" class="mt-2"></div></div></details>
+        <details id="pgMovesBox"><summary id="pgMovesSum">Vem flyttas</summary><div class="pb-2" id="pgMovesPane"></div></details>
+        <details id="pgMoreMetrics"><summary>Fler mått och tips</summary><div class="pb-2" id="pgMetricsMore"></div></details>
+      </div>
+    </section>
+  </div>
+
+  @if (M.Practice)
+  {
+    <style>
+      #pgScenario { width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; border: 1px solid var(--bs-border-color); border-radius: .5rem; background: var(--bs-body-bg); color: var(--bs-body-color); padding: 1rem; }
+      #pgScenario h2 { font-size: 1.1rem; text-transform: none; letter-spacing: 0; color: inherit; }
+      #pgScenario .sc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem .75rem; }
+      @@media (min-width: 560px) { #pgScenario .sc-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); } #pgScenario .sc-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); } #pgScenario .sc-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      #pgScenario label { font-size: .85rem; display: block; margin-bottom: .15rem; }
+      #pgScenario .form-control, #pgScenario .form-select { min-height: 44px; }
+      #pgScenario .btn { min-height: 44px; }
+      #pgScenario .btn-sm { min-height: 36px; }
+      #pgScenario fieldset { border: 0; padding: 0; margin: 0 0 .9rem; }
+      #pgScenario legend { font-size: .95rem; font-weight: 600; margin-bottom: .35rem; }
+      #pgScenario .sc-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; margin-bottom: .5rem; }
+      #pgScenario .sc-card { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; text-align: left; min-height: 72px; padding: .6rem .75rem; border: 1px solid var(--bs-border-color); border-radius: .5rem; background: var(--bs-body-bg); color: var(--bs-body-color); }
+      #pgScenario .sc-card span { font-size: .85rem; color: var(--bs-secondary-color); }
+      #pgScenario .sc-card[aria-pressed="true"] { border-color: var(--bs-primary); box-shadow: 0 0 0 2px var(--bs-primary); }
+      #pgScenario summary { cursor: pointer; font-weight: 600; padding: .5rem 0; min-height: 44px; }
+      #pgScenario .sc-err { font-size: .8rem; color: var(--bs-danger-text-emphasis, #b02a37); margin-top: .2rem; }
+      #pgScenario .sc-note { font-size: .8rem; color: var(--bs-secondary-color); margin-top: .2rem; }
+      #pgScenario .sc-warn { font-size: .85rem; padding: .4rem .6rem; border-radius: .35rem; background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); margin-bottom: .6rem; }
+      #pgScenario [aria-invalid="true"] { border-color: var(--bs-danger); }
+      #pgScenario { scroll-padding-bottom: 12rem; }   /* ett fält som får fokus och dess fel hamnar ovanför den fasta nederkanten */
+      #pgScenario .sc-crow { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem 44px; gap: .5rem; margin-bottom: .5rem; }
+      #pgScenario .sc-crow .btn { padding: 0; font-size: 1.25rem; line-height: 1; }
+      #pgScenario .sc-foot { position: sticky; bottom: -1rem; margin: 0 -1rem -1rem; padding: .6rem 1rem .8rem; background: var(--bs-body-bg); border-top: 1px solid var(--bs-border-color); }
+    </style>
+    <dialog id="pgScenario" aria-labelledby="pgScenarioTitle">
+      <h2 id="pgScenarioTitle">Skapa testdata</h2>
+      <p class="pg-hint">Påhittade skyttar för att öva. Välj ett exempel, eller ange antalen själv. Inget sparas.</p>
+      <fieldset>
+        <legend>Välj ett exempel</legend>
+        <div class="sc-cards" id="scCards"></div>
+        <details id="scBig"><summary>Större övningar (SSM, SM och prestandatest)</summary><div class="sc-cards" id="scCardsBig"></div></details>
+      </fieldset>
+      <details id="scCustom">
+        <summary>Anpassa antalen</summary>
+        <fieldset>
+          <legend>Hur många skjuter exakt…</legend>
+          <div class="pg-hint mb-1">Varje person står på en rad. Den som skjuter två klasser har två starter men räknas som en person. Lägg till en rad för varje kombination av klasser som finns.</div>
+          <div id="scRows"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="scAddRow">+ Lägg till kombination</button>
+          <div class="pg-hint mt-1" id="scStarts" aria-live="polite"></div>
+        </fieldset>
+        <fieldset>
+          <legend><label class="mb-0"><input type="checkbox" id="scStaffOn"> Funktionärer som också skjuter</label></legend>
+          <div id="scStaffBox" hidden>
+            <div class="pg-hint mb-1">Ett uppdrag är en tid då personen hjälper till och inte kan skjuta. De räknas bland personerna ovan.</div>
+            <div class="sc-grid" id="scStaff" aria-describedby="scStaffErr">
+              <div><label for="scJobN">Har ett uppdrag (t.ex. skjutledare)</label><input class="form-control" id="scJobN" type="number" min="0" max="1000" inputmode="numeric"></div>
+              <div><label for="scJobMode">Är upptagna</label><select class="form-select" id="scJobMode"><option value="am">Förmiddag, 09:00 till 12:00</option><option value="pm">Eftermiddag, 12:00 till 15:00</option></select></div>
+              <div><label for="scRes">Utan fast starttid (hoppar in vid behov)</label><input class="form-control" id="scRes" type="number" min="0" inputmode="numeric"></div>
+              <div><label for="scEarly">Vill skjuta tidigt på dagen</label><input class="form-control" id="scEarly" type="number" min="0" inputmode="numeric"></div>
+            </div>
+            <div class="sc-err" id="scStaffErr" hidden></div>
+          </div>
+        </fieldset>
+        <details id="scBana">
+          <summary>Banan och varianten</summary>
+          <div class="sc-grid">
+            <div><label for="scSt">Stationer på banan</label><input class="form-control" id="scSt" type="number" min="1" max="20" inputmode="numeric"></div>
+            <div><label for="scSeed">Variant</label><input class="form-control" id="scSeed" type="number" min="1" inputmode="numeric"></div>
+            <div class="d-flex align-items-end"><button type="button" class="btn btn-outline-secondary" id="scNewSeed">Ny variant</button></div>
+          </div>
+          <div class="pg-hint mt-1">Samma variant ger samma skyttar, så du kan dela länken.</div>
+        </details>
+      </details>
+      <div class="sc-foot">
+        <div class="fw-semibold" id="scSum" aria-live="polite"></div>
+        <div class="pg-hint" id="scHelp" aria-live="polite"></div>
+        <div class="d-flex gap-2 justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary" id="scCancel">Avbryt</button><button type="button" class="btn btn-primary" id="scGo">Använd testdata</button></div>
+      </div>
+    </dialog>
+  }
+
+  <div id="pgDone"></div>
+  <dialog id="pgConfirm" aria-labelledby="pgConfirmTitle"><h2 id="pgConfirmTitle" style="font-size:1.1rem;text-transform:none;letter-spacing:0;color:inherit">Är du säker?</h2><div id="pgConfirmBody" class="mb-3"></div>
+    <div class="d-flex gap-2 justify-content-end"><button type="button" class="btn btn-outline-secondary" id="pgConfirmNo">Avbryt</button><button type="button" class="btn btn-danger" id="pgConfirmYes">Använd ändå</button></div></dialog>
+</div>
+<script src="/js/patrol-generator.js?v=20" defer></script>
