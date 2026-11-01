@@ -316,7 +316,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var colPatrols = r.Ps.Where(x => x.Short > 0.01).Select(x => "patrull " + (x.N)).ToList();
                 metrics = new PlanMetrics(!res.Infeasible, res.Q.Hard, res.Q.Under, r.UnderWish.Count, res.Q.Coll, wait, res.Q.Over,
                     ordered.Count > 0 ? ordered.Max(x => x.StartTime)?.ToString("HH:mm") : null, ordered.Count > 0 ? At(day, r.LastEnd).ToString("HH:mm") : null,
-                    r.Under.Select(z => NameOf(z.Id)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList(), colPatrols);
+                    r.Under.Select(z => NameOf(z.Id)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList(), colPatrols,
+                    res.Q.StaffBad, res.Q.Cap, res.Q.Link);
             }
             PlanTimeline? timeline = null;
             if (res.Q?.R is { } rr)

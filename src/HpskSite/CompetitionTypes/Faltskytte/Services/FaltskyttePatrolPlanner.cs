@@ -69,7 +69,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
     /// <summary>Utfallet i tre frågor: följs reglerna, när är vi klara, hur har skyttarna det. Namn på de som bryter, så att sidan kan visa vem.</summary>
     public sealed record PlanMetrics(bool Feasible, int Hard, int UnderMin, int UnderWish, int Collisions, int WaitOverHour, double OverMinutes, string? LastStart, string? LastEnd,
-        List<string> UnderMinNames, List<string> CollisionPatrols);
+        List<string> UnderMinNames, List<string> CollisionPatrols, int StaffBad = 0, int Cap = 0, int Link = 0);
 
     /// <summary>
     /// Planera dagen steg 3b: den rena delen av "Bygg startlistan runt funktionärerna". Tar anmälningarna, de låsta skyttarna, uppdragen och

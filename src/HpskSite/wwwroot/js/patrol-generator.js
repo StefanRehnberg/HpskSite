@@ -88,6 +88,9 @@
     if (m.underMin) out.push(m.underMin + ' skyttar får kortare vila än minsta vila' + (m.underMinNames && m.underMinNames.length ? ' (' + m.underMinNames.slice(0, 4).map(esc).join(', ') + (m.underMinNames.length > 4 ? ' …' : '') + ')' : ''));
     if (m.collisions) out.push(m.collisions + ' gånger är två patruller på samma station samtidigt');
     if (m.overMinutes > 0.5) out.push('dagen blir ' + dur(m.overMinutes) + ' för lång');
+    if (m.cap) out.push(m.cap + (m.cap === 1 ? ' skytt får' : ' skyttar får') + ' inte plats: patrullerna har fler skyttar än platser');
+    if (m.staffBad) out.push(m.staffBad + (m.staffBad === 1 ? ' start krockar' : ' starter krockar') + ' med ett funktionärsuppdrag');
+    if (m.link) out.push(m.link + (m.link === 1 ? ' skytt får' : ' skyttar får') + ' inte gå i samma patrull som den de valt');
     return out;
   }
   // Orsaken till ett uppehåll: den skytt vars andra start sitter tätast efter att den första rundan är slut plus vilan (tidigare start + rundtid + vila).
@@ -211,10 +214,10 @@
     const ps = t.patrols, sts = t.stations && t.stations.length ? t.stations : [{ index: 1, number: 1, name: null }];
     const all = ps;
     const tmin = Math.floor(Math.min(...all.map(p => p.startMin)) / 30) * 30, tmax = Math.ceil(Math.max(...all.map(p => p.endMin)) / 30) * 30;
-    const W = 1100, L = 120, rowH = Math.max(28, Math.min(56, Math.floor(520 / sts.length))), top = 24, H = top + sts.length * rowH + 8, x = m => L + (m - tmin) / Math.max(1, tmax - tmin) * W;
+    const W = 1100, L = 175, rowH = Math.max(28, Math.min(56, Math.floor(520 / sts.length))), top = 24, H = top + sts.length * rowH + 8, x = m => L + (m - tmin) / Math.max(1, tmax - tmin) * W;
     let s = '<svg id="pgSvg" viewBox="0 0 ' + (L + W + 20) + ' ' + H + '" role="img" aria-label="Stationsbild: en rad per station, en ruta per patrull" aria-describedby="pgNote">';
     for (let m = tmin; m <= tmax; m += 30) s += '<line x1="' + x(m) + '" x2="' + x(m) + '" y1="' + (top - 4) + '" y2="' + H + '" stroke="var(--bs-border-color)" ' + (m % 60 ? 'stroke-dasharray="2 4"' : '') + '/>' + (m % 60 === 0 ? '<text x="' + (x(m) + 3) + '" y="12">' + hm(m) + '</text>' : '');
-    sts.forEach((st, i) => { const y = top + i * rowH; s += '<text x="4" y="' + (y + 17) + '" style="fill:var(--bs-body-color)">' + 'Station ' + st.number + (st.name ? ' ' + esc(String(st.name).slice(0, 10)) : '') + '</text><line x1="' + L + '" x2="' + (L + W) + '" y1="' + (y + rowH) + '" y2="' + (y + rowH) + '" stroke="var(--bs-border-color)" opacity=".5"/>'; });
+    sts.forEach((st, i) => { const y = top + i * rowH; s += '<text x="4" y="' + (y + 17) + '" style="fill:var(--bs-body-color)">' + 'Station ' + st.number + (st.name ? ' ' + esc(String(st.name).length > 14 ? String(st.name).slice(0, 13) + '…' : String(st.name)) : '') + '<title>' + esc('Station ' + st.number + (st.name ? ' ' + st.name : '')) + '</title></text><line x1="' + L + '" x2="' + (L + W) + '" y1="' + (y + rowH) + '" y2="' + (y + rowH) + '" stroke="var(--bs-border-color)" opacity=".5"/>'; });
     ps.forEach(p => {
       const selP = sel && sel.k === 'patrol' && sel.id === p.number, hiId = sel && sel.k === 'person' ? sel.id : hi, personSel = hiId != null && (T(R).persons.find(z => z.memberId === hiId) || { starts: [] }).starts.some(z => z.patrol === p.number);
       sts.forEach((st, i) => {
