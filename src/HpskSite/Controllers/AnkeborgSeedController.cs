@@ -2179,6 +2179,79 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
             });
         }
 
+        /// <summary>
+        /// Fler påhittade medlemmar i Ankeborg för filmerna om patrullgeneratorn: en tävling i
+        /// Trollenäs storlek kräver ca 290 personer. Samma väg som <see cref="Seed"/> (IMemberService
+        /// + ClubMembership), märkta med <see cref="SeedTag"/> så att <see cref="Purge"/> tar dem.
+        /// Idempotent: finns adressen hoppas personen över. Namnen är sammansatta av vanliga
+        /// förnamn och påhittade efternamn (inga figurnamn).
+        /// </summary>
+        public IActionResult SeedCrowd(string confirm = "", bool dryRun = true, int target = 290)
+        {
+            var guard = Guard(confirm);
+            if (guard != null) return guard;
+
+            var club = FindClub();
+            if (club == null)
+                return Json(new { success = false, message = "Ankeborg finns inte — kör Seed först." });
+
+            var firstNames = new[]
+            {
+                "Anders", "Birgitta", "Carl", "Dagmar", "Erik", "Frida", "Gustav", "Helena", "Ivar", "Jenny",
+                "Kjell", "Lena", "Magnus", "Nina", "Olof", "Petra", "Rolf", "Sofia", "Tomas", "Ulrika",
+                "Viktor", "Wilma", "Axel", "Elin", "Hugo", "Maja", "Sture", "Tilda", "Börje", "Greta"
+            };
+            var lastNames = new[]
+            {
+                "Älvsbacka", "Tallmyr", "Rönnhult", "Sjöbacka", "Hagelstam", "Vikhult", "Bergsjö",
+                "Näsbacka", "Lindhaga", "Ekdalen", "Solvik", "Granhammar", "Björkelund", "Havsten",
+                "Strandmark", "Vallmyr"
+            };
+
+            var existingInClub = MembersOfClub(club.Id).Count;
+            var toCreate = Math.Max(0, target - existingInClub);
+            var created = 0;
+            var failures = new List<string>();
+
+            // Blandad ordning så att listan inte läses alfabetiskt: steg som är relativt prima med 30/16.
+            for (var i = 0; i < firstNames.Length * lastNames.Length && created < toCreate; i++)
+            {
+                var first = firstNames[(i * 7) % firstNames.Length];
+                var last = lastNames[(i * 11 + i / firstNames.Length) % lastNames.Length];
+                var p = new Person(first, last, "Medlem", null);
+                var email = Email(p);
+                if (_memberService.GetByEmail(email) != null) continue;
+                if (dryRun) { created++; continue; }
+
+                try
+                {
+                    var member = _memberService.CreateMember(email, email, $"{first} {last}", "hpskMember");
+                    member.SetValue("firstName", first);
+                    member.SetValue("lastName", last);
+                    member.SetValue("primaryClubId", club.Id);
+                    member.SetValue("memberSince", DateTime.Now.AddYears(-RandomYears(p)));
+                    member.IsApproved = true;
+                    _memberService.Save(member);
+                    _memberService.AssignRoles(new[] { member.Id }, new[] { "Users" });
+                    _clubMembershipService.Save(new ClubMembership
+                    {
+                        MemberId = member.Id,
+                        ClubId = club.Id,
+                        MembershipStatus = "Aktiv",
+                        MemberSince = DateTime.Now.AddYears(-RandomYears(p)),
+                        MemberNotes = SeedTag
+                    });
+                    created++;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{first} {last}: {ex.Message}");
+                }
+            }
+
+            return Json(new { success = failures.Count == 0, dryRun, clubNodeId = club.Id, fanns = existingInClub, skapade = created, failures });
+        }
+
         // ── Hjälpare ─────────────────────────────────────────────────────────────────
 
         private IActionResult? Guard(string confirm)
