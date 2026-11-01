@@ -304,7 +304,16 @@
     let h = ''; if (r.existing.patrols === 0) h = '<p class="mb-0">Det finns ingen startlista än: alla ' + nStarts + ' starter får en plats.</p>';
     else if (!moves.length) h = '<p class="pg-ok mb-0"><b>Ingen behöver flyttas.</b></p>';
     else h = '<ul class="pg-moves">' + moves.slice(0, 15).map(li).join('') + '</ul>' + (moves.length > 15 ? '<details><summary style="min-height:44px">Visa de ' + (moves.length - 15) + ' övriga</summary><ul class="pg-moves">' + moves.slice(15, 300).map(li).join('') + '</ul></details>' : '');
+    // De som får ny tid får inget mejl: arrangören ringer dem. Listan är namn, klass och ny tid, som text att klistra in eller skriva ut.
+    const callList = moves.filter(m => m.kind !== 'removed');
+    if (callList.length) h += '<p class="mt-2 mb-0"><button type="button" class="btn btn-outline-secondary btn-sm" id="pgCopyMoves" style="min-height:44px">Kopiera som lista att ringa efter (' + callList.length + ')</button> <span class="pg-hint" id="pgCopyMovesMsg" role="status"></span></p>';
     $('pgMovesPane').innerHTML = h;
+    const cb = $('pgCopyMoves');
+    if (cb) cb.addEventListener('click', async () => {
+      const txt = callList.map(m => m.name + ' (' + m.shootingClass + '): patrull ' + m.toPatrol + ' kl ca ' + m.toTime).join('\n');
+      try { await navigator.clipboard.writeText(txt); $('pgCopyMovesMsg').textContent = 'Listan över ' + callList.length + ' skyttar är kopierad.'; }
+      catch (e) { $('pgCopyMovesMsg').textContent = 'Kunde inte kopiera. Markera och kopiera själv: ' + txt.replace(/\n/g, '; '); }
+    });
   }
   function kpiRows(r) { const k = T(r) && T(r).kpi, m = r.metrics || {}; if (!k) return []; return [['Patruller', k.patrols], ['Starter', k.starts], ['Skyttar med flera starter', k.multi], ['Väntar mer än 1 timme', m.waitOverHour || 0], ['Längsta väntan över vilan', dur(k.maxWaitMin)], ['Under minsta vila', k.underMin], ['Under önskad vila', k.underWish], ['Patruller som kan behöva extra tid', k.needAdd], ['Krockar vid station', k.collisions], ['Sista start / klart ca', (k.lastStart || '–') + ' / ' + (k.lastEnd || '–')]]; }
   // Krav "gå i samma patrull som" (hårt) och önskemål om starttid (mjukt) ur anmälningarna: det som inte gick redovisas med namn, aldrig tyst.

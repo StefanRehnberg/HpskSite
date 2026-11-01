@@ -1,5 +1,4 @@
-﻿@inject HpskSite.Services.Planning.PlanningService PlanningSvc
-@await Html.PartialAsync("_ShootingClassesBootstrap")
+﻿@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
  * Fältskytte Patrol Management
  * Full CRUD for patrols and shooters, with publish mechanism.
@@ -63,16 +62,8 @@
                        "Generera patruller" ovan är den enkla vägen och räcker för en klubbtävling med en start per skytt. Visas för alla tävlingar (kräver ingen planering). *@
                     @if (int.TryParse(competitionId, out var compIdForGenerator))
                     {
-                        <a class="btn btn-outline-secondary btn-sm" href="/patrullgenerator/@compIdForGenerator" title="Avancerad: ställ in vila, dagens slut och uppdelning, jämför två förslag och se vem som flyttas innan något sparas. För en enkel startlista räcker Generera patruller.">
+                        <a class="btn btn-outline-secondary btn-sm" href="/patrullgenerator/@compIdForGenerator" title="Avancerad: bygger om startlistan runt funktionärernas uppdrag, vila, önskemål och kamratkrav. Du ser förslaget och vem som flyttas innan något sparas, och kan ångra. För en enkel startlista räcker Generera patruller.">
                             <i class="bi bi-sliders me-1"></i>Patrullgenerator (avancerad)
-                        </a>
-                    }
-                    @* Planera dagen: startlistan byggs om runt funktionärernas uppdrag (förhandsvisning, säkerhetskopia, ångra). Dialogen bor i planeringens Bemanning och öppnas direkt
-                       härifrån; planeringen och tävlingen prövar själva vem som får göra det. Visas bara när tävlingen har en planering. *@
-                    @if (int.TryParse(competitionId, out var compIdForPlanning) && PlanningSvc.ForCompetition(compIdForPlanning) != null)
-                    {
-                        <a class="btn btn-outline-secondary btn-sm" href="/tavlingsplanering?c=@competitionId&vy=startlista" title="Bygg om startlistan så att ingen skjuter när hen står på sin station — du ser förslaget först och kan ångra">
-                            <i class="bi bi-diagram-2 me-1"></i>Bygg om runt funktionärerna…
                         </a>
                     }
                     @* Starter's OPERATOR screen (send-off / hold / DNS at the line) — pad-optimised,
