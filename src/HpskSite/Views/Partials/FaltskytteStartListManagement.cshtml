@@ -532,7 +532,7 @@
         var ids = [];
         document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
         if (ids.length === 0) return;
-        var data = await apiPost('BulkMoveShooters', { competitionId: parseInt(compId), patrolMemberIds: ids, targetPatrolId: targetId });
+        var data = await apiPostForce('BulkMoveShooters', { competitionId: parseInt(compId), patrolMemberIds: ids, targetPatrolId: targetId });
         if (data.success) loadFaltPatrols();
         else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
@@ -759,7 +759,7 @@
         if (patrol && seatedCount >= faltPatrolSize) {
             if (!confirm('Patrullen har redan ' + seatedCount + ' skyttar (max ' + faltPatrolSize + '). Lägg till ändå?')) return;
         }
-        var data = await apiPost('AddShooterToPatrol', {
+        var data = await apiPostForce('AddShooterToPatrol', {
             competitionId: parseInt(compId),
             patrolId: patrolId,
             memberId: memberId,
@@ -770,7 +770,7 @@
         if (data.success) {
             faltSearchShooters(); // Refresh available list
             loadFaltPatrols();
-        } else { alert('Fel: ' + (data.message || 'Okänt fel')); }
+        } else if (!data.cancelled) { alert('Fel: ' + (data.message || 'Okänt fel')); }
     };
 
     // Existing functions (generate, delete all, delete by group)

@@ -814,7 +814,8 @@ namespace HpskSite.Controllers
                         {
                             Class = c.Class.Trim(),
                             StartPreference = c.StartPreference ?? request.StartPreference ?? "Inget",
-                            TeamNumber = c.TeamNumber
+                            TeamNumber = c.TeamNumber,
+                            JoinMemberId = c.JoinMemberId is > 0 ? c.JoinMemberId : null
                         })
                         .ToList();
                 }
@@ -873,6 +874,21 @@ namespace HpskSite.Controllers
                     IsActive = true,
                     IsSubCompetition = request.IsSubCompetition
                 };
+                // Fältskytte: "gå i samma patrull som" prövas av samma regel som skyttens egen anmälan och adminens redigering, mot den anmäldas klubb.
+                if (classEntries.Any(e => e.JoinMemberId.HasValue))
+                {
+                    if (!string.Equals(competition.CompetitionType, "Faltskytte", StringComparison.OrdinalIgnoreCase))
+                        return Json(new { success = false, message = "Att gå i samma patrull som någon annan gäller bara fältskytte." });
+                    int ClubOf(HpskSite.Models.Registrations.RegistrationRecord r) => r.ClubId > 0 ? r.ClubId : _memberClubService.GetPrimaryClubId(_memberService.GetById(r.MemberId));
+                    string NameOf(int id) => _memberService.GetById(id)?.Name ?? "Den personen";
+                    var allRegistrations = _registrations.List(request.CompetitionId);
+                    foreach (var entry in classEntries.Where(e => e.JoinMemberId.HasValue))
+                    {
+                        var joinError = HpskSite.Models.Registrations.RegistrationJoinRule.Check(registration, entry.Class, entry.JoinMemberId!.Value, allRegistrations, ClubOf, NameOf);
+                        if (joinError != null) return Json(new { success = false, message = joinError });
+                    }
+                }
+
                 _registrations.Save(registration);
                 capacityLease?.Dispose();
 
@@ -2826,6 +2842,8 @@ namespace HpskSite.Controllers
             /// <summary>Direktplacering team/slot for this class. When omitted on a class
             /// the registration already had, the existing entry's team is preserved.</summary>
             public int? TeamNumber { get; set; }
+            /// <summary>Fältskytte, efteranmälan: medlemmen skytten ska gå i samma patrull som i den här klassen. Prövas av RegistrationJoinRule.</summary>
+            public int? JoinMemberId { get; set; }
         }
 
         /// <summary>

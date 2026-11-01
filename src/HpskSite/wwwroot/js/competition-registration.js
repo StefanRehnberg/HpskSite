@@ -2474,6 +2474,7 @@ async function registerAndJoinPatrol() {
                     ? sc + ': redan i patrull ' + (joinData.weaponGroup || '') + '-' + joinData.patrolNumber
                     : sc + ': patrull ' + (joinData.weaponGroup || '') + '-' + joinData.patrolNumber + ' (' + joinData.memberCount + '/' + joinData.patrolSize + ')';
                 patrolResults.push(msg);
+                if (joinData.joinNote) patrolResults.push(joinData.joinNote);
             }
         }
 

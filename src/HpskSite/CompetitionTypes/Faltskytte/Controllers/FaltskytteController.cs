@@ -1884,9 +1884,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     message = "Skytten finns redan i patrull " + (existingPatrol?.PatrolNumber ?? 0) });
             }
 
+            // "Gå i samma patrull som": ligger kamraten redan i en patrull med ledig plats hamnar skytten där.
+            var (joinRegs, joinPlacements) = await PairStateAsync(request.CompetitionId);
+            var partnerPlace = HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.PartnerPlacement(joinRegs, joinPlacements, request.MemberId, request.ShootingClass);
+            FaltskyttePatrol? withPartner = null;
+            if (partnerPlace != null)
+            {
+                var pp = await db.FirstOrDefaultAsync<FaltskyttePatrol>("WHERE Id = @0 AND CompetitionId = @1", partnerPlace.PatrolId, request.CompetitionId);
+                var seated = pp == null ? int.MaxValue : await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND (Status IS NULL OR Status <> 'DNS')", pp.Id);
+                if (pp != null && seated < (pp.Capacity ?? patrolSize)) withPartner = pp;
+            }
+
             // Find latest patrol for this weapon group with space. DNS'd shooters don't count toward
             // capacity, so a did-not-start seat is reused before spilling to a new patrol.
-            var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+            var openPatrol = withPartner ?? await db.FirstOrDefaultAsync<FaltskyttePatrol>(
                 @"SELECT p.* FROM FaltskyttePatrol p
                   WHERE p.CompetitionId = @0 AND " + HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.GroupMatchSql("p.WeaponGroup", "@1") + @"
                   AND (SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = p.Id AND (Status IS NULL OR Status <> 'DNS')) < COALESCE(p.Capacity, @2)
@@ -1928,7 +1939,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var memberCount = await db.ExecuteScalarAsync<int>(
                 "SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0", openPatrol.Id);
 
-            return Json(new { success = true, patrolNumber = openPatrol.PatrolNumber, memberCount, patrolSize, weaponGroup });
+            string? joinNote = null;
+            if (partnerPlace != null && openPatrol.Id != partnerPlace.PatrolId)
+            {
+                var partnerName = joinRegs.FirstOrDefault(r => r.MemberId == HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.PartnerOf(joinRegs, request.MemberId, request.ShootingClass))?.MemberName ?? "kamraten";
+                joinNote = $"{request.MemberName} ska gå i samma patrull som {partnerName}, men patrull {partnerPlace.PatrolNumber} har ingen ledig plats. Placerades i patrull {openPatrol.PatrolNumber}; arrangören kan flytta dem ihop.";
+                _logger.LogWarning("Rullande start: {Member} fick inte plats hos kamraten i tävling {Comp} (kamratens patrull {Partner}, placerad i {Placed})", request.MemberId, request.CompetitionId, partnerPlace.PatrolNumber, openPatrol.PatrolNumber);
+            }
+            return Json(new { success = true, patrolNumber = openPatrol.PatrolNumber, memberCount, patrolSize, weaponGroup, joinNote });
             }
             catch (Exception ex)
             {
@@ -2344,6 +2362,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             using var _patrolLock = await _dbLock.TryAcquireAsync(HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LockName(request.CompetitionId), TimeSpan.FromSeconds(10));
             if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
+            if (!request.Force)
+            {
+                var why = await SeparationAsync(request.CompetitionId, new[] { (request.MemberId, request.ShootingClass) }, request.PatrolId);
+                if (why != null) return Json(new { success = false, needsForce = true, message = why });
+            }
+
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
             // Remove from any existing patrol within the same weapon group (allows "move" via add).
@@ -2437,6 +2461,33 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return pos;
         }
 
+        /// <summary>
+        /// "Måste gå i samma patrull som" vid manuella ändringar: skyttarnas anmälningar (med kamrater) och dagens placeringar. Anmälningarna läses FÖRE den egna
+        /// anslutningen (repositoryt har egen läsning). Se <see cref="HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules"/>.
+        /// </summary>
+        private async Task<(List<HpskSite.Models.ViewModels.Competition.CompetitionRegistration> Regs, List<HpskSite.CompetitionTypes.Faltskytte.Services.PairPlacement> Placements)> PairStateAsync(int competitionId)
+        {
+            var regs = (await _startListRepository.GetCompetitionRegistrations(competitionId)).Where(r => r.IsActive).ToList();
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0", competitionId);
+            var members = await db.FetchAsync<FaltskyttePatrolMember>("WHERE PatrolId IN (SELECT Id FROM FaltskyttePatrol WHERE CompetitionId = @0)", competitionId);
+            var byId = patrols.ToDictionary(p => p.Id);
+            var placements = members.Where(m => byId.ContainsKey(m.PatrolId))
+                .Select(m => new HpskSite.CompetitionTypes.Faltskytte.Services.PairPlacement(m.MemberId, m.ShootingClass ?? "", m.PatrolId, byId[m.PatrolId].PatrolNumber, m.Status == "DNS")).ToList();
+            return (regs, placements);
+        }
+
+        /// <summary>Beskedet att visa (och låta arrangören bekräfta) när flytten skulle skilja ett par åt, eller null.</summary>
+        private async Task<string?> SeparationAsync(int competitionId, IEnumerable<(int MemberId, string ShootingClass)> movers, int targetPatrolId)
+        {
+            var (regs, placements) = await PairStateAsync(competitionId);
+            if (!regs.Any(r => r.JoinMemberId is > 0)) return null;
+            int number;
+            using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                number = await db.ExecuteScalarAsync<int>("SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0 AND CompetitionId = @1", targetPatrolId, competitionId);
+            return HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.SeparationMessage(regs, placements, movers.Select(m => new HpskSite.CompetitionTypes.Faltskytte.Services.PairMove(m.MemberId, m.ShootingClass, targetPatrolId, number)).ToList());
+        }
+
         private static async Task MoveMemberToPatrolSeat(NPoco.IDatabase db, int patrolMemberId, int targetPatrolId)
         {
             var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", patrolMemberId);
@@ -2487,6 +2538,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
+            var moving = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", request.PatrolMemberId);
+            if (moving != null && !request.Force)
+            {
+                var why = await SeparationAsync(request.CompetitionId, new[] { (moving.MemberId, moving.ShootingClass ?? "") }, request.TargetPatrolId);
+                if (why != null) return Json(new { success = false, needsForce = true, message = why });
+            }
             await MoveMemberToPatrolSeat(db, request.PatrolMemberId, request.TargetPatrolId);
 
             return Json(new { success = true });
@@ -2575,6 +2632,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 catch { }
             }
 
+            // "Gå i samma patrull som": har skytten en kamrat i gruppen som redan är placerad hamnar hen hos kamraten när platsen räcker (om arrangören inte pekat ut en patrull
+            // själv). Går det inte får arrangören veta det, med namn — registreringen är redan sparad och patrullen går att ändra efteråt.
+            var (pairRegs, pairPlacements) = await PairStateAsync(request.CompetitionId);
+            var joinNotes = new List<string>();
+            string PairName(int id) => pairRegs.FirstOrDefault(r => r.MemberId == id)?.MemberName is { Length: > 0 } nm ? nm : $"Medlem {id}";
+
             var assignments = new List<object>();
             foreach (var grp in classesByGroup)
             {
@@ -2582,6 +2645,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 int patrolId;
                 int patrolNumber;
                 bool createdNew = false;
+                var partnerPlace = grp.Select(c => HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.PartnerPlacement(pairRegs, pairPlacements, memberId, c.Class)).FirstOrDefault(p => p != null);
 
                 if (request.Target == "newPatrol")
                 {
@@ -2599,9 +2663,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }
                 else // "nextAvailable" — also the fallback when the explicit pick is in the wrong group
                 {
+                    FaltskyttePatrol? withPartner = null;
+                    if (partnerPlace != null)
+                    {
+                        var pp = await db.FirstOrDefaultAsync<FaltskyttePatrol>("WHERE Id = @0 AND CompetitionId = @1", partnerPlace.PatrolId, request.CompetitionId);
+                        var taken = pp == null ? int.MaxValue : await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND (Status IS NULL OR Status <> 'DNS')", pp.Id);
+                        if (pp != null && taken < (pp.Capacity ?? walkInPatrolSize)) withPartner = pp;
+                    }
                     // Fill the lowest-numbered patrol of this group that still has a free (non-DNS)
                     // seat — so a DNS'd shooter's freed slot gets used before spilling to a new patrol.
-                    var openPatrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>(
+                    var openPatrol = withPartner ?? await db.FirstOrDefaultAsync<FaltskyttePatrol>(
                         @"SELECT p.* FROM FaltskyttePatrol p
                           WHERE p.CompetitionId = @0
                           AND (" + HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.GroupMatchSql("p.WeaponGroup", "@1") + @" OR p.WeaponGroup = '' OR p.WeaponGroup IS NULL)
@@ -2621,6 +2692,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                             "SELECT PatrolNumber FROM FaltskyttePatrol WHERE Id = @0", patrolId);
                         createdNew = true;
                     }
+                }
+
+                if (partnerPlace != null && patrolId != partnerPlace.PatrolId)
+                {
+                    var follow = grp.Select(c => (Class: c.Class, Partner: HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.PartnerOf(pairRegs, memberId, c.Class))).First(x => x.Partner != null);
+                    joinNotes.Add($"{memberName} ska gå i samma patrull som {PairName(follow.Partner!.Value)} i klass {weaponGroup}, men placerades i patrull {patrolNumber}. {PairName(follow.Partner!.Value)} ligger i patrull {partnerPlace.PatrolNumber}, "
+                        + (request.Target == "newPatrol" || explicitPatrolId.HasValue ? "som inte valdes." : "som inte har någon ledig plats. Flytta dem ihop för hand."));
                 }
 
                 // Same-group dedupe (matches AddShooterToPatrol's behaviour) — moving a shooter
@@ -2670,7 +2748,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new
             {
                 success = true,
-                assignments
+                assignments,
+                joinNote = joinNotes.Count == 0 ? null : string.Join("\n", joinNotes)
             });
         }
 
@@ -2892,6 +2971,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (_patrolLock == null) return Json(new { success = false, message = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.BusyMessage });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
+            if (!request.Force && request.PatrolMemberIds.Count > 0)
+            {
+                var rows = await db.FetchAsync<FaltskyttePatrolMember>("WHERE Id IN (@0)", request.PatrolMemberIds);
+                var why = await SeparationAsync(request.CompetitionId, rows.Select(r => (r.MemberId, r.ShootingClass ?? "")), request.TargetPatrolId);
+                if (why != null) return Json(new { success = false, needsForce = true, message = why });
+            }
             foreach (var pmId in request.PatrolMemberIds)
                 await MoveMemberToPatrolSeat(db, pmId, request.TargetPatrolId);
 

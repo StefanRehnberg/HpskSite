@@ -56,6 +56,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string ShootingClass { get; set; } = "";
         public string MemberName { get; set; } = "";
         public string ClubName { get; set; } = "";
+        /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
+        public bool Force { get; set; }
     }
 
     public class RemoveShooterFromPatrolRequest
@@ -69,6 +71,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int CompetitionId { get; set; }
         public int PatrolMemberId { get; set; }
         public int TargetPatrolId { get; set; }
+        /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
+        public bool Force { get; set; }
     }
 
     /// <summary>
@@ -90,6 +94,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int CompetitionId { get; set; }
         public List<int> PatrolMemberIds { get; set; } = new();
         public int TargetPatrolId { get; set; }
+        /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
+        public bool Force { get; set; }
     }
 
     public class UpdatePatrolTimeRequest

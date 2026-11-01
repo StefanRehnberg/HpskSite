@@ -1046,6 +1046,12 @@
                     </div>
                 }
 
+                @if (compType == "Faltskytte")
+                {
+                    @* Fältskytte: "gå i samma patrull som" per vald klass (nybörjare med klubbens vapen). Fylls när skytt och klass är valda; servern prövar valet. *@
+                    <div class="mb-3" id="walkInJoinContainer"></div>
+                }
+
                 @if (dpEnabled)
                 {
                     <div class="mb-3">
@@ -5551,6 +5557,38 @@ function springTimeShort(t) {
 // Springskytte → weapon checkboxes (A/C) × one age dropdown → "A-<age>" / "C-<age>";
 // everything else → the flat #walkInClassList checkboxes. Single source of truth for the
 // submit collection, submit-enabled state, and the Springskytte start-time slot rows.
+// Fältskytte, efteranmälan: "gå i samma patrull som" per vald klass. Kandidaterna är samma som i skyttens egen anmälan (klubbkamrater som redan är anmälda i vapengruppen).
+// Tidigare val behålls när raderna ritas om; en sen svarande lista ritar inte över en nyare.
+let walkInJoinSeq = 0;
+async function renderWalkInJoinRows() {
+    const host = document.getElementById('walkInJoinContainer');
+    if (!host || !isFaltCompetition) return;
+    const memberId = parseInt(document.getElementById('walkInSelectedMemberId').value, 10) || 0;
+    const classes = getWalkInSelectedClasses();
+    const previous = {};
+    host.querySelectorAll('.walk-in-join-select').forEach(s => { previous[s.dataset.class] = s.value; });
+    const seq = ++walkInJoinSeq;
+    if (!memberId || classes.length === 0) { host.innerHTML = ''; return; }
+    const competitionId = parseInt($('.competition-registration-management').data('competition-id'), 10);
+    const clubBlockVisible = !document.getElementById('walkInClubBlock')?.classList.contains('d-none');
+    const clubId = clubBlockVisible ? parseInt(document.getElementById('walkInClubSelect')?.value, 10) || 0 : 0;
+    const lists = await Promise.all(classes.map(async c => {
+        try {
+            const resp = await fetch(`/umbraco/surface/Competition/GetJoinCandidates?competitionId=${competitionId}&classId=${encodeURIComponent(c.id)}&targetMemberId=${memberId}${clubId ? `&representingClubId=${clubId}` : ''}`,
+                { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await resp.json();
+            return d && d.success && Array.isArray(d.candidates) ? d.candidates : [];
+        } catch (e) { return []; }
+    }));
+    if (seq !== walkInJoinSeq) return;
+    if (lists.every(l => l.length === 0)) { host.innerHTML = ''; return; }
+    host.innerHTML = '<label class="form-label fw-bold mb-1">Gå i samma patrull som</label><small class="text-muted d-block mb-2">För en nybörjare med klubbens vapen. Bara klubbkamrater som redan är anmälda i samma vapengrupp kan väljas. Gäller vid nästa nybygge av startlistan, och direkt om skytten läggs på en patrull nu.</small>'
+        + classes.map((c, i) => `<div class="d-flex align-items-center gap-2 mb-1"><label class="small mb-0" style="min-width:130px" for="walkInJoin_${i}">${escapeWalkIn(c.name || c.id)}</label>`
+            + `<select class="form-select form-select-sm walk-in-join-select" id="walkInJoin_${i}" data-class="${escapeWalkIn(c.id)}"><option value="0">Ingen</option>`
+            + lists[i].map(p => `<option value="${p.memberId}">${escapeWalkIn(p.name)}</option>`).join('') + '</select></div>').join('');
+    host.querySelectorAll('.walk-in-join-select').forEach(s => { if (previous[s.dataset.class] && [...s.options].some(o => o.value === previous[s.dataset.class])) s.value = previous[s.dataset.class]; });
+}
+
 function getWalkInSelectedClasses() {
     if (walkInSpringskytteEnabled) {
         const age = document.getElementById('walkInSpringAgeClass')?.value || '';
@@ -5778,6 +5816,7 @@ async function openWalkInRegistrationModal() {
     document.getElementById('walkInSelectedMember').textContent = 'Ingen vald än';
     document.getElementById('walkInSelectedMember').classList.add('text-muted');
     document.getElementById('walkInSelectedMemberId').value = '';
+    renderWalkInJoinRows();
     document.getElementById('walkInError').classList.add('d-none');
     document.getElementById('walkInSubmitBtn').disabled = true;
     // Hide the club picker until a shooter is picked — a stale one from the previous walk-in
@@ -6003,9 +6042,12 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
     const list = document.getElementById('walkInClassList');
     if (!list) return;
+    // Byter skytten "tävlar för" ändras vilka klubbkamrater som kan väljas.
+    document.getElementById('walkInClubSelect')?.addEventListener('change', () => renderWalkInJoinRows());
     list.addEventListener('change', (e) => {
         if (!e.target.classList.contains('walk-in-class-cb')) return;
         enforceClassMutex('#walkInClassList', e.target);
+        renderWalkInJoinRows();
         if (walkInDirektplaceringEnabled) {
             const checked = Array.from(list.querySelectorAll('.walk-in-class-cb:checked'))
                 .map(cb => ({ id: cb.value, name: cb.dataset.className || cb.value }));
@@ -6111,6 +6153,7 @@ function escapeWalkIn(s) {
 
 function selectWalkInMember(memberId, memberName, clubName) {
     document.getElementById('walkInSelectedMemberId').value = memberId;
+    renderWalkInJoinRows();
     const sel = document.getElementById('walkInSelectedMember');
     sel.textContent = clubName ? `${memberName} (${clubName})` : memberName;
     sel.classList.remove('text-muted');
@@ -6169,10 +6212,16 @@ async function submitWalkInRegistration() {
             if (sel.value) slotByClass[sel.dataset.classId] = parseInt(sel.value, 10);
         });
     }
+    const joinByClass = {};
+    document.querySelectorAll('#walkInJoinContainer .walk-in-join-select').forEach(sel => {
+        const v = parseInt(sel.value, 10) || 0;
+        if (v > 0) joinByClass[sel.dataset.class] = v;
+    });
     const classes = getWalkInSelectedClasses()
         .map(c => {
             const entry = { class: c.id, startPreference: 'Inget' };
             if (slotByClass[c.id] != null) entry.teamNumber = slotByClass[c.id];
+            if (joinByClass[c.id]) entry.joinMemberId = joinByClass[c.id];
             return entry;
         });
 
@@ -6234,6 +6283,9 @@ async function submitWalkInRegistration() {
                 const patrolData = await patrolResp.json();
                 if (!patrolData.success) {
                     console.warn('Patrol assignment failed:', patrolData.message);
+                } else if (patrolData.joinNote) {
+                    // "Gå i samma patrull som" gick inte att hålla (kamratens patrull full eller en annan patrull vald): säg det med namn, patrullen går att ändra efteråt.
+                    showDeskSaveNotice(String(patrolData.joinNote).split('\n'), 'warning');
                 }
             } catch (patrolErr) {
                 console.warn('Patrol assignment threw:', patrolErr);
