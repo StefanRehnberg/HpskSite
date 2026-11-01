@@ -2695,6 +2695,10 @@ namespace HpskSite.Services
 
     <p>Det inneb&auml;r att du nu har tillg&aring;ng till administrationsfunktioner f&ouml;r {roleName}.</p>
     {tutorialSection}
+    <p>Ta g&auml;rna en stund och titta igenom sidan <strong>Om Pistol.nu</strong> &ndash; den ger dig en bra &ouml;verblick &ouml;ver vad Pistol.nu &auml;r och vad ni kan anv&auml;nda det till.</p>
+    <p style=""text-align: center; margin: 15px 0 20px 0;"">
+        <a href=""{siteUrl}/om-pistol-nu/"" style=""display: inline-block; background-color: #198754; color: white !important; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;"">L&auml;s om Pistol.nu</a>
+    </p>
     <p>Om du har fr&aring;gor om din nya roll, kontakta oss via <a href=""mailto:admin@pistol.nu"">admin@pistol.nu</a>.</p>
 
     <p>Med v&auml;nliga h&auml;lsningar,<br/>Pistol.nu</p>
