@@ -77,12 +77,12 @@
   {
     <a class="pg-back" href="/competitions"><i class="bi bi-arrow-left"></i> Tillbaka till tävlingar</a>
     <div class="alert alert-warning py-2 mb-2" role="note" id="pgPracticeBanner"><b>Övning.</b> Skyttarna är påhittade, inget sparas och inget publiceras. Sidan och motorn är desamma som för en riktig tävling.</div>
-    <h1>Patrullgenerator <span class="pg-hint fw-normal">· Övning</span> <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="pgScenarioBtn">Skapa testdata</button></h1>
+    <h1>Patrullgenerator <span class="pg-hint fw-normal">· Övning</span> <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="pgScenarioBtn">Skapa testdata</button> <button type="button" class="btn btn-outline-primary btn-sm ms-1" id="pgGuide" onclick="TutorialHelper.open('tutorial-patrullgenerator-prova')" title="Se instruktionsfilm om att prova patrullgeneratorn"><i class="bi bi-play-circle me-1"></i>Guide</button></h1>
   }
   else
   {
     <a class="pg-back" href="/competitionmanagement?competitionId=@M.CompetitionId"><i class="bi bi-arrow-left"></i> Tillbaka till tävlingen</a>
-    <h1>Patrullgenerator <span class="pg-hint fw-normal">· @M.Name</span> <a class="btn btn-outline-secondary btn-sm ms-2" id="pgPracticeLink" href="/patrullgenerator/lab">Öva med påhittade skyttar</a></h1>
+    <h1>Patrullgenerator <span class="pg-hint fw-normal">· @M.Name</span> <a class="btn btn-outline-secondary btn-sm ms-2" id="pgPracticeLink" href="/patrullgenerator/lab">Öva med påhittade skyttar</a> <button type="button" class="btn btn-outline-primary btn-sm ms-1" id="pgGuide" onclick="TutorialHelper.open('tutorial-patrullgenerator')" title="Se instruktionsfilm om startlistan och patrullgeneratorn"><i class="bi bi-play-circle me-1"></i>Guide</button></h1>
   }
 
   <div class="pg-statusrow">

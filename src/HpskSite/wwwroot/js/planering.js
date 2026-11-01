@@ -89,6 +89,24 @@
         }).join('');
         wrap.classList.remove('d-none');
     }
+    // Instruktionsfilmerna (noderna under /tutorials) — en film per del där den hör hemma.
+    const GUIDE = {
+        oversikt: 'tutorial-planering-starta', meddelanden: 'tutorial-planering-starta', moten: 'tutorial-planering-starta',
+        mote: 'tutorial-planering-starta', deltagare: 'tutorial-planering-starta', installningar: 'tutorial-planering-starta',
+        uppgifter: 'tutorial-planering-uppgifter', dokument: 'tutorial-planering-uppgifter',
+        stationer: 'tutorial-planering-uppgifter', beslut: 'tutorial-planering-uppgifter',
+        bemanning: 'tutorial-bemanning-planering'
+    };
+    function setGuide(v) {
+        const b = $('plGuide'); if (!b) return;
+        const id = GUIDE[v];
+        b.dataset.tutorial = id || '';
+        b.classList.toggle('d-none', !id || TOKEN);
+    }
+    $('plGuide')?.addEventListener('click', e => {
+        const id = e.currentTarget.dataset.tutorial;
+        if (id && typeof TutorialHelper !== 'undefined') TutorialHelper.open(id);
+    });
     $('plActionsList')?.addEventListener('click', e => {
         const b = e.target.closest('[data-pl-action]'); if (!b) return;
         const fn = actionFns[parseInt(b.dataset.plAction, 10)]; if (fn) fn();
@@ -416,6 +434,7 @@
         if (view !== 'bemanning' && window.PlaneringBemanning) window.PlaneringBemanning.leave();
         rowFns = [];
         renderRail();
+        setGuide(view);
         ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
            uppgifter: viewTasks, beslut: viewDecisions, dokument: viewDocuments, deltagare: viewPeople, installningar: viewSettings,
            tavling: viewCompetition, stationer: viewStations,

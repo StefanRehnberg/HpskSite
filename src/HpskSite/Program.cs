@@ -1,4 +1,4 @@
-﻿using HpskSite;
+using HpskSite;
 using HpskSite.Extensions;
 using HpskSite.Middleware;
 using HpskSite.Models;
@@ -238,5 +238,5 @@ app.MapControllers();
 // as it conflicts with Umbraco's internal routing pipeline
 app.MapHub<HpskSite.Hubs.TrainingMatchHub>("/hubs/trainingmatch");
 
-    await app.RunAsync();
+await app.RunAsync();
 

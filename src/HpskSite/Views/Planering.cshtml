@@ -86,11 +86,17 @@
                         <h1 id="plTitle">Tävlingsplanering</h1>
                         <div class="pl-sub" id="plSub"></div>
                     </div>
-                    <div class="dropdown d-none pl-noprint" id="plActions">
-                        <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-sliders me-1"></i>Åtgärder
+                    <div class="d-flex gap-2 align-items-start pl-noprint">
+                        @* Instruktionsfilmen som hör till delen — planering.js sätter vilken (tutorialId) och visar knappen. *@
+                        <button type="button" class="btn btn-outline-primary text-nowrap d-none" id="plGuide" title="Se instruktionsfilm om den här delen">
+                            <i class="bi bi-play-circle me-1"></i>Guide
                         </button>
-                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="plActionsList"></ul>
+                        <div class="dropdown d-none" id="plActions">
+                            <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-sliders me-1"></i>Åtgärder
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="plActionsList"></ul>
+                        </div>
                     </div>
                 </div>
                 <div id="plMsg" aria-live="polite"></div>
