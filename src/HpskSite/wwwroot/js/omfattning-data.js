@@ -1,4 +1,4 @@
-// Innehållet i kartan på /allt. Byggt 2026-09-27 ur en inventering av koden.
+// Innehållet i kartan på /allt. Byggt 2026-09-27 ur en inventering av koden. Tävlingsplanering, bemanning och patrullgenerator omskrivna 2026-11-01.
 // ⚠️ Kartan är ett påstående om sajten: lägg bara in det som FINNS i koden, och ta bort det
 // som tas bort. Varje sträng utan barn räknas som en funktion i sidans totalsiffra.
 // [namn, beskrivning, barn?] eller bara "namn" för en detalj
@@ -25,18 +25,26 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
   ["Serier och säsonger","",[
    ["Poängstrategier","",["Summa","Bästa N","Antal segrar","Fasta poäng","Dynamiska poäng","Klubblag bästa X"]],
    "Serieresultat per klass","Seriebanner på tävlingen","Säsongssida","Kopiera serie med tävlingar"]],
-  ["Planering och projektering","Det som händer veckorna före. Här finns det som ingen annan tjänst tar hand om.",[
-   ["Förberedelser","",["Områden och uppgifter","Deadlines och försenade","Beroenden","Kommentarer och logg","Dokument och länkar","Påminn ansvariga"]],
-   ["Mallar","",["Standard per gren och storlek","Egna mallar"]],
-   "Budget och utfall per område",
-   ["Materiel","",["Materiellista för fältskytte","Materielberäkning för övriga grenar"]],
+  ["Tävlingsplanering","Planeringen börjar långt innan tävlingen finns. Hela gruppen på ett ställe: inga mejltrådar, inga kalkylark.",[
+   ["Planering utan tävling","",["Skapa och namnge en planering, till exempel ett mästerskap flera år fram","Delplaneringar för större arrangemang","Kopplas till tävlingen först när det behövs","Kopiera planeringen till nästa år","Lämna över ledningen"]],
+   ["Med i planeringen","",["Sök en medlem eller bjud in via e-post","Följer, Deltar, Kan ändra och Sammankallande","Företräder klubb eller krets","Svara utan konto via en länk","Be om att få vara med"]],
+   ["Samarbete","",["Meddelanden med @-nämning","Möten med tidsförslag och svar","Att prata om och anteckningar","Mötet i din kalender","Förslag och beslut","Beslut till styrelsens ärendekö","Ett mejl om dagen, eller de notiser du väljer"]],
+   ["Uppgifter","",["Mall per gren och storlek","Områden med ansvariga","Fem lägen, från Ej påbörjad till Utförd","Milstolpar och förbundets frister","Försenade och mina uppgifter","Kommentarer och logg","Påminn ansvariga"]],
+   ["Dokumentarkiv","",["Kategorier","Bifoga till meddelanden, möten och uppgifter","Filer och länkar"]],
+   ["Stationerna","Fältskyttets stationer, planerade av flera på samma gång.",["En ansvarig per station: person, klubb eller krets","Godkännande av banläggare, station för station","Flera bygger var sin station i samma konfiguration"]],
+   ["Vägen till tävlingen","",["Ansökan till kretsen direkt ur planeringen","Tävlingen kopplas till planeringen"]],
    ["Dagsprogram","",["Programpunkter","Publikt program","Kontroll av krockar"]],
-   "Planeringsblad för utskrift"]],
-  ["Bemanning","Rätt funktionär på rätt plats, utan kalkylark och telefonkedjor.",[
-   ["Bemanningsrutnät","",["Roll per dag","Förberedelse- och efterarbetsdagar","Behov mot bemannat","Luckor och dubbelbokning","Dela pass","Ersätt person"]],
+   ["Materiel","",["Materiellista för fältskytte","Materielberäkning för övriga grenar"]],
+   "Planeringsblad för utskrift",
+   "Videoguide i varje del"]],
+  ["Bemanning","Rätt funktionär på rätt plats, veckor före tävlingen.",[
+   ["Bemanningen steg för steg","",["Roller och antal per dag","Det som är gjort och det som saknas","Funktionärer som också skjuter","Tid per start","Dagens startlista bygger på bemanningen"]],
+   ["Bemanningsrutnät","",["Roll per dag","Förberedelse- och efterarbetsdagar","Behov mot bemannat","Luckor och dubbelbokning","Uppdrag mitt i en egen start","Roller som ska vara bemannade hela skjuttiden","Avlösning mellan pass","Ersätt person"]],
    ["Roller","",["Rollkatalog","Egna rollnamn","Appbehörighet per roll","Stationschefer"]],
-   ["Rekrytering","",["Hjälppass för självanmälan","Förfrågan till klubb eller krets","Push och mejl"]],
-   ["Funktionärens sida","",["Se placeringarna du fått","Anmäl dig till pass","Ange tillgänglighet","Se placering utan konto"]],
+   ["Rekrytering","",["Hjälppass för självanmälan","Förfrågan till klubb eller krets","Länk att dela","Push och mejl"]],
+   ["Fyll med hjälp","",["Klistra in en namnlista","Förslag med skäl","Se förslaget innan något läggs in","Ångra förslaget"]],
+   ["Besked","",["Placeringar syns i schemat direkt","Du bestämmer när de får besked"]],
+   ["Funktionärens sida","",["Se placeringarna du fått","Egen starttid på samma ställe","Anmäl dig till pass","Ange tillgänglighet","Se placering utan konto"]],
    ["Personmatchning","",["Koppla till medlem","Hitta dubbletter"]],
    "Utskrift och e-postlista"]],
   ["Anmälan","",[
@@ -50,6 +58,7 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
    ["Finaler","",["En per vapengrupp","Frys kvalresultatet","Cut 1/6","Placera om efter resultat"]],
    ["Springskytte","",["Flera startlistor","Pass och pauser","Startnummerserier","Numrera om med historik","Stafettstartlista"]],
    ["Fältskyttets patruller","",["Generera per vapengrupp","Flytta skyttar","Numrera om","Walk-in till nästa patrull"]],
+   ["Patrullgeneratorn","Fältets startlista, byggd runt funktionärerna. Förslaget först, ändringen när du väljer.",["Svar på om det går ihop","Stationsbild över dagen","Du ser vem som flyttas, och varför","Funktionärer får ingen start som krockar med uppdraget","Vila mellan starter","Önskemål om tidig eller sen start","Gå i samma patrull som en klubbkamrat","Lås skyttar som ska ligga fast","Säkerhetskopia och Ångra","Publicera per vapengrupp","Övningsläge med påhittade skyttar","Dela övningen med en länk"]],
    "Direktplacering","Utskrift"]],
   ["Disken","Registreringsbordet på tävlingsdagen.",[
    ["Efteranmälan","",["Flera klasser på en gång","Lediga platser direkt","Lag och stafett"]],
@@ -237,7 +246,7 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
    ["Gå med","",["Kod","QR","Länk"]],
    "Gäster","Live-tavla","Foto av måltavlan","Reaktioner","Resultat till Min sida",
    ["Topplista","",["Form","Förbättring 30 dagar"]]]],
-  ["Mitt schema","",["Tidslinje","Krockar","Kalenderexport","Påminnelse"]],
+  ["Mitt schema","",["Tidslinje","Krockar","Kalenderexport","Påminnelse","Uppdrag som funktionär och egen start tillsammans","Ändrad starttid syns"]],
   ["Notiser","",["Push","Nya matcher","Formförbättring","Licensförfall"]],
   ["Siktbild","",[["Simulator","",["Skärpeplan","Ljus","Brytningsfel","Diopter","Skytteglasögon","Amplitud"]],"Videolektion"]],
   ["Mobilappen","Android-appen, i test.",["Matcher","QR-skanner","Statistik"]]

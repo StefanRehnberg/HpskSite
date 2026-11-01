@@ -157,26 +157,83 @@ namespace HpskSite.Controllers
                 // problem (each request from a cookie-less scraper gets a fresh SessionHash)
                 // produces a flood of single-page sessions; filtering to ≥ 2 paths in a day
                 // strips them out without needing UA-level rules.
-                var dailyRows = await db.FetchAsync<DailyVisitorRow>(
-                    @"SELECT
-                          [Day],
-                          COUNT(*) AS Visitors,
-                          SUM(PageCount) AS PageViews
+                // EN läsning av besöksloggen för alla tre svaren (förut tre: dagar, veckor och funktioner, var
+                // och en med egen skanning, egen tidszonsomräkning per rad och egen uppslagning av Path ur
+                // huvudtabellen). Raderna från veckofönstrets början läggs i en temporär tabell med den lokala
+                // tiden räknad en gång; de tre frågorna läser därifrån, i samma batch och samma anslutning.
+                // Fönstren är oförändrade: dagar och veckor på lokal tid (>= @1 respektive >= @0), funktionerna
+                // på den råa tiden (>= @1), precis som förut.
+                var (dailyRows, weeklyRows, featureRows) = db.FetchMultiple<DailyVisitorRow, WeeklyVisitorRow, FeatureUsageRow>(
+                    @"SELECT CAST(CAST(VisitedAt AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' AS datetime2) AS Loc,
+                             VisitedAt AS Raw, SessionHash, [Path], LOWER([Path]) AS PathLower
+                      INTO #v
+                      FROM [VisitorLogs] WHERE VisitedAt >= DATEADD(day, -1, @0);
+
+                      SELECT [Day], COUNT(*) AS Visitors, SUM(PageCount) AS PageViews
                       FROM (
-                          SELECT
-                              CAST(VisitedAt AS DATE) AS [Day],
-                              SessionHash,
-                              COUNT(*) AS PageCount
-                          FROM (SELECT CAST(CAST(VisitedAt AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' AS datetime2) AS VisitedAt,
-                                       SessionHash, [Path]
-                                  FROM [VisitorLogs] WHERE VisitedAt >= DATEADD(day, -1, @0)) AS v
-                          WHERE VisitedAt >= @0
-                          GROUP BY CAST(VisitedAt AS DATE), SessionHash
+                          SELECT CAST(Loc AS DATE) AS [Day], SessionHash, COUNT(*) AS PageCount
+                          FROM #v
+                          WHERE Loc >= @1
+                          GROUP BY CAST(Loc AS DATE), SessionHash
                           HAVING COUNT(DISTINCT [Path]) >= 2
                       ) AS s
                       GROUP BY [Day]
-                      ORDER BY [Day]",
-                    dailyStart);
+                      ORDER BY [Day];
+
+                      SELECT WeekStart, COUNT(*) AS Visitors, SUM(PageCount) AS PageViews
+                      FROM (
+                          SELECT DATEADD(day, -((DATEDIFF(day, '19000101', Loc)) % 7), CAST(Loc AS DATE)) AS WeekStart,
+                                 SessionHash, COUNT(*) AS PageCount
+                          FROM #v
+                          WHERE Loc >= @0
+                          GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', Loc)) % 7), CAST(Loc AS DATE)), SessionHash
+                          HAVING COUNT(DISTINCT [Path]) >= 2
+                      ) AS s
+                      GROUP BY WeekStart
+                      ORDER BY WeekStart;
+
+                      SELECT Feature, COUNT(DISTINCT SessionHash) AS Sessions, COUNT(*) AS PageViews
+                      FROM (
+                          SELECT v.SessionHash,
+                              CASE
+                                  WHEN v.PathLower LIKE '/utbildning%'    THEN 'Utbildning'
+                                  WHEN v.PathLower LIKE '/styrelse%'      THEN 'Styrelse'
+                                  WHEN v.PathLower LIKE '/faltkonfig%'    THEN 'Fältkonfig'
+                                  WHEN v.PathLower LIKE '/siktbild%'      THEN 'Siktbild'
+                                  WHEN v.PathLower LIKE '/skjutban%'      THEN 'Skjutbanor'
+                                  WHEN v.PathLower LIKE '/skyttetrappan%' THEN 'Skyttetrappan'
+                                  WHEN v.PathLower LIKE '/traningsmatch%' THEN 'Träningsmatch'
+                                  WHEN v.PathLower LIKE '/competitions%'  THEN 'Tävlingar'
+                                  WHEN v.PathLower LIKE '/marken%'        THEN 'Märken'
+                                  WHEN v.PathLower LIKE '/live%'          THEN 'Live-resultat'
+                                  WHEN v.PathLower LIKE '/station%'       THEN 'Resultatinmatning'
+                                  WHEN v.PathLower LIKE '/mitt-schema%'   THEN 'Mitt schema'
+                                  WHEN v.PathLower LIKE '/ekonomi%'       THEN 'Ekonomi'
+                                  WHEN v.PathLower LIKE '/tavlingsplanering%' THEN 'Tävlingsplanering'
+                                  WHEN v.PathLower LIKE '/patrullgenerator%'  THEN 'Patrullgenerator'
+                                  ELSE NULL
+                              END AS Feature,
+                              CASE WHEN v.PathLower LIKE '/styrelse%'
+                                     OR v.PathLower LIKE '/faltkonfig%'
+                                     OR v.PathLower LIKE '/station%'
+                                     OR v.PathLower LIKE '/mitt-schema%'
+                                     OR v.PathLower LIKE '/ekonomi%'
+                                     OR v.PathLower LIKE '/tavlingsplanering%'
+                                     OR v.PathLower LIKE '/patrullgenerator%'
+                                   THEN 1 ELSE 0 END AS LoginGated,
+                              CASE WHEN e.SessionHash IS NULL THEN 0 ELSE 1 END AS Engaged
+                          FROM #v v
+                          LEFT JOIN (
+                              SELECT SessionHash FROM #v
+                              WHERE Raw >= @1
+                              GROUP BY SessionHash HAVING COUNT(DISTINCT [Path]) >= 2
+                          ) e ON e.SessionHash = v.SessionHash
+                          WHERE v.Raw >= @1
+                      ) t
+                      WHERE Feature IS NOT NULL AND (Engaged = 1 OR LoginGated = 1)
+                      GROUP BY Feature
+                      ORDER BY Sessions DESC;",
+                    weeklyStart, dailyStart);
 
                 var dailyMap = dailyRows.ToDictionary(r => r.Day.Date, r => r);
                 var daily = new List<object>(30);
@@ -197,27 +254,6 @@ namespace HpskSite.Controllers
                 // 1900-01-01 was a Monday, so (DATEDIFF(day, '19000101', VisitedAt) % 7) gives 0 for Monday.
                 // Same engagement filter as daily — sessions with ≥ 2 distinct paths within
                 // the same week count as one engaged visitor; everything else is dropped.
-                var weeklyRows = await db.FetchAsync<WeeklyVisitorRow>(
-                    @"SELECT
-                          WeekStart,
-                          COUNT(*) AS Visitors,
-                          SUM(PageCount) AS PageViews
-                      FROM (
-                          SELECT
-                              DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)) AS WeekStart,
-                              SessionHash,
-                              COUNT(*) AS PageCount
-                          FROM (SELECT CAST(CAST(VisitedAt AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' AS datetime2) AS VisitedAt,
-                                       SessionHash, [Path]
-                                  FROM [VisitorLogs] WHERE VisitedAt >= DATEADD(day, -1, @0)) AS v
-                          WHERE VisitedAt >= @0
-                          GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)), SessionHash
-                          HAVING COUNT(DISTINCT [Path]) >= 2
-                      ) AS s
-                      GROUP BY WeekStart
-                      ORDER BY WeekStart",
-                    weeklyStart);
-
                 var weeklyMap = weeklyRows.ToDictionary(r => r.WeekStart.Date, r => r);
                 var weekly = new List<object>(53);
                 for (int i = 0; i < 53; i++)
@@ -238,52 +274,14 @@ namespace HpskSite.Controllers
                 // "engaged session" filter (≥ 2 distinct paths in the window, same as the
                 // daily/weekly charts) exists to stop cookie-blind scrapers inflating the
                 // PUBLIC buckets — so it is applied to those only. The login-gated pages
-                // (Styrelse, Fältkonfig, Resultatinmatning, Mitt schema, Ekonomi) can't be reached by a
+                // (Styrelse, Fältkonfig, Resultatinmatning, Mitt schema, Ekonomi, Tävlingsplanering,
+                // Patrullgenerator) can't be reached by a
                 // scraper at all, and a station tablet or a shooter opening a QR/push link
                 // often logs exactly ONE path for a whole day — filtering those would report
                 // zero usage for pages that were used all day. Paths come from the route table
                 // / nav menu. NOTE: query strings are never logged, so the admin Resultat tab
                 // (/competitionmanagement?competitionId=) can't be split out — the
                 // "Resultatinmatning" bucket is the dedicated staff page /station.
-                var featureRows = await db.FetchAsync<FeatureUsageRow>(
-                    @"SELECT Feature, COUNT(DISTINCT SessionHash) AS Sessions, COUNT(*) AS PageViews
-                      FROM (
-                          SELECT v.SessionHash,
-                              CASE
-                                  WHEN LOWER(v.[Path]) LIKE '/utbildning%'    THEN 'Utbildning'
-                                  WHEN LOWER(v.[Path]) LIKE '/styrelse%'      THEN 'Styrelse'
-                                  WHEN LOWER(v.[Path]) LIKE '/faltkonfig%'    THEN 'Fältkonfig'
-                                  WHEN LOWER(v.[Path]) LIKE '/siktbild%'      THEN 'Siktbild'
-                                  WHEN LOWER(v.[Path]) LIKE '/skjutban%'      THEN 'Skjutbanor'
-                                  WHEN LOWER(v.[Path]) LIKE '/skyttetrappan%' THEN 'Skyttetrappan'
-                                  WHEN LOWER(v.[Path]) LIKE '/traningsmatch%' THEN 'Träningsmatch'
-                                  WHEN LOWER(v.[Path]) LIKE '/competitions%'  THEN 'Tävlingar'
-                                  WHEN LOWER(v.[Path]) LIKE '/marken%'        THEN 'Märken'
-                                  WHEN LOWER(v.[Path]) LIKE '/live%'          THEN 'Live-resultat'
-                                  WHEN LOWER(v.[Path]) LIKE '/station%'       THEN 'Resultatinmatning'
-                                  WHEN LOWER(v.[Path]) LIKE '/mitt-schema%'   THEN 'Mitt schema'
-                                  WHEN LOWER(v.[Path]) LIKE '/ekonomi%'       THEN 'Ekonomi'
-                                  ELSE NULL
-                              END AS Feature,
-                              CASE WHEN LOWER(v.[Path]) LIKE '/styrelse%'
-                                     OR LOWER(v.[Path]) LIKE '/faltkonfig%'
-                                     OR LOWER(v.[Path]) LIKE '/station%'
-                                     OR LOWER(v.[Path]) LIKE '/mitt-schema%'
-                                     OR LOWER(v.[Path]) LIKE '/ekonomi%'
-                                   THEN 1 ELSE 0 END AS LoginGated,
-                              CASE WHEN e.SessionHash IS NULL THEN 0 ELSE 1 END AS Engaged
-                          FROM [VisitorLogs] v
-                          LEFT JOIN (
-                              SELECT SessionHash FROM [VisitorLogs]
-                              WHERE VisitedAt >= @0
-                              GROUP BY SessionHash HAVING COUNT(DISTINCT [Path]) >= 2
-                          ) e ON e.SessionHash = v.SessionHash
-                          WHERE v.VisitedAt >= @0
-                      ) t
-                      WHERE Feature IS NOT NULL AND (Engaged = 1 OR LoginGated = 1)
-                      GROUP BY Feature
-                      ORDER BY Sessions DESC",
-                    dailyStart);
 
                 var featureUsage = featureRows
                     .Select(r => (object)new { feature = r.Feature, sessions = r.Sessions, pageViews = r.PageViews })
@@ -474,6 +472,13 @@ namespace HpskSite.Controllers
             var currentMonthStart = new DateTime(now.Year, now.Month, 1);
             var currentYearStart = new DateTime(now.Year, 1, 1);
 
+            // Tid per del, i loggen när bygget är klart — så nästa gång någon undrar vad som är långsamt
+            // står svaret där i stället för att behöva gissas.
+            var swTotal = System.Diagnostics.Stopwatch.StartNew();
+            long lastMark = 0;
+            var timings = new List<string>();
+            void Mark(string part) { var t = swTotal.ElapsedMilliseconds; timings.Add($"{part}={t - lastMark}"); lastMark = t; }
+
             // ── 1. Members ──────────────────────────────────────────
             // Bara huvudklubben behövs ur medlemmarna (skalplanen B); trappans framsteg ligger i
             // MemberTrainingProgress (B5) och läses nedan.
@@ -525,7 +530,14 @@ namespace HpskSite.Controllers
             }
 
             int totalMembers = approvedMembers.Count;
-            int newMembers30d = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= thirtyDaysAgo);
+
+            // Skapandedagen i lokal tid räknas EN gång per medlem. Förut gjordes omräkningen i 42
+            // genomgångar över alla medlemmar (30 dagar + 12 månader, två anrop vardera).
+            var createdLocal = new List<DateTime>(approvedMembers.Count);
+            foreach (var m in approvedMembers) createdLocal.Add(UmbracoTime.Local(m.CreateDate));
+            int newMembers30d = createdLocal.Count(d => d >= thirtyDaysAgo);
+            var createdPerDay = createdLocal.GroupBy(d => d.Date).ToDictionary(g => g.Key, g => g.Count());
+            var createdPerMonth = createdLocal.GroupBy(d => (d.Year, d.Month)).ToDictionary(g => g.Key, g => g.Count());
 
             // New members per day (last 30 days, oldest first). Every day in the window is
             // emitted, zeros included, so the x-axis is a real calendar — a bulk club import
@@ -538,7 +550,7 @@ namespace HpskSite.Controllers
                     return new
                     {
                         day = day.ToString("yyyy-MM-dd"),
-                        count = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate).Date == day)
+                        count = createdPerDay.GetValueOrDefault(day, 0)
                     };
                 })
                 .ToList();
@@ -548,14 +560,15 @@ namespace HpskSite.Controllers
                 .Select(i =>
                 {
                     var monthStart = new DateTime(now.Year, now.Month, 1).AddMonths(-11 + i);
-                    var monthEnd = monthStart.AddMonths(1);
                     return new
                     {
                         month = monthStart.ToString("yyyy-MM"),
-                        count = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= monthStart && UmbracoTime.Local(m.CreateDate) < monthEnd)
+                        count = createdPerMonth.GetValueOrDefault((monthStart.Year, monthStart.Month), 0)
                     };
                 })
                 .ToList();
+
+            Mark("medlemmar");
 
             // Members by region — resolve via primaryClubId → club node → regionalFederation
             var membersByRegion = new List<object>();
@@ -663,14 +676,17 @@ namespace HpskSite.Controllers
                     List<HpskSite.Models.Events.ClubEventRecord> EventsOf(int clubId) =>
                         eventsByOwner.TryGetValue(clubId, out var list) ? list : new List<HpskSite.Models.Events.ClubEventRecord>();
 
-                    var recentTrainings = _trainings.DatesByClub(threeMonthsAgo);
+                    // EN läsning av träningarnas datum från förrförra årets början; "senaste tre månaderna" är en
+                    // delmängd av den (förut två frågor mot samma tabell).
+                    var trainingsByClub = _trainings.DatesByClub(new DateTime(now.Year - 2, 1, 1));
+                    var recentTrainingsFrom = threeMonthsAgo.Date;
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
                         var hasRecentEvent = EventsOf(club.Id)
                             .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= threeMonthsAgo)
                             // Fas B5: en träning är också aktivitet i klubben.
-                            || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);
+                            || (trainingsByClub.TryGetValue(club.Id, out var td) && td.Any(d => d >= recentTrainingsFrom));
                         var hasRecentClubComp = clubIdsWithRecentComp.Contains(club.Id);
                         return hasRecentEvent || hasRecentClubComp;
                     });
@@ -747,7 +763,6 @@ namespace HpskSite.Controllers
                             }))
                         .ToList();
                     // Fas B5: klubbarnas träningar räknas in som typen Träning.
-                    var trainingsByClub = _trainings.DatesByClub(new DateTime(now.Year - 2, 1, 1));
                     allClubEvents.AddRange(allClubNodes.SelectMany(club =>
                         (trainingsByClub.TryGetValue(club.Id, out var dates) ? dates : new List<DateTime>())
                             .Select(d => new { clubId = club.Id, clubName = club.Name ?? "", eventType = "Träning", eventDate = (DateTime?)d })));
@@ -782,7 +797,17 @@ namespace HpskSite.Controllers
                     // Lookup tables used by the top-clubs cards on the frontend so each
                     // row can render the club name as a link to the club's published page.
                     var clubNameLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Name ?? "");
-                    var clubUrlLookup = allClubNodes.ToDictionary(c => c.Id, c => c.Url() ?? "");
+                    // Adressen byggs bara för de klubbar som hamnar i en topplista (högst 75 av ~500) — förut
+                    // ett Url()-anrop för varje klubb vid varje bygge, fast listorna bara visar 25 var.
+                    var clubNodeById = allClubNodes.ToDictionary(c => c.Id);
+                    var clubUrlCache = new Dictionary<int, string>();
+                    string ClubUrlOf(int clubId)
+                    {
+                        if (clubUrlCache.TryGetValue(clubId, out var cached)) return cached;
+                        var url = clubNodeById.TryGetValue(clubId, out var node) ? (node.Url() ?? "") : "";
+                        clubUrlCache[clubId] = url;
+                        return url;
+                    }
 
                     var topClubsByEvents = allClubEvents
                         .Where(e => e.eventDate.HasValue && e.eventDate.Value.Year == now.Year)
@@ -791,11 +816,11 @@ namespace HpskSite.Controllers
                         {
                             clubId = g.Key,
                             club = clubNameLookup.GetValueOrDefault(g.Key, g.First().clubName),
-                            count = g.Count(),
-                            url = clubUrlLookup.GetValueOrDefault(g.Key, "")
+                            count = g.Count()
                         })
                         .OrderByDescending(g => g.count)
                         .Take(25)
+                        .Select(g => new { g.clubId, g.club, g.count, url = ClubUrlOf(g.clubId) })
                         .Cast<object>()
                         .ToList();
 
@@ -805,13 +830,15 @@ namespace HpskSite.Controllers
                         {
                             clubId = kvp.Key,
                             club = clubNameLookup[kvp.Key],
-                            count = kvp.Value,
-                            url = clubUrlLookup.GetValueOrDefault(kvp.Key, "")
+                            count = kvp.Value
                         })
                         .OrderByDescending(x => x.count)
                         .Take(25)
+                        .Select(x => new { x.clubId, x.club, x.count, url = ClubUrlOf(x.clubId) })
                         .Cast<object>()
                         .ToList();
+
+                    Mark("klubbar+tävlingar+händelser");
 
                     // ── 4-7. All SQL stats (single DB connection, consolidated queries) ──
                     int trainingMatches30d = 0;
@@ -1367,6 +1394,8 @@ namespace HpskSite.Controllers
                         }
                     }
 
+                    Mark("SQL");
+
                     // ── 6b. Active members (activity windows + engagement) — in-memory ───────
                     int activeMembers30d = 0;
                     int activeMembers90d = 0;
@@ -1434,11 +1463,11 @@ namespace HpskSite.Controllers
                         {
                             clubId = kvp.Key,
                             club = clubNameLookup[kvp.Key],
-                            count = kvp.Value,
-                            url = clubUrlLookup.GetValueOrDefault(kvp.Key, "")
+                            count = kvp.Value
                         })
                         .OrderByDescending(x => x.count)
                         .Take(25)
+                        .Select(x => new { x.clubId, x.club, x.count, url = ClubUrlOf(x.clubId) })
                         .Cast<object>()
                         .ToList();
 
@@ -1504,6 +1533,11 @@ namespace HpskSite.Controllers
                     var totalDiskPercentage = totalDiskSpaceMB > 0
                         ? Math.Round(totalUsedMB / totalDiskSpaceMB * 100, 1)
                         : 0;
+
+                    Mark("aktivitet+lagring");
+                    var aiChatStats = BuildAiChatStats();
+                    Mark("AI-chatt");
+                    _logger.LogInformation("Adminstatistiken byggdes på {TotalMs} ms ({Parts})", swTotal.ElapsedMilliseconds, string.Join(", ", timings));
 
                     return new
                     {
@@ -1571,7 +1605,7 @@ namespace HpskSite.Controllers
                         faltkonfig = faltkonfigStats,
                         firearms = firearmStats,
                         foreningsintyg = foreningsintygStats,
-                        aiChat = BuildAiChatStats()
+                        aiChat = aiChatStats
                     };
                 }
             }

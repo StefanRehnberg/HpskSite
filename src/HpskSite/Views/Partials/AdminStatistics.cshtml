@@ -1104,6 +1104,76 @@
             <div class="small text-muted mt-2">Ansökningar: totalt (väntar hos kretsen). Resultat och banor: totalt (väntar på kretsen). Utkast räknas inte — dem har kretsen inte sett.</div>
         </div></div>
 
+        <!-- Section O: Tävlingsplanering och patrullgenerator. Laddas separat (GetPlaneringStats), som ekonomin.
+             Bara tal — en planering är privat för dem som är med, så inga namn eller innehåll visas. -->
+        <h5 class="mt-4 mb-2"><i class="bi bi-clipboard-check me-2"></i>Tävlingsplanering och patrullgenerator</h5>
+        <p class="text-muted small mb-3">
+            Hur mycket planeringen och patrullgeneratorn används. Räknar bara — en planering är privat för dem som är med,
+            så inga namn eller innehåll visas. Planeringar som demoklubben Ankeborg skapat räknas inte, inte heller dess tävlingar.
+            "Används av fler" = minst två personer är med.
+        </p>
+        <div id="plStatError" class="alert alert-warning d-none small"></div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Planeringar</div><div class="fs-3 fw-bold" id="statPlTotal">–</div><div class="small text-muted" id="statPlTotalSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Används av fler</div><div class="fs-3 fw-bold" id="statPlGroup">–</div><div class="small text-muted" id="statPlGroupSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Personer med i planeringar</div><div class="fs-3 fw-bold" id="statPlPeople">–</div><div class="small text-muted" id="statPlPeopleSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Uppgifter</div><div class="fs-3 fw-bold" id="statPlTasks">–</div><div class="small text-muted" id="statPlTasksSub"></div>
+            </div></div></div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Meddelanden</div><div class="fs-3 fw-bold" id="statPlMessages">–</div><div class="small text-muted" id="statPlMessagesSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Möten</div><div class="fs-3 fw-bold" id="statPlMeetings">–</div><div class="small text-muted" id="statPlMeetingsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Förslag och beslut</div><div class="fs-3 fw-bold" id="statPlDecisions">–</div><div class="small text-muted" id="statPlDecisionsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Dokument</div><div class="fs-3 fw-bold" id="statPlDocs">–</div><div class="small text-muted" id="statPlDocsSub"></div>
+            </div></div></div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Bemanning i planeringar</div><div class="fs-3 fw-bold" id="statPlStaff">–</div><div class="small text-muted" id="statPlStaffSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Patrullgenerator: tillämpade förslag</div><div class="fs-3 fw-bold" id="statPgApplied">–</div><div class="small text-muted" id="statPgAppliedSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Lås och kamratkrav</div><div class="fs-3 fw-bold" id="statPgLocks">–</div><div class="small text-muted" id="statPgLocksSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Stationer och koppling</div><div class="fs-3 fw-bold" id="statPlStations">–</div><div class="small text-muted" id="statPlStationsSub"></div>
+            </div></div></div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-lg-7"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">Sidvisningar, senaste 30 dagarna</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Sida</th><th class="text-end">Besökare</th><th class="text-end">Sidvisningar</th><th class="text-end text-muted">30 dagarna före</th></tr></thead>
+                        <tbody id="plVisitBody"><tr><td colspan="4" class="text-muted">Hämtar…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="small text-muted mt-2">Besökare = olika sessioner. Övningsläget kan nås av alla inloggade, generatorn bara av dem som arrangerar tävlingen.</div>
+            </div></div></div>
+            <div class="col-lg-5"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">Planeringar per gren</h6>
+                <div id="plDisciplines" class="d-flex flex-wrap gap-2 mb-3"><span class="text-muted small">Hämtar…</span></div>
+                <h6 class="card-title">Skapade per månad (12 månader)</h6>
+                <div id="plPerMonth" class="small text-muted">Hämtar…</div>
+            </div></div></div>
+        </div>
+
     </div>
 </div>
 
@@ -1234,6 +1304,7 @@
 
         const url = '/umbraco/surface/AdminStatistics/GetStatistics?force=' + (force ? 'true' : 'false');
 
+        prefetchStats(force);
         fetch(url)
             .then(r => r.json())
             .then(resp => {
@@ -1253,6 +1324,7 @@
                 loadVisitorStats(force);
                 loadEkonomiStats(force);
                 loadKretsgranskningStats(force);
+                loadPlaneringStats(force);
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -2041,9 +2113,22 @@
         return div.innerHTML;
     }
 
+    // De fyra delarna som laddas för sig (besök, ekonomi, kretsgranskning, planering) hämtas redan när
+    // sidan börjar ladda, parallellt med huvudstatistiken — förut väntade de tills den var klar, så
+    // laddtiden blev summan av dem i stället för den längsta. Svaret ritas först när huvudsidan är
+    // synlig (diagram i en dold ruta får fel storlek), så loadX tar den förhämtade förfrågan.
+    const statPrefetched = {};
+    const STAT_PARTS = ['GetVisitorStats', 'GetEkonomiStats', 'GetKretsgranskningStats', 'GetPlaneringStats'];
+    function statUrl(name, force) { return '/umbraco/surface/AdminStatistics/' + name + '?force=' + (force ? 'true' : 'false'); }
+    function prefetchStats(force) { STAT_PARTS.forEach(function (n) { statPrefetched[n] = fetch(statUrl(n, force)); }); }
+    function statFetch(name, force) {
+        const p = statPrefetched[name];
+        if (p) { delete statPrefetched[name]; return p; }
+        return fetch(statUrl(name, force));
+    }
+
     function loadVisitorStats(force) {
-        const url = '/umbraco/surface/AdminStatistics/GetVisitorStats?force=' + (force ? 'true' : 'false');
-        fetch(url)
+        statFetch('GetVisitorStats', force)
             .then(r => r.json())
             .then(resp => {
                 if (!resp.success) {
@@ -2070,7 +2155,7 @@
         const err = document.getElementById('kgStatError');
         if (!err) return;
         const fail = m => { err.textContent = 'Kretsarnas statistik kunde inte läsas: ' + m; err.classList.remove('d-none'); };
-        fetch('/umbraco/surface/AdminStatistics/GetKretsgranskningStats?force=' + (force ? 'true' : 'false'))
+        statFetch('GetKretsgranskningStats', force)
             .then(r => r.json())
             .then(resp => {
                 if (!resp.success) { fail(resp.message || 'okänt fel'); return; }
@@ -2124,10 +2209,69 @@
         }).join('') || '<tr><td colspan="7" class="text-muted">Inga kretsar.</td></tr>';
     }
 
+    // ── Section O: tävlingsplanering och patrullgenerator ─────────────────────────────────────────
+    function loadPlaneringStats(force) {
+        const err = document.getElementById('plStatError');
+        if (!err) return;
+        const fail = m => { err.textContent = 'Planeringens statistik kunde inte läsas: ' + m; err.classList.remove('d-none'); };
+        statFetch('GetPlaneringStats', force)
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) { fail(resp.message || 'okänt fel'); return; }
+                const d = resp.data;
+                if (d.warnings && d.warnings.length) { err.textContent = d.warnings.join(' '); err.classList.remove('d-none'); } else err.classList.add('d-none');
+                renderPlanering(d);
+            })
+            .catch(e => fail(e.message || 'nätverksfel'));
+    }
+
+    function renderPlanering(d) {
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        const nf = n => Number(n || 0).toLocaleString('sv-SE');
+        const s = d.summary, c = d.content, st = d.staffing, pg = d.patrol;
+        set('statPlTotal', nf(s.plannings));
+        set('statPlTotalSub', nf(s.new30) + ' nya senaste 30 dagarna · ' + nf(s.startedFromCompetition) + ' startade från en tävling · ' + nf(s.subPlannings) + ' delplaneringar');
+        set('statPlGroup', nf(s.inGroup) + (s.plannings ? ' av ' + nf(s.plannings) : ''));
+        set('statPlGroupSub', nf(s.active30) + ' med något som hänt senaste 30 dagarna · ' + nf(s.withTasksInMotion) + ' med uppgifter i rörelse');
+        set('statPlPeople', nf(s.people));
+        set('statPlPeopleSub', nf(s.guests) + ' gäster utan konto');
+        set('statPlTasks', nf(c.tasks));
+        set('statPlTasksSub', nf(c.tasksDone) + ' klara · ' + nf(c.tasksInMotion) + ' i rörelse · ' + nf(c.tasksOverdue) + ' försenade · ' + nf(c.milestones) + ' milstolpar');
+        set('statPlMessages', nf(c.messages));
+        set('statPlMessagesSub', nf(c.messages30) + ' senaste 30 dagarna (utan systemmeddelanden)');
+        set('statPlMeetings', nf(c.meetings));
+        set('statPlMeetingsSub', nf(c.meetingsScheduled) + ' bokade · ' + nf(c.meetings30) + ' skapade senaste 30 dagarna');
+        set('statPlDecisions', nf(c.decisions));
+        set('statPlDecisionsSub', nf(c.decisionsDecided) + ' avgjorda · ' + nf(c.decisionsToBoard) + ' skickade till styrelsens ärendekö');
+        set('statPlDocs', nf(c.documents));
+        set('statPlDocsSub', nf(c.documentMB) + ' MB · ' + nf(c.documentLinks) + ' är länkar');
+        set('statPlStaff', nf(st.assignments));
+        set('statPlStaffSub', 'placeringar i ' + nf(st.plannings) + ' planeringar · ' + nf(st.notified) + ' meddelade · ' + nf(st.shooterModeChosen) + ' har valt hur skjutande funktionärer hanteras');
+        set('statPgApplied', nf(pg.applied));
+        set('statPgAppliedSub', nf(pg.applied30) + ' senaste 30 dagarna · ' + nf(pg.undone) + ' ångrade · ' + nf(pg.competitions) + ' tävlingar');
+        set('statPgLocks', nf(pg.lockedShooters) + ' · ' + nf(pg.joinRules));
+        set('statPgLocksSub', 'låsta skyttar (' + nf(pg.competitionsWithLocks) + ' tävlingar) · kamratkrav (' + nf(pg.competitionsWithJoinRules) + ' tävlingar) · ' + nf(pg.competitionsPublishedByGroup) + ' delpublicerade per vapengrupp');
+        set('statPlStations', nf(c.planningsWithStations));
+        set('statPlStationsSub', 'planeringar med stationer (' + nf(c.stationResponsibles) + ' ansvariga) · ' + nf(c.linkedToCompetition) + ' kopplade till en tävling');
+
+        const e = x => (x == null ? '' : String(x)).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const v = d.visits;
+        const row = (label, x) => '<tr><td>' + e(label) + '</td><td class="text-end fw-semibold">' + nf(x.sessions30) + '</td><td class="text-end">' + nf(x.views30) + '</td>'
+            + '<td class="text-end text-muted">' + nf(x.sessionsPrev) + ' besökare · ' + nf(x.viewsPrev) + ' visningar</td></tr>';
+        document.getElementById('plVisitBody').innerHTML =
+            row('Tävlingsplanering', v.planering) + row('Patrullgenerator (tävlingens)', v.generator) + row('Patrullgenerator, övningsläge', v.lab);
+
+        const DISC = { Faltskytte: 'Fältskytte', Springskytte: 'Springskytte', Precision: 'Precision', Milsnabb: 'Milsnabb' };
+        document.getElementById('plDisciplines').innerHTML = (d.byDiscipline || []).map(x =>
+            '<span class="badge bg-secondary-subtle text-secondary-emphasis">' + e(x.discipline ? (DISC[x.discipline] || x.discipline) : 'Gren inte vald') + ' · ' + nf(x.count) + '</span>').join('')
+            || '<span class="text-muted small">Inga planeringar.</span>';
+        document.getElementById('plPerMonth').textContent = (d.perMonth || []).map(m => m.month.slice(2) + ': ' + m.count).join('  ·  ') || '—';
+    }
+
     function loadEkonomiStats(force) {
         const err = document.getElementById('ekError');
         if (!err) return;
-        fetch('/umbraco/surface/AdminStatistics/GetEkonomiStats?force=' + (force ? 'true' : 'false'))
+        statFetch('GetEkonomiStats', force)
             .then(r => r.json())
             .then(resp => {
                 if (!resp.success) {
@@ -2281,7 +2425,7 @@
     // Known feature buckets — kept in sync with the CASE in AdminStatisticsController.GetVisitorStats.
     // We render every one (filling 0 for any the server didn't return) so "this feature gets no
     // traffic" is shown explicitly rather than silently dropping out.
-    const FEATURE_ORDER = ['Utbildning', 'Styrelse', 'Fältkonfig', 'Siktbild', 'Skjutbanor', 'Skyttetrappan', 'Träningsmatch', 'Tävlingar', 'Märken', 'Live-resultat', 'Resultatinmatning', 'Mitt schema', 'Ekonomi'];
+    const FEATURE_ORDER = ['Utbildning', 'Styrelse', 'Fältkonfig', 'Siktbild', 'Skjutbanor', 'Skyttetrappan', 'Träningsmatch', 'Tävlingar', 'Märken', 'Live-resultat', 'Resultatinmatning', 'Mitt schema', 'Ekonomi', 'Tävlingsplanering', 'Patrullgenerator'];
 
     function renderFeatureUsage(featureUsage) {
         const colors = getColors();
