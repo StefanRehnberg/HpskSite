@@ -436,7 +436,6 @@
     { id: 'smfri', big: true, name: 'SM 2024 fredag (R, 14 skjuter också C)', sc: { R: 237, C: 66, Also: [A2('C', 'R', 14)], Stations: 10 }, rest: '45', wish: '90', champ: 'R', size: '10', int: '11', first: '07:55', rm: '110' },
     { id: 'smsat', big: true, name: 'SM 2024 lördag (C)', sc: { C: 333, Stations: 10 }, rest: '45', wish: '90', size: '10', int: '11', first: '07:55', rm: '110' },
     { id: 'smsun', big: true, name: 'SM 2024 söndag (B)', sc: { B: 199, Stations: 10 }, rest: '45', wish: '90', size: '10', int: '11', first: '07:55', rm: '110' },
-    { id: 'big', big: true, name: 'Prestandatest (går inte ihop på en dag)', sc: { C: 1650, B: 600, A: 450, R: 300, Also: [A2('C', 'B', 300), A2('C', 'A', 225)], Stations: 12 }, rest: '45', wish: '90', size: '12', int: '5' },
   ];
   const fullSc = sc => Object.assign({ V: 1, Seed: 1, C: 0, B: 0, A: 0, R: 0, Also: [], Multi: [], Jobs: [], Reserves: 0, Early: 0, Stations: 8 }, sc);
   function currentSc() { try { return fullSc(JSON.parse(P.sc)); } catch (e) { return fullSc(PRESETS[0].sc); } }
@@ -517,7 +516,7 @@
     const jn = gv('scJobN'), rs = gv('scRes'), er = gv('scEarly'), need = jn + rs + er;
     if (staffOn && need > m.persons) { errors++; errAt('scStaff', 'Uppdrag, reserver och tidiga är ' + need + ' men det finns bara ' + m.persons + ' personer. <button type="button" class="btn btn-sm btn-outline-primary" data-staffmax="1">Sänk till ' + m.persons + '</button>'); } else errAt('scStaff', '');
     let tot = '';
-    if (total < 1) tot = 'Ange hur många som skjuter.'; else if (total > 6000) tot = 'Högst 6 000 starter.';
+    if (total < 1) tot = 'Ange hur många som skjuter.'; else if (total > 1500) tot = 'Högst 1 500 starter.';
     if (tot) errors++;
     $('scStarts').textContent = GR.filter(g => sc[g] > 0).map(g => g + ' ' + sc[g]).join(' · ') + (total ? ' starter' : '');
     $('scSum').textContent = tot ? tot : total + ' starter · ' + m.persons + ' personer · ' + m.dub + ' dubbla';

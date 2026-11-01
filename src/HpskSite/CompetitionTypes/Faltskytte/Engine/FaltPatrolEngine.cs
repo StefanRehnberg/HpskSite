@@ -88,7 +88,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
     {
         public static readonly string[] Groups = { "C", "B", "A", "R" };
         public const double Day2Offset = 1440;
-        public const int MaxStarts = 6000;   // prototypen hade 1500; ett stort SM har flera tusen starter (se PatrolScenarioTests.Perf_report)
+        public const int MaxStarts = 1500;   // SM 2024 hade ca 1 200 starter över fyra dagar och en dag har som mest ca 400; planeringen görs en dag i taget
         static readonly double[] SoftWish = { 10, 30, 100 };
         static readonly double[] SoftEnd = { 3, 0.5, 0.1 };
 

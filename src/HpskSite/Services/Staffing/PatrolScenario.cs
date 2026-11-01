@@ -48,7 +48,7 @@ namespace HpskSite.Services.Staffing
     public static class ScenarioBuilder
     {
         /// <summary>Taken gäller även interna körningar; ett stort SM har flera tusen starter.</summary>
-        public const int MaxStarts = 6000, MaxJobs = 1000, MaxStations = 20, MaxAlso = 12;
+        public const int MaxStarts = 1500, MaxJobs = 1000, MaxStations = 20, MaxAlso = 12;
         public static readonly string[] Groups = { "C", "B", "A", "R" };
         /// <summary>Klasserna per vapengrupp ur klassregistret (öppna klasser först); aldrig hårdkodade id.</summary>
         static readonly Dictionary<string, string[]> ClassIds = Groups.ToDictionary(g => g, g =>

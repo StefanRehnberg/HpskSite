@@ -263,7 +263,7 @@ namespace HpskSite.Tests
         public void Perf_report_for_large_scenarios()
         {
             if (Environment.GetEnvironmentVariable("HPSK_PERF") != "1") return;
-            foreach (var total in new[] { 300, 1500, 3000, 5000 })
+            foreach (var total in new[] { 300, 800, 1500 })
             {
                 var s = new PatrolScenario { Seed = 1, C = total * 55 / 100, B = total * 20 / 100, A = total * 15 / 100, R = total * 10 / 100, Stations = 12, Date = "2028-06-10" };
                 s.Also.Add(new ScenarioAlso { From = "C", To = "B", N = s.B / 2 });
