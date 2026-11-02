@@ -28,6 +28,8 @@ namespace HpskSite.Controllers
         };
 
         private const long MaxFileSize = 5 * 1024 * 1024; // 5 MB
+        /// <summary>Högsta antal pixlar en uppladdad bild får ha (40 megapixel).</summary>
+        private const long MaxPixels = 40_000_000;
 
         public ImageUploadController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -83,13 +85,34 @@ namespace HpskSite.Controllers
                 _logger.LogWarning("SEC: Bilduppladdning nekades — ändelsen {Extension} är ingen bildändelse", extension);
                 return Json(new { error = new { message = "Endast bildfiler (JPG, PNG, GIF, WebP) är tillåtna" } });
             }
+            // Bilden LÄSES och SKRIVS OM (omkodas) i stället för att sparas som den kom: metadata, dolda tillägg och filer som
+            // är två format på en gång (en bild som också är HTML) försvinner. Gränsen på pixlar skyddar mot
+            // dekompressionsbomber (en liten fil som blir gigabyte i minnet).
+            byte[] reencoded;
             try
             {
-                await using var probe = upload.OpenReadStream();
-                var info = await SixLabors.ImageSharp.Image.IdentifyAsync(
-                    new SixLabors.ImageSharp.Formats.DecoderOptions { Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance },
-                    probe);
-                if (info == null) throw new SixLabors.ImageSharp.UnknownImageFormatException("okänt bildformat");
+                await using var input = upload.OpenReadStream();
+                using var image = await SixLabors.ImageSharp.Image.LoadAsync(
+                    new SixLabors.ImageSharp.Formats.DecoderOptions
+                    {
+                        Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance,
+                        MaxFrames = 200
+                    },
+                    input);
+                if ((long)image.Width * image.Height > MaxPixels)
+                {
+                    _logger.LogWarning("SEC: Bilduppladdning nekades — {W}x{H} pixlar är över gränsen", image.Width, image.Height);
+                    return Json(new { error = new { message = "Bilden är för stor (för många pixlar). Förminska den och försök igen." } });
+                }
+                using var ms = new MemoryStream();
+                switch (extension)
+                {
+                    case ".png": await SixLabors.ImageSharp.ImageExtensions.SaveAsPngAsync(image, ms); break;
+                    case ".gif": await SixLabors.ImageSharp.ImageExtensions.SaveAsGifAsync(image, ms); break;
+                    case ".webp": await SixLabors.ImageSharp.ImageExtensions.SaveAsWebpAsync(image, ms); break;
+                    default: await SixLabors.ImageSharp.ImageExtensions.SaveAsJpegAsync(image, ms); break;
+                }
+                reencoded = ms.ToArray();
             }
             catch (Exception ex) when (ex is SixLabors.ImageSharp.UnknownImageFormatException or SixLabors.ImageSharp.InvalidImageContentException)
             {
@@ -103,7 +126,7 @@ namespace HpskSite.Controllers
                 // (skalplanen D3); the URL /images/uploads/… is unchanged.
                 if (!HpskSite.Services.Storage.FileStoreNames.IsValidName("x" + extension)) extension = ".jpg";
                 var fileName = $"{Guid.NewGuid():N}{extension}";
-                await using (var stream = upload.OpenReadStream())
+                await using (var stream = new MemoryStream(reencoded))
                     await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.IFileStore>().SaveAsync(HpskSite.Services.Storage.FileStoreAreas.Uploads, fileName, stream);
 
                 var url = HpskSite.Services.Storage.FileStoreAreas.PublicUrl(HpskSite.Services.Storage.FileStoreAreas.Uploads, fileName);

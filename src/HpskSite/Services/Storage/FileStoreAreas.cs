@@ -94,5 +94,17 @@ namespace HpskSite.Services.Storage
             if (!IsValidArea(area)) throw new ArgumentException($"Ogiltigt område: {area}");
             if (!IsValidName(name)) throw new ArgumentException($"Ogiltigt filnamn: {name}");
         }
+
+        /// <summary>
+        /// Som <see cref="Require"/>, för SKRIVNING. Säkerhetsplanen 2026-11-02 (A6/H5): i ett publikt område (serveras från
+        /// sajtens egen adress) får aldrig en fil med aktivt innehåll — HTML, SVG, XML, skript — skrivas, oavsett vilken
+        /// uppladdning som ber om det. Raderingar går genom <see cref="Require"/> så att en sådan fil alltid kan tas bort.
+        /// </summary>
+        public static void RequireWritable(string area, string name)
+        {
+            Require(area, name);
+            if (FileStoreAreas.IsPublic(area) && HpskSite.Services.Security.UploadedContent.IsActiveContent(name))
+                throw new ArgumentException($"Aktivt innehåll får inte sparas i ett publikt område: {name}");
+        }
     }
 }

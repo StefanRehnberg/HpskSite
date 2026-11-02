@@ -62,6 +62,29 @@ namespace HpskSite.Tests
         public void Uppladdningsomradena_kanns_igen(string path, bool expected) =>
             Assert.Equal(expected, UploadedContentSafetyMiddleware.IsUploadArea(path));
 
+        [Theory]
+        [InlineData("uploads", "x.html")]
+        [InlineData("uploads", "x.svg")]
+        [InlineData("field-targets", "1/figur.svg")]
+        [InlineData("faltskytte", "a.XML")]
+        public void Lagringen_nekar_aktivt_innehall_i_publika_omraden(string area, string name) =>
+            Assert.Throws<ArgumentException>(() => FileStoreNames.RequireWritable(area, name));
+
+        [Theory]
+        [InlineData("uploads", "abc.png")]
+        [InlineData("uploads", "abc.jpg")]
+        [InlineData("field-targets", "1-3 bla.jpg")]
+        [InlineData("AiChatIndex", "embeddings.json")]       // privat område: ingen publik servering
+        public void Lagringen_tillater_vanliga_filer(string area, string name) =>
+            FileStoreNames.RequireWritable(area, name);
+
+        [Fact]
+        public void Radering_av_en_aktiv_fil_ar_alltid_mojlig()
+        {
+            // En sådan fil som ändå skulle ligga kvar måste kunna tas bort: Require (utan Writable) släpper igenom namnet.
+            FileStoreNames.Require("uploads", "gammal-fil.html");
+        }
+
         [Fact]
         public async Task Mellanvaran_nekar_html_i_uppladdningsomradet_och_lamnar_resten()
         {

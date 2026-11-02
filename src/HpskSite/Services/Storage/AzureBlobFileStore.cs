@@ -50,14 +50,14 @@ namespace HpskSite.Services.Storage
 
         public async Task SaveAsync(string area, string name, Stream content, CancellationToken ct = default)
         {
-            FileStoreNames.Require(area, name);
+            FileStoreNames.RequireWritable(area, name);
             await EnsureContainerAsync(ct);
             await Blob(area, name)!.UploadAsync(content, overwrite: true, ct);
         }
 
         public async Task<bool> CreateIfAbsentAsync(string area, string name, Stream content, CancellationToken ct = default)
         {
-            FileStoreNames.Require(area, name);
+            FileStoreNames.RequireWritable(area, name);
             await EnsureContainerAsync(ct);
             try
             {

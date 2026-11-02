@@ -32,18 +32,32 @@ namespace HpskSite.Hubs
         // Track which match each connection is viewing (connectionId -> matchCode)
         private static readonly ConcurrentDictionary<string, string> _connectionMatches = new();
 
-        public TrainingMatchHub(IMemberManager memberManager, IMemberService memberService)
+        private readonly HpskSite.Services.Security.MatchAccessService _access;
+
+        public TrainingMatchHub(IMemberManager memberManager, IMemberService memberService,
+            HpskSite.Services.Security.MatchAccessService access)
         {
             _memberManager = memberManager;
             _memberService = memberService;
+            _access = access;
         }
+
+        /// <summary>Ett nekat anrop: HubException med en svensk text (klienten ser den), annars bara loggat när brytaren är av.</summary>
+        private static HubException Denied(string text) => new(text);
 
         /// <summary>
         /// Join a match group to receive real-time updates for that match
         /// Called when a user views or participates in a match
+        ///
+        /// <para>⚠️ Säkerhetsplanen 2026-11-02 (A7/H3): bara en inloggad medlem eller en gäst med giltig gästkaka för
+        /// matchen. Förut kunde vem som helst med en matchkod lyssna på liveresultatet.</para>
         /// </summary>
         public async Task JoinMatchGroup(string matchCode)
         {
+            var caller = await _access.ResolveAsync(Context, matchCode);
+            if (caller == null && _access.ShouldDeny("JoinMatchGroup", matchCode))
+                throw Denied("Du måste vara inloggad (eller ha en gästlänk) för att följa matchen.");
+
             await Groups.AddToGroupAsync(Context.ConnectionId, $"match_{matchCode.ToUpperInvariant()}");
         }
 
@@ -61,6 +75,21 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task RegisterSpectator(string matchCode, int memberId, string name, string profilePictureUrl, string clubName)
         {
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A7/H3): parametrarna memberId/name/profilePictureUrl/clubName IGNORERAS
+            // (signaturen står kvar för installerade appar och för webben). Identiteten läses på servern ur inloggningen eller
+            // gästkakan — förut kunde klienten skriva in vilket id, namn och vilken bild som helst, och namnet skrevs in hos alla
+            // som följde matchen med innerHTML.
+            var caller = await _access.ResolveAsync(Context, matchCode);
+            if (caller == null)
+            {
+                if (_access.ShouldDeny("RegisterSpectator", matchCode))
+                    throw Denied("Du måste vara inloggad (eller ha en gästlänk) för att följa matchen.");
+                caller = new HpskSite.Services.Security.HubCaller(null, null,
+                    HpskSite.Services.Security.SpectatorRules.CleanName(name),
+                    HpskSite.Services.Security.SpectatorRules.CleanPictureUrl(profilePictureUrl),
+                    HpskSite.Services.Security.SpectatorRules.CleanClub(clubName));
+            }
+
             var normalizedCode = matchCode.ToUpperInvariant();
 
             // Remove from previous match if any
@@ -69,14 +98,20 @@ namespace HpskSite.Hubs
                 await UnregisterSpectatorInternal(previousMatch, Context.ConnectionId);
             }
 
+            // Tak: listorna är statiska och annars obegränsade (en angripare kunde fylla minnet med påhittade matchkoder).
+            if (!_matchSpectators.ContainsKey(normalizedCode) && _matchSpectators.Count >= HpskSite.Services.Security.SpectatorRules.MaxTrackedMatches)
+                throw Denied("Hubben är full just nu. Försök igen om en stund.");
+
             // Add to new match
             var spectators = _matchSpectators.GetOrAdd(normalizedCode, _ => new ConcurrentDictionary<string, MatchSpectator>());
+            if (!spectators.ContainsKey(Context.ConnectionId) && spectators.Count >= HpskSite.Services.Security.SpectatorRules.MaxSpectatorsPerMatch)
+                throw Denied("Matchen har för många åskådare.");
             var spectator = new MatchSpectator
             {
-                MemberId = memberId,
-                Name = name,
-                ProfilePictureUrl = profilePictureUrl,
-                ClubName = clubName,
+                MemberId = caller.MemberId ?? 0,
+                Name = caller.DisplayName,
+                ProfilePictureUrl = caller.PictureUrl,
+                ClubName = caller.ClubName,
                 ConnectionId = Context.ConnectionId
             };
             spectators[Context.ConnectionId] = spectator;
@@ -101,6 +136,8 @@ namespace HpskSite.Hubs
             if (_matchSpectators.TryGetValue(matchCode, out var spectators))
             {
                 spectators.TryRemove(connectionId, out _);
+                // Städa bort tomma matcher så att listan inte växer med döda koder.
+                if (spectators.IsEmpty) _matchSpectators.TryRemove(matchCode, out _);
             }
             _connectionMatches.TryRemove(connectionId, out _);
             await Task.CompletedTask;
@@ -132,6 +169,13 @@ namespace HpskSite.Hubs
         /// </summary>
         public async Task JoinOrganizerGroup(string matchCode)
         {
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A7/H3): bara matchens SKAPARE lyssnar på arrangörens förfrågningar (namnen på dem som
+            // vill gå med). Förut kunde vem som helst med koden göra det.
+            var caller = await _access.ResolveAsync(Context, matchCode);
+            var allowed = caller?.MemberId is int id && _access.IsCreator(matchCode, id);
+            if (!allowed && _access.ShouldDeny("JoinOrganizerGroup", matchCode))
+                throw Denied("Bara den som skapade matchen kan ta emot förfrågningar.");
+
             await Groups.AddToGroupAsync(Context.ConnectionId, $"organizer_{matchCode.ToUpperInvariant()}");
         }
 

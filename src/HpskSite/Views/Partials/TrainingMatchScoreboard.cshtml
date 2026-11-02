@@ -1211,15 +1211,30 @@ function updateSpectatorsDisplay(spectators, matchStatus) {
     const visibleSpectators = otherSpectators.slice(0, maxAvatars);
 
     avatarsContainer.innerHTML = visibleSpectators.map(s => {
-        if (s.profilePictureUrl) {
-            return `<img src="${s.profilePictureUrl}" alt="${s.name}" class="spectator-mini-avatar" title="${s.name}">`;
+        const img = safeSpecImg(s.profilePictureUrl);
+        if (img) {
+            return `<img src="${img}" alt="${escSpec(s.name)}" class="spectator-mini-avatar" title="${escSpec(s.name)}">`;
         }
-        const initials = s.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-        return `<div class="spectator-mini-avatar spectator-mini-avatar-initials" title="${s.name}">${initials}</div>`;
+        return `<div class="spectator-mini-avatar spectator-mini-avatar-initials" title="${escSpec(s.name)}">${specInitials(s.name)}</div>`;
     }).join('');
 
     // Update count
     countBadge.textContent = otherSpectators.length;
+}
+
+// Säkerhetsplanen 2026-11-02 (A7/H3): åskådarnas namn, bilder och klubbar skrivs ALDRIG in som HTML utan att kodas —
+// ett medlemsnamn kan i sig innehålla HTML. Bild-adressen släpps bara igenom som en sajtrelativ eller https-adress.
+function escSpec(v) {
+    return String(v == null ? '' : v).replace(/[&<>"'`]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
+    });
+}
+function safeSpecImg(u) {
+    u = String(u || '');
+    return (/^\/(?!\/)/.test(u) || /^https:\/\//i.test(u)) && !/["'<>`\s\\]/.test(u) ? escSpec(u) : '';
+}
+function specInitials(name) {
+    return escSpec(String(name || '').split(' ').filter(Boolean).map(function (n) { return n[0]; }).join('').toUpperCase().slice(0, 2));
 }
 
 // Show spectators modal
@@ -1236,16 +1251,17 @@ function showSpectatorsModal() {
         noMessage.style.display = 'none';
 
         listContainer.innerHTML = spectators.map(s => {
-            const avatar = s.profilePictureUrl
-                ? `<img src="${s.profilePictureUrl}" alt="${s.name}" class="rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">`
-                : `<div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-size: 14px;">${s.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}</div>`;
+            const img = safeSpecImg(s.profilePictureUrl);
+            const avatar = img
+                ? `<img src="${img}" alt="${escSpec(s.name)}" class="rounded-circle" style="width: 40px; height: 40px; object-fit: cover;">`
+                : `<div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-size: 14px;">${specInitials(s.name)}</div>`;
 
             return `
                 <div class="list-group-item d-flex align-items-center gap-3">
                     ${avatar}
                     <div>
-                        <div class="fw-medium">${s.name}</div>
-                        ${s.clubName ? `<small class="text-muted">${s.clubName}</small>` : ''}
+                        <div class="fw-medium">${escSpec(s.name)}</div>
+                        ${s.clubName ? `<small class="text-muted">${escSpec(s.clubName)}</small>` : ''}
                     </div>
                 </div>
             `;

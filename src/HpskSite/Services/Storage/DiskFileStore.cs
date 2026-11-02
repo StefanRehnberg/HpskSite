@@ -39,7 +39,7 @@ namespace HpskSite.Services.Storage
 
         public async Task SaveAsync(string area, string name, Stream content, CancellationToken ct = default)
         {
-            FileStoreNames.Require(area, name);
+            FileStoreNames.RequireWritable(area, name);
             var path = PathFor(area, name) ?? throw new ArgumentException($"Ogiltigt filnamn: {name}");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             // Skriv till en temporär fil och flytta: en läsare ser aldrig en halvskriven fil.
@@ -58,7 +58,7 @@ namespace HpskSite.Services.Storage
 
         public async Task<bool> CreateIfAbsentAsync(string area, string name, Stream content, CancellationToken ct = default)
         {
-            FileStoreNames.Require(area, name);
+            FileStoreNames.RequireWritable(area, name);
             var path = PathFor(area, name) ?? throw new ArgumentException($"Ogiltigt filnamn: {name}");
             if (File.Exists(path)) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
