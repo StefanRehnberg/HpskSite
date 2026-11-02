@@ -274,16 +274,38 @@ async function submitAddGuest() {
     }
 }
 
+// Hämtar QR-bilden för en claim-länk från vår egen server (POST /api/match/qr). Länken sätts bara in som text —
+// aldrig som HTML.
+async function renderClaimQr(container, claimUrl) {
+    container.textContent = '';
+    try {
+        const resp = await fetch('/api/match/qr', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: claimUrl })
+        });
+        if (!resp.ok) throw new Error('QR');
+        const blob = await resp.blob();
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(blob);
+        img.alt = 'QR-kod';
+        img.style.width = '200px';
+        img.style.height = '200px';
+        container.appendChild(img);
+    } catch (e) {
+        container.textContent = 'QR-koden kunde inte skapas. Länken är: ' + claimUrl;
+    }
+}
+
 function showGuestQrCode(guestData) {
     // Set guest name
     document.getElementById('guestQrName').textContent = guestData.displayName;
 
-    // Generate QR code using a simple library or API
+    // QR-koden skapas på vår egen server (säkerhetsplanen 2026-11-02): claim-länken bär en bärartoken och får inte
+    // skickas till en tredjepartstjänst.
     const qrContainer = document.getElementById('guestQrCodeContainer');
-    const claimUrl = guestData.claimUrl;
-
-    // Use QR code API (or include a QR library)
-    qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(claimUrl)}" alt="QR Code" style="width: 200px; height: 200px;">`;
+    renderClaimQr(qrContainer, guestData.claimUrl);
 
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('guestQrModal'));
@@ -497,12 +519,9 @@ function showMemberQrCode(claimData) {
     document.getElementById('memberQrName').textContent = claimData.displayName;
     document.getElementById('memberQrClub').textContent = claimData.clubName ? `(${claimData.clubName})` : '';
 
-    // Generate QR code
+    // QR-koden skapas på vår egen server (säkerhetsplanen 2026-11-02), aldrig hos en tredjepartstjänst.
     const qrContainer = document.getElementById('memberQrCodeContainer');
-    const claimUrl = claimData.claimUrl;
-
-    // Use QR code API
-    qrContainer.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(claimUrl)}" alt="QR Code" style="width: 200px; height: 200px;">`;
+    renderClaimQr(qrContainer, claimData.claimUrl);
 
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('memberQrModal'));

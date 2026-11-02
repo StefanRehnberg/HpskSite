@@ -2421,6 +2421,58 @@ namespace HpskSite.Controllers.Api
         #region Member Claim (Forgot Password at Range)
 
         /// <summary>
+        /// QR-bilden för en claim-länk, skapad på vår egen server (säkerhetsplanen 2026-11-02). Förut hämtades den från
+        /// api.qrserver.com med hela länken — och den bär en bärartoken — som parameter.
+        /// POST /api/match/qr   { "url": "https://pistol.nu/match/ABC123/guest/…" }
+        ///
+        /// <para>Bara inloggade, och bara länkar till sajtens egen <c>/match/…</c>-adress — tjänsten är ingen öppen
+        /// QR-generator.</para>
+        /// </summary>
+        [HttpPost("qr")]
+        public async Task<IActionResult> ClaimQr([FromBody] ClaimQrRequest? request)
+        {
+            var memberId = await GetCurrentMemberIdAsync();
+            if (!memberId.HasValue) return Unauthorized();
+
+            // Samma adresser som claim-länkarna byggs av: EmailSettings:SiteUrl (som CreateMemberClaim/AddGuest använder)
+            // eller sajtens adress utåt.
+            var url = request?.Url?.Trim();
+            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/');
+            var ownLink = !string.IsNullOrEmpty(url)
+                && (url.StartsWith(Request.PublicBase() + "/match/", StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrEmpty(siteUrl) && url.StartsWith(siteUrl + "/match/", StringComparison.OrdinalIgnoreCase)));
+            if (!ownLink || url!.Length > 300)
+                return BadRequest(ApiResponse<string>.Error("Ogiltig länk"));
+
+            try
+            {
+                var gen = new QRCoder.QRCodeGenerator();
+                using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.Q);
+                var qr = new QRCoder.QRCode(data);
+                using var img = qr.GetGraphic(
+                    pixelsPerModule: 10,
+                    darkColor: SixLabors.ImageSharp.Color.Black,
+                    lightColor: SixLabors.ImageSharp.Color.White,
+                    drawQuietZones: true);
+                using var ms = new System.IO.MemoryStream();
+                img.Save(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                Response.Headers.CacheControl = "no-store"; // bärartoken: ingen cachning
+                return File(ms.ToArray(), "image/png");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte skapa QR-kod för claim-länk");
+                return StatusCode(500, ApiResponse<string>.Error("QR-koden kunde inte skapas."));
+            }
+        }
+
+        /// <summary>Begäran till <c>api/match/qr</c>.</summary>
+        public class ClaimQrRequest
+        {
+            public string? Url { get; set; }
+        }
+
+        /// <summary>
         /// Search for members by name (for organizers to find members who forgot their password)
         /// GET /api/match/search-members?q={searchTerm}
         /// </summary>
