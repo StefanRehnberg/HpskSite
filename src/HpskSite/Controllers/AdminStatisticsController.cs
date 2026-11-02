@@ -633,8 +633,8 @@ namespace HpskSite.Controllers
 
                     int totalClubs = allClubNodes.Count;
 
-                    // Active club: has ≥1 approved member AND (has event within last 3 months
-                    //              OR has a club competition within last 3 months)
+                    // Active club: has ≥3 approved members AND (an event, a training or a club competition
+                    //              within ±6 months)
                     var membersByClub = approvedMembers
                         .Select(m =>
                         {
@@ -649,7 +649,10 @@ namespace HpskSite.Controllers
 
                     int clubsWithMembers = allClubNodes.Count(club => membersByClub.ContainsKey(club.Id));
 
-                    var threeMonthsAgo = today.AddMonths(-3);
+                    // Aktiv klubb: minst 3 medlemmar OCH en händelse, träning eller tävling inom ±6 månader.
+                    const int ActiveClubMinMembers = 3;
+                    var activeFrom = today.AddMonths(-6);
+                    var activeTo = today.AddMonths(6);
 
                     // Pre-compute the set of club IDs that have a competition with date
                     // within the last 3 months. Done once here instead of per-club inside
@@ -662,7 +665,7 @@ namespace HpskSite.Controllers
                         .Where(c =>
                         {
                             var d = c.CompetitionDate;
-                            return d.HasValue && d.Value >= threeMonthsAgo;
+                            return d.HasValue && d.Value >= activeFrom && d.Value <= activeTo;
                         })
                         .Select(c => c.ClubId)
                         .Where(id => id > 0)
@@ -679,14 +682,15 @@ namespace HpskSite.Controllers
                     // EN läsning av träningarnas datum från förrförra årets början; "senaste tre månaderna" är en
                     // delmängd av den (förut två frågor mot samma tabell).
                     var trainingsByClub = _trainings.DatesByClub(new DateTime(now.Year - 2, 1, 1));
-                    var recentTrainingsFrom = threeMonthsAgo.Date;
+                    var activeFromDate = activeFrom.Date;
+                    var activeToDate = activeTo.Date.AddDays(1); // hela slutdagen räknas med
                     int activeClubs = allClubNodes.Count(club =>
                     {
-                        if (!membersByClub.ContainsKey(club.Id)) return false;
+                        if (!membersByClub.TryGetValue(club.Id, out var memberCount) || memberCount < ActiveClubMinMembers) return false;
                         var hasRecentEvent = EventsOf(club.Id)
-                            .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= threeMonthsAgo)
+                            .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= activeFrom && e.StartsAt.Value <= activeTo)
                             // Fas B5: en träning är också aktivitet i klubben.
-                            || (trainingsByClub.TryGetValue(club.Id, out var td) && td.Any(d => d >= recentTrainingsFrom));
+                            || (trainingsByClub.TryGetValue(club.Id, out var td) && td.Any(d => d >= activeFromDate && d < activeToDate));
                         var hasRecentClubComp = clubIdsWithRecentComp.Contains(club.Id);
                         return hasRecentEvent || hasRecentClubComp;
                     });
