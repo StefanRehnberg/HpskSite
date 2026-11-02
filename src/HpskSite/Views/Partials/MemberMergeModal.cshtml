@@ -329,7 +329,16 @@
             'En kopia av den sparas i sammanslagningsloggen, och dess e-postadress kommer fortsätta ' +
             'peka på den post du behåller — så nästa import skapar inte dubbletten igen.</div>';
 
-        mmEl('mm_compareStep').innerHTML = head + reason + fieldsCard + countsCard + warn;
+        // Säkerhetsplanen 2026-11-02 (A5/H4): servern säger om kontot som tas bort har en administratörsroll som den
+        // som slår ihop inte får ta bort. Knappen spärras och förklaringen visas bredvid — ingen ska klicka för att få ett fel.
+        var refusals = d.refusals || {};
+        var blockedText = refusals[loser.id] || '';
+        var blocked = blockedText
+            ? '<div class="alert alert-danger small"><i class="bi bi-shield-lock me-1"></i>' + mmEscape(blockedText) + '</div>'
+            : '';
+
+        mmEl('mm_compareStep').innerHTML = head + reason + blocked + fieldsCard + countsCard + warn;
+        mmEl('mm_mergeBtn').disabled = !!blockedText;
     }
 
     window.mmTakeAll = function (checked) {

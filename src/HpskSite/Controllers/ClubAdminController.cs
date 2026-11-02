@@ -1347,9 +1347,11 @@ namespace HpskSite.Controllers
         /// Assigns club admin role to a member
         /// </summary>
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> AssignClubAdmin(int memberId, int clubId)
         {
-            if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
+            var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            if (!isSiteAdmin && !await _authService.IsClubAdminForClub(clubId))
             {
                 return Json(new { success = false, message = "Access denied" });
             }
@@ -1360,6 +1362,19 @@ namespace HpskSite.Controllers
                 if (member == null)
                 {
                     return Json(new { success = false, message = "Member not found" });
+                }
+
+                // ⚠️ Säkerhetsplanen 2026-11-02 (M6/B5): en klubbadmin kunde göra VILKEN medlem som helst på sajten till
+                // admin för sin klubb. Nu måste målet vara en aktiv medlem i klubben (en nyligen importerad räknas) —
+                // sajtadmin får fortfarande utse vem som helst.
+                if (!isSiteAdmin && !_roster.ActiveMemberIds(clubId).Contains(member.Id))
+                {
+                    _logger.LogWarning("SEC: AssignClubAdmin nekades — medlem {MemberId} är inte aktiv medlem i klubb {ClubId}", member.Id, clubId);
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"{member.Name} är inte medlem i klubben. Lägg först till {member.Name} som medlem och försök sedan igen."
+                    });
                 }
 
                 // Get club from content service (clubs are Document Type nodes, NOT members)
@@ -1376,6 +1391,8 @@ namespace HpskSite.Controllers
                 // Assign club admin role
                 var groupName = $"ClubAdmin_{clubId}";
                 _memberService.AssignRole(member.Id, groupName);
+                _logger.LogWarning("SEC: Klubbadmin tilldelad — medlem {MemberId} för klubb {ClubId} (av {ByAdmin})",
+                    member.Id, clubId, isSiteAdmin ? "sajtadmin" : "klubbadmin");
 
                 return Json(new {
                     success = true,
@@ -1392,6 +1409,7 @@ namespace HpskSite.Controllers
         /// Removes club admin role from a member
         /// </summary>
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> RemoveClubAdmin(int memberId, int clubId)
         {
             if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
@@ -1423,6 +1441,7 @@ namespace HpskSite.Controllers
                     }
 
                     _memberService.DissociateRole(member.Id, groupName);
+                    _logger.LogWarning("SEC: Klubbadmin borttagen — medlem {MemberId} för klubb {ClubId}", member.Id, clubId);
                     return Json(new { success = true, message = "Club admin role removed" });
                 }
 

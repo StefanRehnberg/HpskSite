@@ -316,15 +316,15 @@ namespace HpskSite.Controllers
 
             _documentService.IncrementDownloadCount(id);
 
-            // Serve browser-viewable types inline (PDF, images), download the rest
-            var inlineTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "application/pdf",
-                "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
-                "text/plain", "text/html"
-            };
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A6/H5): Content-Type härleds ur FILÄNDELSEN, aldrig ur det klienten skickade vid
+            // uppladdningen (document.ContentType). Förut serverades text/html och image/svg+xml inline på sajtens egen
+            // adress, med klientens egen typ — en klubbadmin kunde ladda upp "a.txt" märkt text/html med skript och få
+            // det att köras hos den som öppnar länken. Aktivt innehåll (html, svg, xml, skript) laddas bara ner.
+            var servedType = HpskSite.Services.Security.UploadedContent.ServedContentType(document.FileName);
+            HpskSite.Services.Security.UploadedContent.AddHardeningHeaders(Response.Headers);
 
-            if (inlineTypes.Contains(document.ContentType))
+            // Serve browser-viewable types inline (PDF, images), download the rest
+            if (HpskSite.Services.Security.UploadedContent.IsInlineSafe(servedType))
             {
                 // ⚠️ Inte $"inline; filename=\"{namn}\"": ett filnamn med å/ä/ö är inte ASCII, och Kestrel
                 //    kastar då vid huvudet — varje sådant dokument gav 500. SetHttpFileName skriver både
@@ -332,10 +332,10 @@ namespace HpskSite.Controllers
                 var disposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("inline");
                 disposition.SetHttpFileName(document.FileName);
                 Response.Headers.ContentDisposition = disposition.ToString();
-                return File(stream, document.ContentType, enableRangeProcessing: true);
+                return File(stream, servedType, enableRangeProcessing: true);
             }
 
-            return File(stream, document.ContentType, document.FileName, enableRangeProcessing: true);
+            return File(stream, servedType, document.FileName, enableRangeProcessing: true);
         }
 
         // ===== STORAGE QUOTA =====

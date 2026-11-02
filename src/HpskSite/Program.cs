@@ -196,6 +196,10 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+// ⚠️ Säkerhetsplanen 2026-11-02 (A6/H5a): uppladdningsområdena serverar aldrig HTML/SVG/XML/skript, och allt
+// därifrån får nosniff + CSP sandbox. FÖRE de statiska filerna och blobb-serveringen.
+app.UseMiddleware<HpskSite.Services.Storage.UploadedContentSafetyMiddleware>();
+
 app.Use(async (context, next) =>
 {
     await next();

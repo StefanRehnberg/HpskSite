@@ -21,6 +21,12 @@ namespace HpskSite.Controllers
             "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"
         };
 
+        /// <summary>Ändelser vi sparar bilder med (säkerhetsplanen 2026-11-02) — aldrig .html/.svg/.xml.</summary>
+        private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".jpg", ".jpeg", ".png", ".gif", ".webp"
+        };
+
         private const long MaxFileSize = 5 * 1024 * 1024; // 5 MB
 
         public ImageUploadController(
@@ -67,11 +73,34 @@ namespace HpskSite.Controllers
                 return Json(new { error = new { message = "Endast bildfiler (JPG, PNG, GIF, WebP) är tillåtna" } });
             }
 
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A6/H5): klientens Content-Type-header är inget bevis, och ändelsen togs förut
+            // ur filnamnet — en klubbadmin kunde ladda upp x.html med skript som image/png och få det serverat från
+            // sajtens adress. Nu: ändelsen måste vara en bildändelse OCH innehållet måste vara en riktig bild
+            // (kända bildformat, TIFF avstängd).
+            var extension = Path.GetExtension(upload.FileName)?.ToLowerInvariant() ?? "";
+            if (!AllowedExtensions.Contains(extension))
+            {
+                _logger.LogWarning("SEC: Bilduppladdning nekades — ändelsen {Extension} är ingen bildändelse", extension);
+                return Json(new { error = new { message = "Endast bildfiler (JPG, PNG, GIF, WebP) är tillåtna" } });
+            }
+            try
+            {
+                await using var probe = upload.OpenReadStream();
+                var info = await SixLabors.ImageSharp.Image.IdentifyAsync(
+                    new SixLabors.ImageSharp.Formats.DecoderOptions { Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance },
+                    probe);
+                if (info == null) throw new SixLabors.ImageSharp.UnknownImageFormatException("okänt bildformat");
+            }
+            catch (Exception ex) when (ex is SixLabors.ImageSharp.UnknownImageFormatException or SixLabors.ImageSharp.InvalidImageContentException)
+            {
+                _logger.LogWarning("SEC: Bilduppladdning nekades — innehållet är ingen bild som sajten kan läsa");
+                return Json(new { error = new { message = "Filen är ingen giltig bild" } });
+            }
+
             try
             {
                 // Generate unique filename preserving extension — stored through the file store
                 // (skalplanen D3); the URL /images/uploads/… is unchanged.
-                var extension = Path.GetExtension(upload.FileName)?.ToLowerInvariant() ?? ".jpg";
                 if (!HpskSite.Services.Storage.FileStoreNames.IsValidName("x" + extension)) extension = ".jpg";
                 var fileName = $"{Guid.NewGuid():N}{extension}";
                 await using (var stream = upload.OpenReadStream())

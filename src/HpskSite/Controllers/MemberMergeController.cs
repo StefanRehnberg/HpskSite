@@ -103,9 +103,22 @@ namespace HpskSite.Controllers
             try
             {
                 var c = _mergeService.Compare(memberAId, memberBId, clubId);
+
+                // Säkerhetsplanen 2026-11-02: vilken av de två som INTE får tas bort av den som slår ihop (administratörsroll),
+                // och varför. Klienten spärrar knappen och visar texten — Merge prövar samma regel igen.
+                var isSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+                var managed = (await _authService.GetManagedClubIds()).ToList();
+                var refusals = new Dictionary<int, string>();
+                foreach (var m in new[] { c.Survivor, c.Loser })
+                {
+                    var why = MergeRefusalFor(m.Id, m.Name, isSiteAdmin, managed);
+                    if (why != null) refusals[m.Id] = why;
+                }
+
                 return Json(new
                 {
                     success = true,
+                    refusals = refusals,
                     suggestedSurvivorId = c.SuggestedSurvivorId,
                     suggestedReason = c.SuggestedReason,
                     survivor = Summary(c.Survivor),
@@ -156,6 +169,19 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Ogiltigt dataformat: " + ex.Message });
             }
 
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A5/H4): ett konto med en administratörsroll som aktören inte får föra över
+            // kan inte tas bort av en sammanslagning — annars kunde en klubbadmin ta över en sajtadmins roll och radera kontot.
+            var actorIsSiteAdmin = await _authService.IsCurrentUserAdminAsync();
+            var actorManagedClubIds = (await _authService.GetManagedClubIds()).ToList();
+            var loserForRefusal = _memberService.GetById(loserMemberId);
+            var refusalText = loserForRefusal == null ? null
+                : MergeRefusalFor(loserForRefusal.Id, loserForRefusal.Name ?? "Kontot", actorIsSiteAdmin, actorManagedClubIds);
+            if (refusalText != null)
+            {
+                _logger.LogWarning("SEC: Sammanslagning nekades i controllern — förloraren {Loser}, klubb {ClubId}", loserMemberId, clubId);
+                return Json(new { success = false, message = refusalText });
+            }
+
             try
             {
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -165,6 +191,8 @@ namespace HpskSite.Controllers
                     ClubId = clubId,
                     SurvivorMemberId = survivorMemberId,
                     LoserMemberId = loserMemberId,
+                    ActorIsSiteAdmin = actorIsSiteAdmin,
+                    ActorManagedClubIds = actorManagedClubIds,
                     MergedByMemberId = currentMember != null ? int.Parse(currentMember.Id!) : null,
                     TakeFromLoser = new HashSet<string>(takeFields, StringComparer.OrdinalIgnoreCase)
                 });
@@ -192,6 +220,14 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = ex.Message });
             }
         }
+
+        /// <summary>Svensk förklaring om medlemmen inte får tas bort av en sammanslagning (administratörsroll), annars null.</summary>
+        private string? MergeRefusalFor(int memberId, string? name, bool actorIsSiteAdmin, IReadOnlyCollection<int> managedClubIds) =>
+            HpskSite.Services.Security.MergeRoleRules.LoserRefusal(
+                string.IsNullOrWhiteSpace(name) ? "Kontot" : name,
+                _memberService.GetAllRoles(memberId),
+                actorIsSiteAdmin,
+                id => managedClubIds.Contains(id));
 
         /// <summary>
         /// Both members must be on this club's roster, or be club-less. Without this an admin

@@ -368,6 +368,18 @@ namespace HpskSite.Services
                 throw new InvalidOperationException("Det är samma medlem.");
             }
 
+            // ⚠️ Säkerhetsplanen 2026-11-02 (A5/H4): den som slår ihop får inte radera ett konto med en roll hen inte
+            // får föra över (sajt-/kretsadmin, eller admin för en annan klubb). Defense in depth — controllern
+            // prövar samma regel först och visar förklaringen.
+            var refusal = HpskSite.Services.Security.MergeRoleRules.LoserRefusal(
+                loser.Name ?? "Kontot", _memberService.GetAllRoles(loser.Id),
+                request.ActorIsSiteAdmin, id => request.ActorManagedClubIds.Contains(id));
+            if (refusal != null)
+            {
+                _logger.LogWarning("SEC: Sammanslagning nekades — förloraren {Loser} har en roll aktören inte får föra över (klubb {ClubId})", loser.Id, request.ClubId);
+                throw new InvalidOperationException(refusal);
+            }
+
             var result = new MergeResult
             {
                 SurvivorMemberId = survivor.Id,
@@ -419,6 +431,8 @@ namespace HpskSite.Services
             {
                 var current = _memberService.GetAllRoles(survivor.Id);
                 if (current.Contains(role, StringComparer.OrdinalIgnoreCase)) continue;
+                // Privilegierade roller förs bara över av den som själv får tilldela dem (se LoserRefusal ovan).
+                if (!HpskSite.Services.Security.MergeRoleRules.MayTransfer(role, request.ActorIsSiteAdmin, id => request.ActorManagedClubIds.Contains(id))) continue;
                 _memberService.AssignRole(survivor.Id, role);
                 result.RolesTaken.Add(role);
             }
@@ -959,6 +973,14 @@ namespace HpskSite.Services
         public int SurvivorMemberId { get; set; }
         public int LoserMemberId { get; set; }
         public int? MergedByMemberId { get; set; }
+
+        /// <summary>
+        /// Vem som slår ihop (säkerhetsplanen 2026-11-02). Strängast som förval: en anropare som inte anger något
+        /// får varken föra över eller radera privilegierade konton.
+        /// </summary>
+        public bool ActorIsSiteAdmin { get; set; }
+        public IReadOnlyCollection<int> ActorManagedClubIds { get; set; } = Array.Empty<int>();
+
         public HashSet<string> TakeFromLoser { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
