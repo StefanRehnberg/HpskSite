@@ -212,7 +212,8 @@
 
                 // Redirect to user profile after 2 seconds
                 setTimeout(() => {
-                    window.location.href = '/user-profile-page/';
+                    // Privilegierade konton loggas inte in av länken — servern skickar dem till inloggningen.
+                    window.location.href = data.redirectUrl || '/user-profile-page/';
                 }, 2000);
             } else {
                 showError(data.message);

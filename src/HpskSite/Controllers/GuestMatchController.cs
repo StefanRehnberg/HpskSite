@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -20,26 +21,33 @@ namespace HpskSite.Controllers
         private readonly ILogger<GuestMatchController> _logger;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
-        private readonly SignInManager<MemberIdentityUser> _signInManager;
         private readonly Services.ClubService _clubService;
         private readonly IHubContext<TrainingMatchHub> _hubContext;
+        private readonly IAntiforgery _antiforgery;
+        private readonly ITimeLimitedDataProtector _joinedTicket;
+
+        /// <summary>Hur länge "du är med"-sidan efter en claim gäller (säkerhetsplanen 2026-11-02, H2).</summary>
+        private static readonly TimeSpan JoinedTicketLifetime = TimeSpan.FromMinutes(30);
 
         public GuestMatchController(
             IScopeProvider scopeProvider,
             ILogger<GuestMatchController> logger,
             IMemberService memberService,
             IMemberManager memberManager,
-            SignInManager<MemberIdentityUser> signInManager,
             Services.ClubService clubService,
-            IHubContext<TrainingMatchHub> hubContext)
+            IHubContext<TrainingMatchHub> hubContext,
+            IAntiforgery antiforgery,
+            IDataProtectionProvider dataProtection)
         {
             _scopeProvider = scopeProvider;
             _logger = logger;
             _memberService = memberService;
             _memberManager = memberManager;
-            _signInManager = signInManager;
             _clubService = clubService;
             _hubContext = hubContext;
+            _antiforgery = antiforgery;
+            // ⚠️ Purpose-strängen byts aldrig (utfärdade biljetter slutar annars gälla).
+            _joinedTicket = dataProtection.CreateProtector("Match.MemberClaim.Joined.v1").ToTimeLimitedDataProtector();
         }
 
         /// <summary>
@@ -49,7 +57,8 @@ namespace HpskSite.Controllers
         [HttpGet("{code}/guest/{token}")]
         public async Task<IActionResult> ClaimGuestSpot(string code, string token)
         {
-            _logger.LogInformation("ClaimGuestSpot called with code={Code}, token={Token}", code, token);
+            // ⚠️ Själva token loggas aldrig (säkerhetsplanen 2026-11-02): den är en bärarbehörighet.
+            _logger.LogInformation("ClaimGuestSpot called with code={Code}", code);
 
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(token))
             {
@@ -60,7 +69,7 @@ namespace HpskSite.Controllers
             // Parse token
             if (!Guid.TryParse(token, out var claimToken))
             {
-                _logger.LogWarning("ClaimGuestSpot: Could not parse token as GUID: {Token}", token);
+                _logger.LogWarning("ClaimGuestSpot: Could not parse token as GUID");
                 return RedirectToErrorPage("Ogiltig token");
             }
 
@@ -91,7 +100,7 @@ namespace HpskSite.Controllers
 
             if (guest == null)
             {
-                _logger.LogWarning("ClaimGuestSpot: No guest found with ClaimToken {ClaimToken}", claimToken);
+                _logger.LogWarning("ClaimGuestSpot: No guest found for the claim token");
                 scope.Complete();
                 return RedirectToErrorPage("Ogiltig inbjudningstoken");
             }
@@ -153,7 +162,7 @@ namespace HpskSite.Controllers
         [HttpGet("{code}/member/{token}")]
         public async Task<IActionResult> ClaimMemberSpot(string code, string token)
         {
-            _logger.LogInformation("ClaimMemberSpot called with code={Code}, token={Token}", code, token);
+            _logger.LogInformation("ClaimMemberSpot called with code={Code}", code);
 
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(token))
             {
@@ -167,7 +176,7 @@ namespace HpskSite.Controllers
             // Parse token
             if (!Guid.TryParse(token, out var claimToken))
             {
-                _logger.LogWarning("ClaimMemberSpot: Could not parse token as GUID: {Token}", token);
+                _logger.LogWarning("ClaimMemberSpot: Could not parse token as GUID");
                 return View("MemberClaimConfirmation", new MemberClaimViewModel
                 {
                     ErrorMessage = "Ogiltig token"
@@ -207,7 +216,7 @@ namespace HpskSite.Controllers
 
             if (claimRecord == null)
             {
-                _logger.LogWarning("ClaimMemberSpot: No member claim found with token {ClaimToken}", claimToken);
+                _logger.LogWarning("ClaimMemberSpot: No member claim found for the token");
                 scope.Complete();
                 return View("MemberClaimConfirmation", new MemberClaimViewModel
                 {
@@ -275,7 +284,8 @@ namespace HpskSite.Controllers
                 ClaimToken = token,
                 MatchCode = code.ToUpper(),
                 MemberName = claimRecord.DisplayName,
-                MemberEmail = memberEmail,
+                // Den som bara har länken får inte se hela adressen (säkerhetsplanen 2026-11-02).
+                MemberEmail = HpskSite.Services.Security.MaskedEmail.Mask(memberEmail),
                 ClubName = clubName,
                 IsValid = true,
                 IsTeamMatch = match.IsTeamMatch,
@@ -292,7 +302,22 @@ namespace HpskSite.Controllers
         [HttpPost("{code}/member/confirm")]
         public async Task<IActionResult> ConfirmMemberClaim(string code, [FromForm] string claimToken, [FromForm] int? teamId = null)
         {
-            _logger.LogInformation("ConfirmMemberClaim called with code={Code}, claimToken={ClaimToken}", code, claimToken);
+            _logger.LogInformation("ConfirmMemberClaim called with code={Code}", code);
+
+            // Formuläret har antiforgery-token (säkerhetsplanen 2026-11-02). Ett nekat formulär får en
+            // svensk förklaring, inte ett tomt 400.
+            try
+            {
+                await _antiforgery.ValidateRequestAsync(HttpContext);
+            }
+            catch (AntiforgeryValidationException)
+            {
+                _logger.LogWarning("SEC: ConfirmMemberClaim nekades — antiforgery-token saknades eller var ogiltigt");
+                return View("MemberClaimConfirmation", new MemberClaimViewModel
+                {
+                    ErrorMessage = "Sidan har varit öppen för länge. Skanna QR-koden igen och försök på nytt. Inget har sparats."
+                });
+            }
 
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(claimToken))
             {
@@ -421,27 +446,80 @@ namespace HpskSite.Controllers
 
             scope.Complete();
 
-            // Sign in the member using Umbraco's identity system
-            var identityUser = await _memberManager.FindByEmailAsync(memberEmail);
-            if (identityUser == null)
-            {
-                _logger.LogWarning("ConfirmMemberClaim: Identity user not found for member {MemberId} with email {Email}",
-                    claimRecord.LinkedMemberId, memberEmail);
-                return RedirectToErrorPage("Kunde inte logga in medlemmen");
-            }
-
-            // Sign in with persistent cookie
-            await _signInManager.SignInAsync(identityUser, isPersistent: true);
-
-            _logger.LogInformation("ConfirmMemberClaim: Member {MemberId} ({Email}) signed in and joined match {MatchCode} via claim",
-                claimRecord.LinkedMemberId, memberEmail, code);
+            // ⚠️ SÄKERHETSPLANEN 2026-11-02 (A1/H2): ingen session skapas här. Förut anropades
+            // SignInAsync för medlemmen, utan lösenord — så den som skapat en claim för ett annat konto
+            // (även en sajtadmin) kunde själv bekräfta länken och bli inloggad som det kontot. Deltagaren är
+            // redan inlagd; nu visas "du är med"-sidan, som låter personen logga in på vanligt sätt.
+            _logger.LogInformation("ConfirmMemberClaim: Member {MemberId} joined match {MatchCode} via claim (ingen session skapad)",
+                claimRecord.LinkedMemberId, code);
 
             // Notify via SignalR so creator's scoreboard updates
             await _hubContext.Clients.Group($"match_{code.ToUpper()}")
                 .SendAsync("ParticipantJoined", claimRecord.LinkedMemberId!.Value);
 
-            // Redirect to match view
-            return Redirect($"/traningsmatch/?join={code.ToUpper()}");
+            var ticket = _joinedTicket.Protect($"{claimRecord.LinkedMemberId.Value}|{code.ToUpper()}", JoinedTicketLifetime);
+            return Redirect($"/match/{code.ToUpper()}/member/joined?t={Uri.EscapeDataString(ticket)}");
+        }
+
+        /// <summary>
+        /// "Du är med i matchen" — visas efter en bekräftad claim. Skapar INGEN session. Är besökaren redan
+        /// inloggad som medlemmen går hen rakt in i matchen; annars väljer hen att logga in, få en
+        /// återställningslänk eller fortsätta utan att logga in.
+        /// GET /match/{code}/member/joined?t=...
+        /// </summary>
+        [HttpGet("{code}/member/joined")]
+        public async Task<IActionResult> MemberClaimJoined(string code, string? t)
+        {
+            var matchCode = (code ?? "").ToUpper();
+            if (!TryReadJoinedTicket(t, matchCode, out var memberId))
+            {
+                return View("MemberClaimConfirmation", new MemberClaimViewModel
+                {
+                    ErrorMessage = "Länken har gått ut. Skanna QR-koden igen om du vill gå med."
+                });
+            }
+
+            var member = _memberService.GetById(memberId);
+            if (member == null)
+            {
+                return View("MemberClaimConfirmation", new MemberClaimViewModel { ErrorMessage = "Medlemmen hittades inte i systemet." });
+            }
+
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current != null && current.Key == member.Key)
+            {
+                return Redirect($"/traningsmatch/?join={matchCode}");
+            }
+
+            var matchUrl = $"/traningsmatch/?join={matchCode}";
+            return View("MemberClaimJoined", new MemberClaimJoinedViewModel
+            {
+                MatchCode = matchCode,
+                MemberName = string.IsNullOrWhiteSpace(member.Name) ? "medlemmen" : member.Name,
+                SignedInAsOther = current != null ? (current.Name ?? "ett annat konto") : null,
+                LoginUrl = $"/login-register/?returnUrl={Uri.EscapeDataString(matchUrl)}",
+                ForgotUrl = $"/login-register/?forgot=1&returnUrl={Uri.EscapeDataString(matchUrl)}",
+                ContinueUrl = "/traningsmatch/"
+            });
+        }
+
+        /// <summary>Läser "du är med"-biljetten: giltig, inte utgången och utfärdad för just den här matchen.</summary>
+        private bool TryReadJoinedTicket(string? ticket, string matchCode, out int memberId)
+        {
+            memberId = 0;
+            if (string.IsNullOrEmpty(ticket)) return false;
+            try
+            {
+                var payload = _joinedTicket.Unprotect(ticket);
+                var parts = payload.Split('|');
+                return parts.Length == 2
+                    && int.TryParse(parts[0], out memberId)
+                    && string.Equals(parts[1], matchCode, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                return false; // utgången eller förfalskad
+            }
         }
 
         /// <summary>
@@ -602,6 +680,18 @@ namespace HpskSite.Controllers
         public bool IsOpen { get; set; }
         public List<MemberClaimTeamOption> Teams { get; set; } = new();
         public int? MaxShootersPerTeam { get; set; }
+    }
+
+    /// <summary>Modell för "du är med i matchen"-sidan (efter en bekräftad claim).</summary>
+    public class MemberClaimJoinedViewModel
+    {
+        public string MatchCode { get; set; } = string.Empty;
+        public string MemberName { get; set; } = string.Empty;
+        /// <summary>Satt när besökaren är inloggad som NÅGON ANNAN än den inbjudne.</summary>
+        public string? SignedInAsOther { get; set; }
+        public string LoginUrl { get; set; } = string.Empty;
+        public string ForgotUrl { get; set; } = string.Empty;
+        public string ContinueUrl { get; set; } = string.Empty;
     }
 
     public class MemberClaimTeamOption

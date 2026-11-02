@@ -30,6 +30,10 @@ namespace HpskSite.Controllers
         private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
             HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
 
+        /// <summary>Loggern ur RequestServices, så att konstruktorn inte ändras. E-postadresser loggas aldrig.</summary>
+        private Microsoft.Extensions.Logging.ILogger<MemberController> Log =>
+            HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MemberController>>();
+
         private readonly IMemberService _memberService;
         private readonly IMemberGroupService _memberGroupService;
         private readonly IMemberManager _memberManager;
@@ -1376,12 +1380,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> AutoLogin(string token, string email)
         {
-            Console.WriteLine($"[AutoLogin] Attempting auto-login for email: {email}");
+            Log.LogInformation("[AutoLogin] Attempting auto-login for email");
 
             // Validate parameters
             if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(email))
             {
-                Console.WriteLine("[AutoLogin] Missing token or email parameter");
+                Log.LogInformation("[AutoLogin] Missing token or email parameter");
                 TempData["ErrorMessage"] = "Ogiltig inloggningslänk. Token eller e-postadress saknas.";
                 return Redirect("/login-register?tab=login");
             }
@@ -1392,7 +1396,7 @@ namespace HpskSite.Controllers
                 var member = _memberService.GetByEmail(email);
                 if (member == null)
                 {
-                    Console.WriteLine($"[AutoLogin] Member not found for email: {email}");
+                    Log.LogInformation("[AutoLogin] Member not found for email");
                     TempData["ErrorMessage"] = "Kontot kunde inte hittas. Kontakta support om problemet kvarstår.";
                     return Redirect("/login-register?tab=login");
                 }
@@ -1400,8 +1404,17 @@ namespace HpskSite.Controllers
                 // Check if member is approved
                 if (!member.IsApproved)
                 {
-                    Console.WriteLine($"[AutoLogin] Member not approved: {email}");
+                    Log.LogInformation("[AutoLogin] Member not approved");
                     TempData["ErrorMessage"] = "Ditt konto är inte godkänt ännu. Vänta på godkännande från klubbadministratör.";
+                    return Redirect("/login-register?tab=login");
+                }
+
+                // ⚠️ Säkerhetsplanen 2026-11-02 (H2b): en inloggningslänk i en inkorg ger ALDRIG en session till ett
+                // privilegierat konto (sajt-, krets- eller klubbadmin) — de loggar in med lösenord.
+                if (HpskSite.Services.Security.PrivilegedAccount.HasPrivilegedRole(_memberService.GetAllRoles(member.Id)))
+                {
+                    Log.LogWarning("SEC: AutoLogin nekades — konto {MemberId} är privilegierat", member.Id);
+                    TempData["ErrorMessage"] = "Av säkerhetsskäl loggas administratörer inte in via en länk. Logga in med ditt lösenord.";
                     return Redirect("/login-register?tab=login");
                 }
 
@@ -1409,35 +1422,35 @@ namespace HpskSite.Controllers
                 switch (_tokens.Check(member.Id, MemberTokenPurpose.AutoLogin, token))
                 {
                     case MemberTokenCheck.Missing:
-                        Console.WriteLine($"[AutoLogin] No token found for member: {email}");
+                        Log.LogInformation("[AutoLogin] No token found for member");
                         TempData["ErrorMessage"] = "Inloggningslänken har redan använts eller är ogiltig. Använd vanlig inloggning istället.";
                         return Redirect("/login-register?tab=login");
                     case MemberTokenCheck.Expired:
-                        Console.WriteLine($"[AutoLogin] Token expired for member: {email}");
+                        Log.LogInformation("[AutoLogin] Token expired for member");
                         TempData["ErrorMessage"] = "Inloggningslänken har gått ut (giltig i 7 dagar). Använd vanlig inloggning istället.";
                         return Redirect("/login-register?tab=login");
                     case MemberTokenCheck.Mismatch:
-                        Console.WriteLine($"[AutoLogin] Token mismatch for member: {email}");
+                        Log.LogInformation("[AutoLogin] Token mismatch for member");
                         TempData["ErrorMessage"] = "Ogiltig inloggningslänk. Använd vanlig inloggning istället.";
                         return Redirect("/login-register?tab=login");
                 }
 
                 // Token is valid - clear it (single-use)
-                Console.WriteLine($"[AutoLogin] Token validated successfully for: {email}. Clearing token.");
+                Log.LogInformation("[AutoLogin] Token validated successfully. Clearing token.");
                 _tokens.Clear(member.Id, MemberTokenPurpose.AutoLogin);
 
                 // Sign in the member with persistent cookie (remember me for 90 days)
                 var identityUser = await _memberManager.FindByEmailAsync(email);
                 if (identityUser == null)
                 {
-                    Console.WriteLine($"[AutoLogin] Identity user not found for: {email}");
+                    Log.LogInformation("[AutoLogin] Identity user not found");
                     TempData["ErrorMessage"] = "Ett tekniskt fel uppstod. Använd vanlig inloggning istället.";
                     return Redirect("/login-register?tab=login");
                 }
 
                 // Sign in with persistent cookie using SignInManager
-                await _signInManager.SignInAsync(identityUser, isPersistent: true);
-                Console.WriteLine($"[AutoLogin] Member signed in successfully: {email}");
+                await _signInManager.SignInAsync(identityUser, isPersistent: true); // signin-ok: engångskod ur godkännandemejlet, ej privilegierat konto (kontrollerat ovan)
+                Log.LogInformation("[AutoLogin] Member signed in successfully");
 
                 // Set success message
                 TempData["SuccessMessage"] = "Välkommen! Du är nu inloggad.";
@@ -1447,8 +1460,8 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AutoLogin] Error during auto-login for {email}: {ex.Message}");
-                Console.WriteLine($"[AutoLogin] Stack trace: {ex.StackTrace}");
+                Log.LogWarning(ex, "[AutoLogin] Error during auto-login");
+                // (stack trace skrivs inte längre till konsolen);
                 TempData["ErrorMessage"] = "Ett fel uppstod vid automatisk inloggning. Använd vanlig inloggning istället.";
                 return Redirect("/login-register?tab=login");
             }
@@ -1461,19 +1474,19 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> QuickApprove(int memberId, long ts, string sig)
         {
-            Console.WriteLine($"[QuickApprove] Attempting quick approve for memberId: {memberId}");
+            Log.LogInformation("[QuickApprove] Attempting quick approve for memberId {MemberId}", memberId);
 
             // Validate parameters
             if (memberId <= 0 || ts <= 0 || string.IsNullOrEmpty(sig))
             {
-                Console.WriteLine("[QuickApprove] Missing or invalid parameters");
+                Log.LogInformation("[QuickApprove] Missing or invalid parameters");
                 return Content(QuickApproveHtmlPage("Ogiltig l&#228;nk", "L&#228;nken &#228;r ogiltig eller saknar parametrar.", false), "text/html");
             }
 
             // Validate HMAC signature and expiry
             if (!_emailService.ValidateQuickApproveSignature(memberId, ts, sig))
             {
-                Console.WriteLine($"[QuickApprove] Invalid or expired signature for memberId: {memberId}");
+                Log.LogInformation("[QuickApprove] Invalid or expired signature for memberId {MemberId}", memberId);
                 return Content(QuickApproveHtmlPage("Ogiltig eller utg&#229;ngen l&#228;nk", "L&#228;nken &#228;r ogiltig eller har g&#229;tt ut. Logga in p&#229; administrationspanelen f&#246;r att godk&#228;nna medlemmen manuellt.", false), "text/html");
             }
 
@@ -1483,7 +1496,7 @@ namespace HpskSite.Controllers
                 var member = _memberService.GetById(memberId);
                 if (member == null)
                 {
-                    Console.WriteLine($"[QuickApprove] Member not found: {memberId}");
+                    Log.LogInformation("[QuickApprove] Member not found {MemberId}", memberId);
                     return Content(QuickApproveHtmlPage("Medlem hittades inte", "Medlemmen kunde inte hittas i systemet.", false), "text/html");
                 }
 
@@ -1497,19 +1510,19 @@ namespace HpskSite.Controllers
                         var ln = member.GetValue<string>("lastName") ?? "";
                         alreadyName = $"{fn} {ln}".Trim();
                     }
-                    Console.WriteLine($"[QuickApprove] Member already approved: {memberId}");
+                    Log.LogInformation("[QuickApprove] Member already approved {MemberId}", memberId);
                     return Content(QuickApproveHtmlPage("Redan godk&#228;nd", $"Medlemmen <strong>{System.Net.WebUtility.HtmlEncode(alreadyName)}</strong> &#228;r redan godk&#228;nd.", true), "text/html");
                 }
 
                 // Approve the member (same logic as MemberAdminController.ApproveMember)
                 member.IsApproved = true;
                 _memberService.Save(member);
-                Console.WriteLine($"[QuickApprove] Member approved and saved: {memberId}");
+                Log.LogInformation("[QuickApprove] Member approved and saved {MemberId}", memberId);
 
                 // Assign to Users group and remove from PendingApproval group
                 _memberService.AssignRole(member.Id, "Users");
                 _memberService.DissociateRole(member.Id, "PendingApproval");
-                Console.WriteLine($"[QuickApprove] Member groups updated: {memberId}");
+                Log.LogInformation("[QuickApprove] Member groups updated {MemberId}", memberId);
 
                 // Generate auto-login token for approval email
                 var autoLoginToken = Guid.NewGuid().ToString("N");
@@ -1529,7 +1542,7 @@ namespace HpskSite.Controllers
                     await _emailService.SendApprovalNotificationAsync(
                         member.Email, memberName, autoLoginToken,
                         _replyContacts.ForMembersOwnClub(member));
-                    Console.WriteLine($"[QuickApprove] Approval email sent to: {member.Email}");
+                    Log.LogInformation("[QuickApprove] Approval email sent");
 
                     // Send confirmation to admin
                     var clubId = member.GetValue<int>("primaryClubId");
@@ -1543,15 +1556,15 @@ namespace HpskSite.Controllers
                 }
                 catch (Exception emailEx)
                 {
-                    Console.WriteLine($"[QuickApprove] Failed to send approval email: {emailEx.Message}");
+                    Log.LogWarning(emailEx, "[QuickApprove] Failed to send approval email");
                 }
 
-                Console.WriteLine($"[QuickApprove] Approval completed for: {memberId}");
+                Log.LogInformation("[QuickApprove] Approval completed for {MemberId}", memberId);
                 return Content(QuickApproveHtmlPage("Medlem godk&#228;nd!", $"<strong>{System.Net.WebUtility.HtmlEncode(memberName)}</strong> har godk&#228;nts och f&#229;tt ett e-postmeddelande med inloggningsl&#228;nk.", true), "text/html");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[QuickApprove] Error: {ex.Message}");
+                Log.LogWarning(ex, "[QuickApprove] Error");
                 return Content(QuickApproveHtmlPage("Ett fel uppstod", "Kunde inte godk&#228;nna medlemmen. F&#246;rs&#246;k igen eller anv&#228;nd administrationspanelen.", false), "text/html");
             }
         }
@@ -1597,12 +1610,12 @@ namespace HpskSite.Controllers
         [HttpGet]
         public IActionResult AcceptInvitation(string token, string email)
         {
-            Console.WriteLine($"[AcceptInvitation] Token received for email: {email}");
+            Log.LogInformation("[AcceptInvitation] Token received for email");
 
             // Validate parameters
             if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(email))
             {
-                Console.WriteLine("[AcceptInvitation] Missing token or email parameter");
+                Log.LogInformation("[AcceptInvitation] Missing token or email parameter");
                 TempData["ErrorMessage"] = "Ogiltig inbjudningslänk. Token eller e-postadress saknas.";
                 return Redirect("/login-register?tab=register");
             }
@@ -1621,7 +1634,7 @@ namespace HpskSite.Controllers
         [IgnoreAntiforgeryToken]
         public async Task<IActionResult> CompleteInvitation(string token, string email, string password)
         {
-            Console.WriteLine($"[CompleteInvitation] Processing invitation for email: {email}");
+            Log.LogInformation("[CompleteInvitation] Processing invitation for email");
 
             // Validate parameters
             if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
@@ -1635,7 +1648,7 @@ namespace HpskSite.Controllers
                 var member = _memberService.GetByEmail(email);
                 if (member == null)
                 {
-                    Console.WriteLine($"[CompleteInvitation] Member not found for email: {email}");
+                    Log.LogInformation("[CompleteInvitation] Member not found for email");
                     return Json(new { success = false, message = "Kontot kunde inte hittas" });
                 }
 
@@ -1643,13 +1656,13 @@ namespace HpskSite.Controllers
                 switch (_tokens.Check(member.Id, MemberTokenPurpose.Invitation, token))
                 {
                     case MemberTokenCheck.Missing:
-                        Console.WriteLine($"[CompleteInvitation] No invitation token found for: {email}");
+                        Log.LogInformation("[CompleteInvitation] No invitation token found");
                         return Json(new { success = false, message = "Inbjudningslänken har redan använts eller är ogiltig" });
                     case MemberTokenCheck.Expired:
-                        Console.WriteLine($"[CompleteInvitation] Token expired for: {email}");
+                        Log.LogInformation("[CompleteInvitation] Token expired");
                         return Json(new { success = false, message = "Inbjudningslänken har gått ut (giltig i 7 dagar)" });
                     case MemberTokenCheck.Mismatch:
-                        Console.WriteLine($"[CompleteInvitation] Token mismatch for: {email}");
+                        Log.LogInformation("[CompleteInvitation] Token mismatch");
                         return Json(new { success = false, message = "Ogiltig inbjudningslänk" });
                 }
 
@@ -1657,7 +1670,7 @@ namespace HpskSite.Controllers
                 var identityUser = await _memberManager.FindByEmailAsync(email);
                 if (identityUser == null)
                 {
-                    Console.WriteLine($"[CompleteInvitation] Identity user not found for: {email}");
+                    Log.LogInformation("[CompleteInvitation] Identity user not found");
                     return Json(new { success = false, message = "Ett tekniskt fel uppstod" });
                 }
 
@@ -1668,11 +1681,11 @@ namespace HpskSite.Controllers
                 if (!resetPasswordResult.Succeeded)
                 {
                     var errors = string.Join(", ", resetPasswordResult.Errors);
-                    Console.WriteLine($"[CompleteInvitation] Password reset failed: {errors}");
+                    Log.LogInformation("[CompleteInvitation] Password reset failed");
                     return Json(new { success = false, message = "Kunde inte sätta lösenord: " + errors });
                 }
 
-                Console.WriteLine($"[CompleteInvitation] Password set successfully for: {email}");
+                Log.LogInformation("[CompleteInvitation] Password set successfully");
 
                 // Clear invitation token (single-use)
                 _tokens.Clear(member.Id, MemberTokenPurpose.Invitation);
@@ -1694,21 +1707,34 @@ namespace HpskSite.Controllers
                 }
 
                 _memberService.Save(member);
-                Console.WriteLine($"[CompleteInvitation] Member auto-approved: {email}");
+                Log.LogInformation("[CompleteInvitation] Member auto-approved");
 
                 // Migrate guest scores if this member was invited via match guest system (Path B)
                 await MigrateGuestScoresToMember(member);
 
+                // ⚠️ Säkerhetsplanen 2026-11-02 (H2b): ett privilegierat konto (sajt-/krets-/klubbadmin) loggas aldrig
+                // in av en länk — lösenordet är satt, men personen loggar in på vanligt sätt.
+                if (HpskSite.Services.Security.PrivilegedAccount.HasPrivilegedRole(_memberService.GetAllRoles(member.Id)))
+                {
+                    Log.LogWarning("SEC: CompleteInvitation loggade inte in privilegierat konto {MemberId}", member.Id);
+                    return Json(new
+                    {
+                        success = true,
+                        message = "Ditt konto har aktiverats! Logga in med ditt nya lösenord.",
+                        redirectUrl = "/login-register/"
+                    });
+                }
+
                 // Sign in the member with persistent cookie (90-day remember me)
-                await _signInManager.SignInAsync(identityUser, isPersistent: true);
-                Console.WriteLine($"[CompleteInvitation] Member signed in successfully: {email}");
+                await _signInManager.SignInAsync(identityUser, isPersistent: true); // signin-ok: lösenord just satt av den som äger inbjudan, ej privilegierat konto
+                Log.LogInformation("[CompleteInvitation] Member signed in successfully");
 
                 return Json(new { success = true, message = "Ditt konto har aktiverats!" });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CompleteInvitation] Error: {ex.Message}");
-                Console.WriteLine($"[CompleteInvitation] Stack trace: {ex.StackTrace}");
+                Log.LogWarning(ex, "[CompleteInvitation] Error");
+                // (stack trace skrivs inte längre till konsolen);
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
         }

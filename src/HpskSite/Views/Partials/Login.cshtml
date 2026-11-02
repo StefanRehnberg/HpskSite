@@ -187,5 +187,12 @@ function openPasswordReset(prefillEmail) {
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
 }
+
+// "Glömt lösenordet?"-länken från "du är med i matchen"-sidan (?forgot=1) öppnar återställningen direkt.
+window.addEventListener('load', function () {
+    try {
+        if (new URLSearchParams(window.location.search).get('forgot') === '1') openPasswordReset('');
+    } catch (e) { /* ingen förifyllning är ok */ }
+});
 </script>
 }

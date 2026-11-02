@@ -909,6 +909,15 @@ namespace HpskSite.Controllers
         {
             try
             {
+                // ⚠️ Säkerhetsplanen 2026-11-02 (A2/H1): authn FÖRE allt annat. Endpointen saknade förut
+                // inloggningskrav och lämnade ut e-post för hela klubben till vem som helst.
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                if (currentMember == null)
+                {
+                    return StatusCode(StatusCodes.Status401Unauthorized,
+                        new { success = false, message = "Du måste vara inloggad för att se klubbens medlemmar." });
+                }
+
                 if (clubId <= 0)
                 {
                     return Ok(new { success = false, message = "Invalid club ID" });
@@ -916,9 +925,6 @@ namespace HpskSite.Controllers
 
                 // Check if current user is club admin for this club
                 var isClubAdmin = false;
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
-
-                if (currentMember != null && clubId > 0)
                 {
                     var member = _memberService.GetByEmail(currentMember.Email);
                     if (member != null)
@@ -935,6 +941,8 @@ namespace HpskSite.Controllers
                 var clubMembers = HttpContext.RequestServices.GetRequiredService<ClubRosterService>()
                     .LoadActiveMembers(_memberService, clubId)
                     .Where(m => m.ContentType.Alias != "hpskClub")
+                    // Andra än klubbens admin ser bara godkända medlemmar (prospekten är admins sak).
+                    .Where(m => isClubAdmin || m.IsApproved)
                     .ToList();
 
                 // Filter by search if provided
@@ -966,15 +974,16 @@ namespace HpskSite.Controllers
                     var additionalClubs = member.GetValue("memberClubIds")?.ToString() ?? "";
                     var hasData = presenceMap.TryGetValue(member.Id, out var memberDisciplines) && memberDisciplines.Count > 0;
 
-                    // Basic data visible to all members
+                    // Basic data visible to all LOGGED-IN members (Stefan 2026-11-02: alla inloggade ser klubbens
+                    // medlemsregister — bara namn och bild). E-post och övriga klubbar är klubbadmins.
                     var memberData = new
                     {
                         id = member.Id,
                         name = member.Name,
-                        email = member.Email,
+                        email = isClubAdmin ? member.Email : null,
                         profilePictureUrl = member.GetValue<string>("profilePictureUrl") ?? "",
                         isPrimaryClub = isPrimary,
-                        additionalClubs = additionalClubs,
+                        additionalClubs = isClubAdmin ? additionalClubs : null,
                         isApproved = member.IsApproved,
                         // Dashboard sharing level for showing dashboard button
                         dashboardSharingLevel = string.IsNullOrEmpty(member.GetValue<string>("dashboardSharingLevel")) ? "club" : member.GetValue<string>("dashboardSharingLevel"),
@@ -1011,7 +1020,8 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Ok(new { success = false, message = "Error loading members: " + ex.Message });
+                _logger.LogWarning(ex, "GetClubMembers misslyckades (klubb {Club})", clubId);
+                return Ok(new { success = false, message = "Medlemmarna kunde inte hämtas just nu." });
             }
         }
 

@@ -1,0 +1,105 @@
+@model HpskSite.Controllers.MemberClaimJoinedViewModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Du är med i matchen - Träningsmatch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" />
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .claim-card {
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            max-width: 420px;
+            width: 100%;
+            margin: 1rem;
+            overflow: hidden;
+        }
+        .claim-header {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .claim-header i { font-size: 3rem; margin-bottom: 0.5rem; }
+        .claim-body { padding: 1.5rem; }
+        .warning-box {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            color: #92400e;
+            font-size: 0.95rem;
+        }
+        .btn-choice {
+            display: block;
+            width: 100%;
+            padding: 0.9rem 1rem;
+            font-size: 1.05rem;
+            font-weight: 600;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            text-align: center;
+            text-decoration: none;
+        }
+        .btn-primary-choice { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: #fff; border: none; }
+        .btn-secondary-choice { background: #eef2ff; color: #3730a3; border: none; }
+        .btn-quiet-choice { background: #f3f4f6; color: #4b5563; border: none; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="claim-card">
+        <div class="claim-header">
+            <i class="bi bi-person-check"></i>
+            <h4 class="mb-0">Du är med i matchen</h4>
+        </div>
+        <div class="claim-body">
+            <p class="text-center mb-3">
+                Du är nu med som <strong>@Model.MemberName</strong> i match <strong>@Model.MatchCode</strong>.
+            </p>
+
+            @if (!string.IsNullOrEmpty(Model.SignedInAsOther))
+            {
+                <div class="warning-box">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Du är inloggad som <strong>@Model.SignedInAsOther</strong>, men den här inbjudan gäller
+                    <strong>@Model.MemberName</strong>. Logga ut via menyn på pistol.nu och logga in som
+                    @Model.MemberName om resultaten ska hamna på det kontot.
+                </div>
+            }
+            else
+            {
+                <div class="warning-box">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Du är <strong>inte inloggad</strong>. Resultat som skrivs in för dig sparas på ditt konto, men
+                    för att se och skriva in dem själv behöver du logga in.
+                </div>
+            }
+
+            <a class="btn-choice btn-primary-choice" href="@Model.LoginUrl">
+                <i class="bi bi-box-arrow-in-right me-2"></i>Logga in
+            </a>
+            <a class="btn-choice btn-secondary-choice" href="@Model.ForgotUrl">
+                <i class="bi bi-envelope me-2"></i>Glömt lösenordet? Få en länk till din e-post
+            </a>
+            <a class="btn-choice btn-quiet-choice" href="@Model.ContinueUrl">
+                Fortsätt utan att logga in
+            </a>
+        </div>
+    </div>
+</body>
+</html>

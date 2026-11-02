@@ -2248,7 +2248,7 @@ namespace HpskSite.Controllers.Api
             var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
             var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{claimToken}";
 
-            _logger.LogInformation("AddGuest: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
+            _logger.LogInformation("AddGuest: Generated claim for guest {GuestId}", guest.Id);
 
             // Notify via SignalR
             await _hubContext.Clients.Group($"match_{code.ToUpper()}")
@@ -2405,7 +2405,7 @@ namespace HpskSite.Controllers.Api
             var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
             var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{newClaimToken}";
 
-            _logger.LogInformation("RegenerateGuestQr: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
+            _logger.LogInformation("RegenerateGuestQr: Generated claim for guest {GuestId}", guest.Id);
 
             var response = new RegenerateGuestQrResponse
             {
@@ -2424,7 +2424,6 @@ namespace HpskSite.Controllers.Api
         /// Search for members by name (for organizers to find members who forgot their password)
         /// GET /api/match/search-members?q={searchTerm}
         /// </summary>
-        [AllowAnonymous]
         [HttpGet("search-members")]
         public async Task<IActionResult> SearchMembers([FromQuery] string q)
         {
@@ -2434,17 +2433,26 @@ namespace HpskSite.Controllers.Api
                 return Unauthorized(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Ej inloggad"));
             }
 
-            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+            // Säkerhetsplanen 2026-11-02: minst 3 tecken, bara namn (aldrig e-post), bara godkända medlemmar och
+            // en spärr per medlem — annars kan vilken inloggad medlem som helst lista registret eller testa adresser.
+            if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 3)
             {
-                return BadRequest(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Sökterm måste vara minst 2 tecken"));
+                return BadRequest(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Sökterm måste vara minst 3 tecken"));
+            }
+
+            var rate = HttpContext.RequestServices.GetService<HpskSite.Services.Hosting.RateCounterService>();
+            if (rate != null && rate.Increment($"rl:match-search:member:{memberId.Value}", TimeSpan.FromMinutes(10)) > 60)
+            {
+                _logger.LogWarning("SEC: SearchMembers spärrades för medlem {MemberId} (för många sökningar)", memberId.Value);
+                return StatusCode(429, ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("För många sökningar. Vänta en stund och försök igen."));
             }
 
             try
             {
-                // Sökningen i SQL (skalplanen B): namn, förnamn, efternamn och e-post, högst 20.
+                // Sökningen i SQL (skalplanen B): förnamn, efternamn och namn, högst 20.
                 // Förut byggdes hela registret som IMember för varje sökning från appen.
                 var results = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.MemberDirectoryService>()
-                    .Search(q.Trim(), 20, approvedOnly: false, searchNames: true)
+                    .Search(q.Trim(), 20, approvedOnly: true, searchNames: true, matchEmail: false)
                     .Select(m => new Shared.DTOs.MemberSearchResult
                     {
                         Id = m.MemberId,
@@ -2458,8 +2466,8 @@ namespace HpskSite.Controllers.Api
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching members with term '{SearchTerm}'", q);
-                return StatusCode(500, ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error($"Serverfel: {ex.Message}"));
+                _logger.LogError(ex, "Error searching members");
+                return StatusCode(500, ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Error("Sökningen misslyckades. Försök igen."));
             }
         }
 
@@ -2475,7 +2483,6 @@ namespace HpskSite.Controllers.Api
         /// Create a member claim QR code (organizer only)
         /// POST /api/match/{code}/member-claim
         /// </summary>
-        [AllowAnonymous]
         [HttpPost("{code}/member-claim")]
         public async Task<IActionResult> CreateMemberClaim(string code, [FromBody] Shared.DTOs.CreateMemberClaimRequest? request)
         {
@@ -2571,7 +2578,8 @@ namespace HpskSite.Controllers.Api
                 var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
                 var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/member/{claimToken}";
 
-                _logger.LogInformation("CreateMemberClaim: Generated claimUrl={ClaimUrl} for member {MemberId}", claimUrl, request.MemberId);
+                // Själva länken (som bär en bärartoken) loggas aldrig (säkerhetsplanen 2026-11-02).
+                _logger.LogInformation("CreateMemberClaim: Generated claim for member {MemberId}", request.MemberId);
 
                 var response = new Shared.DTOs.CreateMemberClaimResponse
                 {

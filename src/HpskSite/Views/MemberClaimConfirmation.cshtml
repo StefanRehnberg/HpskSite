@@ -165,10 +165,12 @@
                 <div class="warning-box mt-3">
                     <i class="bi bi-info-circle me-2"></i>
                     Genom att bekräfta godkänner du att gå med i matchen som <strong>@Model.MemberName</strong>.
-                    Dina resultat kommer att kopplas till ditt medlemskonto.
+                    Dina resultat kopplas till ditt medlemskonto. Du loggas inte in av det här – du väljer själv
+                    på nästa sida.
                 </div>
 
                 <form method="post" action="/match/@Model.MatchCode/member/confirm">
+                    @Html.AntiForgeryToken()
                     <input type="hidden" name="claimToken" value="@Model.ClaimToken" />
 
                     @if (Model.IsTeamMatch && Model.Teams.Any())

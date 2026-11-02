@@ -128,17 +128,10 @@ if (scaleOut.ForwardedHeaders.Enabled)
     });
 }
 
-// Add CORS for mobile app SignalR connections
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("MobileApp", policy =>
-    {
-        policy.SetIsOriginAllowed(_ => true) // Allow any origin for mobile apps
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials(); // Required for SignalR
-    });
-});
+// ⚠️ CORS finns INTE längre (säkerhetsplanen 2026-11-02, P4). Policyn "MobileApp" släppte in vilken Origin
+// som helst MED credentials, så en främmande sida kunde läsa inloggade svar. Mobilappen (MAUI) är en
+// inbyggd klient som inte omfattas av CORS, webbläsarens WebSocket gör det inte heller, och webben
+// anropar sig själv (same-origin). Lägg ingen `AddCors` här utan en vitlista av egna ursprung.
 
 // Configure JWT Authentication for Mobile API
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));
@@ -215,9 +208,6 @@ app.Use(async (context, next) =>
 // Member activity tracking middleware is now registered via MemberActivityTrackingComposer
 // using PostRouting pipeline filter to ensure it runs after authentication
 
-// Enable CORS for mobile app (must be before routing/endpoints)
-app.UseCors("MobileApp");
-
 app.UseUmbraco()
     .WithMiddleware(u =>
     {
@@ -234,8 +224,7 @@ app.UseUmbraco()
 app.MapControllers();
 
 // Map SignalR hub for training match real-time communication
-// Note: CORS is handled globally via app.UseCors() - don't use RequireCors() here
-// as it conflicts with Umbraco's internal routing pipeline
+// Note: ingen CORS (se överst) — hubben anropas same-origin av webben och av MAUI-appen.
 app.MapHub<HpskSite.Hubs.TrainingMatchHub>("/hubs/trainingmatch");
 
 await app.RunAsync();

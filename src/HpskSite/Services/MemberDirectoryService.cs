@@ -66,14 +66,19 @@ namespace HpskSite.Services
         /// <param name="clubId">Bara klubbens aktiva medlemmar (<c>ClubMembership</c>, samma regel som
         /// <see cref="ClubRosterService"/>).</param>
         /// <param name="searchNames">Sök även i förnamn och efternamn (inte bara nodens namn och e-post).</param>
-        public List<MemberDirectoryEntry> Search(string? query, int take, int? clubId = null, bool approvedOnly = true, bool searchNames = false)
+        /// <param name="matchEmail">
+        /// Säkerhetsplanen 2026-11-02 (M7): sökningen matchade ALLTID e-post, så vilken inloggad medlem som helst kunde
+        /// testa om en adress tillhör en medlem. Ytor som inte behöver e-post (t.ex. claim i träningsmatch) skickar
+        /// <c>false</c>. Förvalet är oförändrat tills varje yta granskats (sökmatrisen i planen).
+        /// </param>
+        public List<MemberDirectoryEntry> Search(string? query, int take, int? clubId = null, bool approvedOnly = true, bool searchNames = false, bool matchEmail = true)
         {
             var q = (query ?? "").Trim();
             if (take <= 0) return new List<MemberDirectoryEntry>();
             var like = "%" + q.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
 
             // Tom fråga = de första <take> på namn (väljare som visar en lista innan något skrivits).
-            var where = new List<string> { q.Length == 0 ? "1 = 1" : "(n.text LIKE @0 OR m.Email LIKE @0" + (searchNames ? NameMatch : "") + ")" };
+            var where = new List<string> { q.Length == 0 ? "1 = 1" : "(n.text LIKE @0" + (matchEmail ? " OR m.Email LIKE @0" : "") + (searchNames ? NameMatch : "") + ")" };
             if (approvedOnly) where.Add("m.isApproved = 1");
             if (clubId.HasValue)
                 where.Add("EXISTS (SELECT 1 FROM ClubMembership cm WHERE cm.MemberId = m.nodeId AND cm.ClubId = @1 AND cm.MembershipStatus NOT IN (@2, @3))");
