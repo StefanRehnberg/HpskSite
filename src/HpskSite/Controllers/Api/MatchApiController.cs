@@ -2428,6 +2428,7 @@ namespace HpskSite.Controllers.Api
         /// <para>Bara inloggade, och bara länkar till sajtens egen <c>/match/…</c>-adress — tjänsten är ingen öppen
         /// QR-generator.</para>
         /// </summary>
+        [AllowAnonymous] // inloggningen prövas först i koden (401) — se SearchMembers
         [HttpPost("qr")]
         public async Task<IActionResult> ClaimQr([FromBody] ClaimQrRequest? request)
         {
@@ -2476,6 +2477,9 @@ namespace HpskSite.Controllers.Api
         /// Search for members by name (for organizers to find members who forgot their password)
         /// GET /api/match/search-members?q={searchTerm}
         /// </summary>
+        // [AllowAnonymous] är med flit kvar: inloggningen prövas FÖRST i koden nedan och ger då 401 som JSON, som mobilappen
+        // förväntar sig (annars skickar klass-[Authorize] en 302 mot en inloggningssida). Säkerhetsplanen 2026-11-02 provade att ta bort det.
+        [AllowAnonymous]
         [HttpGet("search-members")]
         public async Task<IActionResult> SearchMembers([FromQuery] string q)
         {
@@ -2535,6 +2539,7 @@ namespace HpskSite.Controllers.Api
         /// Create a member claim QR code (organizer only)
         /// POST /api/match/{code}/member-claim
         /// </summary>
+        [AllowAnonymous] // inloggningen prövas först i koden (401 som JSON för mobilappen) — se SearchMembers
         [HttpPost("{code}/member-claim")]
         public async Task<IActionResult> CreateMemberClaim(string code, [FromBody] Shared.DTOs.CreateMemberClaimRequest? request)
         {
