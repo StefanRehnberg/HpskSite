@@ -134,15 +134,21 @@ if (scaleOut.ForwardedHeaders.Enabled)
 // anropar sig själv (same-origin). Lägg ingen `AddCors` här utan en vitlista av egna ursprung.
 
 // Configure JWT Authentication for Mobile API
-builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));
+// ⚠️ Säkerhetsplanen 2026-11-02 (A3/H6): hemligheten kommer ur JwtSecretResolver — en riktig `Secret`, annars den äldre
+// `SecretKey` (så prodfilen fungerar), annars en slumpad nyckel för processen. En platshållare ur repot används ALDRIG.
+var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
+var jwtSettings = jwtSection.Get<JwtSettings>() ?? new JwtSettings();
+var jwtResolution = HpskSite.Services.Security.JwtSecretResolver.Resolve(jwtSettings.Secret, jwtSection["SecretKey"]);
+jwtSettings.Secret = jwtResolution.Secret;
+builder.Services.Configure<JwtSettings>(jwtSection);
+builder.Services.PostConfigure<JwtSettings>(o => o.Secret = jwtResolution.Secret);
 builder.Services.AddSingleton<JwtTokenService>();
 
 // Add controllers for API endpoints (Mobile app)
 builder.Services.AddControllers();
 
-// Add JWT Bearer authentication
-var jwtSettings = builder.Configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>();
-if (jwtSettings != null && jwtSettings.IsValid())
+// Add JWT Bearer authentication (alltid registrerad: MatchApiController kräver schemat även för webbanvändare)
+if (jwtSettings.IsValid())
 {
     var key = Encoding.UTF8.GetBytes(jwtSettings.Secret);
 
@@ -158,6 +164,7 @@ if (jwtSettings != null && jwtSettings.IsValid())
                 ValidIssuer = jwtSettings.Issuer,
                 ValidAudience = jwtSettings.Audience,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
+                ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 }, // ingen algoritmförväxling
                 ClockSkew = TimeSpan.Zero
             };
 
@@ -181,6 +188,12 @@ if (jwtSettings != null && jwtSettings.IsValid())
 }
 
 WebApplication app = builder.Build();
+
+// JWT-hemligheten (säkerhetsplanen 2026-11-02): larma när den inte är en riktigt konfigurerad nyckel.
+if (jwtResolution.Source == HpskSite.Services.Security.JwtSecretResolver.SecretSource.Ephemeral && !app.Environment.IsDevelopment())
+    app.Logger.LogCritical("SEC: JwtSettings:Secret saknas eller är en platshållare — mobilens JWT signeras med en slumpad nyckel som byts vid varje omstart. Sätt en riktig JwtSettings:Secret i appsettings.Production.json.");
+else if (jwtResolution.Source == HpskSite.Services.Security.JwtSecretResolver.SecretSource.LegacySecretKey)
+    app.Logger.LogWarning("SEC: JWT signeras med den äldre nyckeln JwtSettings:SecretKey. Byt namn till JwtSettings:Secret i appsettings.Production.json.");
 
 await app.BootUmbracoAsync();
 

@@ -14,6 +14,9 @@ namespace HpskSite.Services
     /// </summary>
     public class JwtTokenService
     {
+        /// <summary>Längsta tid en refresh-token får gälla (dagar). Konfigurationen kan bara korta den.</summary>
+        public const int MaxRefreshTokenDays = 90;
+
         private readonly JwtSettings _jwtSettings;
         private readonly SymmetricSecurityKey _signingKey;
 
@@ -76,7 +79,8 @@ namespace HpskSite.Services
         {
             // If "remember me" is checked, use the configured expiration
             // Otherwise, use a shorter expiration (e.g., 1 day)
-            var days = rememberMe ? _jwtSettings.RefreshTokenExpirationDays : 1;
+            // ⚠️ Säkerhetsplanen 2026-11-02 (H6): aldrig längre än MaxRefreshTokenDays, oavsett konfiguration (prod hade 3650 dagar).
+            var days = rememberMe ? Math.Min(_jwtSettings.RefreshTokenExpirationDays, MaxRefreshTokenDays) : 1;
             return DateTime.UtcNow.AddDays(days);
         }
 

@@ -21,10 +21,31 @@ namespace HpskSite.Migrations
         [Column("MemberId")]
         public int MemberId { get; set; }
 
-        /// <summary>The refresh token value</summary>
+        /// <summary>
+        /// Klartexten. ⚠️ Skrivs INTE längre (säkerhetsplanen 2026-11-02, H6) — bara <see cref="TokenHash"/> lagras. Kolumnen
+        /// finns kvar tills steg 2-skriptet tömt och tagit bort den; äldre rader har den fortfarande ifylld.
+        /// </summary>
         [Column("Token")]
         [MaxLength(500)]
-        public string Token { get; set; } = string.Empty;
+        public string? Token { get; set; }
+
+        /// <summary>SHA-256 av token som 64 gemena hextecken (<c>RefreshTokenHasher</c>). Det som slås upp.</summary>
+        [Column("TokenHash")]
+        [MaxLength(64)]
+        public string? TokenHash { get; set; }
+
+        /// <summary>Alla token som kommer ur samma inloggning delar familj. En återanvänd token återkallar hela familjen.</summary>
+        [Column("FamilyId")]
+        public Guid? FamilyId { get; set; }
+
+        /// <summary>Hashen av token som ersatte den här (när den roterades).</summary>
+        [Column("ReplacedByHash")]
+        [MaxLength(64)]
+        public string? ReplacedByHash { get; set; }
+
+        /// <summary>När token senast användes för att få en ny (UTC) — grunden för nådefönstret vid dubbelanrop.</summary>
+        [Column("LastUsedAt")]
+        public DateTime? LastUsedAt { get; set; }
 
         /// <summary>When the token expires</summary>
         [Column("ExpiresAt")]

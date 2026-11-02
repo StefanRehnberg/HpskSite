@@ -86,7 +86,7 @@ namespace HpskSite.Services.Hosting
             "MembershipFeePayerEmail.UpdatedUtc",
             "RankingPushLog.NotifiedAt",
             "RankingSnapshot.CreatedAt",
-            "RefreshTokens.CreatedAt", "RefreshTokens.ExpiresAt", "RefreshTokens.RevokedAt",
+            "RefreshTokens.CreatedAt", "RefreshTokens.ExpiresAt", "RefreshTokens.RevokedAt", "RefreshTokens.LastUsedAt",
             "RegionFeeCompetition.CreatedUtc",
             "SiteSetting.UpdatedUtc",
             "StaffAssignment.CheckedInAt", "StaffAssignment.CreatedDate", "StaffAssignment.ModifiedDate", "StaffAssignment.NotifiedAt",
