@@ -112,3 +112,6 @@ appsettings.Development.json
 # annans räkenskapsinformation och hör inte i ett publikt repo. Planen och besluten som
 # kommer UR materialet hör i notes/ekonomi-plan-2026-09-17.md, inte här.
 /Ekonomi Exempel/
+
+# Startlistor och resultatlistor med skyttars namn (personuppgifter) – ska aldrig in i ett publikt repo.
+/FieldResults/
