@@ -7,7 +7,7 @@
     <div class="col-12">
         <h1>@(Model.Value<string>("pageTitle") ?? Model.Name)</h1>
         @{
-            var bodyText = Model.Value<string>("bodyText");
+            var bodyText = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Value<string>("bodyText"));
         }
         @if (!string.IsNullOrEmpty(bodyText))
         {

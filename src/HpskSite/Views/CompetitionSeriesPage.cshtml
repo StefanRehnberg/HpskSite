@@ -44,7 +44,7 @@
     var seriesStartDate = Model.Value<DateTime>("seriesStartDate");
     var seriesEndDate = Model.Value<DateTime>("seriesEndDate");
     var seriesName = Model.Value<string>("seriesName") ?? Model.Name;
-    var seriesDescription = Model.Value<string>("seriesDescription");
+    var seriesDescription = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Value<string>("seriesDescription"));
     var seriesLogo = Model.Value<IPublishedContent>("seriesLogo");
     var isActive = Model.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
     var seriesCalculationStrategy = Model.Value<string>("seriesCalculationStrategy") ?? "";
@@ -180,7 +180,7 @@
                                 var compEndDate = Posts.Of(competition).CompetitionEndDate;
                                 var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
                                 var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
-                                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
+                                var description = HpskSite.Extensions.RteHelper.SafeMarkup(competition.Value<string>("description"));
                                 var venue = Posts.Of(competition).Venue;
 
                                 // Check if multi-day competition

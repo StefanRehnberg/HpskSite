@@ -548,7 +548,7 @@
                 var compEndDate = Posts.Of(competition).CompetitionEndDate;
                 var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
                 var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
-                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
+                var description = HpskSite.Extensions.RteHelper.SafeMarkup(competition.Value<string>("description"));
                 var venue = Posts.Of(competition).Venue;
 
                 // Check if multi-day competition
@@ -898,7 +898,7 @@
                         var compEndDate = Posts.Of(competition).CompetitionEndDate;
                         var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
                         var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
-                        var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
+                        var description = HpskSite.Extensions.RteHelper.SafeMarkup(competition.Value<string>("description"));
                         var venue = Posts.Of(competition).Venue;
 
                         // Check if multi-day competition

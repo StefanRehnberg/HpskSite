@@ -32,7 +32,7 @@
              ?? new HpskSite.Models.Events.ClubEventRecord { Id = Model.Id, PageName = Model.Name ?? "" };
     var eventId = ev.Id;
     var eventName = ev.DisplayName;
-    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(ev.Description);
+    var description = HpskSite.Extensions.RteHelper.SafeMarkup(ev.Description);
     var eventDateRaw = ev.StartsAt;
     var hasDate = eventDateRaw.HasValue && eventDateRaw.Value.Year > 1900;
     var eventDate = eventDateRaw ?? DateTime.MinValue;

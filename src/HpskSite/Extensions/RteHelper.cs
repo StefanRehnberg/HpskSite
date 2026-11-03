@@ -9,6 +9,13 @@ namespace HpskSite.Extensions
     /// </summary>
     public static class RteHelper
     {
+        /// <summary>ENDA vägen ut för RTE-HTML till en sida: plockar ut markup och saneras med vitlistan.</summary>
+        public static Microsoft.AspNetCore.Html.IHtmlContent SafeHtml(string? value) =>
+            new Microsoft.AspNetCore.Html.HtmlString(HpskHtmlSanitizer.Sanitize(ExtractMarkup(value)));
+
+        /// <summary>Markup efter sanering, som text.</summary>
+        public static string SafeMarkup(string? value) => HpskHtmlSanitizer.Sanitize(ExtractMarkup(value));
+
         public static string ExtractMarkup(string? value)
         {
             if (string.IsNullOrEmpty(value)) return "";

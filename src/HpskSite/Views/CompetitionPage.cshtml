@@ -41,7 +41,7 @@
     var competitionName = compPost.CompetitionName ?? "";
     // Arrangörens händelsesida för tävlingen (sajtstrukturen fas 2) — en enda länkrad under rubriken.
     var linkedEvent = CompetitionLinks.EventForCompetition(Model.Id);
-    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
+    var description = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Value<string>("description"));
     var competitionDate = (compPost.CompetitionDate ?? DateTime.MinValue);
     var competitionEndDate = compPost.CompetitionEndDate;
     var venue = compPost.Venue ?? "";
