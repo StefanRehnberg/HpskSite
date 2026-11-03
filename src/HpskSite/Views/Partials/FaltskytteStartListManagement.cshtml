@@ -430,14 +430,16 @@
                 var wgEsc = (wg || '').replace(/'/g, "\\'");
                 var labelStr = patrol.label || '';
                 var labelSuffix = labelStr ? ' — ' + escapeHtmlInline(labelStr) : '';
-                var labelArg = JSON.stringify(labelStr);
+                // Värdena bärs i data-attribut (HTML-escapade), aldrig som JSON i ett onclick="…": ett " i
+                // attributet klippte det och gav "SyntaxError: Unexpected end of input" — pennan gick inte att klicka.
+                var editAttrs = 'data-patrol-id="' + patrol.patrolId + '" data-time="' + hpskEsc(startTimeStr) + '" data-label="' + hpskEsc(labelStr) + '"';
                 html += '<div class="border-bottom px-3 py-2" data-patrol-id="' + patrol.patrolId + '">' +
                     '<div class="d-flex justify-content-between align-items-center mb-1">' +
                     '<span>' +
                     '<strong>Patrull ' + patrol.patrolNumber + labelSuffix + '</strong>' +
                     (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr +
-                        ' <button class="btn btn-link btn-sm p-0 text-muted" onclick="faltEditPatrol(' + patrol.patrolId + ',\'' + startTimeStr + '\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button></span>' :
-                        ' <button class="btn btn-link btn-sm p-0 text-muted ms-2" onclick="faltEditPatrol(' + patrol.patrolId + ',\'\',' + labelArg + ')" title="Redigera patrull"><i class="bi bi-pencil" style="font-size:0.7em"></i></button>') +
+                        ' <button class="btn btn-link btn-sm px-1 py-0 text-muted" ' + editAttrs + ' onclick="faltEditPatrolFromButton(this)" title="Redigera patrull (starttid och namn)"><i class="bi bi-pencil"></i></button></span>' :
+                        ' <button class="btn btn-link btn-sm px-1 py-0 text-muted ms-2" ' + editAttrs + ' onclick="faltEditPatrolFromButton(this)" title="Redigera patrull (starttid och namn)"><i class="bi bi-pencil"></i></button>') +
                     '<span class="badge bg-secondary ms-2">' + patrol.members.filter(function(m) { return m.status !== 'DNS'; }).length + '</span>' +
                     '</span>' +
                     '<span class="d-flex gap-1">' +
@@ -644,6 +646,9 @@
         if (data.success) loadFaltPatrols();
         else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
     };
+    window.faltEditPatrolFromButton = function(btn) {
+        return window.faltEditPatrol(parseInt(btn.dataset.patrolId), btn.dataset.time || '', btn.dataset.label || '');
+    };
     // Backward-compat shim in case any legacy caller remains
     window.faltEditPatrolTime = function(patrolId, currentTime) { return window.faltEditPatrol(patrolId, currentTime, ''); };
 
@@ -815,7 +820,13 @@
             if (!alreadyGenerated && firstAvailable) firstAvailable = false;
         });
 
-        if (generated.length >= wcs.length) {
+        if (wcs.length === 0) {
+            // Vapenklasserna kommer ur anmälningarna. Utan anmälningar fanns ingen klass att välja, och
+            // dialogen påstod ändå att "alla vapenklasser har patruller" (0 >= 0) — Michael, 2026-11-03.
+            document.querySelector('#faltGenerateModal .modal-footer .btn-primary').disabled = true;
+            container.innerHTML = '<div class="text-warning small"><i class="bi bi-info-circle me-1"></i>Ingen skytt är anmäld ännu, så det finns inget att generera patruller av. ' +
+                'Patruller genereras ur anmälningarna. Vill du förbereda patruller i förväg, använd <strong>Skapa patrull</strong>.</div>';
+        } else if (generated.length >= wcs.length) {
             document.querySelector('#faltGenerateModal .modal-footer .btn-primary').disabled = true;
             container.innerHTML += '<div class="text-success small mt-2"><i class="bi bi-check-circle me-1"></i>Alla vapenklasser har patruller</div>';
         } else {

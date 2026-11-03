@@ -76,6 +76,7 @@
                         <div class="mb-3">
                             <label for="wizard_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="wizard_competitionDate" name="competitionDate" required>
+                            <div class="form-text text-warning d-none" id="wizard_competitionDateYearHint" role="status"></div>
                         </div>
 
                     </div>
@@ -1114,6 +1115,24 @@ function resetWizard() {
     document.getElementById('wizard_stafettRegistrationFee').disabled = true;
     document.getElementById('wizard_stafettFeeGroup').classList.add('d-none');
 }
+
+// Varning när tävlingsdatumet ligger på ett annat år än innevarande — tävlingen hamnar då i listan för det andra
+// året och "försvinner" ur årets lista (Michael 2026-11-03: startdatum i januari, listan stod på 2026).
+window.hpskCompetitionYearHint = window.hpskCompetitionYearHint || function (input) {
+    var hint = document.getElementById(input.id + 'YearHint');
+    if (!hint) return;
+    var m = /^(\d{4})-\d{2}-\d{2}/.exec(input.value || '');
+    var now = new Date().getFullYear();
+    if (m && parseInt(m[1], 10) !== now) {
+        hint.textContent = 'Obs: datumet ligger på ' + m[1] + ', inte på innevarande år (' + now + '). Tävlingen visas under ' + m[1] + ' i tävlingslistan, så välj det året där om du letar efter den.';
+        hint.classList.remove('d-none');
+    } else {
+        hint.classList.add('d-none');
+    }
+};
+document.addEventListener('change', function (e) {
+    if (e.target && (e.target.id === 'wizard_competitionDate' || e.target.id === 'edit_competitionDate')) window.hpskCompetitionYearHint(e.target);
+});
 
 // Initialize Flatpickr date pickers
 function initializeWizardDatePickers() {

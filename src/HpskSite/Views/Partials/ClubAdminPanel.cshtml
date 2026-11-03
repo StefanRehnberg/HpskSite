@@ -6466,7 +6466,7 @@ async function loadClubAdmins() {
                     ? `<button class="btn btn-sm btn-outline-secondary py-0 px-2" disabled title="Minst en klubbadmin måste finnas — lägg till en annan först">
                            <i class="bi bi-x-lg"></i>
                        </button>`
-                    : `<button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeClubAdmin(${a.id}, ${JSON.stringify(a.name)})">
+                    : `<button class="btn btn-sm btn-outline-danger py-0 px-2" data-member-id="${a.id}" data-name="${escapeHtml(a.name).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" onclick="removeClubAdmin(parseInt(this.dataset.memberId), this.dataset.name)">
                            <i class="bi bi-x-lg"></i>
                        </button>`;
                 return `

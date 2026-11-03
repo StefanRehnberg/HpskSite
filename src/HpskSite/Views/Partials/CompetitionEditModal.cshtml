@@ -280,6 +280,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             <div class="mb-3">
                                 <label for="edit_competitionDate" class="form-label">Tävlingsdatum <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control date-input" id="edit_competitionDate" name="competitionDate" value="@compDateStr" required>
+                                <div class="form-text text-warning d-none" id="edit_competitionDateYearHint" role="status"></div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -817,6 +818,25 @@ function hpskRevealPicker(_sel, _dstr, instance) {
 editModal.addEventListener('show.bs.modal', function() {
     setTimeout(function() {
         try {
+            // Varning när datumet ligger på ett annat år än innevarande (samma funktion som i guiden).
+            window.hpskCompetitionYearHint = window.hpskCompetitionYearHint || function (input) {
+                var hint = document.getElementById(input.id + 'YearHint');
+                if (!hint) return;
+                var m = /^(\d{4})-\d{2}-\d{2}/.exec(input.value || '');
+                var now = new Date().getFullYear();
+                if (m && parseInt(m[1], 10) !== now) {
+                    hint.textContent = 'Obs: datumet ligger på ' + m[1] + ', inte på innevarande år (' + now + '). Tävlingen visas under ' + m[1] + ' i tävlingslistan, så välj det året där om du letar efter den.';
+                    hint.classList.remove('d-none');
+                } else {
+                    hint.classList.add('d-none');
+                }
+            };
+            if (!window._hpskYearHintBound) {
+                window._hpskYearHintBound = true;
+                document.addEventListener('change', function (e) {
+                    if (e.target && (e.target.id === 'wizard_competitionDate' || e.target.id === 'edit_competitionDate')) window.hpskCompetitionYearHint(e.target);
+                });
+            }
             // Initialize Flatpickr date pickers with Swedish locale
             flatpickr('#edit_competitionDate', {
                 enableTime: true,

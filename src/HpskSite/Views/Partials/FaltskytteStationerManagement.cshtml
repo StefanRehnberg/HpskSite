@@ -26,6 +26,15 @@
    automatiskt — rutan säger bara att den skiljer sig och hur man hämtar ändringarna. *@
 <div class="alert alert-warning d-none" id="fseStnCfgStale" role="status"></div>
 
+@* Michael 2026-11-03: "Är tanken att man ska använda fältkonfiguratorn först och sedan länka den till tävlingen?"
+   Svaret är ja — förklaras här tills tävlingen har en konfiguration. *@
+<div class="alert alert-info d-none" id="fseStnHowTo" role="status">
+    <i class="bi bi-info-circle me-1"></i><strong>Så får tävlingen sina stationer.</strong>
+    Stationerna skapas först i <a href="/faltkonfig" target="_blank">fältkonfiguratorn</a> (en sparad konfiguration med stationer, målgrupper och figurer).
+    Sedan kopplar du den till tävlingen: <em>Redigera tävling → Stationskonfiguration → Kopiera till tävlingen</em>.
+    När det är gjort visas stationerna här, och du kan utse stationschefer och skriva ut stationskort.
+</div>
+
 @* Kretsens bangranskning (fas 3) — döljer sig själv när tävlingen inte erbjuds granskning. *@
 @await Html.PartialAsync("_CourseReviewCard", competitionId?.ToString() ?? "")
 
@@ -115,6 +124,8 @@
             if (cfgBtn) cfgBtn.innerHTML = d.attachedConfigId
                 ? '<a class="btn btn-outline-secondary btn-sm" href="/faltkonfig/' + d.attachedConfigId + '/redigera" target="_blank"><i class="bi bi-sliders me-1"></i>Öppna konfigurator</a>'
                 : '';
+            var howTo = document.getElementById('fseStnHowTo');
+            if (howTo) howTo.classList.toggle('d-none', !!d.attachedConfigId);
 
             var expected = d.expectedCount || 0;
             managers = {};
