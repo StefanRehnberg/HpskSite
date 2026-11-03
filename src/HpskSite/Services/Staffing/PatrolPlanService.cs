@@ -166,7 +166,7 @@ namespace HpskSite.Services.Staffing
         }
 
         private static string OptionsKey(FaltPlanOptions? o) => o == null ? "gammal" :
-            $"motor/{o.MinRest}/{o.WishRest}/{o.CloseMinutes}/{o.Priority}/{o.Order}/{o.Champion}/{o.GlideEvery}/{o.GlideMinutes}/{o.RoundExtraSeconds}/{o.UseExistingGroups}/{o.Iterations}/{o.PauseBlockMin}/{o.PauseExtMin}/{o.Day2}/{o.Open2Min}/{o.Close2Min}/{o.DayBreak}/{o.ArTogether}/{o.PreCount}/{o.PreStartMin}/{o.RoundMinutes}";
+            $"motor/{o.MinRest}/{o.WishRest}/{o.CloseMinutes}/{o.Priority}/{o.Order}/{o.GroupOrder}/{o.GlideEvery}/{o.GlideMinutes}/{o.RoundExtraSeconds}/{o.UseExistingGroups}/{o.Iterations}/{o.PauseBlockMin}/{o.PauseExtMin}/{o.Day2}/{o.Open2Min}/{o.Close2Min}/{o.DayBreak}/{o.ArTogether}/{o.PreCount}/{o.PreStartMin}/{o.RoundMinutes}";
 
         private static (PatrolPlan Plan, int KeptFitting) PlanOf(PatrolBasis b, PatrolPlanSettings settings, FaltPlanOptions? options = null)
         {

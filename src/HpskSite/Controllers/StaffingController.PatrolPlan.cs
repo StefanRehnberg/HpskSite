@@ -21,14 +21,23 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>Den avancerade generatorns inställningar ur anropet; negativa värden = förval.</summary>
-        private static HpskSite.CompetitionTypes.Faltskytte.Services.FaltPlanOptions EngineOptions(double minRest, double wishRest, string? close, int prio, string? order, string? champ, int glideEvery, int glideMin, double roundExtra, CancellationToken ct, int iters = -1, double roundMin = -1, EngineExtra? x = null)
+        /// <summary>Ordningen mellan vapengrupperna ur anropet: fyra bokstäver C, B, A och R en gång var (t.ex. "CABR"). Äldre form med en enda bokstav = den gruppen först, övriga C, B, A, R. Annars null (= C, B, A, R).</summary>
+        internal static string? GroupOrderOf(string? s)
+        {
+            s = s?.Trim().ToUpperInvariant();
+            if (HpskSite.CompetitionTypes.Faltskytte.Engine.FaltPatrolEngine.IsValidGroupOrder(s)) return s;
+            if (s is "C" or "B" or "A" or "R") return s + string.Concat("CBAR".Where(c => c.ToString() != s));
+            return null;
+        }
+
+        private static HpskSite.CompetitionTypes.Faltskytte.Services.FaltPlanOptions EngineOptions(double minRest, double wishRest, string? close, int prio, string? order, string? groupOrder, int glideEvery, int glideMin, double roundExtra, CancellationToken ct, int iters = -1, double roundMin = -1, EngineExtra? x = null)
         {
             double? closeMin = null;
             if (TimeSpan.TryParse(close, System.Globalization.CultureInfo.InvariantCulture, out var c)) closeMin = c.TotalMinutes;
             return new HpskSite.CompetitionTypes.Faltskytte.Services.FaltPlanOptions
             {
                 MinRest = minRest >= 0 && minRest <= 600 ? minRest : null, WishRest = wishRest >= 0 && wishRest <= 600 ? wishRest : null, CloseMinutes = closeMin,
-                Priority = Math.Clamp(prio, 0, 2), Order = order is "auto" or "sep" or "ar" or "cbar" or "all" ? order : null, Champion = champ is "C" or "B" or "A" or "R" ? champ : null,
+                Priority = Math.Clamp(prio, 0, 2), Order = order is "auto" or "sep" or "ar" or "cbar" or "all" ? order : null, GroupOrder = GroupOrderOf(groupOrder),
                 GlideEvery = Math.Clamp(glideEvery, 0, 100), GlideMinutes = Math.Clamp(glideMin, 0, 60), RoundExtraSeconds = Math.Clamp(roundExtra, 0, 600), RoundMinutes = roundMin >= 10 && roundMin <= 600 ? roundMin : null,
                 PauseBlockMin = x != null && x.PauseBlock >= 0 && x.PauseBlock <= 600 ? x.PauseBlock : null, PauseExtMin = x != null && x.PauseExt >= 0 && x.PauseExt <= 600 ? x.PauseExt : null,
                 Day2 = x?.Day2 ?? false, Open2Min = Clock(x?.Open2), Close2Min = Clock(x?.Close2), DayBreak = Math.Clamp(x?.DayBreak ?? 1, 1, 3), ArTogether = x?.ArTogether ?? true, PreCount = Math.Clamp(x?.Pre ?? 0, 0, 10), PreStartMin = Clock(x?.PreStart), UseExistingGroups = false, Iterations = iters >= 0 ? iters : null, Ct = ct,
@@ -44,7 +53,7 @@ namespace HpskSite.Controllers
         /// <summary>Räknar ut en ny startlista och visar vad som skulle ändras. Ingenting sparas.</summary>
         [HttpGet]
         public async Task<IActionResult> GetPatrolPlan(int competitionId, int patrolSize = 0, int intervalMinutes = 0, string? firstStart = null, string? grouping = null, int gap = 0, bool keep = true,
-            bool engine = false, double minRest = -1, double wishRest = -1, string? close = null, int prio = 1, string? order = null, string? champ = null, int glideEvery = 0, int glideMin = 0, double roundExtra = 60, int iters = -1, double roundMin = -1,
+            bool engine = false, double minRest = -1, double wishRest = -1, string? close = null, int prio = 1, string? order = null, string? groupOrder = null, int glideEvery = 0, int glideMin = 0, double roundExtra = 60, int iters = -1, double roundMin = -1,
             double pauseBlock = -1, double pauseExt = -1, bool day2 = false, string? open2 = null, string? close2 = null, int dayBreak = 1, bool arTogether = true, int pre = 0, string? preStart = null,
             string? scenario = null)
         {
@@ -81,7 +90,7 @@ namespace HpskSite.Controllers
                     : svc.Normalize(owner!.Comp, patrolSize, intervalMinutes, first, grouping, gap, keep);
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted); cts.CancelAfter(TimeSpan.FromSeconds(10));   // tidsgräns: aldrig en delvis lista
                 if (practice != null) iters = iters < 0 || iters > 60000 ? 60000 : iters;   // övningen är öppen för medlemmar: draget klampas
-                var options = engine || practice != null ? EngineOptions(minRest, wishRest, close, prio, order, champ, glideEvery, glideMin, roundExtra, cts.Token, iters, roundMin, new EngineExtra(pauseBlock, pauseExt, day2, open2, close2, dayBreak, arTogether, pre, preStart)) : null;
+                var options = engine || practice != null ? EngineOptions(minRest, wishRest, close, prio, order, groupOrder, glideEvery, glideMin, roundExtra, cts.Token, iters, roundMin, new EngineExtra(pauseBlock, pauseExt, day2, open2, close2, dayBreak, arTogether, pre, preStart)) : null;
                 var pv = practice != null ? PatrolPlanService.PreviewOf(practice, settings, options) : await svc.PreviewAsync(owner!, settings, options);
                 if (pv.BlockedReason != null && pv.Plan.Patrols.Count == 0 && pv.Fingerprint == "")
                     return Json(new { success = false, message = pv.BlockedReason });
@@ -143,7 +152,7 @@ namespace HpskSite.Controllers
                 var first = DateTime.TryParse(request.FirstStart, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var f) ? f : (DateTime?)null;
                 var settings = svc.Normalize(owner.Comp, request.PatrolSize, request.IntervalMinutes, first, request.Grouping, request.Gap, request.Keep);
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted); cts.CancelAfter(TimeSpan.FromSeconds(10));
-                var options = request.Engine ? EngineOptions(request.MinRest, request.WishRest, request.Close, request.Prio, request.Order, request.Champ, request.GlideEvery, request.GlideMin, request.RoundExtra, cts.Token, -1, request.RoundMin, new EngineExtra(request.PauseBlock, request.PauseExt, request.Day2, request.Open2, request.Close2, request.DayBreak, request.ArTogether, request.Pre, request.PreStart)) : null;
+                var options = request.Engine ? EngineOptions(request.MinRest, request.WishRest, request.Close, request.Prio, request.Order, request.GroupOrder, request.GlideEvery, request.GlideMin, request.RoundExtra, cts.Token, -1, request.RoundMin, new EngineExtra(request.PauseBlock, request.PauseExt, request.Day2, request.Open2, request.Close2, request.DayBreak, request.ArTogether, request.Pre, request.PreStart)) : null;
                 var o = await svc.ApplyAsync(owner, settings, request.Fingerprint, request.Force, viewer.Id, options);
                 return Json(new { success = o.Ok, message = o.Message, backupId = o.BackupId, patrols = o.Patrols, shooters = o.Shooters });
             }
@@ -211,7 +220,8 @@ namespace HpskSite.Controllers
         public string? Close { get; set; }
         public int Prio { get; set; } = 1;
         public string? Order { get; set; }
-        public string? Champ { get; set; }
+        /// <summary>Ordningen mellan vapengrupperna, t.ex. "CABR" (se <see cref="StaffingController.GroupOrderOf"/>).</summary>
+        public string? GroupOrder { get; set; }
         public int GlideEvery { get; set; }
         public int GlideMin { get; set; }
         public double RoundExtra { get; set; } = 60;

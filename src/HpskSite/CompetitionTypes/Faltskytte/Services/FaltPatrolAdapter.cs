@@ -15,7 +15,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public double? CloseMinutes;                 // dagens slut i minuter från midnatt; null = första start + 16 h
         public int Priority = 1;                     // 0 kort dag, 1 balans, 2 vila
         public string? Order;                        // "auto" | "sep" | "ar" | "cbar" | "all"
-        public string? Champion;                     // mästerskapsgruppens kod (C/B/A/R) som skjuter först
+        public string? GroupOrder;                   // ordningen mellan vapengrupperna, t.ex. "CBAR" eller "CABR" (null = C, B, A, R)
         public int GlideEvery, GlideMinutes;
         public double RoundExtraSeconds = 60;
         public string? StationConfigJson;            // tävlingens stationskonfiguration (kopian i tävlingen); ger riktiga stationer och skjuttider per grupp
@@ -173,7 +173,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 Interval = settings.IntervalMinutes, Size = settings.PatrolSize, Open = open, Close = options.CloseMinutes ?? Math.Min(2880, open + 960),
                 N = nSt, R = round, Vila = rest, VilaW = Math.Max(rest, options.WishRest ?? rest), Prio = Math.Clamp(options.Priority, 0, 2),
                 Order = options.Order ?? settings.WeaponGrouping switch { "MixAll" => "all", "CombineAR" => "ar", _ => "sep" },
-                Champ = options.Champion, GlideEvery = options.GlideEvery, GlideMin = options.GlideMinutes, RoundExtra = options.RoundExtraSeconds,
+                GroupOrder = options.GroupOrder, GlideEvery = options.GlideEvery, GlideMin = options.GlideMinutes, RoundExtra = options.RoundExtraSeconds,
                 NextFirst = true, PauseBlock = options.PauseBlockMin ?? settings.IntervalMinutes, PauseExt = options.PauseExtMin ?? 30, Day2 = options.Day2, Open2 = options.Open2Min ?? 540, Close2 = options.Close2Min ?? 900, DayBreak = Math.Max(1, options.DayBreak), ArTogether = options.ArTogether, Pre = Math.Max(0, options.PreCount), PreStart = options.PreStartMin ?? (open - 60), JobBuf = constraints.Shoot.BeforeMinutes, Iters = options.Iterations, Ct = options.Ct,
                 St = stations.Count > 0 ? stations.Select(x => new StationCfg { Sec = x.Sec }).ToList() : new List<StationCfg> { new() },
                 Early = new HashSet<int>(constraints.Early), Reserves = new HashSet<int>(reserves),

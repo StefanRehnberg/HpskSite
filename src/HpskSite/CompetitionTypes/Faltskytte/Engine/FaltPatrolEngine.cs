@@ -29,7 +29,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         public double Interval = 10, R = 100, Vila = 15, VilaW = 30, Open = 480, PreStart, Close = 1380, Open2 = 540, Close2 = 900, PauseBlock = 10, PauseExt = 30, RoundExtra = 60, JobBuf = 30, GlideMin;
         public int N = 10, Size = 6, DayBreak = 1, Prio = 1, Pre, GlideEvery;
         public bool NextFirst, Day2, Smart = true, ArTogether = true, Auto = true, KeepMode, Improve = true, Published, HasResults;
-        public string Order = "auto"; public string? Champ; public string KeepPolicy = "full";
+        public string Order = "auto"; public string KeepPolicy = "full";
+        /// <summary>Ordningen mellan vapengrupperna, alla fyra en gång, t.ex. "CBAR", "CABR", "RCBA". Null = "CBAR". Se <see cref="FaltPatrolEngine.OrderOf"/>.</summary>
+        public string? GroupOrder;
+        /// <summary>Äldre form: en grupp som skjuter först, övriga i grundordningen. Används bara när <see cref="GroupOrder"/> saknas.</summary>
+        public string? Champ;
         public Dictionary<string, double> Fill = new() { ["C"] = 12, ["B"] = 15, ["A"] = 21, ["R"] = 21 };
         public List<StationCfg> St = new();
         public Dictionary<string, double>? GroupSize, GroupInterval, GroupStart, Locked, Dns;
@@ -104,6 +108,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         static string Tg(string g) => g == "A_Opt" ? "A" : g;
         static double Round(double x) => Math.Floor(x + 0.5);
         static int GroupIdx(string g) => Array.IndexOf(Groups, g);
+
+        /// <summary>Är texten en giltig ordning: C, B, A och R, var och en exakt en gång (versaler)?</summary>
+        public static bool IsValidGroupOrder(string? s) => s != null && s.Length == Groups.Length && Groups.All(g => s.Count(c => c.ToString() == g) == 1);
+
+        /// <summary>
+        /// Ordningen mellan vapengrupperna som listan följer: <see cref="PlanParams.GroupOrder"/> om den är giltig, annars den äldre <see cref="PlanParams.Champ"/> (den gruppen först, övriga i grundordningen C, B, A, R),
+        /// annars grundordningen. Block, och skyttar med flera starter i samma block, sorteras efter den.
+        /// </summary>
+        public static string[] OrderOf(PlanParams p)
+        {
+            if (IsValidGroupOrder(p.GroupOrder)) return p.GroupOrder!.Select(c => c.ToString()).ToArray();
+            if (p.Champ != null && Groups.Contains(p.Champ)) return new[] { p.Champ }.Concat(Groups.Where(g => g != p.Champ)).ToArray();
+            return Groups;
+        }
 
         // ------------------------------------------------------------ mått
 
@@ -227,7 +245,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             var known = blocks.SelectMany(b => b).ToHashSet();
             var unk = present.Where(g => !known.Contains(g)).ToArray();
             if (unk.Length > 0) blocks.Add(unk);
-            if (p.Champ != null) { var ci = blocks.FindIndex(b => b.Contains(p.Champ)); if (ci > 0) { var c = blocks[ci]; blocks.RemoveAt(ci); blocks.Insert(0, c); } }
+            // Blocken följer den valda ordningen mellan vapengrupperna: ett block står där dess först kommande grupp står, och inom ett block kommer grupperna i samma ordning.
+            // ("C, B, A och R tillsammans" med ordningen C, A, B, R ger alltså C, sedan A och R tillsammans, sedan B.) Okända grupper ligger sist.
+            var ord = OrderOf(p);
+            int Rk(string g) { var i = Array.IndexOf(ord, g); return i < 0 ? 99 : i; }
+            blocks = blocks.Select((b, i) => (b: b.OrderBy(Rk).ToArray(), i)).OrderBy(t => t.b.Min(Rk)).ThenBy(t => t.i).Select(t => t.b).ToList();
             return blocks.Where(b => b.Any(present.Contains)).ToList();
         }
 
@@ -303,6 +325,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             Num(p.N, 1, 40, "Antal stationer"); Num(p.R, 1, 600, "Rundtid"); Num(p.PauseExt, 0, 600, "Förlängd paus"); Num(p.PauseBlock, 0, 600, "Paus mellan block");
             Num(p.RoundExtra, 0, 600, "Omgångstillägg"); Num(p.GlideEvery, 0, 100, "Glid: var n:e patrull"); Num(p.GlideMin, 0, 60, "Glid: minuter");
             Num(p.Open, 0, 1439, "Första start"); Num(p.Close, 1, 2880, "Slut");
+            if (p.GroupOrder != null && !IsValidGroupOrder(p.GroupOrder)) e.Add("Ordningen mellan vapengrupperna måste ha C, B, A och R en gång var");
             if (p.Close <= p.Open) e.Add("Dagen måste sluta efter att den börjar");
             var n = patrols.Sum(q => q.P.Count);
             if (n > MaxStarts) e.Add("För många starter (" + n + ", högst " + MaxStarts + ")");
@@ -386,7 +409,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                 e.Late = !e.Early && p.Late != null && p.Late.Contains(e.Id);
                 e.Pri = e.Pat || e.Early || e.Late || (p.PatrolIds == null && e.Staff != null);
             }
-            var staffInB0 = ents.Count(e => blocks[0].Contains(e.G) && e.Pat);
+            // Förstarten skjuter bara blockets första klass (som en riktig förstart: funktionärerna skjuter sin första klass före öppning). Annars kan en funktionärs andra klass hamna där,
+            // patrullen blir blandad och långsammare, och patrullen efter får en oförklarlig lucka.
+            bool PreEnt(Ent e) => e.Pat && Tg(e.G) == blocks[0][0];
+            var staffInB0 = ents.Count(e => blocks[0].Contains(e.G) && PreEnt(e));
             int SzFor(string[] grs) { var v = grs.Select(g => p.GroupSize != null && p.GroupSize.TryGetValue(g, out var x) ? x : 0).Where(x => x > 0).ToList(); return (int)(v.Count > 0 ? v.Min() : p.Size); }
             double IvFor(string[] grs) { var v = grs.Select(g => p.GroupInterval != null && p.GroupInterval.TryGetValue(g, out var x) ? x : 0).Where(x => x > 0).ToList(); return v.Count > 0 ? v.Max() : p.Interval; }
             var pre = p.Pre > 0 ? (int)Math.Min(p.Pre, Math.Ceiling((double)staffInB0 / SzFor(blocks[0]))) : 0;
@@ -397,7 +423,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                 var grs = blocks[bi];
                 var list = ents.Where(e => grs.Contains(Tg(e.G))).ToList();
                 foreach (var e in list) e.Bi = bi;
-                var staffCnt = list.Count(e => e.Pat);
+                var staffCnt = list.Count(e => bi == 0 ? PreEnt(e) : e.Pat);
                 int sz = SzFor(grs); var iv = IvFor(grs);
                 var lockedL = list.Where(e => e.Fixed != null).ToList();
                 var xt = lockedL.Select(e => e.Fixed!.Value).Distinct().OrderBy(t => t).Select(t => (t, vac: (double)Math.Max(0, sz - lockedL.Count(e => e.Fixed == t)))).ToList();
@@ -418,13 +444,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             var total = meta.Sum(b => b.M + b.Xt.Count);
             var byPerson = new Dictionary<int, List<Ent>>();
             foreach (var e in ents) { if (!byPerson.TryGetValue(e.Id, out var l)) byPerson[e.Id] = l = new(); l.Add(e); }
+            // En skytts starter i samma block följer den valda ordningen mellan vapengrupperna (som GroupIdx, men efter ordningen; okänd grupp ger -1 som förut).
+            var groupOrder = OrderOf(p);
+            int GroupRank(string g) => Array.IndexOf(groupOrder, g);
             foreach (var kv in byPerson)
             {
-                var v = kv.Value.Select((e, i) => (e, i)).OrderBy(t => t.e.Bi).ThenBy(t => GroupIdx(Tg(t.e.G))).ThenBy(t => t.i).Select(t => t.e).ToList();
+                var v = kv.Value.Select((e, i) => (e, i)).OrderBy(t => t.e.Bi).ThenBy(t => GroupRank(Tg(t.e.G))).ThenBy(t => t.i).Select(t => t.e).ToList();
                 kv.Value.Clear(); kv.Value.AddRange(v);
                 for (var i = 0; i < v.Count; i++)
                 {
-                    var e = v[i]; e.Prev = i > 0 ? v[i - 1] : null; e.HasLater = i < v.Count - 1; e.NLater = v.Count - 1 - i; e.NextOrd = i < v.Count - 1 ? v[i + 1].Bi * 100 + GroupIdx(Tg(v[i + 1].G)) : int.MaxValue;
+                    var e = v[i]; e.Prev = i > 0 ? v[i - 1] : null; e.HasLater = i < v.Count - 1; e.NLater = v.Count - 1 - i; e.NextOrd = i < v.Count - 1 ? v[i + 1].Bi * 100 + GroupRank(Tg(v[i + 1].G)) : int.MaxValue;
                     e.Rank = e.Prev != null && e.Prev.Bi == e.Bi ? e.Prev.Rank + 1 : 0;
                 }
             }
@@ -466,7 +495,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                     if (p.KeepMode && gs == null && fixedMax != null) t = Math.Max(t, fixedMax.Value + meta[bi].Iv + delta);
                     var ta = new TimesArr(); var arr = ta.Arr;
                     var np = bi == 0 ? pre : 0;
-                    for (var k = 0; k < np; k++) arr.Add(p.PreStart + k * meta[bi].Iv);
+                    // Förstartspatrullerna får samma extra luckor som övriga (en patrull med blandade klasser tar längre tid vid stationerna): annars krockar de med varandra.
+                    double tp = p.PreStart;
+                    for (var k = 0; k < np; k++) { arr.Add(tp); tp += meta[bi].Iv + gapsAfter[goff[bi] + k]; }
                     int u = np, kk = np;
                     while (u < meta[bi].M)
                     {
@@ -486,7 +517,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                     var np = bi == 0 ? pre : 0;
                     var cap = new List<double>();
                     {
-                        var ng = mb.GridFree - (np > 0 ? Math.Min(mb.List.Count(e => e.Pat && e.Fixed == null), np * mb.Sz) : 0);
+                        var ng = mb.GridFree - (np > 0 ? Math.Min(mb.List.Count(e => PreEnt(e) && e.Fixed == null), np * mb.Sz) : 0);
                         var mm2 = mb.M - mb.Spare - np; var bas = mm2 > 0 ? (int)Math.Floor(ng / (double)mm2) : 0; var rem = mm2 > 0 ? ng % mm2 : 0;
                         var mergedAt = new Dictionary<int, int>(); foreach (var kv in times.MergedOf) mergedAt[kv.Value] = kv.Key; var reg = 0;
                         for (var k = 0; k < arr.Count; k++)
@@ -504,14 +535,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                             slot[e] = times.MergedOf.TryGetValue(xi, out var gi) ? gi : times.G + times.Rest.IndexOf(xi);
                         }
                     bool SamePatrol(Ent e, int j) => byPerson[e.Id].Any(o => o != e && o.Bi == bi && slot.TryGetValue(o, out var sj) && sj == j);
-                    bool OkSlot(Ent e, int j) => cap[j] > 0 && (j >= np || e.Pat) && !Forbidden(e, arr[j], mb.D) && !SamePatrol(e, j);
+                    bool OkSlot(Ent e, int j) => cap[j] > 0 && (j >= np || PreEnt(e)) && !Forbidden(e, arr[j], mb.D) && !SamePatrol(e, j);
                     var maxRank = Math.Max(0, mb.List.Count > 0 ? mb.List.Max(e => e.ERank) : 0);
                     // Väljer plats för en enhet (en skytt, eller en klump som måste stå i samma patrull). Kedjan av reservplaner är den ursprungliga; för en enhet på en medlem är den identisk med förut.
                     int ChooseSlot(List<Ent> M, double aw, double am, bool lateSeek, bool wishLate)
                     {
                         var size = M.Count; var k = -1;
                         bool Cap(int j) => cap[j] > size - 1;
-                        bool Seat(int j) => M.All(m => j >= np || m.Pat);
+                        bool Seat(int j) => M.All(m => j >= np || PreEnt(m));
                         bool Ok(int j) => Cap(j) && Seat(j) && M.All(m => !Forbidden(m, arr[j], mb.D) && !SamePatrol(m, j));
                         if (lateSeek || wishLate)
                         {

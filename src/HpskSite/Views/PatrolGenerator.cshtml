@@ -104,8 +104,19 @@
           <div class="pg-field"><label for="pgClose">Dagen ska vara slut senast</label><input class="form-control" id="pgClose" type="time"><span class="pg-hint">Tomt = ingen gräns.</span></div>
           <div class="pg-field"><label for="pgRest">Minsta vila mellan två starter (min)</label><input class="form-control" id="pgRest" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Gäller skyttar med flera starter samma dag.</span></div>
           <div class="pg-field"><label for="pgWish">Önskad vila (min)</label><input class="form-control" id="pgWish" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Gärna minst så här lång vila. Tomt = som minsta vila.</span></div>
-          <div class="pg-field"><label for="pgOrder">Vilka klasser skjuts tillsammans?</label><select class="form-select" id="pgOrder"><option value="auto">Välj automatiskt det bästa</option><option value="sep">C, B, A, R var för sig</option><option value="ar">C, B, A och R tillsammans</option><option value="cbar">C och B tillsammans, A och R tillsammans</option><option value="all">Alla blandade</option></select></div>
-          <div class="pg-field"><label for="pgChamp">Mästerskap i en vapengrupp?</label><select class="form-select" id="pgChamp"><option value="">Nej, C först som vanligt</option><option value="B">Ja, B skjuts först</option><option value="A">Ja, A skjuts först</option><option value="R">Ja, R skjuts först</option></select></div>
+          <div class="pg-field"><label for="pgOrder">Vilka klasser skjuts tillsammans?</label><select class="form-select" id="pgOrder"><option value="auto">Välj automatiskt det bästa</option><option value="sep">Varje vapengrupp för sig</option><option value="ar">A och R tillsammans, övriga för sig</option><option value="cbar">C och B tillsammans, A och R tillsammans</option><option value="all">Alla blandade</option></select></div>
+          @{
+            // Alla 24 ordningar av C, B, A och R. Tomt värde = C, B, A, R (grundordningen), så adressen blir kort för den vanliga dagen.
+            var groupOrders = new List<string>();
+            void Permute(string rest, string done) { if (rest.Length == 0) { groupOrders.Add(done); return; } foreach (var c in rest) Permute(rest.Replace(c.ToString(), ""), done + c); }
+            Permute("CBAR", "");
+          }
+          <div class="pg-field"><label for="pgGOrder">Ordning mellan vapengrupperna</label><select class="form-select" id="pgGOrder">
+            @foreach (var go in groupOrders)
+            {
+              <option value="@(go == "CBAR" ? "" : go)">@string.Join(", ", go.ToCharArray())@(go == "CBAR" ? " (vanlig ordning)" : "")</option>
+            }
+          </select><span class="pg-hint">Vilken vapengrupp som skjuter först, sedan nästa, och så vidare. Klasser som skjuts tillsammans följer den av dem som kommer först i ordningen.</span></div>
           <div class="pg-field"><label for="pgRoundMin">Hur lång tid tar en runda? (min)</label><input class="form-control" id="pgRoundMin" type="number" min="10" max="600" inputmode="numeric"><span class="pg-hint" id="pgRoundHint">Tid för en patrull att gå hela banan. Tomt = uppskattning, 10 min per station.</span></div>
           <div class="pg-field"><label for="pgPause">Paus mellan klasser (min)</label><input class="form-control" id="pgPause" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Tid mellan sista patrullen i en klass och första i nästa. Tomt = som tiden mellan patruller.</span></div>
           <div class="pg-field"><label for="pgPauseExt">Får förlängas med (min)</label><input class="form-control" id="pgPauseExt" type="number" min="0" max="600" inputmode="numeric"><span class="pg-hint">Hur mycket pausen får växa för att skyttarna ska hinna vila.</span></div>

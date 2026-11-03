@@ -20,7 +20,7 @@
 
   const FIELDS = [
     ['pgSize', 'size', ''], ['pgInt', 'int', ''], ['pgFirst', 'first', ''], ['pgClose', 'close', ''], ['pgRest', 'rest', '15'], ['pgPrio', 'prio', '1'],
-    ['pgWish', 'wish', ''], ['pgOrder', 'order', 'auto'], ['pgChamp', 'champ', ''], ['pgGlideN', 'gn', '0'], ['pgGlideM', 'gm', '0'], ['pgRound', 'round', '60'], ['pgRoundMin', 'rm', ''], ['pgPause', 'pb', ''], ['pgPauseExt', 'pe', ''], ['pgOpen2', 'o2', ''], ['pgClose2', 'c2', ''], ['pgBreak', 'db', '1'], ['pgPre', 'pre', '0'], ['pgPreStart', 'ps', ''],
+    ['pgWish', 'wish', ''], ['pgOrder', 'order', 'auto'], ['pgGOrder', 'go', ''], ['pgGlideN', 'gn', '0'], ['pgGlideM', 'gm', '0'], ['pgRound', 'round', '60'], ['pgRoundMin', 'rm', ''], ['pgPause', 'pb', ''], ['pgPauseExt', 'pe', ''], ['pgOpen2', 'o2', ''], ['pgClose2', 'c2', ''], ['pgBreak', 'db', '1'], ['pgPre', 'pre', '0'], ['pgPreStart', 'ps', ''],
   ];
   const DEFAULTS = Object.fromEntries(FIELDS.map(f => [f[1], f[2]])); DEFAULTS.keep = '1'; DEFAULTS.d2 = '0'; DEFAULTS.ar = '1'; DEFAULTS.sc = '';   // sc = övningsscenariot (JSON, bara siffror)
   let P = Object.assign({}, DEFAULTS);
@@ -30,7 +30,9 @@
   let view = phone() ? 'list' : 'sta', sel = null /* {k:'patrol'|'person', id} */, lastChange = null;
 
   // ---------- inställningar <-> fält <-> adress
-  function fromHash() { const q = new URLSearchParams(location.hash.replace(/^#/, '')); P = Object.assign({}, DEFAULTS); q.forEach((v, k) => { if (k in P) P[k] = v; }); }
+  // Äldre adresser har &champ=A (en grupp som skjuter först): den gruppen först, övriga i ordningen C, B, A, R.
+  const groupOrderOf = v => { v = (v || '').toUpperCase(); if (/^[CBAR]$/.test(v)) v = v + 'CBAR'.replace(v, ''); const ok = v.length === 4 && [...'CBAR'].every(g => v.split(g).length === 2); return ok && v !== 'CBAR' ? v : ''; };   // grundordningen C, B, A, R = tomt
+  function fromHash() { const q = new URLSearchParams(location.hash.replace(/^#/, '')); P = Object.assign({}, DEFAULTS); q.forEach((v, k) => { if (k === 'champ') P.go = groupOrderOf(v); else if (k in P) P[k] = k === 'go' ? groupOrderOf(v) : v; }); if (P.go === 'CBAR') P.go = ''; }
   function toFields() { FIELDS.forEach(([id, k]) => { const el = $(id); if (el) el.value = P[k]; }); $('pgKeep').checked = P.keep === '1'; $('pgDay2').checked = P.d2 === '1'; $('pgDay2Box').hidden = P.d2 !== '1'; }
   function fromFields() { FIELDS.forEach(([id, k]) => { const el = $(id); if (el) P[k] = el.value.trim(); }); P.keep = $('pgKeep').checked ? '1' : '0'; P.d2 = $('pgDay2').checked ? '1' : '0'; $('pgDay2Box').hidden = P.d2 !== '1'; }
   function toHash() { const q = new URLSearchParams(); Object.keys(P).forEach(k => { if (P[k] !== DEFAULTS[k]) q.set(k, P[k]); }); history.replaceState(null, '', location.pathname + (q.toString() ? '#' + q.toString() : '')); }
@@ -40,7 +42,7 @@
     if (p.size) q.patrolSize = p.size; if (p.int) q.intervalMinutes = p.int;
     if (p.first) q.firstStart = (date || new Date().toISOString().slice(0, 10)) + 'T' + p.first;
     if (p.close) q.close = p.close; if (p.rest !== '') q.minRest = p.rest; if (p.wish !== '') q.wishRest = p.wish;
-    q.prio = p.prio; q.order = p.order; if (p.champ) q.champ = p.champ; q.glideEvery = p.gn; q.glideMin = p.gm; q.roundExtra = p.round; if (p.rm) q.roundMin = p.rm;
+    q.prio = p.prio; q.order = p.order; if (p.go) q.groupOrder = p.go; q.glideEvery = p.gn; q.glideMin = p.gm; q.roundExtra = p.round; if (p.rm) q.roundMin = p.rm;
     if (p.pb !== '') q.pauseBlock = p.pb; if (p.pe !== '') q.pauseExt = p.pe; if (p.d2 === '1') { q.day2 = true; if (p.o2) q.open2 = p.o2; if (p.c2) q.close2 = p.c2; q.dayBreak = p.db; } if (p.ar !== '1') q.arTogether = false; if (+p.pre > 0) { q.pre = p.pre; if (p.ps) q.preStart = p.ps; }
     if (p.keep !== '1') q.keep = false;
     return q;
@@ -48,7 +50,7 @@
   function body(p, extra) {
     const q = query(p);
     return Object.assign({ competitionId: comp, engine: true, patrolSize: +q.patrolSize || 0, intervalMinutes: +q.intervalMinutes || 0, firstStart: q.firstStart || null, keep: p.keep === '1',
-      minRest: p.rest === '' ? -1 : +p.rest, wishRest: p.wish === '' ? -1 : +p.wish, close: q.close || null, prio: +p.prio, order: q.order, champ: q.champ || null, glideEvery: +p.gn, glideMin: +p.gm, roundExtra: +p.round, roundMin: p.rm ? +p.rm : -1, pauseBlock: p.pb === '' ? -1 : +p.pb, pauseExt: p.pe === '' ? -1 : +p.pe, day2: p.d2 === '1', open2: p.o2 || null, close2: p.c2 || null, dayBreak: +p.db, arTogether: p.ar === '1', pre: +p.pre || 0, preStart: p.ps || null }, extra || {});
+      minRest: p.rest === '' ? -1 : +p.rest, wishRest: p.wish === '' ? -1 : +p.wish, close: q.close || null, prio: +p.prio, order: q.order, groupOrder: q.groupOrder || null, glideEvery: +p.gn, glideMin: +p.gm, roundExtra: +p.round, roundMin: p.rm ? +p.rm : -1, pauseBlock: p.pb === '' ? -1 : +p.pb, pauseExt: p.pe === '' ? -1 : +p.pe, day2: p.d2 === '1', open2: p.o2 || null, close2: p.c2 || null, dayBreak: +p.db, arTogether: p.ar === '1', pre: +p.pre || 0, preStart: p.ps || null }, extra || {});
   }
   async function getJson(url, init, signal) { const r = await fetch(url, Object.assign({ headers: { Accept: 'application/json' }, signal }, init || {})); if (!r.ok) throw new Error('Server ' + r.status); return r.json(); }
 
@@ -428,6 +430,8 @@
     { id: 'trol25', name: 'Trollenäs 2025', sc: { C: 189, B: 27, A: 94, R: 34, Also: [A2('C', 'A', 56), A2('C', 'R', 17), A2('C', 'B', 11), A2('B', 'A', 2), A2('A', 'R', 1)], Multi: [{ Groups: 'CBA', N: 7 }, { Groups: 'CAR', N: 10 }, { Groups: 'CBR', N: 2 }] }, size: '7', int: '8', first: '08:00', rm: '90' },
     { id: 'skane', name: 'Skånemästerskap 2025', sc: { C: 168, B: 11, A: 83, R: 17, Also: [A2('C', 'A', 79), A2('C', 'R', 17), A2('C', 'B', 11)] }, size: '8', int: '10', first: '08:00', rm: '105' },
     { id: 'martens', name: 'Mårtenträffen (många skjuter tre klasser)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }] }, size: '8', int: '8', first: '08:00', rm: '75' },
+    // Bockstensträffen 2026: rundan tar 84 min från start till mål, 8 min mellan upprop. Patrullstorlek 6 (listans största patrull; generatorn fyller patrullerna, arrangörens var ofta inte fulla, så generatorn får färre patruller och slutar något tidigare). Funktionärerna (21 st, Varbergs PK) har ett uppdrag 18:00–18:30, efter dagens slut: det är bara det som markerar dem som funktionärer för förstarten och begränsar ingen runda (ett uppdrag mitt på dagen spärrar deras rundor och förstarten tappar patruller). 24 personer med uppdrag ger de 21 som skjuter C i förstarten, eftersom några saknar C-start. De skjuter i fyra förstartspatruller från 07:00 med 8 min emellan; förstarten fylls bara med personer som har uppdrag. Övriga startar 09:00 (arrangörens uppgifter). Antalen ur patrullistan: 111 personer, 233 starter.
+    { id: 'bocksten', name: 'Bockstensträffen 2026', sc: { C: 107, B: 17, A: 62, R: 47, Also: [A2('C', 'A', 25), A2('C', 'R', 12), A2('C', 'B', 8), A2('A', 'R', 3)], Multi: [{ Groups: 'CAR', N: 28 }, { Groups: 'CBA', N: 5 }, { Groups: 'CBR', N: 4 }], Jobs: [{ N: 24, From: '18:00', To: '18:30' }] }, size: '6', int: '8', first: '09:00', rm: '84', pre: '4', ps: '07:00', order: 'ar', close: '16:00' },
     { id: 'newbies', name: 'Nybörjare med kamrat och önskemål (Mårtenträffen + 10 nybörjare, 12 önskemål)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }], Followers: 10, WishEarly: 8, WishLate: 4 }, size: '8', int: '8', first: '08:00', rm: '75' },
     { id: 'staff', name: 'Svårt, med funktionärer (Mårtenträffen + uppdrag)', sc: { C: 78, B: 21, A: 37, R: 27, Also: [A2('C', 'R', 6), A2('C', 'A', 19), A2('C', 'B', 10)], Multi: [{ Groups: 'CBR', N: 7 }, { Groups: 'CBA', N: 4 }, { Groups: 'CAR', N: 12 }], Jobs: [{ N: 12, From: '09:00', To: '12:00' }], Reserves: 3, Early: 4 }, size: '8', int: '8', first: '08:00', rm: '75' },
     { id: 'four', name: 'Stresstest: många skjuter alla fyra klasserna', sc: { C: 24, B: 16, A: 16, R: 8, Multi: [{ Groups: 'CBAR', N: 8 }, { Groups: 'CBA', N: 8 }], Stations: 6 } },
@@ -435,8 +439,8 @@
     { id: 'ssm26b', big: true, name: 'SSM 2026 dag 2 (A och R)', sc: { A: 87, R: 74, Also: [A2('A', 'R', 57)] }, size: '8', int: '8', first: '09:00', rm: '100' },
     { id: 'ssm25a', big: true, name: 'SSM 2025 dag 1 (C och B)', sc: { C: 104, B: 56, Also: [A2('C', 'B', 52)] }, size: '5', int: '8', first: '08:00', rm: '200' },
     { id: 'ssm25b', big: true, name: 'SSM 2025 dag 2 (A och R)', sc: { A: 38, R: 48, Also: [A2('A', 'R', 28)] }, size: '5', int: '10', first: '09:00', rm: '180' },
-    { id: 'smthu', big: true, name: 'SM 2024 torsdag (A, 36 skjuter också C)', sc: { A: 266, C: 99, Also: [A2('C', 'A', 36)], Stations: 10 }, rest: '45', wish: '90', champ: 'A', size: '10', int: '11', first: '07:55', rm: '110' },
-    { id: 'smfri', big: true, name: 'SM 2024 fredag (R, 14 skjuter också C)', sc: { R: 237, C: 66, Also: [A2('C', 'R', 14)], Stations: 10 }, rest: '45', wish: '90', champ: 'R', size: '10', int: '11', first: '07:55', rm: '110' },
+    { id: 'smthu', big: true, name: 'SM 2024 torsdag (A, 36 skjuter också C)', sc: { A: 266, C: 99, Also: [A2('C', 'A', 36)], Stations: 10 }, rest: '45', wish: '90', go: 'ACBR', size: '10', int: '11', first: '07:55', rm: '110' },
+    { id: 'smfri', big: true, name: 'SM 2024 fredag (R, 14 skjuter också C)', sc: { R: 237, C: 66, Also: [A2('C', 'R', 14)], Stations: 10 }, rest: '45', wish: '90', go: 'RCBA', size: '10', int: '11', first: '07:55', rm: '110' },
     { id: 'smsat', big: true, name: 'SM 2024 lördag (C)', sc: { C: 333, Stations: 10 }, rest: '45', wish: '90', size: '10', int: '11', first: '07:55', rm: '110' },
     { id: 'smsun', big: true, name: 'SM 2024 söndag (B)', sc: { B: 199, Stations: 10 }, rest: '45', wish: '90', size: '10', int: '11', first: '07:55', rm: '110' },
   ];
@@ -445,9 +449,11 @@
   let lastExtra = null;   // förvalets egna inställningar (rundtid, vila, mästerskap) följer med så länge man bara justerar antalen
   function setScenario(sc, extra) {
     lastExtra = extra || null;
-    P.sc = JSON.stringify(fullSc(sc)); P.close = ''; P.pb = '';   // det som hänger på skyttarna (dagens slut, paus) räknas fram igen
+    P.sc = JSON.stringify(fullSc(sc)); P.close = (extra && extra.close) || ''; P.pb = '';   // det som hänger på skyttarna (dagens slut, paus) räknas fram igen
     P.rm = (extra && extra.rm) || ''; P.first = (extra && extra.first) || '';   // verkliga förval har sin egen rundtid och första start; annars föreslår servern
-    P.rest = (extra && extra.rest) || DEFAULTS.rest; P.wish = (extra && extra.wish) || ''; P.champ = (extra && extra.champ) || '';
+    P.rest = (extra && extra.rest) || DEFAULTS.rest; P.wish = (extra && extra.wish) || ''; P.go = groupOrderOf((extra && (extra.go || extra.champ)) || '');
+    P.order = (extra && extra.order) || 'auto';   // hur klasserna delas upp (t.ex. 'ar' = C först, sedan B, A och R i en blandad följd)
+    P.pre = (extra && extra.pre) || '0'; P.ps = (extra && extra.ps) || '';   // förstart (funktionärspatruller före öppning): antal och första start följer förvalet
     P.size = (extra && extra.size) || ''; P.int = (extra && extra.int) || '';   // tomt = servern föreslår (6 per patrull, 15 minuter)
     R = null; toFields(); toHash();
   }
