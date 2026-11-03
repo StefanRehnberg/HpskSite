@@ -4,29 +4,31 @@ using Microsoft.Extensions.Options;
 namespace HpskSite
 {
     /// <summary>
-    /// Configures the Security Stamp Validator for member authentication.
+    /// Hur ofta inloggningskakans säkerhetsstämpel prövas mot databasen.
     ///
-    /// By default, ASP.NET Core Identity validates the security stamp every 30 minutes.
-    /// This means even if your cookie is valid for 30 days, users get logged out every 30 minutes
-    /// when the validator detects a security stamp mismatch.
+    /// Stämpeln byts när medlemmen byter lösenord, stängs av, låses eller förlorar en roll
+    /// (<see cref="HpskSite.Services.Security.SessionRevocationHandler"/>) — men en öppen session märker det först vid nästa prövning.
+    /// Intervallet är därför det som avgör hur länge en avstängd medlem kan vara kvar.
     ///
-    /// This configuration extends the validation interval to match the cookie timeout,
-    /// preventing unexpected logouts for members who have "Remember Me" checked.
-    ///
-    /// Note: The security stamp is updated when:
-    /// - Password is changed
-    /// - External login is added/removed
-    /// - AllowConcurrentLogins is false and user logs in elsewhere (invalidates other sessions)
+    /// <para>Förvalet är 30 dagar (ett medvetet gammalt beslut: ASP.NET:s förval 30 minuter ansågs ha loggat ut medlemmar i onödan).
+    /// <c>Security:Session:StampValidationMinutes</c> ändrar det utan ny kod — sätt ett kort värde (t.ex. 15) först när en A/B i dev
+    /// har visat att en vanlig session överlever intervallet och att en avstängd medlem tappar sin.</para>
     /// </summary>
     public class MemberSecurityStampValidatorOptions : IConfigureOptions<SecurityStampValidatorOptions>
     {
-        public void Configure(SecurityStampValidatorOptions options)
+        public const int DefaultMinutes = 30 * 24 * 60;
+        private readonly IConfiguration _configuration;
+
+        public MemberSecurityStampValidatorOptions(IConfiguration configuration) => _configuration = configuration;
+
+        public static TimeSpan IntervalFrom(string? configured)
         {
-            // Set validation interval to 30 days (matching cookie timeout)
-            // This means the security stamp is only validated every 30 days
-            // Users will still be logged out immediately if their password changes
-            // or if AllowConcurrentLogins=false and they log in elsewhere
-            options.ValidationInterval = TimeSpan.FromDays(30);
+            if (int.TryParse(configured, out var minutes) && minutes >= 1 && minutes <= DefaultMinutes)
+                return TimeSpan.FromMinutes(minutes);
+            return TimeSpan.FromMinutes(DefaultMinutes);
         }
+
+        public void Configure(SecurityStampValidatorOptions options) =>
+            options.ValidationInterval = IntervalFrom(_configuration["Security:Session:StampValidationMinutes"]);
     }
 }

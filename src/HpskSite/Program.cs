@@ -81,13 +81,13 @@ if (!string.IsNullOrWhiteSpace(dpConnection) && !dpConnection.Contains("|DataDir
         });
 }
 
-// Configure member authentication cookies specifically (not backoffice)
-// This ensures RememberMe checkbox is properly respected for frontend members
-builder.Services.ConfigureOptions<MemberCookieConfigureOptions>();
+// ⚠️ Säkerhetsplanen 2026-11-02 (paket 2, P5a): medlemmens inloggningskaka är schemat "Identity.Application" (den tidigare
+// MemberCookieConfigureOptions riktade sig mot "Umbraco.Members" och gjorde aldrig något). Kaknamnet och livslängden rörs INTE
+// (ett nytt namn loggar ut alla) — bara flaggan: aldrig över http, vilken proxy som än terminerar https.
+// Gäller också antiforgery-kakan (namnet behålls).
+HpskSite.Services.Security.SessionCookieSetup.AddSessionCookieHardening(builder.Services);
 
-// Configure Security Stamp Validator to prevent 30-minute auto-logout
-// By default, ASP.NET Core Identity validates security stamps every 30 minutes,
-// which causes users to be logged out even with "Remember Me" checked
+// Hur ofta säkerhetsstämpeln prövas (förval 30 dagar, medvetet gammalt beslut) — se MemberSecurityStampValidatorOptions.
 builder.Services.ConfigureOptions<MemberSecurityStampValidatorOptions>();
 
 // Register SignalR for real-time training match communication

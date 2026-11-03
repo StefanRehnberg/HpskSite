@@ -28,9 +28,10 @@ namespace HpskSite.Composers
             {
                 // Number of failed attempts before lockout (applies to members). Default: 5.
                 options.Lockout.MaxFailedAccessAttempts = 10;
-                // NOTE: does NOT set member lockout duration — see class summary
+                // NOTE: member lockout duration is NOT set here — see class summary
                 // (members use Security:MemberDefaultLockoutTimeInMinutes, 30 days by default).
-                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+                // (Raden "DefaultLockoutTimeSpan = 5 min" togs bort 2026-11-03: den gällde inte medlemmar och var vilseledande;
+                // ASP.NET:s eget förval är samma 5 minuter för backoffice.)
                 options.Lockout.AllowedForNewUsers = true;
 
                 // Password settings (keep reasonable but not overly strict)

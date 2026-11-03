@@ -309,6 +309,11 @@ namespace HpskSite.Composers
                 HpskSite.Services.ClubMembershipSyncHandler>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavedNotification,
                 HpskSite.Services.ClubMembershipSyncHandler>();
+            // Säkerhetsplanen 2026-11-02 (P5b): avstängd/låst medlem eller borttagen roll byter säkerhetsstämpeln.
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavingNotification,
+                HpskSite.Services.Security.SessionRevocationHandler>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.RemovedMemberRolesNotification,
+                HpskSite.Services.Security.SessionRevocationHandler>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();
