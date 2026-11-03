@@ -300,6 +300,7 @@ namespace HpskSite.Controllers
         /// POST /match/{code}/member/confirm
         /// </summary>
         [HttpPost("{code}/member/confirm")]
+        [IgnoreAntiforgeryToken] // tokenen prövas för hand i metoden (svensk felsida i stället för 400)
         public async Task<IActionResult> ConfirmMemberClaim(string code, [FromForm] string claimToken, [FromForm] int? teamId = null)
         {
             _logger.LogInformation("ConfirmMemberClaim called with code={Code}", code);

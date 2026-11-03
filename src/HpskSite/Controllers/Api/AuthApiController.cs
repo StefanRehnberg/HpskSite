@@ -17,6 +17,9 @@ namespace HpskSite.Controllers.Api
     /// </summary>
     [Route("api/auth")]
     [ApiController]
+    // Antiforgery: medvetet fritt. Inloggning/refresh/utloggning bär sina uppgifter i kroppen (lösenord, refresh-token) och
+    // ReportActivity kräver JWT i Authorization-huvudet — ingen sessionskaka som en annan sajt kan utnyttja (CSRF kräver ambient kaka).
+    [IgnoreAntiforgeryToken]
     public class AuthApiController : ControllerBase
     {
         private readonly IMemberManager _memberManager;

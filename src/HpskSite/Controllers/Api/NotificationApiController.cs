@@ -11,6 +11,8 @@ namespace HpskSite.Controllers.Api
     [Route("api/notifications")]
     [ApiController]
     [Authorize(AuthenticationSchemes = "JwtBearer")]
+    // Antiforgery: medvetet fritt — bara JWT i Authorization-huvudet (ingen sessionskaka att kapa).
+    [IgnoreAntiforgeryToken]
     public class NotificationApiController : ControllerBase
     {
         private readonly PushNotificationService _pushNotificationService;
