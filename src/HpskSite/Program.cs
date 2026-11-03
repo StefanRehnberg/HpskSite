@@ -203,6 +203,9 @@ if (scaleOut.ForwardedHeaders.Enabled)
     app.UseForwardedHeaders();
 }
 
+// ⚠️ Säkerhetsplanen 2026-11-02 (paket 2, steg 1): säkerhetshuvuden på varje svar. FÖRST av de egna.
+app.UseMiddleware<HpskSite.Services.Security.SecurityHeadersMiddleware>();
+
 // Redirect HTTP to HTTPS in production
 if (!app.Environment.IsDevelopment())
 {
