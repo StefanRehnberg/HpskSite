@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/competitionresults/verifyrecompute?confirm=golden-master&amp;ids=1,2,3&amp;mode=off
         /// </summary>
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("VerifyGuard: 404 utom i Development med HPSK_VERIFY_ENDPOINTS, tillåten databas och hash-nyckel; finns bara i DEBUG-bygget")]
         public async Task<IActionResult> VerifyRecompute(string? confirm, string? ids, string? mode, bool full = false)
         {
             var refuse = VerifyGuard(confirm);

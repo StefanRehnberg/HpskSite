@@ -94,9 +94,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var artifact = BuildArtifact(competition, build);
 
                 var artifactJson = JsonConvert.SerializeObject(artifact);
+                // F0: den publicerade listans frusna bild skrivs på SAMMA ställe som artefakten — alltså bara
+                // när en admin publicerar eller ber om en omräkning. En avpublicerad lista har ingen bild.
+                var snapshot = build.Results.IsOfficial && !build.Results.IsSubCompetition
+                    ? ToResponseJson(build.Results, _services)
+                    : "";
                 _results.Update(competition.Id, r =>
                 {
                     r.ResultData = artifactJson;
+                    r.PublishedSnapshot = snapshot;
                     r.LastUpdated = DateTime.Now;
                 });
 
@@ -112,6 +118,59 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 _logger.LogWarning(ex, "Kunde inte räkna om resultatartefakten för fältskyttetävling {CompetitionId} ({Reason})",
                     competitionId, reason);
                 return false;
+            }
+        }
+
+        // ── Frusen bild av den publicerade listan (utanför mästerskapet, F0) ──────
+
+        /// <summary>
+        /// Ska huvudlistan serveras ur den frusna bilden i stället för att räknas live? Ja bara för en officiell
+        /// huvudlista som HAR en bild och där ingen admin ber om en sammanslagnings-förhandsvisning. Deltävlingen
+        /// är alltid live (med flit). EN regel, prövad av <c>FaltskytteFrozenListTests</c>.
+        /// </summary>
+        public static bool ServeFrozen(bool subCompetitionOnly, string? previewMergeConfig, bool isOfficial, string? snapshot) =>
+            !subCompetitionOnly
+            && string.IsNullOrEmpty(previewMergeConfig)
+            && isOfficial
+            && !string.IsNullOrWhiteSpace(snapshot);
+
+        /// <summary>
+        /// Exakt det svar <c>GetFaltskytteResults</c> ger för huvudlistan, som sträng. Serialiseras med MVC:s
+        /// egna JSON-inställningar så att en frusen lista är byte-lik en live-byggd — sidan kan inte skilja dem åt.
+        /// </summary>
+        public static string ToResponseJson(FaltskylteFinalResults results, IServiceProvider services)
+        {
+            var options = (services.GetService(typeof(Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>))
+                as Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>)?.Value.JsonSerializerOptions;
+            return System.Text.Json.JsonSerializer.Serialize(new { success = true, results }, options);
+        }
+
+        /// <summary>
+        /// Skriver BARA bilden (rör varken artefakten eller LastUpdated). Används av engångssteget som fryser
+        /// redan publicerade listor, och bara för en tävling som är officiell och saknar bild.
+        /// Returnerar: "frozen", "already", "not-official", "no-results" eller "failed".
+        /// </summary>
+        public async Task<string> FreezeIfMissingAsync(int competitionId, bool apply)
+        {
+            try
+            {
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null || !competition.FaltskytteResultsOfficial) return "not-official";
+                var current = _results.Get(competitionId);
+                if (current != null && !string.IsNullOrWhiteSpace(current.PublishedSnapshot)) return "already";
+                var build = await _builder.BuildAsync(competitionId, null, subCompetitionOnly: false);
+                if (build.Results == null) return "no-results";
+                if (apply)
+                {
+                    var snapshot = ToResponseJson(build.Results, _services);
+                    _results.Update(competitionId, r => r.PublishedSnapshot = snapshot, createIfMissing: true);
+                }
+                return "frozen";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte frysa den publicerade listan för fältskyttetävling {CompetitionId}", competitionId);
+                return "failed";
             }
         }
 

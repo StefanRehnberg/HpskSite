@@ -1,0 +1,78 @@
+@*
+    Utanför mästerskapet, F0: fryser de redan publicerade fältlistorna en gång. Bara sajtadministratör.
+    Visa läget skriver ingenting. Att köra om är ofarligt: en lista som redan har en bild hoppas över.
+*@
+<div id="prfPanel" class="mt-5">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-snow me-2"></i>Frys publicerade fältlistor</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        En publicerad fältlista ska bara kunna ändras när en administratör ber om en omräkning — aldrig av att någon
+        tittar på sidan. Listor som publicerades innan den regeln fanns saknar sin frusna bild och räknas tills vidare
+        live. Här fryser du dem med dagens uträkning. Ingenting annat ändras, och det går att köra om.
+    </p>
+    <div class="d-flex gap-2 flex-wrap mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="prfLoad">Visa läget</button>
+        <button type="button" class="btn btn-primary btn-sm d-none" id="prfRun">Frys listorna</button>
+    </div>
+    <div id="prfOut" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__prfInit) return; window.__prfInit = true;
+    var BASE = '/umbraco/surface/PublishedResultsFreeze';
+    var root = document.getElementById('prfPanel');
+    var out = document.getElementById('prfOut');
+    var runBtn = document.getElementById('prfRun');
+    var TEXT = { frozen: 'fryses nu', already: 'redan fryst', 'no-results': 'inga resultat att frysa', 'not-official': 'inte publicerad', failed: 'misslyckades' };
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
+
+    function render(d, done) {
+        var todo = 0, html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Tävling</th><th>Läge</th></tr></thead><tbody>';
+        (d.rows || []).forEach(function (r) {
+            if (r.state === 'frozen') todo++;
+            html += '<tr><td>' + esc(r.id) + '</td><td' + (r.state === 'failed' ? ' class="text-danger"' : '') + '>'
+                + esc(done && r.state === 'frozen' ? 'frusen nu' : (TEXT[r.state] || r.state)) + '</td></tr>';
+        });
+        out.innerHTML = html + '</tbody></table></div>';
+        runBtn.classList.toggle('d-none', done || todo === 0);
+    }
+
+    async function load() {
+        out.textContent = 'Läser…';
+        try {
+            var r = await fetch(BASE + '/Preview', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            render(d, false);
+        } catch (e) { out.innerHTML = '<span class="text-danger">Läget gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+
+    async function run() {
+        runBtn.disabled = true;
+        try {
+            var fd = new FormData(); fd.append('__RequestVerificationToken', token());
+            var r = await fetch(BASE + '/Run', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            render(d, true);
+        } catch (e) { out.innerHTML = '<span class="text-danger">Avbrutet: ' + esc(e.message) + '. Kör igen — det som redan är fryst hoppas över.</span>'; }
+        finally { runBtn.disabled = false; }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    function armed(btn, text) {
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; return true; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = text;
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+        return false;
+    }
+
+    document.getElementById('prfLoad').addEventListener('click', load);
+    runBtn.addEventListener('click', function () { if (armed(runBtn, 'Tryck igen för att frysa')) run(); });
+})();
+</script>

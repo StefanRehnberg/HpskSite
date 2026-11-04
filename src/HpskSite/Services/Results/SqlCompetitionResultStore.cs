@@ -121,7 +121,7 @@ UPDATE {Table} SET
     ResultType = @1, ResultData = @2, IsOfficial = @3, SubIsOfficial = @4,
     MergeConfig = @5, SubMergeConfig = @6, ClassNameOverrides = @7, SubClassNameOverrides = @8,
     ShootOffConfig = @9, SubShootOffConfig = @10, HonoraryAwardConfig = @11,
-    LastUpdated = @12, UpdatedDate = @13
+    LastUpdated = @12, UpdatedDate = @13, PublishedSnapshot = @14
 WHERE Id = @0",
                 row.Id,
                 string.IsNullOrWhiteSpace(after.ResultType) ? CompetitionResultFields.DefaultResultType : after.ResultType,
@@ -130,7 +130,8 @@ WHERE Id = @0",
                 Null(after.ClassNameOverrides), Null(after.SubClassNameOverrides),
                 Null(after.ShootOffConfig), Null(after.SubShootOffConfig),
                 Null(after.HonoraryAwardConfig),
-                after.LastUpdated, DateTime.Now);
+                after.LastUpdated, DateTime.Now,
+                Null(after.PublishedSnapshot));
             scope.Complete();
 
             after.Id = row.Id;
@@ -159,6 +160,7 @@ WHERE Id = @0",
             public string? ShootOffConfig { get; set; }
             public string? SubShootOffConfig { get; set; }
             public string? HonoraryAwardConfig { get; set; }
+            public string? PublishedSnapshot { get; set; }
             public DateTime? LastUpdated { get; set; }
             public DateTime CreatedDate { get; set; }
             public DateTime UpdatedDate { get; set; }
@@ -179,6 +181,7 @@ WHERE Id = @0",
             ShootOffConfig = r.ShootOffConfig ?? "",
             SubShootOffConfig = r.SubShootOffConfig ?? "",
             HonoraryAwardConfig = r.HonoraryAwardConfig ?? "",
+            PublishedSnapshot = r.PublishedSnapshot ?? "",
             LastUpdated = r.LastUpdated,
             IsPublished = true,
         };
@@ -196,6 +199,7 @@ WHERE Id = @0",
             || (a.ShootOffConfig ?? "") != (b.ShootOffConfig ?? "")
             || (a.SubShootOffConfig ?? "") != (b.SubShootOffConfig ?? "")
             || (a.HonoraryAwardConfig ?? "") != (b.HonoraryAwardConfig ?? "")
+            || (a.PublishedSnapshot ?? "") != (b.PublishedSnapshot ?? "")
             || a.LastUpdated != b.LastUpdated;
 
         private static string? Null(string? s) => string.IsNullOrEmpty(s) ? null : s;

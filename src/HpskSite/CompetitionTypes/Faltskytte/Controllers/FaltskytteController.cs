@@ -996,6 +996,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
+                // ⚠️ FRUSEN NÄR PUBLICERAD (utanför mästerskapet, F0; Stefan 2026-11-04: "resultat får bara
+                // räknas om när en admin ber om det — det får inte ens vara möjligt att ändra genom att visa
+                // sidan"). En officiell huvudlista läses ur bilden som skrevs vid publiceringen / senaste
+                // admin-omräkningen — aldrig ur skottraderna. Räknas live bara om: bilden saknas (då som
+                // förut, tills engångssteget fryst den), listan är preliminär, det är deltävlingen (alltid
+                // live, med flit), eller admin själv förhandsvisar en sammanslagning (mergeConfig i anropet).
+                if (!subCompetitionOnly && string.IsNullOrEmpty(mergeConfig))
+                {
+                    var frozen = _results.Get(competitionId);
+                    var comp = frozen == null ? null : _competitions.GetSaved(competitionId);
+                    if (comp != null && FaltskytteResultArtifactService.ServeFrozen(
+                            subCompetitionOnly, mergeConfig, comp.FaltskytteResultsOfficial, frozen!.PublishedSnapshot))
+                        return Content(frozen.PublishedSnapshot, "application/json");
+                }
+
                 // ⚠️ Bygget bor i FaltskytteResultsBuilder, inte här. Särskjutningskortet och
                 // prisutdelningens resultatartefakt läser SAMMA ställning — räknades den om på
                 // andra sidan kunde ytorna säga olika saker om samma medalj, vilket är precis

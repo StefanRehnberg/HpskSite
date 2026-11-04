@@ -29,6 +29,13 @@ namespace HpskSite.Models.Results
         /// <summary>Deltävlingens lista publicerad.</summary>
         public bool SubIsOfficial { get; set; }
 
+        /// <summary>
+        /// Frusen bild av den PUBLICERADE huvudlistan: builderns fulla svar (JSON) som det publika
+        /// /resultat visar. Skrivs bara vid publicering och när en admin räknar om (utanför mästerskapet,
+        /// F0). Tom = ingen bild än, och listan räknas live som förut. Bara tabellen bär den.
+        /// </summary>
+        public string PublishedSnapshot { get; set; } = "";
+
         /// <summary>Klassammanslagningen (JSON). Fält- och springskyttet bär huvudlistans på tävlingen.</summary>
         public string MergeConfig { get; set; } = "";
         public string SubMergeConfig { get; set; } = "";
@@ -74,6 +81,7 @@ namespace HpskSite.Models.Results
         SubShootOffConfig,
         HonoraryAwardConfig,
         LastUpdated,
+        PublishedSnapshot,
     }
 
     /// <summary>Nodens egenskapsalias — en plats, delad av nodlagringen och flytten.</summary>
@@ -97,6 +105,7 @@ namespace HpskSite.Models.Results
             CompetitionResultField.SubShootOffConfig => "subCompetitionFaltskytteShootOffConfig",
             CompetitionResultField.HonoraryAwardConfig => "honoraryAwardConfig",
             CompetitionResultField.LastUpdated => "lastUpdated",
+            CompetitionResultField.PublishedSnapshot => "publishedSnapshot", // finns bara i tabellen; nodens doctype saknar den
             _ => throw new ArgumentOutOfRangeException(nameof(field)),
         };
 
