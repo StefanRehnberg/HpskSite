@@ -36,6 +36,7 @@ BEGIN
         FETCH NEXT FROM d INTO @t;
     END
     CLOSE d; DEALLOCATE d;
+    DELETE FROM dbo.CompetitionResultList WHERE CompetitionId IN (SELECT CloneId FROM dbo.GoldenFixture);
     DELETE FROM dbo.Competition WHERE Id IN (SELECT CloneId FROM dbo.GoldenFixture);
     DELETE FROM dbo.GoldenFixture;
 END
@@ -113,6 +114,15 @@ BEGIN
         FETCH NEXT FROM ct INTO @t;
     END
     CLOSE ct; DEALLOCATE ct;
+
+    -- result list row: carries MergeConfig / ShootOffConfig / ClassNameOverrides, so merges and shoot-offs are exercised under every scope
+    DECLARE @rlCols NVARCHAR(MAX), @rlSel NVARCHAR(MAX);
+    SELECT @rlCols = STRING_AGG(CAST(QUOTENAME(c.name) AS NVARCHAR(MAX)), ','),
+           @rlSel  = STRING_AGG(CAST(CASE c.name WHEN 'CompetitionId' THEN '@clone' ELSE QUOTENAME(c.name) END AS NVARCHAR(MAX)), ',')
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID('dbo.CompetitionResultList') AND c.is_identity = 0 AND c.is_computed = 0 AND TYPE_NAME(c.user_type_id) <> 'timestamp';
+    SET @sql = N'INSERT dbo.CompetitionResultList (' + @rlCols + N') SELECT ' + @rlSel + N' FROM dbo.CompetitionResultList WHERE CompetitionId = @src';
+    EXEC sp_executesql @sql, N'@src INT, @clone INT', @src, @clone;
 
     FETCH NEXT FROM s INTO @src, @code, @scope;
 END
