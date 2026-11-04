@@ -629,8 +629,9 @@ namespace HpskSite.Controllers
             var type = comp.CompetitionType ?? "";
             c.TypeLabel = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Name ?? type;
             c.Offered = ResultReviewRules.Offered(comp.IsAwardingStandardMedals, c.IsClubOnly);
-            c.IsChampionship = CompetitionScopeHelper.IsChampionshipScope(c.Scope);
-            c.IsSmOrLandsdel = c.Scope == CompetitionScopeHelper.SvensktMasterskap || c.Scope == CompetitionScopeHelper.Landsdelsmasterskap;
+            var championshipRule = ChampionshipRule.ForScope(c.Scope);
+            c.IsChampionship = championshipRule.IsChampionshipRaw;
+            c.IsSmOrLandsdel = championshipRule.IsSmOrLandsdel;
 
             var cr = _calendar.CompetitionRegion(competitionId);
             if (cr != null) { c.RegionId = cr.Value.Region.Id; c.RegionName = cr.Value.Region.Name; }

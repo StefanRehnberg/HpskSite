@@ -82,7 +82,7 @@ namespace HpskSite.Services
                 CompetitionId = competitionId,
                 CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                 CompetitionType = competitionType,
-                IsChampionship = ChampionshipCategory.IsChampionship(scope),
+                IsChampionship = ChampionshipRule.ForScope(scope).IsChampionship,
                 SelectedWeaponGroup = (weaponGroup ?? "").Trim(),
                 CanEdit = canEdit
             };
@@ -128,7 +128,7 @@ namespace HpskSite.Services
             if (model.IsChampionship && hasGroupC)
             {
                 model.MedalGroupingText = MedalGrouping.Describe(artifact.MedalsPerWeaponGroup);
-                var current = MedalGrouping.PerWeaponGroup(competition);
+                var current = ChampionshipRule.For(competition).MedalsPerWeaponGroup;
                 if (current != artifact.MedalsPerWeaponGroup)
                 {
                     model.MedalGroupingStale =
@@ -398,7 +398,7 @@ namespace HpskSite.Services
             // bredvid medaljerna på samma sida, och medaljerna kommer ur artefakten — läste de
             // två olika indelningar skulle sidan visa fyra hedersprisklasser intill en enda
             // medaljgrupp. Samma skäl som att enheterna reser med talen.
-            var splitC = ChampionshipCategory.SplitsGroupC(scope, artifact.MedalsPerWeaponGroup);
+            var splitC = ChampionshipRule.ForScope(scope, artifact.MedalsPerWeaponGroup).SplitsChampionshipClassC;
 
             // ⚠️ ORDNINGEN HÄR ÄR INTE MEDALJORDNINGEN. Hederspriser tillfaller deltagarna, inte
             // finalisterna, så mängden är en annan än medaljens — och därför får den här

@@ -206,7 +206,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 ScoringVariant = scoring.Variant
             };
 
-            if (!ChampionshipCategory.IsChampionship(scope)) return artifact;
+            if (!ChampionshipRule.For(competition).IsChampionship) return artifact;
 
             foreach (var standing in build.CategoryStandings)
             {

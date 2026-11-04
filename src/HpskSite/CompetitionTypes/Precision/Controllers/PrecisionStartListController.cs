@@ -2937,8 +2937,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 hasResultList = availableRankings.Count > 0,
                 // Vid ett mästerskap märks SHB-valet ut på finalkortet (C.3.6.1.1). Inget förval —
                 // kretsstyrelsen kan ge andra regler (C.3.6.4), och klubbarna gör olika.
-                isChampionship = ChampionshipCategory.IsChampionship(
-                    _competitions.GetSaved(competitionId)?.CompetitionScope),
+                isChampionship = ChampionshipRule.For(_competitions.GetSaved(competitionId)).IsChampionship,
                 perClass = perGroup
             });
         }

@@ -184,8 +184,6 @@ namespace HpskSite.Models.Competitions
                 ? CompetitionEndDate.Value.Date
                 : CompetitionDate?.Date ?? CompetitionEndDate?.Date;
 
-        public bool IsChampionship => CompetitionScopeHelper.IsChampionshipScope(CompetitionScope ?? "");
-
         /// <summary>Klasserna, samma läsning som <c>ShootingClassIdsValue.ReadIds</c>.</summary>
         public IReadOnlyList<string> ClassIds => ShootingClassIdsValue.ReadIds(ShootingClassIds);
 

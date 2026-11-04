@@ -243,8 +243,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // SHB 2026: standard medals are split per C-category at SM AND Landsdelsmästerskap
             // (pre-existing hardcode; KrM/KM use the merged C grouping). Keep the SM-only split here
             // because the StandardMedalService's `isChampionship` flag specifically gates the C-split.
-            var isSmOrLdm = competitionScope == CompetitionScopeHelper.SvensktMasterskap
-                         || competitionScope == CompetitionScopeHelper.Landsdelsmasterskap;
+            var championshipRule = ChampionshipRule.For(competition);
+            var isSmOrLdm = championshipRule.IsSmOrLandsdel;
             if (isAwardingStandardMedals && !isClubOnly)
             {
                 var medalService = new FaltskytteStandardMedalService();
@@ -270,12 +270,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var medalCategoryTies = new List<FaltskytteMedalCategoryTies>();
             var categoryStandings = new List<FaltskytteCategoryStanding>();
 
-            if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
+            if (championshipRule.IsChampionshipRaw)
             {
                 // Arrangörens val (klubb/krets): en uppsättning medaljer per vapengrupp, eller
-                // delade mästerskapsklasser. Nivåspärren ligger i MedalGrouping.
-                var splitC = ChampionshipCategory.SplitsGroupC(
-                    competitionScope, MedalGrouping.PerWeaponGroup(competition));
+                // delade mästerskapsklasser. Nivåspärren ligger i regeln.
+                var splitC = championshipRule.SplitsChampionshipClassC;
                 categoryStandings = shooterResults
                     .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))

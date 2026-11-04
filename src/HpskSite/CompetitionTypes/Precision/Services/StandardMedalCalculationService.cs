@@ -296,15 +296,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// </summary>
         /// <param name="competitionScope">Competition scope from Umbraco property</param>
         /// <returns>True if SM or Landsdel (split C by Dam/Jun/Vet/Open), False otherwise</returns>
-        public bool ShouldSplitGroupC(string competitionScope)
-        {
-            if (string.IsNullOrEmpty(competitionScope))
-                return false;
-
-            // Only SM and Landsdel split Group C by classification
-            return competitionScope == "Svenskt Mästerskap" ||
-                   competitionScope == "Landsdelsmästerskap";
-        }
+        public bool ShouldSplitGroupC(string competitionScope) =>
+            // Bara SM och landsdelsmästerskap delar vapengrupp C för standardmedaljerna. Regeln bor i ChampionshipRule (S2).
+            HpskSite.CompetitionTypes.Common.ChampionshipRule.ForScope(competitionScope).SplitsStandardMedalGroupC;
     }
 
     /// <summary>

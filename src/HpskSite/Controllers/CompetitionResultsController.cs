@@ -2447,15 +2447,15 @@ namespace HpskSite.Controllers
                 // ⚠️ GetValue<string> och inte Value<string> — samma försiktighet som rad 4003:
                 // en FlexibleDropdown kan ha lagrat omfattningen som en JSON-array, och
                 // ChampionshipCategory.Normalize skalar av den.
-                var scopeForMedals = competition?.CompetitionScope ?? "";
+                var championshipRule = ChampionshipRule.For(competition);
                 // Arrangörens val: en uppsättning medaljer per vapengrupp, eller delade
-                // mästerskapsklasser? Se MedalGrouping — nivåspärren ligger där.
-                var perWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
+                // mästerskapsklasser? Se MedalGrouping — nivåspärren ligger i regeln.
+                var perWeaponGroup = championshipRule.MedalsPerWeaponGroup;
                 var hasFinalsForMedals = CompetitionFinals.Effective(
                     competition?.CompetitionType, competition?.NumberOfFinalSeries ?? 0) > 0;
-                var medalGroups = BuildMedalGroups(results, scopeForMedals, perWeaponGroup,
+                var medalGroups = BuildMedalGroups(results, championshipRule,
                     hasFinalsForMedals ? GetFinalistStarts(competitionId) : null);
-                var isChampionship = ChampionshipCategory.IsChampionship(scopeForMedals);
+                var isChampionship = championshipRule.IsChampionship;
 
                 // Tillståndet ytan behöver för att kunna VISA och ÄNDRA indelningen.
                 // `propertyExists` skiljer "arrangören har valt delad" från "egenskapen finns
@@ -2463,7 +2463,7 @@ namespace HpskSite.Controllers
                 var medalGrouping = new
                 {
                     perWeaponGroup,
-                    canChoose = MedalGrouping.CanChoose(scopeForMedals),
+                    canChoose = championshipRule.CanChooseMedalGrouping,
                     propertyExists = _competitions.CanStore(MedalGrouping.PropertyAlias),
                     description = MedalGrouping.Describe(perWeaponGroup)
                 };
@@ -2562,13 +2562,13 @@ namespace HpskSite.Controllers
         /// påstå något om medaljer.
         /// </summary>
         private List<object> BuildMedalGroups(
-            List<PrecisionResultEntry> results, string? competitionScope, bool medalsPerWeaponGroup,
+            List<PrecisionResultEntry> results, ChampionshipRule rule,
             HashSet<string>? finalistStarts = null)
         {
             var groups = new List<object>();
-            if (!ChampionshipCategory.IsChampionship(competitionScope)) return groups;
+            if (!rule.IsChampionship) return groups;
 
-            var splitC = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
+            var splitC = rule.SplitsChampionshipClassC;
 
             // Deltagare = distinkta skyttar i kategorin. En skytt kan inte starta i två klasser
             // inom samma vapengrupp i precision (F.2.2), så distinkta medlemmar är rätt mått.
@@ -3529,8 +3529,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var scope = _competitions.GetSaved(request.CompetitionId)?.CompetitionScope;
-                if (!MedalGrouping.CanChoose(scope))
+                if (!ChampionshipRule.For(_competitions.GetSaved(request.CompetitionId)).CanChooseMedalGrouping)
                 {
                     return Json(new
                     {
@@ -3933,11 +3932,12 @@ namespace HpskSite.Controllers
             var competitionScope = competition?.CompetitionScope ?? "";
             // Arrangörens val: EN uppsättning medaljer per vapengrupp, eller delade
             // mästerskapsklasser? Nivåspärren (bara klubb och krets) ligger i MedalGrouping.
-            var medalsPerWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
+            var championshipRule = ChampionshipRule.For(competition);
+            var medalsPerWeaponGroup = championshipRule.MedalsPerWeaponGroup;
             var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
             var medalAwards = new List<PrecisionMedalCategoryAwards>();
             var medalAwardsComputed = false;
-            if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
+            if (championshipRule.IsChampionshipRaw)
             {
                 // Who was taken to the final. Only looked up when there is a final to be taken
                 // to; an empty set means no finals start list exists yet, which is "unknown"
@@ -4018,7 +4018,7 @@ namespace HpskSite.Controllers
                                 .ToList()
                             : new List<PrecisionShooterResult>();
 
-                    var splitC = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
+                    var splitC = championshipRule.SplitsChampionshipClassC;
                     foreach (var cat in contenders
                                  .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                                  .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
@@ -4158,7 +4158,7 @@ namespace HpskSite.Controllers
                 //     aldrig få medalj).
                 if (useMedalCategories)
                 {
-                    var splitCForAwards = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
+                    var splitCForAwards = championshipRule.SplitsChampionshipClassC;
                     var participantsByCategory = classGroups
                         .SelectMany(cg => cg.Shooters)
                         .GroupBy(sh => ChampionshipCategory.For(sh.ShootingClass, splitCForAwards))
@@ -4325,7 +4325,7 @@ namespace HpskSite.Controllers
             if (isAwardingStandardMedals && !isClubOnly)
             {
                 var allShooters = classGroups.SelectMany(g => g.Shooters).ToList();
-                var shouldSplitGroupC = new StandardMedalCalculationService().ShouldSplitGroupC(competitionScope);
+                var shouldSplitGroupC = championshipRule.SplitsStandardMedalGroupC;
 
                 // Per BR-PS.2.3: Standard medals are determined from the qualification round only,
                 // not the finals. PrecisionShooterResult.TotalScore sums *all* Results, so when finals

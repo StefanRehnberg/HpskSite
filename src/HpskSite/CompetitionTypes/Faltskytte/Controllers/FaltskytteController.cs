@@ -1423,9 +1423,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     };
                 }).ToList();
 
-            var scope = competition.CompetitionScope ?? "";
-            var isSmOrLdm = scope == CompetitionScopeHelper.SvensktMasterskap
-                         || scope == CompetitionScopeHelper.Landsdelsmasterskap;
+            var isSmOrLdm = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition).IsSmOrLandsdel;
             new Services.FaltskytteStandardMedalService().CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
 
             foreach (var s in shooterResults)

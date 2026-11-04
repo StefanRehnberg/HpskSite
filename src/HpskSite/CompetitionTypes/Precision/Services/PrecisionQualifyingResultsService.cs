@@ -213,11 +213,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // ⚠️ Finalklasserna FÖLJER medaljindelningen. Har arrangören valt en uppsättning
             // medaljer per vapengrupp finns ingen egen damfinal att gallra till — en final per
             // kategori och en medalj per vapengrupp vore två olika svar på samma fråga.
-            var scope = competition.CompetitionScope;
-            var lookup = ChampionshipCategory.IsChampionship(scope)
+            var rule = ChampionshipRule.For(competition);
+            var lookup = rule.IsChampionship
                 ? ChampionshipCategory.BuildLookup(
                     results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(),
-                    ChampionshipCategory.SplitsGroupC(scope, MedalGrouping.PerWeaponGroup(competition)))
+                    rule.SplitsChampionshipClassC)
                 : GetMergeLookup(competitionId);
 
             return _qualificationService.BuildFullClassRankings(results, shooterInfo, lookup);

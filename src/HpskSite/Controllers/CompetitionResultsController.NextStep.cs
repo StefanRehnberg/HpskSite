@@ -129,7 +129,7 @@ namespace HpskSite.Controllers
             }).ToList();
 
             // Mästerskapsklassernas indelning (C delas i Dam/Vet/Jun eller inte) — samma regel som medaljerna.
-            bool splitC = ChampionshipCategory.SplitsGroupC(comp.CompetitionScope ?? "", MedalGrouping.PerWeaponGroup(comp));
+            bool splitC = ChampionshipRule.For(comp).SplitsChampionshipClassC;
 
             // ── Per vapengrupp ─────────────────────────────────────────────────────────
             var groupNames = qualStarts.Select(s => s.Group).Distinct()
@@ -279,7 +279,7 @@ namespace HpskSite.Controllers
                 ties,
                 resultsOfficial,
                 // Prisutdelningssidan gäller mästerskapsmedaljer — utan mästerskap säger den bara "0 medaljer".
-                isChampionship = ChampionshipCategory.IsChampionship(comp.CompetitionScope ?? "")
+                isChampionship = ChampionshipRule.For(comp).IsChampionship
             };
         }
     }
