@@ -40,7 +40,7 @@ namespace HpskSite.Controllers
         {
             using var db = _databaseFactory.CreateDatabase();
             return db.Fetch<int>(
-                "SELECT Id FROM dbo.Competition WHERE FaltskytteResultsOfficial = 1 AND CompetitionType IN ('Faltskytte','MagnumFalt') ORDER BY Id");
+                "SELECT Id FROM dbo.Competition WHERE FaltskytteResultsOfficial = 1 ORDER BY Id");
         }
 
         /// <summary>Visar läget utan att skriva: per officiell fälttävling om bilden finns eller skulle skapas.</summary>

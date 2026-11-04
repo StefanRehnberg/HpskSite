@@ -29,11 +29,33 @@
     function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
     function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
 
+    // Fält och springskytte har var sin endpoint; raderna slås ihop i en tabell.
+    var SOURCES = [
+        { kind: 'Fält', preview: BASE + '/Preview', run: BASE + '/Run' },
+        { kind: 'Springskytte', preview: '/umbraco/surface/Springskytte/FreezePreview', run: '/umbraco/surface/Springskytte/FreezeRun' }
+    ];
+    async function callAll(which) {
+        var rows = [];
+        for (var i = 0; i < SOURCES.length; i++) {
+            var s = SOURCES[i], opts = { headers: { 'X-Requested-With': 'XMLHttpRequest' } };
+            if (which === 'run') {
+                var fd = new FormData(); fd.append('__RequestVerificationToken', token());
+                opts = { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } };
+            }
+            var r = await fetch(s[which], opts);
+            if (!r.ok) throw new Error(s.kind + ': ' + fail(r));
+            var d = await r.json();
+            if (!d.success) return { success: false, message: d.message };
+            (d.rows || []).forEach(function (x) { x.kind = s.kind; rows.push(x); });
+        }
+        return { success: true, rows: rows };
+    }
+
     function render(d, done) {
         var todo = 0, html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Tävling</th><th>Läge</th></tr></thead><tbody>';
         (d.rows || []).forEach(function (r) {
             if (r.state === 'frozen') todo++;
-            html += '<tr><td>' + esc(r.id) + '</td><td' + (r.state === 'failed' ? ' class="text-danger"' : '') + '>'
+            html += '<tr><td>' + esc(r.id) + ' <span class="text-body-secondary">' + esc(r.kind || '') + '</span></td><td' + (r.state === 'failed' ? ' class="text-danger"' : '') + '>'
                 + esc(done && r.state === 'frozen' ? 'frusen nu' : (TEXT[r.state] || r.state)) + '</td></tr>';
         });
         out.innerHTML = html + '</tbody></table></div>';
@@ -43,9 +65,7 @@
     async function load() {
         out.textContent = 'Läser…';
         try {
-            var r = await fetch(BASE + '/Preview', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!r.ok) throw new Error(fail(r));
-            var d = await r.json();
+            var d = await callAll('preview');
             if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
             render(d, false);
         } catch (e) { out.innerHTML = '<span class="text-danger">Läget gick inte att läsa: ' + esc(e.message) + '</span>'; }
@@ -54,10 +74,7 @@
     async function run() {
         runBtn.disabled = true;
         try {
-            var fd = new FormData(); fd.append('__RequestVerificationToken', token());
-            var r = await fetch(BASE + '/Run', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
-            if (!r.ok) throw new Error(fail(r));
-            var d = await r.json();
+            var d = await callAll('run');
             if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
             render(d, true);
         } catch (e) { out.innerHTML = '<span class="text-danger">Avbrutet: ' + esc(e.message) + '. Kör igen — det som redan är fryst hoppas över.</span>'; }

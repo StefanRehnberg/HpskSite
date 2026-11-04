@@ -379,13 +379,46 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             try
             {
+                // ⚠️ FRUSEN NÄR PUBLICERAD (utanför mästerskapet, F0b; Stefan 2026-11-04: resultat får bara
+                // räknas om när en admin ber om det). Den publika sidan (publicOnly) serveras ur bilden som
+                // skrevs vid senaste Uppdatera/Publicera — aldrig ur tidsraderna — och filtreras på de
+                // vapengrupper som är publicerade JUST NU (så Gör preliminär döljer direkt utan omräkning).
+                // Live bara när: bilden saknas (tills engångsfrysningen), deltävlingen, admin-ytorna och
+                // live-tavlan (de visar preliminärt med avsikt).
+                if (publicOnly && !subCompetitionOnly)
+                {
+                    var frozen = FrozenPublicJson(competitionId);
+                    if (frozen != null) return Content(frozen, "application/json");
+                }
+                return Json(await BuildResultsResponseAsync(competitionId, subCompetitionOnly, publicOnly));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Springskytte results for CompetitionId={CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>Den frusna publika listan för huvudlistan, filtrerad på de vapengrupper som är publicerade nu. Null = ingen bild.</summary>
+        private string? FrozenPublicJson(int competitionId)
+        {
+            var competition = _competitions.GetSaved(competitionId);
+            var node = competition == null ? null : _results.Get(competition.Id);
+            if (node == null || string.IsNullOrWhiteSpace(node.PublishedSnapshot)) return null;
+            return SpringskytteFrozenResults.Serve(node.PublishedSnapshot, ReadOfficialWeaponClasses(node, competitionId));
+        }
+
+        /// <summary>Svaret som sidan läser, byggt live ur tidsraderna. Delas av live-vägen och av bilden som fryses vid publicering.</summary>
+        private async Task<object> BuildResultsResponseAsync(int competitionId, bool subCompetitionOnly, bool publicOnly)
+        {
+            {
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
 
                 var entries = await db.FetchAsync<SpringskytteResultEntry>(
                     "WHERE CompetitionId = @0 ORDER BY TotalTimeSeconds", competitionId);
 
                 if (!entries.Any())
-                    return Json(new { success = true, results = new List<object>(), classGroups = new List<object>() });
+                    return new { success = true, results = new List<object>(), classGroups = new List<object>() };
 
                 // Deltävling filter: keep only the shooters who opted into the sub-competition
                 // at registration time. Medals are calculated below over this filtered subset.
@@ -396,7 +429,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
                     entries = entries.Where(e => subCompMemberIds.Contains(e.MemberId)).ToList();
                     if (!entries.Any())
-                        return Json(new { success = true, results = new List<object>(), classGroups = new List<object>() });
+                        return new { success = true, results = new List<object>(), classGroups = new List<object>() };
                 }
 
                 // Load start order from content nodes (authoritative source)
@@ -524,7 +557,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (publicOnly && !subCompetitionOnly)
                     classGroups = classGroups.Where(g => officialClasses.Contains(g.weaponClass ?? "")).ToList();
 
-                return Json(new
+                return new
                 {
                     success = true,
                     classGroups,
@@ -536,13 +569,75 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     // even for a class that has no published list yet.
                     weaponClassesWithResults = WeaponClassesWithResults(competitionId),
                     supportsPerClassPublish = true
-                });
+                };
+            }
+        }
+
+        // ── Engångsfrysning (F0b): redan publicerade springskyttelistor saknar bild ──────────────
+
+        /// <summary>Springskyttetävlingar med minst en publicerad vapengrupp (listraden är officiell).</summary>
+        private List<int> OfficialSpringIds()
+        {
+            using var db = _umbracoDatabaseFactory.CreateDatabase();
+            return db.Fetch<int>(
+                "SELECT c.Id FROM dbo.Competition c JOIN dbo.CompetitionResultList l ON l.CompetitionId = c.Id "
+                + "WHERE c.CompetitionType = 'Springskytte' AND l.IsOfficial = 1 ORDER BY c.Id");
+        }
+
+        /// <summary>"frozen" | "already" | "not-official" | "no-results" | "failed".</summary>
+        private async Task<string> FreezeSnapshotIfMissingAsync(int competitionId, bool apply)
+        {
+            try
+            {
+                var competition = _competitions.GetSaved(competitionId);
+                var node = competition == null ? null : _results.Get(competition.Id);
+                if (node == null || ReadOfficialWeaponClasses(node, competitionId).Count == 0) return "not-official";
+                if (!string.IsNullOrWhiteSpace(node.PublishedSnapshot)) return "already";
+                using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                    if (await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.SpringskytteResultEntry WHERE CompetitionId = @0", competitionId) == 0)
+                        return "no-results";
+                if (apply)
+                {
+                    var snapshot = await BuildSnapshotJsonAsync(competitionId);
+                    _results.Update(competitionId, r => r.PublishedSnapshot = snapshot);
+                }
+                return "frozen";
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting Springskytte results for CompetitionId={CompetitionId}", competitionId);
-                return Json(new { success = false, message = "Ett fel uppstod." });
+                _logger.LogWarning(ex, "Kunde inte frysa den publicerade listan för springskyttetävling {CompetitionId}", competitionId);
+                return "failed";
             }
+        }
+
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> FreezePreview()
+        {
+            if (!await _adminAuthorizationService.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratör." });
+            var rows = new List<object>();
+            foreach (var id in OfficialSpringIds()) rows.Add(new { id, state = await FreezeSnapshotIfMissingAsync(id, false) });
+            return Json(new { success = true, rows });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> FreezeRun()
+        {
+            if (!await _adminAuthorizationService.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratör." });
+            var rows = new List<object>();
+            foreach (var id in OfficialSpringIds()) rows.Add(new { id, state = await FreezeSnapshotIfMissingAsync(id, true) });
+            return Json(new { success = true, rows });
+        }
+
+        /// <summary>Bilden som fryses: hela live-svaret (alla klasser) i exakt den form sidan läser, som MVC skulle skicka det.</summary>
+        private async Task<string> BuildSnapshotJsonAsync(int competitionId)
+        {
+            var response = await BuildResultsResponseAsync(competitionId, subCompetitionOnly: false, publicOnly: false);
+            var options = (HttpContext?.RequestServices.GetService(typeof(Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>))
+                as Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>)?.Value.JsonSerializerOptions;
+            return System.Text.Json.JsonSerializer.Serialize(response, options);
         }
 
         // "Gör preliminär" for the Deltävling — flip subCompetitionIsOfficial off (hide it publicly).
@@ -1084,6 +1179,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }, createIfMissing: true);
                     if (HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks reviewHooks)
                         await reviewHooks.AfterResultDataWrittenAsync(competitionId, storedJson);
+
+                    // F0b: den frusna bilden av den publika listan skrivs HÄR — när en admin räknar om eller
+                    // publicerar — efter att de officiella vapengrupperna sparats, så bilden bär rätt läge.
+                    var snapshotJson = await BuildSnapshotJsonAsync(competitionId);
+                    _results.Update(competition.Id, r => r.PublishedSnapshot = snapshotJson);
                     _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official classes=[{Official}]",
                         competitionId, shooterResults.Count, string.Join(",", officialClasses));
 
