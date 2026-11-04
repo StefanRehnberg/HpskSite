@@ -1,6 +1,6 @@
 /* make-fixtures.sql -- golden-master fixtures (rehearsal database ONLY).
-   Clones every competition in $(SRC) twice: once with scope "Svenskt Masterskap" and once with
-   "Landsdelsmasterskap" (with the real a-umlaut). Clones are named "... [GOLDEN SM|LDM]", have SeriesId NULL,
+   Clones every competition in $(SRC) four times: scopes "Svenskt Masterskap", "Landsdelsmasterskap",
+   "Kretsmasterskap" and "Klubbmasterskap" (all with the real a-umlaut). Clones are named "... [GOLDEN SM|LDM|KM|KLM]", have SeriesId NULL,
    and are recorded in dbo.GoldenFixture. Originals are never touched. Re-runnable: old clones are removed first.
    Run: sqlcmd -S "localhost\SQLEXPRESS" -E -C -I -b -d Umbraco_rehearsal -v SRC="1,2,3" -i make-fixtures.sql
    File is ASCII on purpose (non-ASCII is built with NCHAR). */
@@ -68,7 +68,9 @@ WHERE c.object_id = OBJECT_ID('dbo.CompetitionRegistrationClass') AND c.is_ident
 DECLARE @scopes TABLE (code NVARCHAR(10), scope NVARCHAR(60));
 INSERT @scopes VALUES
  (N'SM',  N'Svenskt M' + NCHAR(228) + N'sterskap'),
- (N'LDM', N'Landsdelsm' + NCHAR(228) + N'sterskap');
+ (N'LDM', N'Landsdelsm' + NCHAR(228) + N'sterskap'),
+ (N'KM',  N'Kretsm' + NCHAR(228) + N'sterskap'),
+ (N'KLM', N'Klubbm' + NCHAR(228) + N'sterskap');
 
 CREATE TABLE #map (oldId INT, newId INT);
 DECLARE @src INT, @clone INT, @code NVARCHAR(10), @scope NVARCHAR(60), @suffix NVARCHAR(40), @useg NVARCHAR(40);
