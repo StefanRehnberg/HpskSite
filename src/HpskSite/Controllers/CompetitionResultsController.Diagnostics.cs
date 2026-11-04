@@ -129,22 +129,29 @@ namespace HpskSite.Controllers
             var cfg = sp.GetRequiredService<IConfiguration>();
             var env = sp.GetRequiredService<IWebHostEnvironment>();
 
-            // Alla avslag = 404 utan förklaring.
-            if (!string.Equals(confirm, "golden-master", StringComparison.Ordinal)) return NotFound();
-            if (!env.IsDevelopment()) return NotFound();
-            if (cfg["HPSK_VERIFY_ENDPOINTS"] != "1") return NotFound();
+            // Alla avslag = 404 utan förklaring i svaret; orsaken loggas (bara i DEBUG-bygget).
+            IActionResult Refuse(string why)
+            {
+                _logger.LogWarning("VerifyRecompute avvisad: {Why}", why);
+                return NotFound();
+            }
+
+            if (!string.Equals(confirm, "golden-master", StringComparison.Ordinal)) return Refuse("confirm saknas/fel");
+            if (!env.IsDevelopment()) return Refuse("inte Development");
+            if (cfg["HPSK_VERIFY_ENDPOINTS"] != "1") return Refuse("HPSK_VERIFY_ENDPOINTS != 1");
 
             var allowed = (cfg["Verify:AllowedDatabases"] ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (allowed.Length == 0) return NotFound();
+            if (allowed.Length == 0) return Refuse("Verify:AllowedDatabases tom");
 
             string catalog;
             try { catalog = new SqlConnectionStringBuilder(cfg.GetConnectionString("umbracoDbDSN") ?? "").InitialCatalog; }
-            catch { return NotFound(); }
-            if (!allowed.Contains(catalog, StringComparer.OrdinalIgnoreCase)) return NotFound();
+            catch { return Refuse("anslutningssträngen gick inte att läsa"); }
+            if (!allowed.Contains(catalog, StringComparer.OrdinalIgnoreCase)) return Refuse($"katalogen '{catalog}' ej tillåten");
 
             var actual = ReadDbName();
-            if (!allowed.Contains(actual, StringComparer.OrdinalIgnoreCase)) return NotFound();
+            if (!allowed.Contains(actual, StringComparer.OrdinalIgnoreCase)) return Refuse($"DB_NAME() '{actual}' ej tillåten");
+            if (string.IsNullOrWhiteSpace(cfg["Verify:HashKey"])) return Refuse("Verify:HashKey saknas (user-secrets)");
             return null;
         }
 
