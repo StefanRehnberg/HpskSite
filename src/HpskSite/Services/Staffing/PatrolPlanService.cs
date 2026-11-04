@@ -238,7 +238,8 @@ namespace HpskSite.Services.Staffing
             }
             return new PatrolPlanSettings
             {
-                PatrolSize = patrolSize is >= 1 and <= 12 ? patrolSize : inferSize ?? 6,
+                PatrolSize = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.PlannerSize(
+                    patrolSize, _competitions.GetSaved(competitionId)?.MaxPatrolSize ?? 0, inferSize),
                 IntervalMinutes = intervalMinutes is >= 1 and <= 120 ? intervalMinutes : inferInterval ?? 15,
                 FirstStart = firstStart ?? inferFirst ?? date.AddHours(9),
                 WeaponGrouping = grouping is "MixAll" or "CombineAR" ? grouping : "Separate",

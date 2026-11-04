@@ -1,4 +1,4 @@
-using HpskSite.Services.Competitions;
+﻿using HpskSite.Services.Competitions;
 using NPoco;
 
 namespace HpskSite.CompetitionTypes.Faltskytte.Services
@@ -40,6 +40,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// </summary>
         public static int CapacityOf(int? patrolCapacity, int competitionMax, int fallback) =>
             patrolCapacity is > 0 ? patrolCapacity.Value : competitionMax > 0 ? competitionMax : fallback;
+
+        /// <summary>
+        /// Patrullstorleken en planerarkörning använder: det som angavs (1–12), annars tävlingens "Högsta antal skyttar per patrull"
+        /// (1–12), annars största patrullen i dagens startlista, annars 6. Planeraren följer alltså taket utan att någon skriver in det igen.
+        /// </summary>
+        public static int PlannerSize(int requested, int competitionMax, int? inferred) =>
+            requested is >= 1 and <= 12 ? requested
+            : competitionMax is >= 1 and <= 12 ? competitionMax
+            : inferred ?? 6;
 
         /// <summary>Taket i en patrull när det är en riktig gräns (patrullens eget, annars tävlingens), annars null = ingen gräns.</summary>
         public static int? LimitOf(int? patrolCapacity, int competitionMax) =>

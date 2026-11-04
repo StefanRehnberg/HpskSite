@@ -24,6 +24,15 @@ namespace HpskSite.Tests
             Assert.Equal(6, FaltskyttePatrolWrites.CapacityOf(0, 0, 6));
         }
 
+        [Theory]
+        [InlineData(8, 5, 4, 8)]      // angivet vinner
+        [InlineData(0, 5, 4, 5)]      // annars tävlingens tak
+        [InlineData(0, 0, 4, 4)]      // annars dagens startlista
+        [InlineData(0, 0, null, 6)]   // annars 6
+        [InlineData(0, 40, 4, 4)]     // ett tak utanför 1-12 (planerarens spann) används inte
+        public void The_planner_follows_the_competitions_max_unless_a_size_is_given(int requested, int max, int? inferred, int expected)
+            => Assert.Equal(expected, FaltskyttePatrolWrites.PlannerSize(requested, max, inferred));
+
         [Fact]
         public void No_limit_means_no_warning_ever()
         {
