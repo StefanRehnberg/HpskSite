@@ -385,7 +385,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // vapengrupper som är publicerade JUST NU (så Gör preliminär döljer direkt utan omräkning).
                 // Live bara när: bilden saknas (tills engångsfrysningen), deltävlingen, admin-ytorna och
                 // live-tavlan (de visar preliminärt med avsikt).
-                if (publicOnly && !subCompetitionOnly)
+                if (publicOnly && !subCompetitionOnly && HpskSite.Services.Results.PublishedResultFreeze.Enabled(HttpContext.RequestServices))
                 {
                     var frozen = FrozenPublicJson(competitionId);
                     if (frozen != null) return Content(frozen, "application/json");
@@ -600,6 +600,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 {
                     var snapshot = await BuildSnapshotJsonAsync(competitionId);
                     _results.Update(competitionId, r => r.PublishedSnapshot = snapshot);
+                    _logger.LogWarning("Publicerad springskyttelista fryst (engångsfrysningen) för tävling {CompetitionId}", competitionId);
                 }
                 return "frozen";
             }
@@ -1171,19 +1172,21 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     };
 
                     var storedJson = JsonConvert.SerializeObject(finalResults);
+                    // F0b: den frusna bilden av den publika listan byggs FÖRE skrivningen och skrivs i SAMMA Update som ResultData och
+                    // IsOfficial — två separata skrivningar kunde lämna en publicerad klass utan ny bild om bygget föll emellan. Bilden bär hela
+                    // live-svaret (alla klasser); vilka klasser som är publicerade avgörs vid visning (SpringskytteFrozenResults.Serve).
+                    var snapshotJson = await BuildSnapshotJsonAsync(competitionId);
                     _results.Update(competition.Id, r =>
                     {
                         r.ResultData = storedJson;
+                        r.PublishedSnapshot = snapshotJson;
                         r.LastUpdated = DateTime.Now;
                         r.IsOfficial = official;
                     }, createIfMissing: true);
                     if (HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks reviewHooks)
                         await reviewHooks.AfterResultDataWrittenAsync(competitionId, storedJson);
-
-                    // F0b: den frusna bilden av den publika listan skrivs HÄR — när en admin räknar om eller
-                    // publicerar — efter att de officiella vapengrupperna sparats, så bilden bär rätt läge.
-                    var snapshotJson = await BuildSnapshotJsonAsync(competitionId);
-                    _results.Update(competition.Id, r => r.PublishedSnapshot = snapshotJson);
+                    if (officialClasses.Count > 0)
+                        _logger.LogWarning("PUBLICERAD springskyttelista omräknad (frusen bild skriven) för tävling {CompetitionId}, klasser [{Official}]", competitionId, string.Join(",", officialClasses));
                     _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official classes=[{Official}]",
                         competitionId, shooterResults.Count, string.Join(",", officialClasses));
 

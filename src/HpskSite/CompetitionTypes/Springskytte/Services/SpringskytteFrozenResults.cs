@@ -29,6 +29,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Services
             }
             obj["classGroups"] = keep;
             obj["resultsOfficial"] = official.Count > 0;
+            // Bilden byggs innan resultatraden hunnit skrivas (första publiceringen), så "resultsExist" kan ha varit falskt då — nu finns den.
+            obj["resultsExist"] = true;
             var names = new JsonArray();
             foreach (var s in official.OrderBy(s => s)) names.Add(s);
             obj["officialWeaponClasses"] = names;

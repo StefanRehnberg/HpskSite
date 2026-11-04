@@ -76,6 +76,8 @@
         </div>
         <div id="faltResultBody">
             <div class="card-body p-0">
+                @* Publicerade listor är FASTA: de ändras bara när någon trycker Uppdatera. Här syns det, och när nya resultat väntar. *@
+                <div id="faltFreshnessHint" class="alert alert-info small mb-0 rounded-0 d-none" role="status"></div>
                 <div id="faltResultContent">
                     @if (!string.IsNullOrEmpty(resultPageUrl))
                     {
@@ -373,13 +375,53 @@ function faltRestoreIframe() {
     container.innerHTML = '<iframe id="faltResultIframe" src="' + url + sep + 't=' + Date.now() + '" title="Resultatlista" style="width:100%; height:75vh; border:0; display:block"></iframe>';
 }
 
-// Simple refresh — reload the embedded /resultat/ page.
+// Publicerade listor är fasta (F0): visa det, och när resultat har matats in efter senaste omräkningen.
+async function faltCheckFreshness() {
+    var host = document.getElementById('faltFreshnessHint');
+    var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
+    if (!host || !compId) return;
+    try {
+        var r = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteResultsFreshness?competitionId=' + compId);
+        var d = await r.json();
+        if (!d || !d.success || !d.official) { host.classList.add('d-none'); return; }
+        function hm(s) { try { return new Date(s).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+        host.classList.remove('alert-info', 'alert-warning');
+        if (d.stale) {
+            host.classList.add('alert-warning');
+            host.textContent = 'Nya resultat har matats in' + (d.lastResultAt ? ' (senast ' + hm(d.lastResultAt) + ')' : '') + ' efter att listan räknades om' +
+                (d.savedAt ? ' ' + hm(d.savedAt) : '') + '. Den publicerade listan ändras först när du trycker Uppdatera.';
+        } else {
+            host.classList.add('alert-info');
+            host.textContent = 'Den publicerade listan är fast' + (d.savedAt ? ' (senast uppdaterad ' + hm(d.savedAt) + ')' : '') +
+                '. Resultat som matas in efter publiceringen syns för besökarna först när du trycker Uppdatera.';
+        }
+        host.classList.remove('d-none');
+    } catch (e) { /* hinten är en hjälp, inget som får störa */ }
+}
+// Simple refresh — räkna om den sparade (frusna) listan, och LADDA SEDAN om sidan.
+// ⚠️ Ordningen är avgörande (F0): en officiell fältlista serveras ur en frusen bild som bara Uppdatera skriver om. Laddas
+// iframen och statusen om INNAN omräkningen visas den gamla listan, och arrangören tror att Uppdatera inte gjorde något.
 async function faltRefreshResults(event) {
     if (event) event.stopPropagation();
-    faltRestoreIframe();
-    // Also pull current status (Officiell/Preliminär) so the badge stays in sync.
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
     if (!compId) return;
+
+    // Prisutdelningslistan och den publika listan läser den SPARADE bilden. Utan den här skrivningen blir resultat som matas in efter
+    // publiceringen aldrig synliga. Motsvarar precisionsfamiljens "Uppdatera".
+    var refreshed = false;
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        var rr = await fetch('/umbraco/surface/Faltskytte/RefreshResultArtifact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId: parseInt(compId, 10) })
+        });
+        var rj = await rr.json();
+        refreshed = !!(rj && rj.success);
+    } catch (e) { /* visas nedan: listan kunde inte räknas om */ }
+
+    // Först NU ladda om iframen och statusen — de läser den nya bilden.
+    faltRestoreIframe();
     try {
         var resp = await fetch('/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + compId);
         var data = await resp.json();
@@ -390,19 +432,13 @@ async function faltRefreshResults(event) {
         }
     } catch (e) { /* status sync is best-effort */ }
 
-    // ⚠️ Prisutdelningslistan läser den SPARADE artefakten, inte den här hämtningen. Utan
-    // skrivningen här blir resultat som matas in efter publiceringen aldrig synliga vid
-    // prisbordet — och funktionären har ingen rimlig väg att gissa att det är den här knappen
-    // som saknas. Motsvarar precisionsfamiljens "Uppdatera".
-    try {
-        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
-        await fetch('/umbraco/surface/Faltskytte/RefreshResultArtifact', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
-            body: JSON.stringify({ competitionId: parseInt(compId, 10) })
-        });
-    } catch (e) { /* listan är uppdaterad på skärmen även om artefakten inte hann med */ }
+    // En preliminär lista räknas live och har ingen bild att skriva — då är "kunde inte räkna om" inget fel att visa. En officiell lista
+    // vars omräkning misslyckades ska däremot aldrig se uppdaterad ut.
+    var noteHost = document.getElementById('faltResultContent');
+    if (!refreshed && _faltLastResults && _faltLastResults.isOfficial && noteHost)
+        noteHost.insertAdjacentHTML('afterbegin', '<div class="alert alert-warning small py-2 mb-2" role="alert">Listan kunde inte räknas om, så den du ser är den senast sparade. Försök igen.</div>');
 
+    faltCheckFreshness();
     // Refresh the Särskjutning card after a result refresh.
     faltLoadShootOffStatus(false);
 }
@@ -654,6 +690,7 @@ function faltUpdateResultMeta(results) {
 }
 
 function faltUpdateResultStatus(isOfficial) {
+    setTimeout(faltCheckFreshness, 0);   // publicerat/avpublicerat/uppdaterat: visa läget för den fasta listan
     var badge = document.getElementById('faltResultStatusBadge');
     var pubBtn = document.getElementById('faltPublishResultsBtn');
     var unpubBtn = document.getElementById('faltUnpublishResultsBtn');

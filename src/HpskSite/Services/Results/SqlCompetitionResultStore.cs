@@ -116,13 +116,11 @@ SELECT CAST(SCOPE_IDENTITY() AS INT);", competitionId, CompetitionResultFields.D
                 return before;
             }
 
-            db.Execute($@"
-UPDATE {Table} SET
-    ResultType = @1, ResultData = @2, IsOfficial = @3, SubIsOfficial = @4,
-    MergeConfig = @5, SubMergeConfig = @6, ClassNameOverrides = @7, SubClassNameOverrides = @8,
-    ShootOffConfig = @9, SubShootOffConfig = @10, HonoraryAwardConfig = @11,
-    LastUpdated = @12, UpdatedDate = @13, PublishedSnapshot = @14
-WHERE Id = @0",
+            // ⚠️ Den frusna bilden (upp till ~75 KB) skrivs BARA när den ändrats. Förut skrevs den om vid varje sparning av raden, vilket dubblade
+            // skrivvolymen och gjorde att en nödrollback av kod mot gammalt schema föll på varje sparning i stället för bara bildens egna.
+            var snapshotChanged = (before.PublishedSnapshot ?? "") != (after.PublishedSnapshot ?? "");
+            var args = new List<object?>
+            {
                 row.Id,
                 string.IsNullOrWhiteSpace(after.ResultType) ? CompetitionResultFields.DefaultResultType : after.ResultType,
                 Null(after.ResultData), after.IsOfficial, after.SubIsOfficial,
@@ -131,7 +129,15 @@ WHERE Id = @0",
                 Null(after.ShootOffConfig), Null(after.SubShootOffConfig),
                 Null(after.HonoraryAwardConfig),
                 after.LastUpdated, DateTime.Now,
-                Null(after.PublishedSnapshot));
+            };
+            if (snapshotChanged) args.Add(Null(after.PublishedSnapshot));
+            db.Execute($@"
+UPDATE {Table} SET
+    ResultType = @1, ResultData = @2, IsOfficial = @3, SubIsOfficial = @4,
+    MergeConfig = @5, SubMergeConfig = @6, ClassNameOverrides = @7, SubClassNameOverrides = @8,
+    ShootOffConfig = @9, SubShootOffConfig = @10, HonoraryAwardConfig = @11,
+    LastUpdated = @12, UpdatedDate = @13{(snapshotChanged ? ", PublishedSnapshot = @14" : "")}
+WHERE Id = @0", args.ToArray());
             scope.Complete();
 
             after.Id = row.Id;

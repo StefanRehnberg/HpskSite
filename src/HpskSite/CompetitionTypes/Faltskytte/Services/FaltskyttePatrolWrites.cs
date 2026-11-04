@@ -52,7 +52,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         /// <summary>Taket i en patrull när det är en riktig gräns (patrullens eget, annars tävlingens), annars null = ingen gräns.</summary>
         public static int? LimitOf(int? patrolCapacity, int competitionMax) =>
-            patrolCapacity is > 0 ? patrolCapacity : competitionMax > 0 ? competitionMax : null;
+            // ⚠️ Utan tävlingens eget tak finns ingen gräns att fråga om — även om generatorn har satt ett eget Capacity på patrullen (det styr
+            // bara den automatiska placeringen, som förut). Annars vore "0 = av" inte sant för tävlingar vars patruller redan genererats.
+            competitionMax <= 0 ? null
+            : patrolCapacity is > 0 ? patrolCapacity
+            : competitionMax;
 
         /// <summary>
         /// Frågan som ställs innan en skytt läggs i en patrull som redan är full (en VARNING med bekräftelse, aldrig ett hårt stopp), eller null.

@@ -1002,12 +1002,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 // admin-omräkningen — aldrig ur skottraderna. Räknas live bara om: bilden saknas (då som
                 // förut, tills engångssteget fryst den), listan är preliminär, det är deltävlingen (alltid
                 // live, med flit), eller admin själv förhandsvisar en sammanslagning (mergeConfig i anropet).
-                if (!subCompetitionOnly && string.IsNullOrEmpty(mergeConfig))
+                // En sammanslagnings-FÖRHANDSVISNING är bara för den som får hantera tävlingen — en anonym besökare som lägger på mergeConfig får
+                // fortfarande den frusna listan (annars gick den frusna listan att kringgå med en parameter).
+                var previewMerge = !string.IsNullOrEmpty(mergeConfig) && await IsAuthorizedForCompetition(competitionId);
+                if (!subCompetitionOnly && !previewMerge && HpskSite.Services.Results.PublishedResultFreeze.Enabled(HttpContext.RequestServices))
                 {
                     var frozen = _results.Get(competitionId);
                     var comp = frozen == null ? null : _competitions.GetSaved(competitionId);
                     if (comp != null && FaltskytteResultArtifactService.ServeFrozen(
-                            subCompetitionOnly, mergeConfig, comp.FaltskytteResultsOfficial, frozen!.PublishedSnapshot))
+                            subCompetitionOnly, null, comp.FaltskytteResultsOfficial, frozen!.PublishedSnapshot))
                         return Content(frozen.PublishedSnapshot, "application/json");
                 }
 
@@ -1026,6 +1029,31 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 _logger.LogError(ex, "Error getting Fältskytte results for competition {CompetitionId}", competitionId);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Är den publicerade (frusna) listan äldre än de inmatade resultaten? Fält har ingen automatisk omräkning av en publicerad lista —
+        /// bara en admin som trycker Uppdatera skriver om den — så arrangören måste kunna SE att nya resultat väntar. Jämför senaste
+        /// skottraden (UTC → svensk tid) med listans senaste omräkning (svensk tid). Skriver ingenting.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsAuthorizedForCompetition: tävlingens funktionärer")]
+        public async Task<IActionResult> GetFaltskytteResultsFreshness(int competitionId)
+        {
+            if (competitionId <= 0 || !await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+            var competition = _competitions.GetSaved(competitionId);
+            var record = competition == null ? null : _results.Get(competitionId);
+            var official = competition?.FaltskytteResultsOfficial == true;
+            DateTime? lastResultUtc;
+            using (var db = _umbracoDatabaseFactory.CreateDatabase())
+                lastResultUtc = await db.ExecuteScalarAsync<DateTime?>(
+                    "SELECT MAX(LastModified) FROM FaltskytteResultEntry WHERE CompetitionId = @0", competitionId);
+            DateTime? lastResult = lastResultUtc.HasValue ? HpskSite.Services.Hosting.SwedishTime.FromUtc(lastResultUtc.Value) : null;
+            var savedAt = record?.LastUpdated;
+            // En liten tolerans: omräkningen sker normalt några sekunder efter sista inmatningen vid publicering.
+            var stale = official && lastResult.HasValue && savedAt.HasValue && lastResult.Value > savedAt.Value.AddSeconds(2);
+            return Json(new { success = true, official, stale, lastResultAt = lastResult, savedAt });
         }
 
         /// <summary>Saves merge config for Fältskytte results.</summary>
@@ -1282,6 +1310,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 if (request.IsSubCompetition) r.SubIsOfficial = request.IsOfficial;
                 else r.IsOfficial = request.IsOfficial;
+                // Avpublicering rensar den frusna bilden DIREKT, oberoende av om omräkningen nedan lyckas — annars kunde en gammal bild
+                // ligga kvar och serveras som frusen vid nästa publicering om den omräkningen föll.
+                if (!request.IsSubCompetition && !request.IsOfficial) r.PublishedSnapshot = "";
                 r.LastUpdated = DateTime.Now;
             }, createIfMissing: true);
 
@@ -2392,7 +2423,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
             // Högsta antal skyttar per patrull: en fråga, inte ett stopp. En skytt som redan sitter i patrullen tar ingen ny plats.
-            if (!request.Force)
+            // Egen bekräftelse (ForceCapacity): en bekräftad parseparation (Force) får inte tyst släppa igenom en full patrull.
+            if (!request.ForceCapacity)
             {
                 var alreadyHere = await db.ExecuteScalarAsync<int>(
                     "SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND MemberId = @1 AND (Status IS NULL OR Status <> 'DNS')", request.PatrolId, request.MemberId);
@@ -2592,7 +2624,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 var why = await SeparationAsync(request.CompetitionId, new[] { (moving.MemberId, moving.ShootingClass ?? "") }, request.TargetPatrolId);
                 if (why != null) return Json(new { success = false, needsForce = true, message = why });
-                // Högsta antal skyttar per patrull: en fråga, inte ett stopp. Att flytta inom samma patrull eller en DNS tar ingen plats.
+            }
+            if (moving != null && !request.ForceCapacity)
+            {
+                // Högsta antal skyttar per patrull: en fråga, inte ett stopp (egen bekräftelse, ForceCapacity). Att flytta inom samma patrull eller en DNS tar ingen plats.
                 var takesSeat = moving.PatrolId != request.TargetPatrolId && moving.Status != "DNS" ? 1 : 0;
                 var tooMany = await OverCapacityAsync(db, request.CompetitionId, request.TargetPatrolId, takesSeat,
                     string.IsNullOrWhiteSpace(moving.MemberName) ? "skytten" : moving.MemberName, "flytta");
@@ -3032,7 +3067,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var rows = await db.FetchAsync<FaltskyttePatrolMember>("WHERE Id IN (@0)", request.PatrolMemberIds);
                 var why = await SeparationAsync(request.CompetitionId, rows.Select(r => (r.MemberId, r.ShootingClass ?? "")), request.TargetPatrolId);
                 if (why != null) return Json(new { success = false, needsForce = true, message = why });
-                // Högsta antal skyttar per patrull: en fråga, inte ett stopp. Bara de som faktiskt tar en ny plats räknas.
+            }
+            if (!request.ForceCapacity && request.PatrolMemberIds.Count > 0)
+            {
+                var rows = await db.FetchAsync<FaltskyttePatrolMember>("WHERE Id IN (@0)", request.PatrolMemberIds);
+                // Högsta antal skyttar per patrull: en fråga, inte ett stopp (egen bekräftelse, ForceCapacity). Bara de som faktiskt tar en ny plats räknas.
                 var takingSeats = rows.Count(r => r.PatrolId != request.TargetPatrolId && r.Status != "DNS");
                 var tooMany = await OverCapacityAsync(db, request.CompetitionId, request.TargetPatrolId, takingSeats,
                     takingSeats == 1 ? (rows.First(r => r.PatrolId != request.TargetPatrolId && r.Status != "DNS").MemberName ?? "skytten") : $"{takingSeats} skyttar", "flytta");

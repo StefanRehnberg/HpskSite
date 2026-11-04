@@ -58,6 +58,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string ClubName { get; set; } = "";
         /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
         public bool Force { get; set; }
+        /// <summary>Bekräftat att patrullen får bli överfull (högsta antal skyttar per patrull). Egen flagga: en bekräftad parseparation släpper inte tyst igenom en full patrull.</summary>
+        public bool ForceCapacity { get; set; }
     }
 
     public class RemoveShooterFromPatrolRequest
@@ -73,6 +75,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TargetPatrolId { get; set; }
         /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
         public bool Force { get; set; }
+        /// <summary>Bekräftat att patrullen får bli överfull (högsta antal skyttar per patrull). Egen flagga: en bekräftad parseparation släpper inte tyst igenom en full patrull.</summary>
+        public bool ForceCapacity { get; set; }
     }
 
     /// <summary>
@@ -96,6 +100,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int TargetPatrolId { get; set; }
         /// <summary>Bekräftat att flytten får skilja ett par ("gå i samma patrull som") åt.</summary>
         public bool Force { get; set; }
+        /// <summary>Bekräftat att patrullen får bli överfull (högsta antal skyttar per patrull). Egen flagga: en bekräftad parseparation släpper inte tyst igenom en full patrull.</summary>
+        public bool ForceCapacity { get; set; }
     }
 
     public class UpdatePatrolTimeRequest

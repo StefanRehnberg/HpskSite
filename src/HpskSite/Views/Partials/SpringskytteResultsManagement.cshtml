@@ -240,7 +240,7 @@
                    buttons stay as the "no results calculated yet" entry point and for a competition with
                    a single weapon group. *@
                 <button class="btn btn-outline-primary btn-sm" id="springUpdateAllBtn" onclick="springCreateResultsList(event)"
-                    title="Räknar om resultatlistan från alla registrerade resultat. Ändrar inte om listan är publik.">
+                    title="Räknar om resultatlistan från alla registrerade resultat och uppdaterar den publika listan för de vapengrupper som redan är publicerade. En publicerad lista ändras bara när du trycker här.">
                     <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                 </button>
                 <button class="btn btn-success btn-sm" id="springPublishBtn" style="display:none" onclick="springPublishResults(event)"
@@ -2499,7 +2499,7 @@ async function springLoadResultsList() {
                         ${springPerClassPublish ? `
                         <div class="d-flex gap-2">
                             <button class="btn btn-outline-primary btn-sm" onclick="springCreateResultsList(event,'${wc}')"
-                                title="Räknar om resultaten. Ändrar inte om listan är publik.">
+                                title="Räknar om resultaten och uppdaterar den publika listan för de vapengrupper som redan är publicerade. En publicerad lista ändras bara när du trycker här.">
                                 <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                             </button>
                             ${isOff ? `

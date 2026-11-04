@@ -78,7 +78,6 @@ namespace HpskSite.CompetitionTypes.Common
         /// Delas vapengrupp C för STANDARDMEDALJBERÄKNINGEN? Bara vid SM och landsdelsmästerskap (SHB C.5.1.1.4). Rå jämförelse, exakt
         /// som <c>StandardMedalCalculationService.ShouldSplitGroupC</c>. Tidigare den metoden.
         /// </summary>
-        public bool SplitsStandardMedalGroupC =>
-            !string.IsNullOrEmpty(Scope) && (Scope == "Svenskt Mästerskap" || Scope == "Landsdelsmästerskap");
+        public bool SplitsStandardMedalGroupC => IsSmOrLandsdel;   // EN definition: samma jämförelse mot konstanterna (en tom omfattning är aldrig lika med någon av dem)
     }
 }

@@ -65,6 +65,13 @@ namespace HpskSite.Tests
             new(@"Equals\([^)]*CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap", RegexOptions.Compiled),
             // rå jämförelse mot strängarna
             new("(==|!=)\\s*\"(Svenskt Mästerskap|Landsdelsmästerskap|Kretsmästerskap|Klubbmästerskap)\"", RegexOptions.Compiled),
+            new("\\bis\\s+\"(Svenskt Mästerskap|Landsdelsmästerskap|Kretsmästerskap|Klubbmästerskap)\"", RegexOptions.Compiled),
+            new("Equals\\(\\s*\"(Svenskt Mästerskap|Landsdelsmästerskap|Kretsmästerskap|Klubbmästerskap)\"", RegexOptions.Compiled),
+            // switch: case X: / X =>
+            new(@"\bcase\s+(HpskSite\.CompetitionTypes\.Common\.Utilities\.)?CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap", RegexOptions.Compiled),
+            new(@"CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap\s*(=>|\bor\b)", RegexOptions.Compiled),
+            // en lista av konstanterna som omfattningen slås upp i
+            new(@"(new\s*\[\]|new\s+string\[\])\s*\{[^}]*CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap", RegexOptions.Compiled),
         };
 
         [Fact]
@@ -96,6 +103,11 @@ namespace HpskSite.Tests
         [InlineData("var sm = scope is CompetitionScopeHelper.Kretsmasterskap or CompetitionScopeHelper.Landsdelsmasterskap;")]
         [InlineData("if (string.Equals(scope, CompetitionScopeHelper.Klubbmasterskap, StringComparison.Ordinal))")]
         [InlineData("var sm = scope == \"Svenskt Mästerskap\";")]
+        [InlineData("if (scope is \"Svenskt Mästerskap\") {")]
+        [InlineData("if (scope.Equals(\"Landsdelsmästerskap\")) {")]
+        [InlineData("case CompetitionScopeHelper.Kretsmasterskap:")]
+        [InlineData("var x = scope switch { CompetitionScopeHelper.Klubbmasterskap => 1, _ => 0 };")]
+        [InlineData("var all = new[] { CompetitionScopeHelper.Kretsmasterskap, other }.Contains(scope);")]
         public void Monstren_fangar_det_de_ska(string line) =>
             Assert.True(Forbidden.Any(r => r.IsMatch(line)), "Mönstret fångar inte: " + line);
 

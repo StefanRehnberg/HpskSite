@@ -40,6 +40,18 @@ namespace HpskSite.Services.Results
                                 OR IDENT_INCR('dbo.CompetitionResultList') < 0 THEN 0 ELSE 1 END") == 1;
         }
 
+        /// <summary>
+        /// Finns kolumnen för den frusna bilden (F0, <c>add-published-snapshot-to-result-list.sql</c>)? Varje sparning av en resultatlista
+        /// skriver den — utan kolumnen faller publicering, omräkning och resultatinmatning med "Invalid column name", medan LÄSNINGEN ser frisk ut
+        /// (SELECT *). Kastar när databasen inte går att fråga.
+        /// </summary>
+        public static bool SnapshotColumnExists(IScopeProvider scopeProvider)
+        {
+            using var scope = scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT CASE WHEN COL_LENGTH('dbo.CompetitionResultList', 'PublishedSnapshot') IS NULL THEN 0 ELSE 1 END") == 1;
+        }
+
         protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             try { await Task.Delay(StartupDelay, stoppingToken); }
@@ -50,7 +62,13 @@ namespace HpskSite.Services.Results
                 using var scope = _scopeFactory.CreateScope();
                 if (TableExists(scope.ServiceProvider.GetRequiredService<IScopeProvider>()))
                 {
-                    _logger.LogInformation("Resultatlistornas lagring: tabellen finns.");
+                    if (!SnapshotColumnExists(scope.ServiceProvider.GetRequiredService<IScopeProvider>()))
+                    {
+                        _logger.LogCritical("KOLUMNEN CompetitionResultList.PublishedSnapshot SAKNAS — varje sparning av en resultatlista faller (publicering, "
+                            + "omräkning, resultatinmatning). Kör Migrations/add-published-snapshot-to-result-list.sql NU, eller rulla tillbaka koden.");
+                        return;
+                    }
+                    _logger.LogInformation("Resultatlistornas lagring: tabellen och kolumnerna finns.");
                     return;
                 }
                 var usesTable = CompetitionResultStoreSettings.UsesTable(scope.ServiceProvider.GetRequiredService<SiteSettingService>());

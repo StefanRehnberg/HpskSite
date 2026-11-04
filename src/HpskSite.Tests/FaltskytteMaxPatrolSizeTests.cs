@@ -47,6 +47,13 @@ namespace HpskSite.Tests
             Assert.Equal(6, FaltskyttePatrolWrites.LimitOf(null, 6));
         }
 
+        [Fact]
+        public void A_patrols_own_capacity_alone_is_not_a_limit_so_zero_means_off_for_already_generated_patrols()
+        {
+            Assert.Null(FaltskyttePatrolWrites.LimitOf(4, 0));
+            Assert.Null(FaltskyttePatrolWrites.OverCapacityMessage(1, 9, FaltskyttePatrolWrites.LimitOf(4, 0), 1, "Anna"));
+        }
+
         [Theory]
         [InlineData(5, 6, 1, false)]   // plats kvar
         [InlineData(6, 6, 1, true)]    // full: en till ger 7 av 6

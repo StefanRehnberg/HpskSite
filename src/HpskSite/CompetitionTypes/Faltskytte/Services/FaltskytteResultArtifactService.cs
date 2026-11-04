@@ -106,8 +106,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     r.LastUpdated = DateTime.Now;
                 });
 
-                _logger.LogInformation("Resultatartefakten omräknad för fältskyttetävling {CompetitionId} ({Reason})",
-                    competitionId, reason);
+                if (snapshot.Length > 0)
+                    // Warning med flit: Information syns inte i prod (Serilog Default = Warning), och en omräkning av en PUBLICERAD lista ska gå att spåra.
+                    _logger.LogWarning("PUBLICERAD fältlista omräknad (frusen bild skriven) för tävling {CompetitionId} ({Reason})", competitionId, reason);
+                else
+                    _logger.LogInformation("Resultatartefakten omräknad för fältskyttetävling {CompetitionId} ({Reason})",
+                        competitionId, reason);
                 // Kretsgranskning fas 2: en ändrad lista efter inskick/godkännande.
                 if (_services.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks hooks)
                     await hooks.AfterResultDataWrittenAsync(competitionId, artifactJson);
@@ -164,6 +168,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 {
                     var snapshot = ToResponseJson(build.Results, _services);
                     _results.Update(competitionId, r => r.PublishedSnapshot = snapshot, createIfMissing: true);
+                    _logger.LogWarning("Publicerad fältlista fryst (engångsfrysningen) för tävling {CompetitionId}", competitionId);
                 }
                 return "frozen";
             }

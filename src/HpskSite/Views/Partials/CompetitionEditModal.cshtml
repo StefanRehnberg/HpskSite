@@ -1211,7 +1211,10 @@ window.populateEditModal = function(competition) {
         // Högsta antal skyttar per patrull: tävlingens eget tal; annars det den rullande starten redan hade
         // (så sparningen aldrig ändrar en befintlig tävlings tak), annars tomt = ingen gräns.
         var mpEl = document.getElementById('edit_maxPatrolSize');
-        if (mpEl) mpEl.value = competition.maxPatrolSize > 0 ? competition.maxPatrolSize : (rsEnabled && rsConfig && rsConfig.patrolSize ? rsConfig.patrolSize : '');
+        if (mpEl) mpEl.value = competition.maxPatrolSize > 0 ? competition.maxPatrolSize : '';
+        // Rullande starts egen patrullstorlek (JSON) lämnas orörd när fältet är tomt: en ovidkommande redigering får aldrig göra den till ett tak
+        // som frågar vid varje manuell placering. Den som vill ha ett tak skriver det själv.
+        window.__editRsPatrolSize = (rsEnabled && rsConfig && rsConfig.patrolSize) ? rsConfig.patrolSize : 0;
         document.getElementById('edit_rollingStart').value = competition.rollingStart || '';
         var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
         if (ssEl) ssEl.checked = !!competition.faltskytteSelfServiceResults;
@@ -1439,7 +1442,7 @@ function saveCompetition() {
     var rsCheckbox = document.getElementById('edit_rollingStartEnabled');
     var rsHidden = document.getElementById('edit_rollingStart');
     if (rsCheckbox && rsHidden) {
-        rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_maxPatrolSize').value) || 2 }) : '';
+        rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_maxPatrolSize').value) || window.__editRsPatrolSize || 2 }) : '';
     }
 
     // Delad fältinsamling (_CompetitionFormSave).
