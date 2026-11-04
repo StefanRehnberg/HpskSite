@@ -514,14 +514,22 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </div>
                             </div>
                         </div>
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="edit_maxPatrolSize" class="form-label">Högsta antal skyttar per patrull</label>
+                                    <input type="number" class="form-control" id="edit_maxPatrolSize" name="maxPatrolSize" min="2" max="12" placeholder="Ingen gräns" style="max-width: 140px;">
+                                    <div class="form-text small">
+                                        Lämna tomt om det inte finns någon gräns. Nya patruller som skapas automatiskt följer det här talet.
+                                        Du kan alltid lägga till fler skyttar, men får då en fråga först.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="edit_rollingStartEnabled" onchange="document.getElementById('edit_rollingStartSettings').style.display = this.checked ? '' : 'none'">
+                            <input class="form-check-input" type="checkbox" id="edit_rollingStartEnabled">
                             <label class="form-check-label fw-bold" for="edit_rollingStartEnabled">Rullande start</label>
                             <div class="form-text small mt-1">Patrulltilldelning på plats. Typiskt för banfält och drop-in.</div>
-                        </div>
-                        <div id="edit_rollingStartSettings" style="display:none" class="ms-4 mb-3">
-                            <label for="edit_patrolSize" class="form-label small">Patrullstorlek</label>
-                            <input type="number" class="form-control form-control-sm" id="edit_patrolSize" min="2" max="12" value="2" style="max-width: 80px;">
                         </div>
                         <input type="hidden" id="edit_rollingStart" name="rollingStart">
                         <div class="form-check mb-3">
@@ -1200,8 +1208,10 @@ window.populateEditModal = function(competition) {
         try { rsConfig = competition.rollingStart ? (typeof competition.rollingStart === 'string' ? JSON.parse(competition.rollingStart) : competition.rollingStart) : null; } catch(e) {}
         var rsEnabled = rsConfig && rsConfig.enabled;
         document.getElementById('edit_rollingStartEnabled').checked = rsEnabled;
-        document.getElementById('edit_rollingStartSettings').style.display = rsEnabled ? '' : 'none';
-        document.getElementById('edit_patrolSize').value = (rsConfig && rsConfig.patrolSize) || 2;
+        // Högsta antal skyttar per patrull: tävlingens eget tal; annars det den rullande starten redan hade
+        // (så sparningen aldrig ändrar en befintlig tävlings tak), annars tomt = ingen gräns.
+        var mpEl = document.getElementById('edit_maxPatrolSize');
+        if (mpEl) mpEl.value = competition.maxPatrolSize > 0 ? competition.maxPatrolSize : (rsEnabled && rsConfig && rsConfig.patrolSize ? rsConfig.patrolSize : '');
         document.getElementById('edit_rollingStart').value = competition.rollingStart || '';
         var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
         if (ssEl) ssEl.checked = !!competition.faltskytteSelfServiceResults;
@@ -1429,7 +1439,7 @@ function saveCompetition() {
     var rsCheckbox = document.getElementById('edit_rollingStartEnabled');
     var rsHidden = document.getElementById('edit_rollingStart');
     if (rsCheckbox && rsHidden) {
-        rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_patrolSize').value) || 2 }) : '';
+        rsHidden.value = rsCheckbox.checked ? JSON.stringify({ enabled: true, patrolSize: parseInt(document.getElementById('edit_maxPatrolSize').value) || 2 }) : '';
     }
 
     // Delad fältinsamling (_CompetitionFormSave).

@@ -1882,7 +1882,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var weaponGroup = !string.IsNullOrEmpty(request.ShootingClass)
                 ? (ShootingClasses.GetWeaponClassCode(request.ShootingClass) is { Length: > 0 } code ? code : "C")
                 : "C";
-            var patrolSize = request.PatrolSize > 0 ? request.PatrolSize : 2;
+            // Taket: tävlingens "Högsta antal skyttar per patrull" om det är satt, annars anropets tal (rullande start), annars 2.
+            var patrolSize = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.CapacityOf(
+                null, _competitions.GetSaved(request.CompetitionId)?.MaxPatrolSize ?? 0, request.PatrolSize > 0 ? request.PatrolSize : 2);
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
@@ -2088,7 +2090,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var patrolSize = request.PatrolSize > 0 ? request.PatrolSize : 6;
+                // Generatorn följer tävlingens "Högsta antal skyttar per patrull" när anropet inte anger ett eget tal (formuläret förifylls med det).
+                var patrolSize = request.PatrolSize > 0
+                    ? request.PatrolSize
+                    : HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.CapacityOf(null, competition.MaxPatrolSize, 6);
                 var intervalMinutes = request.PatrolIntervalMinutes > 0 ? request.PatrolIntervalMinutes : 15;
 
                 // Fetch registrations
@@ -2385,6 +2390,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
+            // Högsta antal skyttar per patrull: en fråga, inte ett stopp. En skytt som redan sitter i patrullen tar ingen ny plats.
+            if (!request.Force)
+            {
+                var alreadyHere = await db.ExecuteScalarAsync<int>(
+                    "SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND MemberId = @1 AND (Status IS NULL OR Status <> 'DNS')", request.PatrolId, request.MemberId);
+                var tooMany = await OverCapacityAsync(db, request.CompetitionId, request.PatrolId, alreadyHere > 0 ? 0 : 1,
+                    string.IsNullOrWhiteSpace(request.MemberName) ? "skytten" : request.MemberName);
+                if (tooMany != null) return Json(new { success = false, needsForce = true, overCapacity = true, message = tooMany });
+            }
+
             // Remove from any existing patrol within the same weapon group (allows "move" via add).
             // A shooter in a C patrol should not be removed when adding to an A patrol — and
             // A_opt is its own group, so an A_opt assignment should not affect plain A patrols.
@@ -2503,6 +2518,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return HpskSite.CompetitionTypes.Faltskytte.Services.PatrolPairRules.SeparationMessage(regs, placements, movers.Select(m => new HpskSite.CompetitionTypes.Faltskytte.Services.PairMove(m.MemberId, m.ShootingClass, targetPatrolId, number)).ToList());
         }
 
+        /// <summary>
+        /// "Högsta antal skyttar per patrull" som en VARNING med bekräftelse (Stefan: aldrig ett hårt stopp): frågan att visa innan
+        /// <paramref name="incoming"/> skyttar läggs i en redan full patrull, eller null. Taket kommer från
+        /// <see cref="HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LimitOf"/> — patrullens eget, annars tävlingens.
+        /// DNS räknas inte (deras plats är ledig). Anropas inne i patrullåset så läget inte hinner ändras.
+        /// </summary>
+        private async Task<string?> OverCapacityAsync(NPoco.IDatabase db, int competitionId, int targetPatrolId, int incoming, string who, string verb = "lägga till")
+        {
+            if (incoming <= 0) return null;
+            var patrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>("WHERE Id = @0 AND CompetitionId = @1", targetPatrolId, competitionId);
+            if (patrol == null) return null;
+            var limit = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LimitOf(patrol.Capacity, _competitions.GetSaved(competitionId)?.MaxPatrolSize ?? 0);
+            if (limit == null) return null;
+            var seated = await db.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM FaltskyttePatrolMember WHERE PatrolId = @0 AND (Status IS NULL OR Status <> 'DNS')", patrol.Id);
+            return HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.OverCapacityMessage(patrol.PatrolNumber, seated, limit, incoming, who, verb);
+        }
+
         private static async Task MoveMemberToPatrolSeat(NPoco.IDatabase db, int patrolMemberId, int targetPatrolId)
         {
             var row = await db.FirstOrDefaultAsync<FaltskyttePatrolMember>("WHERE Id = @0", patrolMemberId);
@@ -2558,6 +2591,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 var why = await SeparationAsync(request.CompetitionId, new[] { (moving.MemberId, moving.ShootingClass ?? "") }, request.TargetPatrolId);
                 if (why != null) return Json(new { success = false, needsForce = true, message = why });
+                // Högsta antal skyttar per patrull: en fråga, inte ett stopp. Att flytta inom samma patrull eller en DNS tar ingen plats.
+                var takesSeat = moving.PatrolId != request.TargetPatrolId && moving.Status != "DNS" ? 1 : 0;
+                var tooMany = await OverCapacityAsync(db, request.CompetitionId, request.TargetPatrolId, takesSeat,
+                    string.IsNullOrWhiteSpace(moving.MemberName) ? "skytten" : moving.MemberName, "flytta");
+                if (tooMany != null) return Json(new { success = false, needsForce = true, overCapacity = true, message = tooMany });
             }
             await MoveMemberToPatrolSeat(db, request.PatrolMemberId, request.TargetPatrolId);
 
@@ -2646,6 +2684,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }
                 catch { }
             }
+            // Tävlingens "Högsta antal skyttar per patrull" går före rullande starts egna tal när den är satt.
+            walkInPatrolSize = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.CapacityOf(null, walkInCompNode?.MaxPatrolSize ?? 0, walkInPatrolSize);
 
             // "Gå i samma patrull som": har skytten en kamrat i gruppen som redan är placerad hamnar hen hos kamraten när platsen räcker (om arrangören inte pekat ut en patrull
             // själv). Går det inte får arrangören veta det, med namn — registreringen är redan sparad och patrullen går att ändra efteråt.
@@ -2991,6 +3031,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var rows = await db.FetchAsync<FaltskyttePatrolMember>("WHERE Id IN (@0)", request.PatrolMemberIds);
                 var why = await SeparationAsync(request.CompetitionId, rows.Select(r => (r.MemberId, r.ShootingClass ?? "")), request.TargetPatrolId);
                 if (why != null) return Json(new { success = false, needsForce = true, message = why });
+                // Högsta antal skyttar per patrull: en fråga, inte ett stopp. Bara de som faktiskt tar en ny plats räknas.
+                var takingSeats = rows.Count(r => r.PatrolId != request.TargetPatrolId && r.Status != "DNS");
+                var tooMany = await OverCapacityAsync(db, request.CompetitionId, request.TargetPatrolId, takingSeats,
+                    takingSeats == 1 ? (rows.First(r => r.PatrolId != request.TargetPatrolId && r.Status != "DNS").MemberName ?? "skytten") : $"{takingSeats} skyttar", "flytta");
+                if (tooMany != null) return Json(new { success = false, needsForce = true, overCapacity = true, message = tooMany });
             }
             foreach (var pmId in request.PatrolMemberIds)
                 await MoveMemberToPatrolSeat(db, pmId, request.TargetPatrolId);

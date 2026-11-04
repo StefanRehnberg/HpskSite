@@ -125,6 +125,7 @@ namespace HpskSite.Models.Competitions
             F("numberOfSeriesOrStations", D, CompetitionFieldShape.Int, c => c.NumberOfSeriesOrStations, (c, v) => c.NumberOfSeriesOrStations = (int)v!),
             F("numberOfFinalSeries", D, CompetitionFieldShape.Int, c => c.NumberOfFinalSeries, (c, v) => c.NumberOfFinalSeries = (int)v!),
             F("maxReshoots", D, CompetitionFieldShape.Int, c => c.MaxReshoots, (c, v) => c.MaxReshoots = (int)v!),
+            F("maxPatrolSize", D, CompetitionFieldShape.Int, c => c.MaxPatrolSize, (c, v) => c.MaxPatrolSize = Math.Clamp((int)v!, 0, 50)),   // CHECK 0..50 i databasen; ett värde utanför ger annars 500
             F("showLiveResults", D, CompetitionFieldShape.Bool, c => c.ShowLiveResults, (c, v) => c.ShowLiveResults = (bool)v!),
             F("scoringMode", D, CompetitionFieldShape.Choice, c => c.ScoringMode, (c, v) => c.ScoringMode = (string?)v),
             F("stationConfig", D, CompetitionFieldShape.Text, c => c.StationConfig, (c, v) => c.StationConfig = (string?)v),

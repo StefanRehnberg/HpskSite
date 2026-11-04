@@ -135,6 +135,13 @@ namespace HpskSite.Models.Competitions
         public int NumberOfSeriesOrStations { get; set; }
         public int NumberOfFinalSeries { get; set; }
         public int MaxReshoots { get; set; }
+
+        /// <summary>
+        /// Högsta antal skyttar per patrull (fält). 0 = ingen gräns (dagens beteende). Är en VARNING med bekräftelse,
+        /// aldrig ett hårt stopp — se <c>FaltskyttePatrolWrites.CapacityOf</c>, som är det enda stället taket läses.
+        /// Inte skjutlagets kapacitet i egenbokningen (<c>DirektplaceringStartListService</c>) — ett annat tal.
+        /// </summary>
+        public int MaxPatrolSize { get; set; }
         public bool ShowLiveResults { get; set; }
 
         /// <summary>Spegeln av konfigurationens räknesätt — läs via <c>FaltskytteScoringMode.Resolve</c>.</summary>

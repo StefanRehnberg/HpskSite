@@ -32,6 +32,30 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             return codes.Any(set.Contains);
         }
 
+        /// <summary>
+        /// Högsta antal skyttar i en patrull — det ENDA stället taket läses (utanför mästerskapet, S1).
+        /// Patrullens egna tak vinner, annars tävlingens "Högsta antal skyttar per patrull" (<paramref name="competitionMax"/> &gt; 0),
+        /// annars <paramref name="fallback"/> (dagens värden: rullande starts patrullstorlek, generatorns tal, 2/6).
+        /// Inte skjutlagets kapacitet i egenbokningen — ett annat tal med ett annat namn.
+        /// </summary>
+        public static int CapacityOf(int? patrolCapacity, int competitionMax, int fallback) =>
+            patrolCapacity is > 0 ? patrolCapacity.Value : competitionMax > 0 ? competitionMax : fallback;
+
+        /// <summary>Taket i en patrull när det är en riktig gräns (patrullens eget, annars tävlingens), annars null = ingen gräns.</summary>
+        public static int? LimitOf(int? patrolCapacity, int competitionMax) =>
+            patrolCapacity is > 0 ? patrolCapacity : competitionMax > 0 ? competitionMax : null;
+
+        /// <summary>
+        /// Frågan som ställs innan en skytt läggs i en patrull som redan är full (en VARNING med bekräftelse, aldrig ett hårt stopp), eller null.
+        /// <paramref name="seated"/> räknar inte DNS. <paramref name="verb"/>: "lägga till" eller "flytta".
+        /// </summary>
+        public static string? OverCapacityMessage(int patrolNumber, int seated, int? limit, int incoming, string who, string verb = "lägga till")
+        {
+            if (limit is not > 0 || incoming <= 0 || seated + incoming <= limit) return null;
+            var count = seated == 1 ? "1 skytt" : $"{seated} skyttar";
+            return $"Patrull {patrolNumber} har redan {count}, och högsta antal per patrull är {limit}. Vill du {verb} {who} ändå?";
+        }
+
         public const string BusyMessage = "Någon annan ändrar startlistan just nu. Försök igen om en stund.";
 
         /// <summary>

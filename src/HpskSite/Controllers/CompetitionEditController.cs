@@ -217,6 +217,7 @@ namespace HpskSite.Controllers
                     patrolSize = 0,
                     patrolIntervalMinutes = 0,
                     maxReshoots = content.MaxReshoots,
+                    maxPatrolSize = content.MaxPatrolSize,
                     rollingStart = content.RollingStart ?? "",
                     faltskytteSelfServiceResults = content.FaltskytteSelfServiceResults,
                     subCompetitionName = content.SubCompetitionName ?? "",
