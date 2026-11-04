@@ -333,6 +333,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? WeaponGroup { get; set; }
         public string? Label { get; set; }
         public List<FaltskyttePatrolMemberView> Members { get; set; } = new();
+        /// <summary>Högsta antal skyttar i patrullen (patrullens eget tak, annars tävlingens). Null = ingen gräns. Bara GetPatrols fyller den.</summary>
+        public int? Limit { get; set; }
         /// <summary>How many members have results entered at the queried station</summary>
         public int CompletedCount { get; set; }
         /// <summary>

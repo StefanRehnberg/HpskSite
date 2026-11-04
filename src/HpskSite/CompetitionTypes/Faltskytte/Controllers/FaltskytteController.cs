@@ -2280,6 +2280,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
                 : new List<FaltskyttePatrolMember>();
 
+            var competitionMax = _competitions.GetSaved(competitionId)?.MaxPatrolSize ?? 0;
             var result = patrols.Select(p => new FaltskyttePatrolView
             {
                 PatrolId = p.Id,
@@ -2287,6 +2288,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 StartTime = p.StartTime,
                 WeaponGroup = p.WeaponGroup,
                 Label = p.Label,
+                // Taket kommer från servern (patrullvyn räknar aldrig ett eget tal): samma LimitOf som varje skrivväg.
+                Limit = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskyttePatrolWrites.LimitOf(p.Capacity, competitionMax),
                 Members = allMembers.Where(m => m.PatrolId == p.Id)
                     .Select(m => new FaltskyttePatrolMemberView
                     {
@@ -2300,7 +2303,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     }).ToList()
             }).ToList();
 
-            return Json(new { success = true, patrols = result });
+            return Json(new { success = true, patrols = result, maxPatrolSize = competitionMax });
         }
 
         // ── Patrol Editing ─────────────────────────────────────────────

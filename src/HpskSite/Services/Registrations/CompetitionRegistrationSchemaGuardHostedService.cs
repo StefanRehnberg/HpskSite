@@ -40,6 +40,14 @@ namespace HpskSite.Services.Registrations
                 missing.Add("CompetitionTeam.LegacyRegistrationDocId");
             if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.CompetitionRegistrationClass', 'JoinMemberId') IS NULL THEN 0 ELSE 1 END") == 0)
                 missing.Add("CompetitionRegistrationClass.JoinMemberId (add-registration-class-join-member.sql)");
+            // Utanför mästerskapet / patrullmax (add-out-of-competition-and-patrol-max.sql): tabellerna och tävlingens kolumner.
+            // En kolumn som saknas fäller Create/kopiering av en tävling och varje ändring av det nya fältet — så larma före det.
+            foreach (var t in new[] { "CompetitionRegistrationClassDecision", "ChampionshipDecisionLog" })
+                if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0)
+                    missing.Add(t + " (add-out-of-competition-and-patrol-max.sql)");
+            foreach (var c in new[] { "MaxPatrolSize", "ChampionshipWeaponGroups", "ChampionshipParticipants", "ChampionshipMode", "HideOutOfCompetitionInPlace", "FaltskyttePublishedGroups" })
+                if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Competition', @0) IS NULL THEN 0 ELSE 1 END", c) == 0)
+                    missing.Add("Competition." + c + " (add-out-of-competition-and-patrol-max.sql)");
             if (db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM sys.index_columns ic
                     JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
                     WHERE i.object_id = OBJECT_ID('dbo.CompetitionFeeChoice') AND i.is_primary_key = 1") != 2)

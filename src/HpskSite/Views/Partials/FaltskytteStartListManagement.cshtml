@@ -128,8 +128,8 @@
 <script>
     // Under rolling start, regenerating replaces the auto-created lists — confirm before opening the
     // generate modal so it can't be triggered by accident.
-    window.faltGuardedGenerate = function () {
-        if (confirm('Rullande start är aktiverad — patruller skapas automatiskt när skyttar anmäler sig.\n\nGenerera om patrullerna bara om något är fel. Vill du fortsätta?')) {
+    window.faltGuardedGenerate = async function () {
+        if (await window.faltConfirm('Rullande start är aktiverad — patruller skapas automatiskt när skyttar anmäler sig.\n\nGenerera om patrullerna bara om något är fel. Vill du fortsätta?', 'Generera om')) {
             faltShowGenerateModal();
         }
     };
@@ -289,9 +289,9 @@
         });
     }
 
-    function confirmIfResultsExist(action) {
+    async function confirmIfResultsExist(action) {
         if (!_faltHasResults) return true;
-        return confirm('OBS! Det finns redan registrerade resultat f\u00f6r denna t\u00e4vling.\n\n\u00c4ndring av patrullistan kan p\u00e5verka p\u00e5g\u00e5ende t\u00e4vling.\n\nVill du forts\u00e4tta med: ' + action + '?');
+        return faltConfirm('OBS! Det finns redan registrerade resultat f\u00f6r denna t\u00e4vling.\n\n\u00c4ndring av patrullistan kan p\u00e5verka p\u00e5g\u00e5ende t\u00e4vling.\n\nVill du forts\u00e4tta med: ' + action + '?');
     }
 
     setTimeout(function() {
@@ -314,14 +314,69 @@
 
     // Ingen spärr är absolut: svarar servern needsForce visas skälet och användaren får bekräfta och försöka igen med force.
     function apiPostForce(endpoint, body) {
-        return apiPost(endpoint, body).then(function(data) {
+        return apiPost(endpoint, body).then(async function(data) {
             if (data && data.needsForce) {
-                if (!confirm(data.message + '\n\nFortsätta ändå?')) return { success: false, cancelled: true };
+                // Servern formulerar frågan själv (patrullens tak, par som skiljs åt, resultat finns …) och slutar den med en fråga.
+                if (!(await faltConfirm(data.message, 'Fortsätt ändå'))) return { success: false, cancelled: true };
                 return apiPost(endpoint, Object.assign({}, body, { force: true }));
             }
             return data;
         });
     }
+
+    // ── Dialoger i sidan — aldrig webbläsarens confirm/prompt/alert ──────────────────────────────
+    // EN dialog för bekräftelse, fråga och besked. Ett löfte: true/false (bekräfta), ett objekt med fältens värden
+    // eller null (fråga), true (besked). Texten är ren text (radbrytningar behålls), aldrig HTML.
+    function faltAsk(o) {
+        return new Promise(function(resolve) {
+            var old = document.getElementById('faltAskModal'); if (old) old.remove();
+            var inputs = o.inputs || [];
+            var el = document.createElement('div');
+            el.className = 'modal fade'; el.id = 'faltAskModal'; el.tabIndex = -1; el.style.zIndex = 1090;
+            var fieldsHtml = inputs.map(function(f, i) {
+                return '<div class="mb-2"><label class="form-label small mb-1" for="faltAskField' + i + '">' + hpskEsc(f.label) + '</label>' +
+                    '<input type="' + (f.type || 'text') + '" class="form-control" id="faltAskField' + i + '" value="' + hpskEsc(f.value || '') + '"' +
+                    (f.placeholder ? ' placeholder="' + hpskEsc(f.placeholder) + '"' : '') + '></div>';
+            }).join('');
+            el.innerHTML =
+                '<div class="modal-dialog modal-dialog-centered"><div class="modal-content">' +
+                '<div class="modal-header"><h5 class="modal-title">' + hpskEsc(o.title || 'Bekräfta') + '</h5>' +
+                '<button type="button" class="btn-close" data-fa-cancel aria-label="Stäng"></button></div>' +
+                '<div class="modal-body">' + (o.message ? '<p class="mb-2" style="white-space:pre-line">' + hpskEsc(o.message) + '</p>' : '') + fieldsHtml +
+                '<div class="text-danger small d-none" data-fa-err role="alert"></div></div>' +
+                '<div class="modal-footer">' +
+                (o.notice ? '' : '<button type="button" class="btn btn-secondary" style="min-height:44px" data-fa-cancel>' + hpskEsc(o.cancelText || 'Avbryt') + '</button>') +
+                '<button type="button" class="btn ' + (o.danger ? 'btn-danger' : 'btn-primary') + '" style="min-height:44px" data-fa-ok>' + hpskEsc(o.okText || 'OK') + '</button>' +
+                '</div></div></div>';
+            document.body.appendChild(el);
+            var modal = bootstrap.Modal.getOrCreateInstance(el, { backdrop: 'static' });
+            var done = false;
+            function finish(v) { if (done) return; done = true; resolve(v); modal.hide(); }
+            function values() { return inputs.map(function(f, i) { return document.getElementById('faltAskField' + i).value; }); }
+            el.querySelector('[data-fa-ok]').addEventListener('click', function() {
+                if (o.notice) return finish(true);
+                if (inputs.length) {
+                    var vals = values();
+                    var err = o.validate ? o.validate(vals) : null;
+                    if (err) { var e = el.querySelector('[data-fa-err]'); e.textContent = err; e.classList.remove('d-none'); return; }
+                    return finish(vals);
+                }
+                finish(true);
+            });
+            el.querySelectorAll('[data-fa-cancel]').forEach(function(b) { b.addEventListener('click', function() { finish(inputs.length ? null : false); }); });
+            el.addEventListener('hidden.bs.modal', function() { if (!done) { done = true; resolve(o.notice ? true : (inputs.length ? null : false)); } el.remove(); });
+            el.addEventListener('shown.bs.modal', function() {
+                var first = el.querySelector('input'); (first || el.querySelector('[data-fa-ok]')).focus();
+            });
+            modal.show();
+            // En dialog ovanpå en annan (t.ex. Lägg till skytt) måste ha sin skärmtäckning över den andra dialogen.
+            var bds = document.querySelectorAll('.modal-backdrop'); if (bds.length) bds[bds.length - 1].style.zIndex = 1085;
+        });
+    }
+    function faltConfirm(message, okText) { return faltAsk({ title: 'Bekräfta', message: message, okText: okText || 'Fortsätt' }); }
+    function faltNotice(message) { return faltAsk({ title: 'Meddelande', message: message, okText: 'OK', notice: true }); }
+    window.faltConfirm = faltConfirm;
+    window.faltNotice = faltNotice;
 
     function apiGet(endpoint) {
         return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) {
@@ -351,6 +406,13 @@
             loading.style.display = 'none';
 
             allPatrols = (data.success && data.patrols) ? data.patrols : [];
+            // Generatorns tal förifylls med tävlingens "Högsta antal skyttar per patrull" (servern är källan).
+            if (data.success && data.maxPatrolSize > 0) {
+                var genSize = document.getElementById('faltGenPatrolSize');
+                if (genSize) genSize.value = data.maxPatrolSize;
+                var genLbl = document.querySelector('label[for="faltGenPatrolSize"]');
+                if (genLbl) genLbl.textContent = 'Skyttar per patrull (från tävlingen)';
+            }
 
             if (allPatrols.length === 0) {
                 empty.style.display = '';
@@ -447,6 +509,13 @@
                     '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltDeletePatrol(' + patrol.patrolId + ')" title="Ta bort patrull"><i class="bi bi-trash"></i></button>' +
                     '</span></div>';
 
+                // Rad 2: antal platser mot taket (servern avgör taket). Över taket med färg OCH text, aldrig bara färg.
+                var seatedN = patrol.members.filter(function(m) { return m.status !== 'DNS'; }).length;
+                if (patrol.limit) {
+                    var over = seatedN > patrol.limit;
+                    html += '<div class="small mb-1 ' + (over ? 'text-danger fw-bold' : 'text-muted') + '">' + seatedN + ' av ' + patrol.limit + ' platser' +
+                        (over ? ' &ndash; &ouml;ver max' : '') + '</div>';
+                }
                 if (patrol.members.length === 0) {
                     html += '<div class="text-muted small fst-italic">Tom patrull</div>';
                 } else {
@@ -463,7 +532,7 @@
                         seatByPos[pos] = m;
                         if (pos > maxSeat) maxSeat = pos;
                     });
-                    for (var seat = 1; seat <= maxSeat; seat++) {
+                    for (var seat = 1; seat <= Math.max(maxSeat, patrol.limit || 0); seat++) {
                         var m = seatByPos[seat];
                         if (!m) {
                             html += '<div class="d-flex align-items-center gap-2 py-1 text-muted small fst-italic">' +
@@ -531,23 +600,23 @@
     };
 
     window.faltBulkMove = async function() {
-        if (!confirmIfResultsExist('Flytta skyttar')) return;
+        if (!(await confirmIfResultsExist('Flytta skyttar'))) return;
         var targetId = parseInt(document.getElementById('faltBulkTarget').value);
-        if (!targetId) { alert('Välj en målpatrull.'); return; }
+        if (!targetId) { await faltNotice('Välj en målpatrull.'); return; }
         var ids = [];
         document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
         if (ids.length === 0) return;
         var data = await apiPostForce('BulkMoveShooters', { competitionId: parseInt(compId), patrolMemberIds: ids, targetPatrolId: targetId });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltBulkRemove = async function() {
-        if (!confirmIfResultsExist('Ta bort skyttar')) return;
+        if (!(await confirmIfResultsExist('Ta bort skyttar'))) return;
         var ids = [];
         document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
         if (ids.length === 0) return;
-        if (!confirm('Ta bort ' + ids.length + ' markerade skyttar från patrullerna?')) return;
+        if (!(await faltConfirm('Ta bort ' + ids.length + ' markerade skyttar från patrullerna?'))) return;
         for (var i = 0; i < ids.length; i++) {
             await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: ids[i] });
         }
@@ -555,11 +624,11 @@
     };
 
     window.faltRemoveShooter = async function(pmId) {
-        if (!confirmIfResultsExist('Ta bort skytt')) return;
-        if (!confirm('Ta bort skytten från patrullen?')) return;
+        if (!(await confirmIfResultsExist('Ta bort skytt'))) return;
+        if (!(await faltConfirm('Ta bort skytten från patrullen?'))) return;
         var data = await apiPost('RemoveShooterFromPatrol', { competitionId: parseInt(compId), patrolMemberId: pmId });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     // DNS: keep the shooter on record but flag them did-not-start, which frees their seat so a late
@@ -567,21 +636,21 @@
     window.faltSetDns = async function(pmId, isDns) {
         var data = await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: pmId, isDns: isDns });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltSetPosition = async function(pmId, position) {
-        if (!confirmIfResultsExist('Byta plats')) return;
+        if (!(await confirmIfResultsExist('Byta plats'))) return;
         var data = await apiPost('SetShooterPosition', { competitionId: parseInt(compId), patrolMemberId: pmId, position: position });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltBulkDns = async function() {
         var ids = [];
         document.querySelectorAll('.falt-member-check:checked').forEach(function(cb) { ids.push(parseInt(cb.dataset.pmId)); });
         if (ids.length === 0) return;
-        if (!confirm('Markera ' + ids.length + ' markerade skyttar som DNS (frigör deras platser)?')) return;
+        if (!(await faltConfirm('Markera ' + ids.length + ' markerade skyttar som DNS (frigör deras platser)?'))) return;
         for (var i = 0; i < ids.length; i++) {
             await apiPost('SetShooterDns', { competitionId: parseInt(compId), patrolMemberId: ids[i], isDns: true });
         }
@@ -589,11 +658,11 @@
     };
 
     window.faltDeletePatrol = async function(patrolId) {
-        if (!confirmIfResultsExist('Ta bort patrull')) return;
-        if (!confirm('Ta bort hela patrullen och alla dess skyttar?')) return;
+        if (!(await confirmIfResultsExist('Ta bort patrull'))) return;
+        if (!(await faltConfirm('Ta bort hela patrullen och alla dess skyttar?'))) return;
         var data = await apiPost('DeletePatrol', { competitionId: parseInt(compId), patrolId: patrolId });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltCreatePatrol = function() {
@@ -615,36 +684,48 @@
     };
 
     window.faltDoCreatePatrol = async function() {
-        if (!confirmIfResultsExist('Skapa patrull')) return;
+        if (!(await confirmIfResultsExist('Skapa patrull'))) return;
         var wg = (document.getElementById('faltNewPatrolWg').value || 'C').trim().toUpperCase();
         var afterNum = parseInt(document.getElementById('faltNewPatrolAfter').value) || 0;
 
         if (afterNum > 0 && allPatrols.length > 0) {
-            if (!confirm('Patrullerna efter position ' + afterNum + ' numreras om. Fortsätt?')) return;
+            if (!(await faltConfirm('Patrullerna efter position ' + afterNum + ' numreras om. Fortsätt?'))) return;
         }
 
         bootstrap.Modal.getInstance(document.getElementById('faltCreatePatrolModal'))?.hide();
         var data = await apiPost('CreatePatrol', { competitionId: parseInt(compId), weaponGroup: wg, afterPatrolNumber: afterNum > 0 ? afterNum : null });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltEditPatrol = async function(patrolId, currentTime, currentLabel) {
-        if (!confirmIfResultsExist('Redigera patrull')) return;
-        var newTime = prompt('Ny starttid (HH:mm) — lämna tomt för att inte ändra:', currentTime || '');
-        if (newTime === null) return;
+        if (!(await confirmIfResultsExist('Redigera patrull'))) return;
+        // EN dialog med båda fälten (förut två webbläsarrutor efter varandra).
+        var vals = await faltAsk({
+            title: 'Redigera patrull',
+            okText: 'Spara',
+            inputs: [
+                { label: 'Starttid (HH:mm) — lämna tomt för att inte ändra', value: currentTime || '', placeholder: '09:30' },
+                { label: 'Namn / dag (valfritt, t.ex. "Lördag fm")', value: currentLabel || '' }
+            ],
+            validate: function(v) {
+                var t = (v[0] || '').trim();
+                if (t === '') return null;
+                var m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(t);
+                return m ? null : 'Ogiltig tid. Använd HH:mm, till exempel 09:30.';
+            }
+        });
+        if (vals === null) return;
         var dt = null;
-        if (newTime && newTime.trim() !== '') {
+        var newTime = (vals[0] || '').trim();
+        if (newTime !== '') {
             var parts = newTime.split(':');
-            if (parts.length !== 2) { alert('Ogiltig tid. Använd HH:mm-format.'); return; }
             dt = new Date();
             dt.setHours(parseInt(parts[0]) || 9, parseInt(parts[1]) || 0, 0, 0);
         }
-        var newLabel = prompt('Namn / dag (valfritt, t.ex. "Lördag fm"):', currentLabel || '');
-        if (newLabel === null) return;
-        var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt ? dt.toISOString() : null, label: newLabel });
+        var data = await apiPost('UpdatePatrolTime', { competitionId: parseInt(compId), patrolId: patrolId, startTime: dt ? dt.toISOString() : null, label: vals[1] });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
     window.faltEditPatrolFromButton = function(btn) {
         return window.faltEditPatrol(parseInt(btn.dataset.patrolId), btn.dataset.time || '', btn.dataset.label || '');
@@ -679,7 +760,7 @@
             close = res.close;
             groups = res.groups || null;
         } else {
-            if (!confirm('Avpublicera patrullistan?\n\nSjälvanmälan öppnas igen om den stängdes vid publiceringen.')) return;
+            if (!(await faltConfirm('Avpublicera patrullistan?\n\nSjälvanmälan öppnas igen om den stängdes vid publiceringen.'))) return;
         }
 
         var data = await apiPost('PublishPatrolList', { competitionId: parseInt(compId), publish: pub, closeRegistration: close, groups: groups });
@@ -690,8 +771,8 @@
             updatePublishUI();
             // Servern svarar success även när patrullistan publicerades men inställningen inte kunde
             // sparas (t.ex. saknad doctype-egenskap) — den varningen får inte gå tyst förbi.
-            if (data.message) alert(data.message);
-        } else { alert('Fel: ' + (data.message || 'Okänt fel')); }
+            if (data.message) await faltNotice(data.message);
+        } else { await faltNotice('Fel: ' + (data.message || 'Okänt fel')); }
     };
 
     // Add Shooter modal
@@ -759,14 +840,9 @@
     // Kept with the same signature: other callers (and the backward-compat shim below) pass the
     // values directly, and nothing about them was unsafe — it was putting them in an ATTRIBUTE.
     window.faltAddShooter = async function(memberId, name, club, shootingClass) {
-        if (!confirmIfResultsExist('L\u00e4gg till skytt')) return;
+        if (!(await confirmIfResultsExist('L\u00e4gg till skytt'))) return;
         var patrolId = parseInt(document.getElementById('faltAddShooterPatrolId').value);
-        // Check patrol size
-        var patrol = allPatrols.find(function(p) { return p.patrolId === patrolId; });
-        var seatedCount = patrol ? patrol.members.filter(function(m) { return m.status !== 'DNS'; }).length : 0;
-        if (patrol && seatedCount >= faltPatrolSize) {
-            if (!confirm('Patrullen har redan ' + seatedCount + ' skyttar (max ' + faltPatrolSize + '). Lägg till ändå?')) return;
-        }
+        // Högsta antal per patrull prövas av servern (en fråga med bekräftelse), aldrig här.
         var data = await apiPostForce('AddShooterToPatrol', {
             competitionId: parseInt(compId),
             patrolId: patrolId,
@@ -778,7 +854,7 @@
         if (data.success) {
             faltSearchShooters(); // Refresh available list
             loadFaltPatrols();
-        } else if (!data.cancelled) { alert('Fel: ' + (data.message || 'Okänt fel')); }
+        } else if (!data.cancelled) { await faltNotice('Fel: ' + (data.message || 'Okänt fel')); }
     };
 
     // Existing functions (generate, delete all, delete by group)
@@ -837,10 +913,10 @@
     };
 
     window.faltGeneratePatrols = async function() {
-        if (!confirmIfResultsExist('Generera patruller')) return;
+        if (!(await confirmIfResultsExist('Generera patruller'))) return;
         var selectedWcs = [];
         document.querySelectorAll('.faltGenWc:checked').forEach(function(cb) { selectedWcs.push(cb.value); });
-        if (selectedWcs.length === 0) { alert('Välj minst en vapenklass.'); return; }
+        if (selectedWcs.length === 0) { await faltNotice('Välj minst en vapenklass.'); return; }
 
         var patrolSize = parseInt(document.getElementById('faltGenPatrolSize').value) || 6;
         faltPatrolSize = patrolSize; // Store for size warnings
@@ -865,24 +941,24 @@
             });
             if (data.success) { loadFaltPatrols(); }
             else if (data.cancelled) { }
-            else { console.error('Generate error:', data.message, data.stackTrace); alert('Fel: ' + (data.message || 'Okänt fel')); }
-        } catch(err) { console.error('Generate exception:', err); alert('Fel: ' + err.message); }
+            else { console.error('Generate error:', data.message, data.stackTrace); await faltNotice('Fel: ' + (data.message || 'Okänt fel')); }
+        } catch(err) { console.error('Generate exception:', err); await faltNotice('Fel: ' + err.message); }
     };
 
     window.faltDeleteGroupPatrols = async function(weaponGroup) {
-        if (!confirmIfResultsExist('Ta bort patruller f\u00f6r ' + weaponGroup)) return;
-        if (!confirm('Ta bort alla patruller för vapengrupp ' + weaponGroup + '?')) return;
+        if (!(await confirmIfResultsExist('Ta bort patruller f\u00f6r ' + weaponGroup))) return;
+        if (!(await faltConfirm('Ta bort alla patruller för vapengrupp ' + weaponGroup + '?'))) return;
         var data = await apiPostForce('DeletePatrolsByGroup', { competitionId: parseInt(compId), weaponGroup: weaponGroup });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltDeleteAllPatrols = async function() {
-        if (!confirmIfResultsExist('Ta bort alla patruller')) return;
-        if (!confirm('Ta bort ALLA patruller?')) return;
+        if (!(await confirmIfResultsExist('Ta bort alla patruller'))) return;
+        if (!(await faltConfirm('Ta bort ALLA patruller?'))) return;
         var data = await apiPostForce('DeletePatrols', { competitionId: parseInt(compId) });
         if (data.success) loadFaltPatrols();
-        else if (!data.cancelled) alert('Fel: ' + (data.message || 'Okänt fel'));
+        else if (!data.cancelled) await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
     };
 
     window.faltRenumberPatrols = async function() {
@@ -893,18 +969,18 @@
         try {
             pre = await apiGet('PreviewRenumberPatrols?competitionId=' + compId);
         } catch (e) {
-            alert('Kunde inte läsa vad omnumreringen skulle innebära. Försök igen.');
+            await faltNotice('Kunde inte läsa vad omnumreringen skulle innebära. Försök igen.');
             return;
         }
         if (!pre || !pre.success) {
-            alert('Fel: ' + ((pre && pre.message) || 'Kunde inte förhandsgranska omnumreringen'));
+            await faltNotice('Fel: ' + ((pre && pre.message) || 'Kunde inte förhandsgranska omnumreringen'));
             return;
         }
 
         var changes = pre.changes || [];
         if (changes.length === 0) {
             // Nothing to do is worth SAYING. Silently reloading looks like the button is broken.
-            alert('Patrullerna är redan numrerade 1–' + pre.total + ' i följd. Inget att göra.');
+            await faltNotice('Patrullerna är redan numrerade 1–' + pre.total + ' i följd. Inget att göra.');
             return;
         }
 
@@ -939,13 +1015,13 @@
 
         msg += '\n\nNumrera om?';
 
-        if (!confirm(msg)) return;
+        if (!(await faltConfirm(msg))) return;
 
         var data = await apiPost('RenumberPatrols', { competitionId: parseInt(compId) });
         if (data.success) {
             loadFaltPatrols();
         } else {
-            alert('Fel: ' + (data.message || 'Okänt fel'));
+            await faltNotice('Fel: ' + (data.message || 'Okänt fel'));
         }
     };
     window.faltPrintPatrolList = function() {
