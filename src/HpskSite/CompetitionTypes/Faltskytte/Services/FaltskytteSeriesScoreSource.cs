@@ -32,14 +32,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly ILogger<FaltskytteSeriesScoreSource> _logger;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly OfficialFaltskytteList _officialFalt;
 
         public FaltskytteSeriesScoreSource(
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
             IContentService contentService,
             ClubService clubService,
             ILogger<FaltskytteSeriesScoreSource> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            OfficialFaltskytteList officialFalt)
         {
+            _officialFalt = officialFalt;
             _competitions = competitions;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
             _contentService = contentService;
@@ -111,7 +114,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             foreach (var compId in competitionIds)
             {
-                if (!resultsByCompetition.TryGetValue(compId, out var rows))
+                // ⚠️ F0c: en OFFICIELL omgång räknas ur sin frusna lista — serieställningen får inte röra sig för att en
+                // skottrad ändrats efter publiceringen. Namn och klubb kommer fortfarande ur patrullbilden (klubben
+                // behöver sitt fulla namn för id-uppslaget; bildens klubbnamn är förkortat). Preliminär omgång: live som förut.
+                var frozen = _officialFalt.TryGet(compId);
+                List<FaltskytteResultEntry>? rows;
+                if (frozen != null)
+                {
+                    // Bilden är byggd utan särskjutningsstationer — ingen filtrering behövs, och räknesättet följer bilden.
+                    rows = OfficialFaltskytteList.RowsOf(frozen);
+                    modeByCompetition[compId] = string.Equals(frozen.ScoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
+                    shootOffStations[compId] = new HashSet<int>();
+                }
+                else if (!resultsByCompetition.TryGetValue(compId, out rows))
                 {
                     set.ByCompetition[compId] = new List<ShooterCompetitionScore>();
                     continue;

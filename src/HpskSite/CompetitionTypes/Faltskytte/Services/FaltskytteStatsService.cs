@@ -40,6 +40,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly OfficialFaltskytteList _officialFalt;
 
         public FaltskytteStatsService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -47,8 +48,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ILogger<FaltskytteStatsService> logger,
             Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Competitions.CompetitionLinks links)
+            HpskSite.Services.Competitions.CompetitionLinks links,
+            OfficialFaltskytteList officialFalt)
         {
+            _officialFalt = officialFalt;
             _competitions = competitions;
             _links = links;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -119,9 +122,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
                     var stationCount = firstWcConfig?.Stations.Count ?? 0;
 
+                    // ⚠️ F0c: en OFFICIELL lista läses ur sin frusna bild — placeringen på Min sida får inte röra sig
+                    // för att en skottrad ändrats efter publiceringen. Bildens klassgrupper är redan sammanslagna och
+                    // rankade som listan visar dem. Preliminär lista (eller saknad bild): live som förut.
+                    var frozen = _officialFalt.TryGet(competitionId);
+
                     // Load EVERY shooter's entries for the comp so we can rank.
-                    var allRows = await db.FetchAsync<FaltskytteResultEntry>(
-                        "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competitionId);
+                    var allRows = frozen != null
+                        ? HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList.RowsOf(frozen)
+                        : await db.FetchAsync<FaltskytteResultEntry>(
+                            "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competitionId);
                     if (!allRows.Any()) continue;
 
                     // Build shooter aggregates with totals (same shape GetFaltskytteResults uses).
@@ -179,11 +189,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     }
 
                     // Rank inside class group with the official tiebreaker.
-                    var isPoang = scoringMode.Equals("Poang", StringComparison.OrdinalIgnoreCase);
+                    var isPoang = (frozen?.ScoringMode ?? scoringMode).Equals("Poang", StringComparison.OrdinalIgnoreCase);
                     var tieBreaker = new FaltskylteTieBreaker(isPoang);
                     var classGroups = shooters
                         .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                         .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s, tieBreaker).ToList());
+                    if (frozen != null)
+                    {
+                        // Gruppering och ordning ur bilden (utan omräkning); mergeLookup pekar varje klass på sin bildgrupp.
+                        mergeLookup = frozen.ClassGroups
+                            .SelectMany(cg => cg.Shooters.Select(s => (Class: s.ShootingClass, Group: cg.ClassName)))
+                            .GroupBy(x => x.Class).ToDictionary(g => g.Key, g => g.First().Group);
+                        classGroups = frozen.ClassGroups.ToDictionary(cg => cg.ClassName, cg => cg.Shooters.ToList());
+                    }
 
                     // Find the member's row(s) — a member can register in more than one class.
                     var memberRows = shooters.Where(s => s.MemberId == memberId).ToList();

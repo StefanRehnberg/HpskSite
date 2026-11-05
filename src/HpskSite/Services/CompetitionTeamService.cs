@@ -31,7 +31,9 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.ClubRosterService _roster;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList _officialFalt;
         public CompetitionTeamService(
+            HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList officialFalt,
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
             AdminAuthorizationService authorizationService,
@@ -47,6 +49,7 @@ namespace HpskSite.Services
             HpskSite.Services.ClubRosterService roster,
             HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _officialFalt = officialFalt;
             _memberProperties = memberProperties;
             _roster = roster;
             _competitions = competitions;
@@ -1450,6 +1453,22 @@ namespace HpskSite.Services
             {
                 var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return null;
+
+                // ⚠️ F0c: är fältlistan OFFICIELL och fryst räknas lagen ur DEN bilden — inte ur skottraderna. Individmedaljerna
+                // läser redan den frusna listan; lagen räknades live, så en rad som ändrats efter publiceringen kunde ge ett
+                // lag en annan placering än skytterna i listan. Räknesättet och stationerna följer bilden, inte dagens konfiguration.
+                var frozen = _officialFalt.TryGet(competitionId);
+                if (frozen != null)
+                {
+                    var frozenRows = HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList.RowsOf(frozen);
+                    return new FaltskytteTeamContext
+                    {
+                        RowsByMember = frozenRows.ToLookup(r => r.MemberId),
+                        StationsDescending = frozenRows.Select(r => r.StationNumber).Distinct().OrderByDescending(n => n).ToList(),
+                        UsesPoints = string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase)
+                                  || string.Equals(frozen.ScoringMode, "Poang", StringComparison.OrdinalIgnoreCase)
+                    };
+                }
 
                 // ⚠️ Tävlingstypen läses ur KONFIGURATIONEN först. Egenskapen `scoringMode` är
                 // en spegel som bara synkas vid Anslut och kan vara inaktuell — läses den ensam

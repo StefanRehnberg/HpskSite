@@ -44,6 +44,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly FaltskytteConfigurationService _configurations;
 
         private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
+        private readonly OfficialFaltskytteList _officialFalt;
+        private readonly FaltskytteMedalLedger _medalLedger;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -69,9 +71,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             FaltskytteConfigurationService configurations,
-            HpskSite.Services.Hosting.DatabaseLock dbLock)
+            HpskSite.Services.Hosting.DatabaseLock dbLock,
+            OfficialFaltskytteList officialFalt,
+            FaltskytteMedalLedger medalLedger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _officialFalt = officialFalt;
+            _medalLedger = medalLedger;
             _competitions = competitions;
             _dbLock = dbLock;
             _configurations = configurations;
@@ -1115,17 +1121,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(competitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                // Samma bygge som resultatlistan, så kortet och listan aldrig kan vara oense om
-                // vilken strid som pågår.
-                var build = await _resultsBuilder.BuildAsync(competitionId, null, subCompetitionOnly);
-                if (build.Results == null)
-                    return Json(new { success = false, message = build.Error ?? "Kunde inte bygga resultatlistan." });
+                // ⚠️ F0c: kortet och listan kan aldrig vara oense — för en OFFICIELL huvudlista läser kortet därför listans
+                // frusna bild (samma medaljstrider som listan visar), inte en ny uppräkning ur skottraderna. Särskjutningens
+                // endpoints skriver om bilden vid varje sparning, så kortet följer med efter varje inmatning. Preliminär
+                // lista och deltävlingen: samma live-bygge som resultatlistan.
+                var frozenList = subCompetitionOnly ? null : _officialFalt.TryGet(competitionId);
+                FaltskylteFinalResults? shootOffResults = frozenList;
+                if (shootOffResults == null)
+                {
+                    var build = await _resultsBuilder.BuildAsync(competitionId, null, subCompetitionOnly);
+                    if (build.Results == null)
+                        return Json(new { success = false, message = build.Error ?? "Kunde inte bygga resultatlistan." });
+                    shootOffResults = build.Results;
+                }
 
                 // ⚠️ JSON-FORMEN ÄR OFÖRÄNDRAD: `className` bär nu MÄSTERSKAPSKATEGORINS namn i
                 // stället för skicklighetsklassens. Kortets JS är därmed orörd — men den strid
                 // som visas är den som faktiskt avgör en medalj. Samma grepp som
                 // precisionsfamiljens GetShootOffStatus tog 2026-09-07.
-                var classGroups = build.Results.MedalCategoryTies
+                var classGroups = shootOffResults.MedalCategoryTies
                     .Where(t => t.Groups != null && t.Groups.Count > 0)
                     .Select(t => new
                     {
@@ -1298,7 +1312,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 // Materialize won Standard medals into the ledger (Fältskytte computes medals
                 // live, so we compute them here rather than from a stored snapshot).
-                await MaterializeFaltskytteMedalsAsync(_competitions.GetSaved(request.CompetitionId)!, request.IsOfficial);
+                // F0c: vid PUBLICERING skriver RefreshAsync (nedan) både bilden och medaljerna; här tas bara platsmedaljerna
+                // bort vid avpublicering.
+                if (!request.IsOfficial)
+                    await MaterializeFaltskytteMedalsAsync(_competitions.GetSaved(request.CompetitionId)!, false);
             }
 
             // Ensure a competitionResult child page exists so the comp gets a /resultat/ URL.
@@ -1369,101 +1386,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             });
         }
 
-        /// <summary>
-        /// Materialize Fältskytte/MagnumFält Standard medals into the Standardmedalj ledger.
-        /// On publish (official=true) the medals are computed live and upserted; on un-publish
-        /// the on-site awards are removed. Never blocks the publish flow.
-        /// </summary>
-        private async Task MaterializeFaltskytteMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isOfficial)
-        {
-            try
-            {
-                if (!isOfficial)
-                {
-                    await _medalMaterialization.RemoveOnSiteForCompetitionAsync(competition.Id);
-                    return;
-                }
-
-                var discipline = competition.CompetitionType ?? StandardMedals.Faltskytte;
-                var competitionDate = competition.CompetitionDate;
-                var year = competitionDate?.Year ?? DateTime.Now.Year;
-                var competitionName = competition.CompetitionName;
-                if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
-
-                var medals = await ComputeFaltskytteOnSiteMedalsAsync(competition);
-                await _medalMaterialization.UpsertOnSiteMedalsAsync(
-                    competition.Id, discipline, year, competitionName, competitionDate, medals);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to materialize Fältskytte standard medals for competition {CompetitionId}", competition.Id);
-            }
-        }
-
-        /// <summary>
-        /// Compute the won Standard medals for a Fältskytte/MagnumFält competition. Mirrors the
-        /// medal computation in GetFaltskytteResults / FaltskytteStatsService: medals are assigned
-        /// on the flat per-(member,class) result list (class merging is display-only and does not
-        /// affect medal assignment). Returns empty when medals aren't awarded for this competition.
-        /// </summary>
-        private async Task<List<OnSiteMedal>> ComputeFaltskytteOnSiteMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
-        {
-            var result = new List<OnSiteMedal>();
-
-            // BR-PS.1.3: club competitions never award standard medals.
-            if (!competition.IsAwardingStandardMedals || competition.IsClubOnly)
-                return result;
-
-            var competitionConfig = ParseCompetitionConfig(competition);
-            // Tävlingstyp from the config first (the property is a stale-able mirror) —
-            // standardmedalj thresholds differ between Normalfält and Poängfält.
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
-            var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
-            var stationCount = firstWcConfig?.Stations.Count(s => !s.IsShootOffOnly) ?? 0;
-            var shootOffOnlyStationNumbers = (firstWcConfig?.Stations
-                .Where(s => s.IsShootOffOnly).Select(s => s.Station).ToHashSet()) ?? new HashSet<int>();
-
-            using var db = _umbracoDatabaseFactory.CreateDatabase();
-            var allResults = await db.FetchAsync<FaltskytteResultEntry>(
-                "WHERE CompetitionId = @0 ORDER BY MemberId, StationNumber", competition.Id);
-            if (shootOffOnlyStationNumbers.Count > 0)
-                allResults = allResults.Where(r => !shootOffOnlyStationNumbers.Contains(r.StationNumber)).ToList();
-            if (!allResults.Any()) return result;
-
-            var shooterResults = allResults
-                .GroupBy(r => new { r.MemberId, r.ShootingClass })
-                .Select(g =>
-                {
-                    var stationResults = g.OrderBy(r => r.StationNumber)
-                        .Select(r => new FaltskytteStationResult
-                        {
-                            StationNumber = r.StationNumber,
-                            Hits = r.Hits,
-                            Figures = r.Figures,
-                            TiebreakerScore = r.TiebreakerScore
-                        }).ToList();
-                    return new FaltskytteShooterResult
-                    {
-                        MemberId = g.Key.MemberId,
-                        ShootingClass = g.Key.ShootingClass,
-                        Stations = stationResults,
-                        TotalHits = stationResults.Sum(s => s.Hits),
-                        TotalFigures = stationResults.Sum(s => s.Figures),
-                        TotalPoints = stationResults.Sum(s => s.Points),
-                        TotalTiebreakerScore = stationResults.Where(s => s.TiebreakerScore.HasValue).Sum(s => s.TiebreakerScore!.Value)
-                    };
-                }).ToList();
-
-            var isSmOrLdm = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition).IsSmOrLandsdel;
-            new Services.FaltskytteStandardMedalService().CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
-
-            foreach (var s in shooterResults)
-            {
-                if (StandardMedals.IsMedal(s.StandardMedal))
-                    result.Add(new OnSiteMedal(s.MemberId, s.ShootingClass, s.StandardMedal!));
-            }
-            return result;
-        }
+        /// <summary>Medaljregistret (F0c: flyttat till <see cref="FaltskytteMedalLedger"/>, som RefreshAsync också anropar).</summary>
+        private Task MaterializeFaltskytteMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isOfficial)
+            => _medalLedger.MaterializeAsync(competition, isOfficial);
 
         /// <summary>
         /// One-shot backfill: creates the missing "Resultat" competitionResult child page

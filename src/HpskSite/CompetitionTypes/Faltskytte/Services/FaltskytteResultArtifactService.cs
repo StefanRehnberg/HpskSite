@@ -39,6 +39,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly FaltskytteMedalLedger _medalLedger;
 
         public FaltskytteResultArtifactService(
             IContentService contentService,
@@ -46,8 +47,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ILogger<FaltskytteResultArtifactService> logger,
             IServiceProvider services,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            FaltskytteMedalLedger medalLedger)
         {
+            _medalLedger = medalLedger;
             _competitions = competitions;
             _results = results;
             _contentService = contentService;
@@ -105,6 +108,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     r.PublishedSnapshot = snapshot;
                     r.LastUpdated = DateTime.Now;
                 });
+
+                // F0c: medaljregistret följer bilden. En officiell huvudlista som just fått en ny bild får också nya
+                // platsmedaljer (Uppdatera, särskjutning, sammanslagning, konfiguration) — förut bara vid Publicera.
+                // Inte för en preliminär lista: dess medaljer finns inte i registret, och en avpublicering tar bort dem.
+                if (snapshot.Length > 0)
+                    await _medalLedger.MaterializeAsync(competition, true);
 
                 if (snapshot.Length > 0)
                     // Warning med flit: Information syns inte i prod (Serilog Default = Warning), och en omräkning av en PUBLICERAD lista ska gå att spåra.
