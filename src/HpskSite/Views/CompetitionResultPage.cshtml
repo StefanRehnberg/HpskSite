@@ -1255,7 +1255,14 @@
         //
         // Samma löfte som där: det är en VY. Varje rad skriver ut sin klass OCH sin officiella
         // placering i klassen, så listan aldrig kan läsas som ett resultat.
-        function faltFlattenByWeaponGroup(classGroups, isPoang) {
+        // Platsen i klassen: serverns när den har räknat den (en tävling med "Utanför mästerskapet" — den som är utanför får
+        // ingen plats, '–'), annars ordningen som förut. Gamla listor har inget placementsAssigned och ritas som de alltid gjort.
+        function faltClassPlace(shooter, idx, assigned) {
+            if (!assigned) return idx + 1;
+            return shooter.outOfCompetition ? '–' : (shooter.placement != null ? shooter.placement : idx + 1);
+        }
+
+        function faltFlattenByWeaponGroup(classGroups, isPoang, placementsAssigned) {
             const keys = s => isPoang
                 ? [s.totalPoints || 0, s.totalTiebreakerScore || 0, 0]
                 : [s.totalHits || 0, s.totalFigures || 0, s.totalTiebreakerScore || 0];
@@ -1270,7 +1277,7 @@
                 (group.shooters || []).forEach((shooter, idx) => {
                     byCode.get(code).push(Object.assign({}, shooter, {
                         __officialClassName: shooter.shootingClass || group.className || '',
-                        __officialPlace: idx + 1,
+                        __officialPlace: faltClassPlace(shooter, idx, placementsAssigned),
                         __sortKeys: keys(shooter)
                     }));
                 });
@@ -1291,10 +1298,18 @@
                 // Lika på ALLA nycklar delar placering. Den officiella särskiljningen bortom dem
                 // är särskjutning, alltså ett beslut servern äger — den här listan hittar inte på
                 // en egen ordning för skyttar den inte kan skilja ärligt.
-                let pos = 0, prev = null;
+                // Den som skjuter utanför mästerskapet får ingen plats och räknas inte i placeringen (utan sådana skyttar är
+                // `contenders` exakt i + 1 som förut).
+                let pos = 0, prev = null, contenders = 0;
                 shooters.forEach((s, i) => {
+                    if (s.outOfCompetition) {
+                        s.__flatPos = '–';
+                        s.__flatClassLabel = `${s.__officialClassName} · –`;
+                        return;
+                    }
+                    contenders++;
                     const same = prev && prev.every((v, k) => v === s.__sortKeys[k]);
-                    if (!same) { pos = i + 1; prev = s.__sortKeys; }
+                    if (!same) { pos = contenders; prev = s.__sortKeys; }
                     s.__flatPos = pos;
                     s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
                 });
@@ -1330,8 +1345,9 @@
                 const faltFlattenable = crFlattenableGroups(results.classGroups);
                 html += crViewToggleHtml(faltFlattenable);
                 const faltGroups = (crFlatMode && faltFlattenable)
-                    ? faltFlattenByWeaponGroup(results.classGroups, isPoang)
+                    ? faltFlattenByWeaponGroup(results.classGroups, isPoang, results.placementsAssigned === true)
                     : results.classGroups;
+                const placementsAssigned = results.placementsAssigned === true;
 
                 faltGroups.forEach(group => {
                     // Show admin-overridden display name when present, fall back to auto.
@@ -1365,8 +1381,8 @@
                         // (@@media print) gäller även här. 'table-info fw-bold' följde med i PDF:en.
                         const rowClass = isCurrentUser ? 'current-user' : '';
                         html += `<tr class="${rowClass}">
-                            <td class="text-center">${group.__isFlat ? shooter.__flatPos : idx + 1}</td>
-                            <td>${shooter.name}</td>
+                            <td class="text-center">${group.__isFlat ? shooter.__flatPos : faltClassPlace(shooter, idx, placementsAssigned)}</td>
+                            <td>${shooter.name}${shooter.outOfCompetition ? '<div class="small text-muted">Utanför mästerskapet</div>' : ''}</td>
                             <td>${shooter.club}</td>
                             <td class="text-center">${group.__isFlat ? shooter.__flatClassLabel : shooter.shootingClass}</td>`;
 
@@ -1402,6 +1418,11 @@
                     });
 
                     html += `</tbody></table>`;
+
+                    // Förklaringen sitter UNDER tabellen (och följer med i utskriften) — inte i ett no-print-fält.
+                    if ((group.shooters || []).some(s => s.outOfCompetition)) {
+                        html += `<div class="text-muted small mt-1 mb-2"><i class="bi bi-info-circle me-1"></i>Utanför mästerskapet: skytten får ingen placering och ingen mästerskapsmedalj. Standardmedalj kan ändå delas ut.</div>`;
+                    }
 
                     // Per-class footnotes from server (e.g. "Särskjutning avgjorde guldet: Anna 5/4 vs Berit 4/3")
                     if (Array.isArray(group.shootOffNotes) && group.shootOffNotes.length > 0) {
