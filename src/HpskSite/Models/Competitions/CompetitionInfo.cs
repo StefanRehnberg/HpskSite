@@ -166,6 +166,24 @@ namespace HpskSite.Models.Competitions
 
         public bool MedalsPerWeaponGroup { get; set; }
 
+        /// <summary>
+        /// Mästerskapets vapengrupper (kommalista, kanonisk, se <c>ChampionshipWeaponGroups.Canonicalize</c>); null = alla grupper
+        /// (dagens beteende). Fält först. Effekten finns bara via <c>ChampionshipRule</c>.
+        /// </summary>
+        public string? ChampionshipWeaponGroups { get; set; }
+
+        /// <summary>Vilka som deltar i mästerskapet: null = alla (dagens beteende), "own" = egen krets/landsdel/klubb, "own+neighbours" = egen + angränsande kretsar.</summary>
+        public string? ChampionshipParticipants { get; set; }
+
+        /// <summary>Arrangörens val: false = utanför-skyttar visas "på rätt plats", true = samlade sist i klassen.</summary>
+        public bool HideOutOfCompetitionInPlace { get; set; }
+
+        /// <summary>
+        /// Växeln för utanför-mästerskapet-beteendet PER TÄVLING: null = av (dagens beteende, alla befintliga tävlingar), "on" = på.
+        /// Tillstånd, följer aldrig med en kopia. Läs via <c>ChampionshipRule</c>, aldrig direkt.
+        /// </summary>
+        public string? ChampionshipMode { get; set; }
+
         /// <summary>Filerna som de lagrade mediareferenserna (MediaPicker3-JSON).</summary>
         public string? InvitationFile { get; set; }
         public string? ResultListFile { get; set; }

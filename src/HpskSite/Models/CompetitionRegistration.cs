@@ -20,12 +20,26 @@ namespace HpskSite.Models
         public int? JoinMemberId { get; set; }
 
         /// <summary>
+        /// Arrangörens BESLUT om "Utanför mästerskapet" för just den här klassraden (null = inget beslut, följ förslaget).
+        /// ⚠️ Bara för LÄSNING: ligger i <c>CompetitionRegistrationClassDecision</c> och skrivs aldrig av <c>Save</c> —
+        /// bara av <c>SetOutOfCompetition</c>. Ett värde som sätts här och sparas med <c>Save</c> ignoreras med flit.
+        /// </summary>
+        public bool? OutOfCompetition { get; set; }
+
+        /// <summary>Vem som satt beslutet (medlems-id), för läsning. Null = okänt eller gallrat.</summary>
+        public int? OutOfCompetitionSetBy { get; set; }
+
+        /// <summary>När beslutet sattes (svensk tid), för läsning.</summary>
+        public DateTime? OutOfCompetitionSetAt { get; set; }
+
+        /// <summary>
         /// En kopia med ALLA fält. Varje ställe som bygger om en klassanmälan utgår från den (eller från en befintlig post via den), så ett nytt fält aldrig tappas tyst:
         /// anmälan sparas som DELETE + INSERT av klassraderna och ersätts hela vid omanmälan. <c>ShootingClassEntryCopyTests</c> fäller bygget om ett fält saknas här.
         /// </summary>
         public ShootingClassEntry Copy() => new()
         {
-            Class = Class, StartPreference = StartPreference, TeamNumber = TeamNumber, JoinMemberId = JoinMemberId
+            Class = Class, StartPreference = StartPreference, TeamNumber = TeamNumber, JoinMemberId = JoinMemberId,
+            OutOfCompetition = OutOfCompetition, OutOfCompetitionSetBy = OutOfCompetitionSetBy, OutOfCompetitionSetAt = OutOfCompetitionSetAt
         };
     }
 

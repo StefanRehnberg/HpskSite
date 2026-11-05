@@ -90,6 +90,13 @@ namespace HpskSite.Services.Competitions
                 return level == "" ? null : level;
             }
 
+            // Utanför mästerskapet: lagras kanoniskt (okända koder bort, sorterat) så att databasen bara kan innehålla de kända formerna.
+            // Tomt eller bara okända = null = dagens beteende (alla grupper / alla deltar).
+            if (key.Equals("championshipWeaponGroups", StringComparison.OrdinalIgnoreCase))
+                return HpskSite.CompetitionTypes.Common.ChampionshipWeaponGroups.Canonicalize(text);
+            if (key.Equals("championshipParticipants", StringComparison.OrdinalIgnoreCase))
+                return HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(text);
+
             if (AmountFields.Contains(key))
                 return decimal.TryParse(text, out var dec) && dec >= 0 ? dec : null;
 

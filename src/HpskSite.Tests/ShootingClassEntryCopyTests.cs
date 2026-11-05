@@ -24,7 +24,7 @@ namespace HpskSite.Tests
             foreach (var p in Props)
             {
                 var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
-                p.SetValue(e, t == typeof(string) ? "värde-" + p.Name : t == typeof(int) ? 7 + p.Name.Length : t == typeof(bool) ? true : throw new NotSupportedException("Lägg till " + t + " i testet"));
+                p.SetValue(e, t == typeof(string) ? "värde-" + p.Name : t == typeof(int) ? 7 + p.Name.Length : t == typeof(bool) ? true : t == typeof(DateTime) ? new DateTime(2026, 11, 6, 12, 0, 0) : throw new NotSupportedException("Lägg till " + t + " i testet"));
             }
             return e;
         }

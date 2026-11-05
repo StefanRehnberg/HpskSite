@@ -198,6 +198,17 @@ VALUES (@0, @1, @2, @3, @4, @5)",
                         id, i, classes[i].Class, string.IsNullOrWhiteSpace(classes[i].StartPreference) ? "Inget" : classes[i].StartPreference,
                         classes[i].TeamNumber, classes[i].JoinMemberId);
                 }
+
+                // Beslutet "Utanför mästerskapet" bor i en EGEN tabell som Save aldrig skriver (klassraderna raderas och sätts in
+                // på nytt här, besluten ska överleva det). Försvinner klassraden (klassbyte, borttagen klass) hör beslutet inte
+                // längre till något och städas — det är det enda sättet ett klassbyte nollställer flaggan. Varje städat beslut
+                // loggas i beslutsloggen (Reason 'class-removed').
+                if (r.Id > 0)
+                {
+                    var cleanup = BuildDecisionCleanup(id, now, r.CompetitionId, r.MemberId, classes.Select(c => c.Class).ToList());
+                    db.Execute(cleanup.LogSql, cleanup.Args);
+                    db.Execute(cleanup.DeleteSql, cleanup.Args);
+                }
             }
             catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627
                                                                     && ex.Message.Contains("UX_CompetitionRegistration_ActiveMember"))
@@ -222,6 +233,26 @@ VALUES (@0, @1, @2, @3, @4, @5)",
         }
 
         // ── Hjälpare ───────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// SQL + parametrar som städar beslut vars klassrad inte längre finns (första satsen loggar, andra raderar). @0 anmälan, @1 tid,
+        /// @2 tävling, @3 medlem, från @4 de klassnycklar som BEHÅLLS. Ingen klass kvar = alla beslut hör till raderade klasser.
+        /// </summary>
+        internal static (string LogSql, string DeleteSql, object[] Args) BuildDecisionCleanup(
+            int registrationId, DateTime now, int competitionId, int memberId, IReadOnlyList<string> keptClassKeys)
+        {
+            var notIn = keptClassKeys.Count == 0
+                ? ""
+                : " AND ClassKey NOT IN (" + string.Join(",", keptClassKeys.Select((_, k) => "@" + (k + 4))) + ")";
+            var args = new List<object> { registrationId, now, competitionId, memberId };
+            args.AddRange(keptClassKeys);
+            var log = $@"
+INSERT INTO dbo.ChampionshipDecisionLog (CompetitionId, RegistrationId, MemberId, ClassKey, OldValue, NewValue, Reason, SetByMemberId, SetAt)
+SELECT @2, RegistrationId, @3, ClassKey, OutOfCompetition, NULL, 'class-removed', NULL, @1
+FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0{notIn}";
+            var delete = $"DELETE FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0{notIn}";
+            return (log, delete, args.ToArray());
+        }
 
         /// <summary>Klassens Id i stället för visningsnamnet, i ordning, utan dubbletter.</summary>
         public static List<ShootingClassEntry> NormalizeClasses(IEnumerable<ShootingClassEntry>? classes)
@@ -257,11 +288,19 @@ VALUES (@0, @1, @2, @3, @4, @5)",
             {
                 var inList = string.Join(",", batch.Select((_, i) => "@" + i));
                 foreach (var c in db.Fetch<ClassRow>(
-                             $"SELECT RegistrationId, SortOrder, ClassKey, StartPreference, TeamNumber, JoinMemberId FROM dbo.CompetitionRegistrationClass WHERE RegistrationId IN ({inList}) ORDER BY RegistrationId, SortOrder",
+                             $@"SELECT c.RegistrationId, c.SortOrder, c.ClassKey, c.StartPreference, c.TeamNumber, c.JoinMemberId,
+       d.OutOfCompetition, d.SetByMemberId AS DecisionSetBy, d.SetAt AS DecisionSetAt
+FROM dbo.CompetitionRegistrationClass c
+LEFT JOIN dbo.CompetitionRegistrationClassDecision d ON d.RegistrationId = c.RegistrationId AND d.ClassKey = c.ClassKey
+WHERE c.RegistrationId IN ({inList}) ORDER BY c.RegistrationId, c.SortOrder",
                              batch.Cast<object>().ToArray()))
                 {
                     if (!classes.TryGetValue(c.RegistrationId, out var list)) classes[c.RegistrationId] = list = new();
-                    list.Add(new ShootingClassEntry { Class = c.ClassKey, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber, JoinMemberId = c.JoinMemberId });
+                    list.Add(new ShootingClassEntry
+                    {
+                        Class = c.ClassKey, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber, JoinMemberId = c.JoinMemberId,
+                        OutOfCompetition = c.OutOfCompetition, OutOfCompetitionSetBy = c.DecisionSetBy, OutOfCompetitionSetAt = c.DecisionSetAt
+                    });
                 }
             }
 
@@ -317,6 +356,9 @@ VALUES (@0, @1, @2, @3, @4, @5)",
             public string StartPreference { get; set; } = "Inget";
             public int? TeamNumber { get; set; }
             public int? JoinMemberId { get; set; }
+            public bool? OutOfCompetition { get; set; }
+            public int? DecisionSetBy { get; set; }
+            public DateTime? DecisionSetAt { get; set; }
         }
 
         private sealed class PairRow

@@ -126,6 +126,9 @@ namespace HpskSite.Models.Competitions
             F("numberOfFinalSeries", D, CompetitionFieldShape.Int, c => c.NumberOfFinalSeries, (c, v) => c.NumberOfFinalSeries = (int)v!),
             F("maxReshoots", D, CompetitionFieldShape.Int, c => c.MaxReshoots, (c, v) => c.MaxReshoots = (int)v!),
             F("maxPatrolSize", D, CompetitionFieldShape.Int, c => c.MaxPatrolSize, (c, v) => c.MaxPatrolSize = Math.Clamp((int)v!, 0, 50)),   // CHECK 0..50 i databasen; ett värde utanför ger annars 500
+            F("championshipWeaponGroups", D, CompetitionFieldShape.Text, c => c.ChampionshipWeaponGroups, (c, v) => c.ChampionshipWeaponGroups = (string?)v),   // kanonisk kommalista; tom/okänd = null = alla grupper
+            F("championshipParticipants", D, CompetitionFieldShape.Choice, c => c.ChampionshipParticipants, (c, v) => c.ChampionshipParticipants = (string?)v),   // NVARCHAR(20)
+            F("hideOutOfCompetitionInPlace", D, CompetitionFieldShape.Bool, c => c.HideOutOfCompetitionInPlace, (c, v) => c.HideOutOfCompetitionInPlace = (bool)v!),
             F("showLiveResults", D, CompetitionFieldShape.Bool, c => c.ShowLiveResults, (c, v) => c.ShowLiveResults = (bool)v!),
             F("scoringMode", D, CompetitionFieldShape.Choice, c => c.ScoringMode, (c, v) => c.ScoringMode = (string?)v),
             F("stationConfig", D, CompetitionFieldShape.Text, c => c.StationConfig, (c, v) => c.StationConfig = (string?)v),
@@ -135,6 +138,7 @@ namespace HpskSite.Models.Competitions
 
             F("faltskyttePatrolsPublished", S, CompetitionFieldShape.Bool, c => c.FaltskyttePatrolsPublished, (c, v) => c.FaltskyttePatrolsPublished = (bool)v!),
             F("faltskyttePublishedGroups", S, CompetitionFieldShape.Text, c => c.FaltskyttePublishedGroups, (c, v) => c.FaltskyttePublishedGroups = (string?)v),
+            F("championshipMode", S, CompetitionFieldShape.Choice, c => c.ChampionshipMode, (c, v) => c.ChampionshipMode = (string?)v),   // NVARCHAR(10): null = av, "on"
             F("faltskytteResultsOfficial", S, CompetitionFieldShape.Bool, c => c.FaltskytteResultsOfficial, (c, v) => c.FaltskytteResultsOfficial = (bool)v!),
             F("faltskytteStationManagers", S, CompetitionFieldShape.Text, c => c.FaltskytteStationManagers, (c, v) => c.FaltskytteStationManagers = (string?)v),
             F("mergeConfig", S, CompetitionFieldShape.Text, c => c.MergeConfig, (c, v) => c.MergeConfig = (string?)v),

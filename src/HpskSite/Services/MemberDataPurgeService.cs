@@ -129,6 +129,9 @@ namespace HpskSite.Services
             ("PlanningShootIntent",          "MemberId"),
             // Planera dagen: personens eget läge (skjuter först, reserv …) är en uppgift om personen.
             ("PlanningShooterMode",          "MemberId"),
+            // Utanför mästerskapet: beslutsloggen (vem som fick sin flagga satt/borttagen) hör till skytten och rensas bara med en
+            // GDPR-rensning av medlemmen (Stefan 2026-11-04, beslut 13). Beslutsraden själv hör till anmälan (CASCADE) — bara vem som satte den släpps (AssignmentColumns).
+            ("ChampionshipDecisionLog",      "MemberId"),
 
             // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
             // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.
@@ -178,6 +181,10 @@ namespace HpskSite.Services
             // släpps pekaren (NULL, eller flyttas till kontot som blir kvar) och raden står kvar. ClearSql får inte vara tom (satsen blir "SET x = NULL, " = syntaxfel),
             // därför en neutral tilldelning.
             ("CompetitionRegistrationClass", "JoinMemberId", "ClassKey = ClassKey"),
+            // Utanför mästerskapet: den som SATTE beslutet (arrangören) släpps vid gallring; själva beslutet och loggraden står kvar
+            // (SetByMemberId är NULL-bar, CHECK tillåter NULL). ClearSql får inte nämna medlemskolumnen och inte vara tom.
+            ("CompetitionRegistrationClassDecision", "SetByMemberId", "SetAt = SetAt"),
+            ("ChampionshipDecisionLog",              "SetByMemberId", "SetAt = SetAt"),
         };
 
         /// <summary>
