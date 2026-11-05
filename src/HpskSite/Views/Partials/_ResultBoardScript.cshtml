@@ -385,11 +385,17 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             if(hasSS)h+='<th>Sär</th>';
             if(isMedals)h+='<th>S</th>';
             h+='</tr></thead><tbody>';
+            var contenders=0;
             shooters.forEach(function(sh,idx){
-                var pos=idx+1;
+                // Den som skjuter utanför mästerskapet får ingen plats och ingen pallfärg, och räknas inte i placeringen
+                // (utan sådana skyttar är contenders exakt idx+1 som förut).
+                var outside=(sh.outOfCompetition===true||sh.OutOfCompetition===true);
+                if(!outside)contenders++;
+                var pos=outside?'–':contenders;
                 var nm=sh.name||sh.Name||'',cl=sh.club||sh.Club||'',sc=sh.shootingClass||sh.ShootingClass||'';
+                if(outside)nm+='<div style="font-size:.75rem;opacity:.65">Utanför mästerskapet</div>';
                 var sts=sh.stations||sh.Stations||[];
-                var pc=pos<=3?' rb-pos-'+pos:'';
+                var pc=(!outside&&pos<=3)?' rb-pos-'+pos:'';
                 h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+nm+'</td><td>'+sc+'</td><td>'+cl+'</td>';
                 for(var i=1;i<=n;i++){
                     var st=null;
