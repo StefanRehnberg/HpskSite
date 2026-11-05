@@ -32,7 +32,9 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.ClubRosterService _roster;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
         private readonly HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList _officialFalt;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
         public CompetitionTeamService(
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition,
             HpskSite.CompetitionTypes.Faltskytte.Services.OfficialFaltskytteList officialFalt,
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,6 +51,7 @@ namespace HpskSite.Services
             HpskSite.Services.ClubRosterService roster,
             HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _outOfCompetition = outOfCompetition;
             _officialFalt = officialFalt;
             _memberProperties = memberProperties;
             _roster = roster;
@@ -66,10 +69,35 @@ namespace HpskSite.Services
             _logger = logger;
         }
 
+        /// <summary>
+        /// Utanför mästerskapet (Stefan 2026-11-04): en skytt som skjuter utanför mästerskapet får inte ingå i ett lag. Null = inget hinder.
+        /// Gäller bara tävlingar där beteendet är på (växel, mästerskap, fält); annars läses inga flaggor och allt är som förut.
+        /// </summary>
+        private string? OutOfCompetitionTeamError(int competitionId, IEnumerable<int> memberIds)
+        {
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return null;
+            var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+            if (!rule.OutOfCompetitionApplies) return null;
+
+            var outside = _outOfCompetition.Load(competition, rule);
+            foreach (var memberId in memberIds.Distinct())
+            {
+                if (!outside.HasMember(memberId)) continue;
+                var name = _registrations.FindForMember(competitionId, memberId)?.MemberName;
+                if (string.IsNullOrWhiteSpace(name)) name = GetMemberDisplayName(memberId);
+                return $"{name} skjuter utanför mästerskapet och kan inte ingå i ett lag.";
+            }
+            return null;
+        }
+
         public async Task<(bool success, string message, int? teamId)> CreateTeamAsync(
             int competitionId, string teamName, string teamClass, int clubId,
             int[] memberIds, int? spareId, int createdByMemberId, bool isRelay = false)
         {
+            var outsideError = OutOfCompetitionTeamError(competitionId, memberIds);
+            if (outsideError != null) return (false, outsideError, null);
+
             var (coreMembers, maxSpares) = TeamClassHelper.GetTeamSize(teamClass);
             // Springskytte: shooters may be named later (any time before the event), so a team
             // or relay can be created with no/partial members and the fee paid up front. All
@@ -457,6 +485,9 @@ namespace HpskSite.Services
             var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget finns inte.");
+
+            var outsideError = OutOfCompetitionTeamError(team.CompetitionId, memberIds);
+            if (outsideError != null) return (false, outsideError);
 
             // Validate team size. Springskytte allows naming shooters later, so a partial/
             // empty roster is accepted on edit too (other disciplines need the exact core).

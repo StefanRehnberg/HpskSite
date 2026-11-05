@@ -48,6 +48,19 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void A_shooter_outside_in_any_class_cannot_join_a_team()
+        {
+            // Lagbildningen frågar per skytt (ett lag är klubbens, inte klassens).
+            var (flags, _) = Flags(Reg(7, true, ("C2", true), ("A1", false)), Reg(8, true, ("C2", false)));
+            var c = Comp();
+            var set = flags.Load(c, ChampionshipRule.For(c));
+
+            Assert.True(set.HasMember(7));
+            Assert.False(set.HasMember(8));
+            Assert.False(set.HasMember(99));
+        }
+
+        [Fact]
         public void The_class_matches_in_id_and_display_name_form()
         {
             var (flags, _) = Flags(Reg(7, true, ("C_Vet_Y", true)));

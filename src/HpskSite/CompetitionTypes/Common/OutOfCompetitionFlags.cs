@@ -18,6 +18,9 @@ namespace HpskSite.CompetitionTypes.Common
 
         public int Count => _set.Count;
 
+        /// <summary>Är skytten utanför mästerskapet i NÅGON klass? Lagbildningen frågar så — ett lag är klubbens, inte klassens.</summary>
+        public bool HasMember(int memberId) => _set.Any(k => k.MemberId == memberId);
+
         /// <summary>Är skytten utanför mästerskapet i just den här klassen (Id eller visningsnamn)?</summary>
         public bool Contains(int memberId, string? shootingClassIdOrName) =>
             _set.Count > 0 && _set.Contains((memberId, ShootingClasses.NormalizeKey(shootingClassIdOrName)));
