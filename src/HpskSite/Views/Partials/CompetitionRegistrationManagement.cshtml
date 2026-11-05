@@ -352,6 +352,14 @@
             #regFilterCard:not(.reg-show-more) .reg-more-filter { display: none; }
         }
     </style>
+    @* "N föreslås utanför mästerskapet" — bara när tävlingen använder beteendet och något förslag väntar på beslut.
+       Förslaget blir ett beslut när resultatlistan publiceras; därför försvinner bannern av sig själv efteråt. *@
+    <div class="alert alert-warning d-none align-items-center flex-wrap gap-2 mb-3" id="regOocBanner" role="status">
+        <i class="bi bi-lightbulb"></i>
+        <span id="regOocBannerText" class="flex-grow-1"></span>
+        <button type="button" class="btn btn-sm btn-outline-dark" id="regOocShowBtn"
+                onclick="showOocSuggested()">Visa dem</button>
+    </div>
     <div class="card mb-3" id="regFilterCard">
         <div class="card-body">
             <div class="row g-2">
@@ -426,6 +434,15 @@
                         <option value="out">Ej incheckad</option>
                     </select>
                 </div>
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter d-none" id="regOocFilterCol">
+                    <label for="competitionOocFilter" class="form-label">Mästerskapet</label>
+                    <select class="form-select" id="competitionOocFilter" onchange="filterCompetitionRegistrations()">
+                        <option value="">Alla</option>
+                        <option value="suggested">Föreslagna utanför</option>
+                        <option value="outside">Utanför mästerskapet</option>
+                        <option value="inside">I mästerskapet</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>
@@ -437,7 +454,7 @@
         const out = document.getElementById('regActiveFilterCount');
         if (!card || !out) return;
         const update = () => {
-            let n = ['competitionClubFilter', 'competitionPreferenceFilter', 'competitionPaymentFilter', 'competitionCheckedInFilter']
+            let n = ['competitionClubFilter', 'competitionPreferenceFilter', 'competitionPaymentFilter', 'competitionCheckedInFilter', 'competitionOocFilter']
                 .filter(id => (document.getElementById(id) || {}).value).length;
             if (card.querySelector('#competitionClassFilterMenu input:checked')) n++;
             out.textContent = n ? ' (' + n + ' aktiva)' : '';
@@ -1716,6 +1733,7 @@ function loadCompetitionRegistrations() {
             populateCompetitionClubFilter();
             populateShootingClassFilter();
             updatePaymentSummary();
+            updateOocBanner();
             filterCompetitionRegistrations();
         } else {
             showCompetitionError(data.message || 'Failed to load registrations');
@@ -3005,8 +3023,49 @@ let consolidatedRefTerm = '';                // the search term this resolution 
 let paymentRefLookupTimer = null;
 let paymentRefLastTerm = '';
 
+// ── "Utanför mästerskapet": läget per anmälan, bannern och filtret ─────────────────────────────
+// En anmälan är "föreslagen" när någon klassrad som mästerskapet omfattar saknar beslut men har ett förslag; "utanför" när någon
+// sådan klassrad GÄLLER som utanför (beslut, annars förslag). Servern avgör vilka rader som omfattas (outOfCompetitionApplies).
+function oocStateOf(reg) {
+    const rows = (reg.shootingClasses || []).filter(sc => sc.outOfCompetitionApplies);
+    return {
+        applies: rows.length > 0,
+        suggested: rows.some(sc => sc.outOfCompetition == null && !!sc.outOfCompetitionSuggestion),
+        outside: rows.some(sc => sc.outOfCompetitionEffective === true)
+    };
+}
+
+function updateOocBanner() {
+    const banner = document.getElementById('regOocBanner');
+    const col = document.getElementById('regOocFilterCol');
+    if (!banner || !col) return;
+    const states = competitionRegistrations.map(oocStateOf);
+    col.classList.toggle('d-none', !states.some(s => s.applies));
+    const n = states.filter(s => s.suggested).length;
+    if (n === 0) {
+        banner.classList.add('d-none'); banner.classList.remove('d-flex');
+        return;
+    }
+    document.getElementById('regOocBannerText').textContent =
+        (n === 1 ? '1 skytt föreslås' : n + ' skyttar föreslås') +
+        ' skjuta utanför mästerskapet (annan krets, landsdel eller klubb). Förslaget blir ett beslut när resultatlistan publiceras. ' +
+        'Ska någon vara med: öppna Redigera anmälan och kryssa ur.';
+    banner.classList.remove('d-none'); banner.classList.add('d-flex');
+}
+
+function showOocSuggested() {
+    const sel = document.getElementById('competitionOocFilter');
+    if (!sel) return;
+    sel.value = 'suggested';
+    // Filtret ligger bakom "Fler filter" på telefon — öppna det så att ett aktivt filter inte är osynligt.
+    document.getElementById('regFilterCard')?.classList.add('reg-show-more');
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    filterCompetitionRegistrations();
+}
+
 function filterCompetitionRegistrations() {
     const selectedClasses = getSelectedCompetitionClasses();
+    const oocFilter = document.getElementById('competitionOocFilter')?.value || '';
     const clubFilter = document.getElementById('competitionClubFilter').value;
     const preferenceFilter = document.getElementById('competitionPreferenceFilter').value;
     const paymentFilter = document.getElementById('competitionPaymentFilter')?.value || '';
@@ -3025,6 +3084,11 @@ function filterCompetitionRegistrations() {
         const matchesCheckedIn = !checkedInFilter
             || (checkedInFilter === 'in' && reg.isCheckedIn === true)
             || (checkedInFilter === 'out' && !reg.isCheckedIn);
+        const oocState = oocFilter ? oocStateOf(reg) : null;
+        const matchesOoc = !oocFilter
+            || (oocFilter === 'suggested' && oocState.suggested)
+            || (oocFilter === 'outside' && oocState.outside)
+            || (oocFilter === 'inside' && oocState.applies && !oocState.outside);
 
         // A resolved samlingsfaktura reference wins over text matching: the club's payment covers a
         // specific set of registrations, and those are exactly the rows the cashier needs to see.
@@ -3046,7 +3110,7 @@ function filterCompetitionRegistrations() {
             matchesSearch = haystack.includes(searchTerm);
         }
 
-        return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesCheckedIn && matchesSearch;
+        return matchesClass && matchesClub && matchesPreference && matchesPayment && matchesCheckedIn && matchesOoc && matchesSearch;
     });
 
     // Header badge reflects the filtered view, not the full total.
