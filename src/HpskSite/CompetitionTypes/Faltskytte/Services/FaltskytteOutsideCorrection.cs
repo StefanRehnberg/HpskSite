@@ -132,7 +132,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         public const int MinReasonLength = 5;
         public const int MaxReasonLength = 300;
-        public const string ChangeAction = "outside-championship-correction";
+        /// <summary>⚠️ Högst 20 tecken: <c>CompetitionChange.Action</c> är nvarchar(20) och <c>Record</c> sväljer felet tyst (testat).</summary>
+        public const string ChangeAction = "outside-correction";
 
         private readonly FaltskytteResultsBuilder _builder;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;

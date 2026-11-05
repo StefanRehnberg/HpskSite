@@ -82,6 +82,14 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void The_change_log_action_fits_the_column()
+        {
+            // CompetitionChange.Action är nvarchar(20); CompetitionChangeRecorder.Record sväljer ett för långt värde tyst
+            // (fångades först vid körning mot rehearsal: raden med anledningen saknades).
+            Assert.InRange(FaltskytteOutsideCorrectionService.ChangeAction.Length, 1, 20);
+        }
+
+        [Fact]
         public void Nothing_changes_when_the_shooter_is_last_and_has_no_medal_effect()
         {
             var before = List(S(1, "Ann", 1), S(2, "Bo", 2));
