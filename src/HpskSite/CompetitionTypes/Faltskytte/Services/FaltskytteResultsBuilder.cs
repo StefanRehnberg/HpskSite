@@ -94,7 +94,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
 
         public async Task<FaltskytteResultsBuildResult> BuildAsync(
-            int competitionId, string? mergeConfig = null, bool subCompetitionOnly = false)
+            int competitionId, string? mergeConfig = null, bool subCompetitionOnly = false,
+            OutOfCompetitionSet? outsideOverride = null)
         {
             var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
@@ -260,7 +261,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // plats och ingen mästerskapsmedalj. Platsen räknas över de tävlande i klassgruppen (visningsgruppen, den sammanslagna om
             // klasserna slagits ihop); mästerskapskategorierna nedan räknas bara över de tävlande. Gäller inte tävlingen beteendet
             // (växeln av, inget mästerskap, inte fält) sätts ingenting och allt är som förut.
-            var outside = _outOfCompetition.Load(competition, championshipRule);
+            // outsideOverride: ENBART Rätta-flödets "hur ser listan ut om…" (förhandsvisningen) — aldrig ett skrivande anrop.
+            var outside = outsideOverride ?? _outOfCompetition.Load(competition, championshipRule);
             var placementsAssigned = championshipRule.OutOfCompetitionApplies;
             if (placementsAssigned)
             {

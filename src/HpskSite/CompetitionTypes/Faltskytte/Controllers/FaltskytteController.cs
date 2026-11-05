@@ -47,6 +47,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly OfficialFaltskytteList _officialFalt;
         private readonly FaltskytteMedalLedger _medalLedger;
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
+        private readonly FaltskytteOutsideCorrectionService _outsideCorrection;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -75,11 +76,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             HpskSite.Services.Hosting.DatabaseLock dbLock,
             OfficialFaltskytteList officialFalt,
             FaltskytteMedalLedger medalLedger,
-            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition,
+            FaltskytteOutsideCorrectionService outsideCorrection)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _officialFalt = officialFalt;
             _outOfCompetition = outOfCompetition;
+            _outsideCorrection = outsideCorrection;
             _medalLedger = medalLedger;
             _competitions = competitions;
             _dbLock = dbLock;
@@ -1384,6 +1387,70 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
 
             return Json(new { success = true, resultsRefreshed = artifactRefreshed });
+        }
+
+        // ── Rätta listan: "Flytta utanför mästerskapet" (S6) ────────────────────────────────
+        // En publicerad lista är fast. Det här är den enda vägen att ändra vem som skjuter utanför mästerskapet efteråt:
+        // förhandsvisningen visar konsekvenserna (platser, medaljer), ändringen kräver anledning + bekräftelse och räknar om listan.
+
+        public class MoveOutsideRequest
+        {
+            public int CompetitionId { get; set; }
+            public int RegistrationId { get; set; }
+            public string ClassKey { get; set; } = "";
+            public string? Reason { get; set; }
+            public bool Confirmed { get; set; }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("HasCompetitionOrganiserAccessAsync(tävlingen): arrangörens behörighet, som SetOutOfCompetition")]
+        public async Task<IActionResult> PreviewMoveOutsideChampionship([FromBody] MoveOutsideRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.RegistrationId <= 0 || string.IsNullOrWhiteSpace(request.ClassKey))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await _adminAuthorizationService.HasCompetitionOrganiserAccessAsync(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var p = await _outsideCorrection.PreviewAsync(request.CompetitionId, request.RegistrationId, request.ClassKey);
+                return p.Ok
+                    ? Json(new { success = true, memberName = p.MemberName, className = p.ClassName, lines = p.Lines,
+                                 placementChanges = p.PlacementChanges, medalChanges = p.MedalChanges })
+                    : Json(new { success = false, message = p.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PreviewMoveOutsideChampionship failed for registration {RegistrationId}", request?.RegistrationId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("HasCompetitionOrganiserAccessAsync(tävlingen): arrangörens behörighet, som SetOutOfCompetition")]
+        public async Task<IActionResult> MoveOutsideChampionship([FromBody] MoveOutsideRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.RegistrationId <= 0 || string.IsNullOrWhiteSpace(request.ClassKey))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await _adminAuthorizationService.HasCompetitionOrganiserAccessAsync(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var memberId = await GetCurrentMemberIdAsync();
+                var r = await _outsideCorrection.ApplyAsync(request.CompetitionId, request.RegistrationId, request.ClassKey,
+                    request.Reason, request.Confirmed, memberId > 0 ? memberId : null);
+                return r.Ok
+                    ? Json(new { success = true, listRefreshed = r.ListRefreshed })
+                    : Json(new { success = false, message = r.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MoveOutsideChampionship failed for registration {RegistrationId}", request?.RegistrationId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
         }
 
         /// <summary>

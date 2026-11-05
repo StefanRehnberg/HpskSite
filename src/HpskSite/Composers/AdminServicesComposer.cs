@@ -374,6 +374,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<FaltskytteResultsBuilder>();
             builder.Services.AddScoped<FaltskytteResultArtifactService>();
             builder.Services.AddScoped<FaltskytteMedalLedger>();
+            builder.Services.AddScoped<FaltskytteOutsideCorrectionService>();
             builder.Services.AddScoped<OfficialFaltskytteList>(); // F0c: den frusna listan, för lag/Min sida/serier/särskjutningskort
 
             // Standalone Fältskytte station configurations (CRUD + sharing + secrecy gate)

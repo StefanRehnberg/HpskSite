@@ -18,6 +18,13 @@ namespace HpskSite.CompetitionTypes.Common
 
         public int Count => _set.Count;
 
+        /// <summary>En ny mängd med skytten i klassen tillagd. Används av Rätta-flödets förhandsvisning ("hur ser listan ut om…") — rör aldrig lagringen.</summary>
+        public OutOfCompetitionSet With(int memberId, string? shootingClassIdOrName)
+        {
+            var copy = new HashSet<(int, string)>(_set) { (memberId, ShootingClasses.NormalizeKey(shootingClassIdOrName)) };
+            return new OutOfCompetitionSet(copy);
+        }
+
         /// <summary>Är skytten utanför mästerskapet i NÅGON klass? Lagbildningen frågar så — ett lag är klubbens, inte klassens.</summary>
         public bool HasMember(int memberId) => _set.Any(k => k.MemberId == memberId);
 
