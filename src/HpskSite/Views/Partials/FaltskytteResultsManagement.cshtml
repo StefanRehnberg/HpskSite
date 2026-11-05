@@ -64,6 +64,10 @@
                        target="_blank" rel="noopener" onclick="event.stopPropagation()">
                         <i class="bi bi-award me-1"></i>Prisutdelningslistan
                     </a>
+                    @* Rätta den PUBLICERADE listan: bara när listan är officiell och tävlingen använder "Utanför mästerskapet" (S6). *@
+                    <button class="btn btn-outline-secondary btn-sm d-none" id="faltMoveOutsideBtn" onclick="faltOpenMoveOutside(event)">
+                        <i class="bi bi-person-dash me-1"></i>Flytta utanför mästerskapet…
+                    </button>
                     <button class="btn btn-success btn-sm" id="faltPublishResultsBtn" style="display:none" onclick="faltPublishResults(true, event)">
                         <i class="bi bi-globe me-1"></i>Officiell
                     </button>
@@ -77,6 +81,7 @@
         <div id="faltResultBody">
             <div class="card-body p-0">
                 @* Publicerade listor är FASTA: de ändras bara när någon trycker Uppdatera. Här syns det, och när nya resultat väntar. *@
+                <div id="faltMoveOutsideFlash" class="alert alert-success small mb-0 rounded-0 d-none" role="status"></div>
                 <div id="faltFreshnessHint" class="alert alert-info small mb-0 rounded-0 d-none" role="status"></div>
                 <div id="faltResultContent">
                     @if (!string.IsNullOrEmpty(resultPageUrl))
@@ -205,6 +210,51 @@
         </div>
     </div>
     }
+</div>
+
+@* Rätta den publicerade listan: flytta en skytt utanför mästerskapet (S6). Steg 1 välj skytt, steg 2 konsekvenserna, steg 3 anledning + bekräftelse.
+   Ingen webbläsarruta (confirm/alert) — allt står i dialogen. *@
+<div class="modal fade" id="faltMoveOutsideModal" tabindex="-1" aria-labelledby="faltMoveOutsideTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="faltMoveOutsideTitle"><i class="bi bi-person-dash me-2"></i>Flytta utanför mästerskapet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-3">
+                    Resultatlistan är publicerad. Skytten står kvar i listan med sitt resultat och kan få standardmedalj, men får ingen placering och
+                    ingen mästerskapsmedalj. Placeringarna efter skytten flyttas upp.
+                </p>
+                <div class="alert alert-danger small d-none" id="faltMoveOutsideError" role="alert"></div>
+                <label class="form-label" for="faltMoveOutsideFilter">Skytt och klass</label>
+                <input type="text" class="form-control mb-2" id="faltMoveOutsideFilter" placeholder="Sök namn" autocomplete="off">
+                <select class="form-select mb-3" id="faltMoveOutsideSelect" size="6" aria-label="Skytt och klass"></select>
+                <button type="button" class="btn btn-outline-primary btn-sm mb-3" id="faltMoveOutsidePreviewBtn" disabled>Visa konsekvenserna</button>
+
+                <div class="d-none" id="faltMoveOutsideConsequences">
+                    <h6 class="mb-2">Om du flyttar <span id="faltMoveOutsideWho"></span> utanför mästerskapet</h6>
+                    <ul class="mb-2" id="faltMoveOutsideLines"></ul>
+                    <p class="small text-muted" id="faltMoveOutsideNobody"></p>
+                    <p class="small fw-semibold mb-3">Kontakta dem som berörs innan du fortsätter.</p>
+
+                    <label class="form-label" for="faltMoveOutsideReason">Anledning <span class="text-muted fw-normal">(loggas)</span></label>
+                    <textarea class="form-control mb-2" id="faltMoveOutsideReason" rows="2" maxlength="300"
+                              placeholder="T.ex. skytten tävlar för en klubb i en annan krets"></textarea>
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="checkbox" id="faltMoveOutsideConfirm">
+                        <label class="form-check-label" for="faltMoveOutsideConfirm">
+                            Jag har kontrollerat att inga medaljer har beställts eller delats ut, eller kontaktat kretsen.
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-danger" id="faltMoveOutsideApplyBtn" disabled>Flytta utanför mästerskapet</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Särskjutning shot entry modal (Normal/Poäng = hits + figures + optional poängmål; Magnum = poängmål-only) -->
@@ -689,8 +739,170 @@ function faltUpdateResultMeta(results) {
     el.style.display = '';
 }
 
+// ── Rätta den publicerade listan: flytta en skytt utanför mästerskapet (S6) ─────────────────────────
+// Servern avgör allt (arrangörens behörighet, om beteendet gäller tävlingen, lag, redan utanför). Här: välj, se konsekvenserna,
+// skriv anledning, bekräfta. Knappen syns bara när listan är officiell och någon klassrad omfattas av mästerskapet.
+var faltOocCandidates = [];     // { registrationId, classKey, label }
+var faltOocPreviewKey = '';     // "registrationId|classKey" som förhandsvisningen gjordes för
+
+function faltOocEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; });
+}
+function faltOocCompId() {
+    return parseInt(document.querySelector('.faltskytte-results-management')?.dataset.competitionId, 10);
+}
+function faltOocToken() {
+    return document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+}
+async function faltOocPost(action, body) {
+    var resp = await fetch('/umbraco/surface/Faltskytte/' + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': faltOocToken() },
+        body: JSON.stringify(body)
+    });
+    return await resp.json();
+}
+
+// Kandidater = anmälningar vars klassrad omfattas av mästerskapet och som inte redan är utanför. Ur anmälningslistans payload.
+async function faltLoadMoveOutsideCandidates() {
+    var compId = faltOocCompId();
+    var resp = await fetch('/umbraco/surface/Competition/GetCompetitionRegistrations?competitionId=' + compId);
+    var data = await resp.json();
+    var list = [];
+    (data.registrations || []).forEach(function (r) {
+        (r.shootingClasses || []).forEach(function (sc) {
+            if (!sc.outOfCompetitionApplies || sc.outOfCompetitionEffective === true) return;
+            list.push({ registrationId: r.id, classKey: sc.class, label: (r.memberName || '') + ' — ' + (sc.className || sc.class) });
+        });
+    });
+    list.sort(function (a, b) { return a.label.localeCompare(b.label, 'sv'); });
+    faltOocCandidates = list;
+    return { any: (data.registrations || []).some(function (r) { return (r.shootingClasses || []).some(function (sc) { return sc.outOfCompetitionApplies; }); }) };
+}
+
+async function faltSyncMoveOutsideButton(isOfficial) {
+    var btn = document.getElementById('faltMoveOutsideBtn');
+    if (!btn) return;
+    if (!isOfficial) { btn.classList.add('d-none'); return; }
+    try {
+        var r = await faltLoadMoveOutsideCandidates();
+        btn.classList.toggle('d-none', !r.any);
+    } catch (e) { btn.classList.add('d-none'); }
+}
+
+function faltRenderMoveOutsideOptions() {
+    var sel = document.getElementById('faltMoveOutsideSelect');
+    var q = (document.getElementById('faltMoveOutsideFilter').value || '').trim().toLowerCase();
+    var html = '';
+    faltOocCandidates.forEach(function (c, i) {
+        if (q && c.label.toLowerCase().indexOf(q) < 0) return;
+        html += '<option value="' + i + '">' + faltOocEsc(c.label) + '</option>';
+    });
+    sel.innerHTML = html || '<option disabled>Ingen träff</option>';
+    document.getElementById('faltMoveOutsidePreviewBtn').disabled = true;
+}
+
+function faltMoveOutsideShowError(msg) {
+    var el = document.getElementById('faltMoveOutsideError');
+    el.textContent = msg || '';
+    el.classList.toggle('d-none', !msg);
+}
+
+function faltMoveOutsideRefreshApply() {
+    var ok = faltOocPreviewKey !== ''
+        && (document.getElementById('faltMoveOutsideReason').value || '').trim().length >= 5
+        && document.getElementById('faltMoveOutsideConfirm').checked;
+    document.getElementById('faltMoveOutsideApplyBtn').disabled = !ok;
+}
+
+function faltMoveOutsideSelected() {
+    var v = document.getElementById('faltMoveOutsideSelect').value;
+    return v === '' ? null : faltOocCandidates[parseInt(v, 10)] || null;
+}
+
+async function faltOpenMoveOutside(event) {
+    if (event) event.stopPropagation();
+    faltMoveOutsideShowError('');
+    document.getElementById('faltMoveOutsideConsequences').classList.add('d-none');
+    document.getElementById('faltMoveOutsideFilter').value = '';
+    document.getElementById('faltMoveOutsideReason').value = '';
+    document.getElementById('faltMoveOutsideConfirm').checked = false;
+    faltOocPreviewKey = '';
+    try { await faltLoadMoveOutsideCandidates(); } catch (e) { faltMoveOutsideShowError('Kunde inte läsa anmälningarna.'); }
+    faltRenderMoveOutsideOptions();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltMoveOutsideModal')).show();
+}
+
+async function faltMoveOutsidePreview() {
+    var c = faltMoveOutsideSelected();
+    if (!c) return;
+    faltMoveOutsideShowError('');
+    faltOocPreviewKey = '';
+    document.getElementById('faltMoveOutsideConsequences').classList.add('d-none');
+    var btn = document.getElementById('faltMoveOutsidePreviewBtn');
+    btn.disabled = true;
+    try {
+        var d = await faltOocPost('PreviewMoveOutsideChampionship', { competitionId: faltOocCompId(), registrationId: c.registrationId, classKey: c.classKey });
+        if (!d.success) { faltMoveOutsideShowError(d.message || 'Kunde inte visa konsekvenserna.'); return; }
+        document.getElementById('faltMoveOutsideWho').textContent = d.memberName + ' (' + d.className + ')';
+        document.getElementById('faltMoveOutsideLines').innerHTML = (d.lines || []).map(function (l) { return '<li>' + faltOocEsc(l) + '</li>'; }).join('');
+        document.getElementById('faltMoveOutsideNobody').textContent = (d.lines || []).length <= 1 ? 'Ingen annan skytt påverkas.' : '';
+        faltOocPreviewKey = c.registrationId + '|' + c.classKey;
+        document.getElementById('faltMoveOutsideConsequences').classList.remove('d-none');
+        faltMoveOutsideRefreshApply();
+    } catch (e) {
+        faltMoveOutsideShowError('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function faltMoveOutsideApply() {
+    var c = faltMoveOutsideSelected();
+    if (!c || faltOocPreviewKey !== c.registrationId + '|' + c.classKey) { faltMoveOutsideShowError('Visa konsekvenserna för den valda skytten först.'); return; }
+    var btn = document.getElementById('faltMoveOutsideApplyBtn');
+    btn.disabled = true;
+    faltMoveOutsideShowError('');
+    try {
+        var d = await faltOocPost('MoveOutsideChampionship', {
+            competitionId: faltOocCompId(), registrationId: c.registrationId, classKey: c.classKey,
+            reason: document.getElementById('faltMoveOutsideReason').value, confirmed: document.getElementById('faltMoveOutsideConfirm').checked
+        });
+        if (!d.success) { faltMoveOutsideShowError(d.message || 'Det gick inte.'); faltMoveOutsideRefreshApply(); return; }
+        bootstrap.Modal.getInstance(document.getElementById('faltMoveOutsideModal'))?.hide();
+        var flash = document.getElementById('faltMoveOutsideFlash');
+        flash.textContent = c.label + ' är flyttad utanför mästerskapet.'
+            + (d.listRefreshed ? ' Listan är omräknad.' : ' Listan kunde inte räknas om — tryck Uppdatera.');
+        flash.classList.remove('d-none');
+        if (typeof faltRestoreIframe === 'function') faltRestoreIframe();
+        setTimeout(faltCheckFreshness, 0);
+        faltSyncMoveOutsideButton(true);
+    } catch (e) {
+        faltMoveOutsideShowError('Ett fel uppstod.');
+        faltMoveOutsideRefreshApply();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var f = document.getElementById('faltMoveOutsideFilter');
+    if (!f) return;
+    f.addEventListener('input', faltRenderMoveOutsideOptions);
+    document.getElementById('faltMoveOutsideSelect').addEventListener('change', function () {
+        document.getElementById('faltMoveOutsidePreviewBtn').disabled = !faltMoveOutsideSelected();
+        // Ett annat val gör den visade förhandsvisningen ogiltig.
+        faltOocPreviewKey = '';
+        document.getElementById('faltMoveOutsideConsequences').classList.add('d-none');
+        faltMoveOutsideRefreshApply();
+    });
+    document.getElementById('faltMoveOutsidePreviewBtn').addEventListener('click', faltMoveOutsidePreview);
+    document.getElementById('faltMoveOutsideApplyBtn').addEventListener('click', faltMoveOutsideApply);
+    document.getElementById('faltMoveOutsideReason').addEventListener('input', faltMoveOutsideRefreshApply);
+    document.getElementById('faltMoveOutsideConfirm').addEventListener('change', faltMoveOutsideRefreshApply);
+});
+
 function faltUpdateResultStatus(isOfficial) {
     setTimeout(faltCheckFreshness, 0);   // publicerat/avpublicerat/uppdaterat: visa läget för den fasta listan
+    faltSyncMoveOutsideButton(isOfficial);
     var badge = document.getElementById('faltResultStatusBadge');
     var pubBtn = document.getElementById('faltPublishResultsBtn');
     var unpubBtn = document.getElementById('faltUnpublishResultsBtn');

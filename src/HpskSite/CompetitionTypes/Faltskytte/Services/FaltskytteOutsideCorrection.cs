@@ -143,8 +143,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly FaltskytteResultArtifactService _artifacts;
         private readonly CompetitionChangeRecorder _changes;
         private readonly ILogger<FaltskytteOutsideCorrectionService> _logger;
+        private readonly Umbraco.Cms.Infrastructure.Scoping.IScopeProvider _scopeProvider;
 
         public FaltskytteOutsideCorrectionService(
+            Umbraco.Cms.Infrastructure.Scoping.IScopeProvider scopeProvider,
             FaltskytteResultsBuilder builder,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             ICompetitionRegistrationStore registrations,
@@ -154,6 +156,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             CompetitionChangeRecorder changes,
             ILogger<FaltskytteOutsideCorrectionService> logger)
         {
+            _scopeProvider = scopeProvider;
             _builder = builder;
             _competitions = competitions;
             _registrations = registrations;
@@ -201,6 +204,27 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 return ($"{registration.MemberName} ingår i laget {team.Team.TeamName}. Ta ur laget först — en skytt utanför mästerskapet får inte ingå i ett lag.", null);
 
             return (null, new Target(competition, rule, registration, cls.Class));
+        }
+
+        /// <summary>
+        /// När listan senast rättades med "Flytta utanför mästerskapet" (svensk tid), eller null. Tittarnotisen på resultatsidan
+        /// ("Listan rättades …") läser den. Ett fel ger null — notisen är en upplysning, aldrig en förutsättning för sidan.
+        /// </summary>
+        public DateTime? LatestCorrection(int competitionId)
+        {
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var at = scope.Database.ExecuteScalar<DateTime?>(
+                    "SELECT MAX(AtUtc) FROM dbo.CompetitionChange WHERE TargetKind = 'competition' AND TargetId = @0 AND [Action] = @1",
+                    competitionId, ChangeAction);
+                return HpskSite.Services.Hosting.SwedishTime.FromUtc(at);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa rättningsdatum för tävling {CompetitionId}", competitionId);
+                return null;
+            }
         }
 
         public async Task<OutsideCorrectionPreview> PreviewAsync(int competitionId, int registrationId, string classKey)
