@@ -244,7 +244,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // (pre-existing hardcode; KrM/KM use the merged C grouping). Keep the SM-only split here
             // because the StandardMedalService's `isChampionship` flag specifically gates the C-split.
             var championshipRule = ChampionshipRule.For(competition);
-            var isSmOrLdm = championshipRule.IsSmOrLandsdel;
+            // EN definition: regeln. Utan vapengruppslista (alla befintliga tävlingar) är den samma jämförelse som förut.
+            var isSmOrLdm = championshipRule.SplitsStandardMedalGroupC;
             if (isAwardingStandardMedals && !isClubOnly)
             {
                 var medalService = new FaltskytteStandardMedalService();
@@ -275,7 +276,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 // Arrangörens val (klubb/krets): en uppsättning medaljer per vapengrupp, eller
                 // delade mästerskapsklasser. Nivåspärren ligger i regeln.
                 var splitC = championshipRule.SplitsChampionshipClassC;
+                // Utanför mästerskapet (S4): en vapengrupp som mästerskapet inte gäller får ingen kategori alls — alltså ingen
+                // mästerskapsmedalj, ingen särskjutning och ingen prisutdelning som mästerskap. Placeringen i klassgrupperna
+                // ovan och standardmedaljerna är oförändrade. Utan lista (eller utan växeln) är filtret alltid sant.
                 categoryStandings = shooterResults
+                    .Where(s => championshipRule.AppliesToClass(s.ShootingClass))
                     .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                     .Select(g => new FaltskytteCategoryStanding

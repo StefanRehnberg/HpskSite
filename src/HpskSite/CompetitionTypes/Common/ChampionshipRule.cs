@@ -87,7 +87,7 @@ namespace HpskSite.CompetitionTypes.Common
         /// Delas vapengrupp C för STANDARDMEDALJBERÄKNINGEN? Bara vid SM och landsdelsmästerskap (SHB C.5.1.1.4). Rå jämförelse, exakt
         /// som <c>StandardMedalCalculationService.ShouldSplitGroupC</c>. Tidigare den metoden.
         /// </summary>
-        public bool SplitsStandardMedalGroupC => IsSmOrLandsdel;   // EN definition: samma jämförelse mot konstanterna (en tom omfattning är aldrig lika med någon av dem)
+        public bool SplitsStandardMedalGroupC => IsSmOrLandsdel && AppliesTo("C");   // EN definition: samma jämförelse mot konstanterna (en tom omfattning är aldrig lika med någon av dem). AppliesTo("C") är sant utan lista, så utan lista är svaret oförändrat; med en lista utan C (mästerskap i andra grupper) delas C inte (SHB rad 3823-3826: delningen gäller "varje mästerskap i vapengrupp C").
 
         // ── Utanför mästerskapet och vilka vapengrupper som avgör mästerskapet (S4/S5) ───────────
 

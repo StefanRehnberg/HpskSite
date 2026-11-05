@@ -75,6 +75,20 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void The_standard_medal_C_split_follows_the_list_only_when_a_list_is_set()
+        {
+            // Utan lista, eller med C i listan: som förut (SM och landsdel delar C).
+            Assert.True(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: null)).SplitsStandardMedalGroupC);
+            Assert.True(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,C")).SplitsStandardMedalGroupC);
+            // Mästerskap bara i A/B: C avgör inget mästerskap, så C delas inte för standardmedaljerna.
+            Assert.False(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,B")).SplitsStandardMedalGroupC);
+            // Växeln av: listan verkar inte.
+            Assert.True(ChampionshipRule.For(Falt(mode: null, scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,B")).SplitsStandardMedalGroupC);
+            // Krets och klubb delade aldrig C för standardmedaljerna.
+            Assert.False(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Kretsmasterskap, groups: "C")).SplitsStandardMedalGroupC);
+        }
+
+        [Fact]
         public void The_existing_rule_answers_stay_the_same()
         {
             // S2:s svar rörs inte av de nya fälten.

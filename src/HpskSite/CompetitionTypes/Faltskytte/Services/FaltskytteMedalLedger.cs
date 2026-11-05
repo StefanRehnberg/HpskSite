@@ -108,7 +108,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     };
                 }).ToList();
 
-            var isSmOrLdm = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition).IsSmOrLandsdel;
+            // Samma definition som byggaren (FaltskytteResultsBuilder): registret får aldrig dela C annorlunda än listan.
+            var isSmOrLdm = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition).SplitsStandardMedalGroupC;
             new FaltskytteStandardMedalService().CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
 
             foreach (var s in shooterResults)
