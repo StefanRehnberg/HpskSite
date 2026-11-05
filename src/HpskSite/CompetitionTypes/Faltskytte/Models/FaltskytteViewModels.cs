@@ -363,6 +363,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool HasResult { get; set; }
         /// <summary>null = normal, "DNS" = did-not-start (seat freed for a late registration).</summary>
         public string? Status { get; set; }
+        /// <summary>
+        /// Skytten skjuter utanför mästerskapet i den här klassen (gällande läge: arrangörens beslut, annars förslaget). Utelämnas
+        /// ur JSON när den är falsk, så en tävling som inte använder beteendet serialiseras exakt som förut.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool OutOfCompetition { get; set; }
     }
 
     // ── Station Entry View ──────────────────────────────────────────

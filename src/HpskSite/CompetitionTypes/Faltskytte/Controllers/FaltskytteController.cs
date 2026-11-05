@@ -606,6 +606,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return Json(new { success = true, held = request.Held });
         }
 
+        /// <summary>
+        /// Vilka (skytt, klass) som skjuter utanför mästerskapet i tävlingen, för märket i patrullvyn och vid stationen. Tom när
+        /// tävlingen inte använder beteendet (då läses ingenting) och när tävlingen saknas.
+        /// </summary>
+        private HpskSite.CompetitionTypes.Common.OutOfCompetitionSet OutsideChampionship(HpskSite.Models.Competitions.CompetitionInfo? competition)
+        {
+            if (competition == null) return HpskSite.CompetitionTypes.Common.OutOfCompetitionSet.None;
+            return _outOfCompetition.Load(competition, HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition));
+        }
+
         // ── Station Entry View ──────────────────────────────────────
 
         /// <summary>
@@ -2325,7 +2335,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     $"WHERE PatrolId IN ({string.Join(",", patrolIds)}) ORDER BY Position")
                 : new List<FaltskyttePatrolMember>();
 
-            var competitionMax = _competitions.GetSaved(competitionId)?.MaxPatrolSize ?? 0;
+            var savedCompetition = _competitions.GetSaved(competitionId);
+            var competitionMax = savedCompetition?.MaxPatrolSize ?? 0;
+            var outside = OutsideChampionship(savedCompetition);
             var result = patrols.Select(p => new FaltskyttePatrolView
             {
                 PatrolId = p.Id,
@@ -2344,6 +2356,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         Name = m.MemberName,
                         Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
                         ShootingClass = m.ShootingClass,
+                        OutOfCompetition = outside.Contains(m.MemberId, m.ShootingClass),
                         Status = m.Status
                     }).ToList()
             }).ToList();

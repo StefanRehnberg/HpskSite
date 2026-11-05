@@ -396,6 +396,13 @@
     window.faltConfirm = faltConfirm;
     window.faltNotice = faltNotice;
 
+    // Märket för en skytt som skjuter utanför mästerskapet (gällande läge ur servern; saknas fältet är skytten med som vanligt).
+    function faltOutsideBadge(m) {
+        return m.outOfCompetition
+            ? ' <span class="badge bg-secondary text-wrap" title="Skjuter utanför mästerskapet i den här klassen: resultatet räknas, men ingen mästerskapsplats.">Utanför mästerskapet</span>'
+            : '';
+    }
+
     function apiGet(endpoint) {
         return fetch('/umbraco/surface/Faltskytte/' + endpoint).then(function(r) {
             if (!r.ok) return r.text().then(function(t) { throw new Error('Server ' + r.status + ': ' + t.substring(0, 200)); });
@@ -564,7 +571,7 @@
                             '<span style="width:1.5rem" class="text-end text-muted small">' + seat + '.</span>' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
                             '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
-                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span></span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' + faltOutsideBadge(m) + '</span>' +
                             '<button class="btn btn-outline-secondary btn-sm py-0 px-1"' + (seat <= 1 ? ' disabled' : '') + ' onclick="faltSetPosition(' + m.patrolMemberId + ',' + (seat - 1) + ')" title="Flytta upp en plats"><i class="bi bi-arrow-up"></i></button>' +
                             '<button class="btn btn-outline-secondary btn-sm py-0 px-1"' + (seat >= maxSeat ? ' disabled' : '') + ' onclick="faltSetPosition(' + m.patrolMemberId + ',' + (seat + 1) + ')" title="Flytta ner en plats"><i class="bi bi-arrow-down"></i></button>' +
                             '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',true)" title="Markera DNS – platsen blir ledig">DNS</button>' +
@@ -576,7 +583,7 @@
                             '<span style="width:1.5rem"></span>' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
                             '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
-                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' + faltOutsideBadge(m) +
                             ' <span class="badge bg-secondary">DNS</span></span>' +
                             '<button class="btn btn-warning btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',false)" title="Ångra DNS – tar första lediga plats">DNS</button>' +
                             '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
@@ -1085,7 +1092,7 @@
                     + (t ? '<span class="patrol-time">' + t + '</span>' : '')
                     + '<span class="patrol-writein"></span></div>');
                 p.members.forEach(function(m) {
-                    w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span></div>');
+                    w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(window.getShootingClassName(m.shootingClass)) + (m.outOfCompetition ? ' – utanför mästerskapet' : '') + '</span></div>');
                 });
                 w.document.write('</div>');
             });
