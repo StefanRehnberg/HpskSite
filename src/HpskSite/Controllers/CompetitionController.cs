@@ -48,6 +48,7 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.ClubRosterService _roster;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetitionFlags;
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -69,9 +70,11 @@ namespace HpskSite.Controllers
             IServiceScopeFactory scopeFactory,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.ClubRosterService roster)
+            HpskSite.Services.ClubRosterService roster,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetitionFlags)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _outOfCompetitionFlags = outOfCompetitionFlags;
             _roster = roster;
             _competitions = competitions;
             _memberClubService = memberClubService;
@@ -1574,6 +1577,10 @@ namespace HpskSite.Controllers
                 }
 
                 var oocRule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+                // Läget per (anmälan, klass): arrangörens beslut och förslaget, ur EN läsare (samma som resultatlistan). Tomt när
+                // beteendet inte gäller tävlingen.
+                var oocStates = _outOfCompetitionFlags.States(competition, oocRule)
+                    .ToDictionary(s => (s.RegistrationId, s.ClassKey));
 
                 // PERFORMANCE FIX: Direct query to competition children instead of full tree traversal
                 var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _).ToList();
@@ -1961,7 +1968,11 @@ namespace HpskSite.Controllers
                             // Arrangörens beslut "Utanför mästerskapet" för klassen (null = inget beslut) och om mästerskapet
                             // gäller klassens vapengrupp alls. Bara för visning i Redigera anmälan; skrivs via SetOutOfCompetition.
                             outOfCompetition = sc.OutOfCompetition,
-                            outOfCompetitionApplies = oocRule.OutOfCompetitionApplies && oocRule.AppliesToClass(sc.Class)
+                            outOfCompetitionApplies = oocRule.OutOfCompetitionApplies && oocRule.AppliesToClass(sc.Class),
+                            // Det GÄLLANDE läget (beslut, annars förslag) och skälet till ett förslag, för kryssrutan.
+                            outOfCompetitionEffective = oocStates.TryGetValue((content.Id, ShootingClasses.NormalizeKey(sc.Class)), out var oocState) && oocState.Effective,
+                            outOfCompetitionSuggestion = oocStates.TryGetValue((content.Id, ShootingClasses.NormalizeKey(sc.Class)), out var oocS2) && sc.OutOfCompetition == null
+                                ? oocS2.Suggestion?.Reason : null
                         }).ToList();
 
                         return new

@@ -22,6 +22,9 @@ namespace HpskSite.CompetitionTypes.Common
     /// (adress, märken, kalender) är en annan fråga och stannar på <c>competitionLevel</c>/<c>CompetitionScopeHelper</c>
     /// (märk raden <c>championshiprule-ok: nivå</c>).</para>
     /// </summary>
+    /// <summary>Sorten mästerskap, för de ställen som behöver skilja nivåerna åt men inte får läsa omfattningen själva.</summary>
+    public enum ChampionshipScopeKind { None, Sm, Landsdel, Krets, Klubb }
+
     public sealed class ChampionshipRule
     {
         /// <summary>Omfattningen som den är lagrad (rå).</summary>
@@ -88,6 +91,20 @@ namespace HpskSite.CompetitionTypes.Common
         /// som <c>StandardMedalCalculationService.ShouldSplitGroupC</c>. Tidigare den metoden.
         /// </summary>
         public bool SplitsStandardMedalGroupC => IsSmOrLandsdel && AppliesTo("C");   // EN definition: samma jämförelse mot konstanterna (en tom omfattning är aldrig lika med någon av dem). AppliesTo("C") är sant utan lista, så utan lista är svaret oförändrat; med en lista utan C (mästerskap i andra grupper) delas C inte (SHB rad 3823-3826: delningen gäller "varje mästerskap i vapengrupp C").
+
+        /// <summary>Vilken sorts mästerskap (normaliserad omfattning). <see cref="ChampionshipScopeKind.None"/> = inget mästerskap.</summary>
+        public ChampionshipScopeKind Kind
+        {
+            get
+            {
+                var scope = CompetitionScopeHelper.NormalizeScopeValue(Scope);
+                if (scope == CompetitionScopeHelper.SvensktMasterskap) return ChampionshipScopeKind.Sm;
+                if (scope == CompetitionScopeHelper.Landsdelsmasterskap) return ChampionshipScopeKind.Landsdel;
+                if (scope == CompetitionScopeHelper.Kretsmasterskap) return ChampionshipScopeKind.Krets;
+                if (scope == CompetitionScopeHelper.Klubbmasterskap) return ChampionshipScopeKind.Klubb;
+                return ChampionshipScopeKind.None;
+            }
+        }
 
         // ── Utanför mästerskapet och vilka vapengrupper som avgör mästerskapet (S4/S5) ───────────
 

@@ -89,6 +89,19 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Kind_names_the_championship_level_and_nothing_else_is_a_championship()
+        {
+            Assert.Equal(ChampionshipScopeKind.Sm, ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.SvensktMasterskap)).Kind);
+            Assert.Equal(ChampionshipScopeKind.Landsdel, ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap)).Kind);
+            Assert.Equal(ChampionshipScopeKind.Krets, ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Kretsmasterskap)).Kind);
+            Assert.Equal(ChampionshipScopeKind.Klubb, ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Klubbmasterskap)).Kind);
+            Assert.Equal(ChampionshipScopeKind.None, ChampionshipRule.For(Falt(scope: "Nationell")).Kind);
+            Assert.Equal(ChampionshipScopeKind.None, ChampionshipRule.For(Falt(scope: null)).Kind);
+            // En JSON-array av äldre data normaliseras som förut.
+            Assert.Equal(ChampionshipScopeKind.Krets, ChampionshipRule.For(Falt(scope: "[\"" + CompetitionScopeHelper.Kretsmasterskap + "\"]")).Kind);
+        }
+
+        [Fact]
         public void The_existing_rule_answers_stay_the_same()
         {
             // S2:s svar rörs inte av de nya fälten.

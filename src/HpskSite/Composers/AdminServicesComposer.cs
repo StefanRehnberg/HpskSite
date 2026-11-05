@@ -368,6 +368,8 @@ namespace HpskSite.Composers
             // Fältskyttets resultatlista byggs EN gång — av resultatsidan, särskjutningskortet
             // OCH prisutdelningens artefaktskrivare. Se klassens egen dokumentation för varför
             // en andra beräkning på konsumentsidan är fel här.
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.IClubRegionLookup, HpskSite.CompetitionTypes.Common.ClubRegionResolver>();
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.IMemberClubsLookup, HpskSite.CompetitionTypes.Common.MemberClubsLookup>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags>();
             builder.Services.AddScoped<FaltskytteResultsBuilder>();
             builder.Services.AddScoped<FaltskytteResultArtifactService>();

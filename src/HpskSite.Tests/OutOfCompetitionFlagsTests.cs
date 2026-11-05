@@ -31,7 +31,73 @@ namespace HpskSite.Tests
         {
             var store = new Mock<ICompetitionRegistrationStore>();
             store.Setup(s => s.List(42)).Returns(regs);
-            return (new OutOfCompetitionFlags(store.Object), store);
+            // Utan "vilka deltar" läses varken kretsar eller medlemmars klubbar (Mock utan uppsättning ger tomt svar).
+            return (new OutOfCompetitionFlags(store.Object, new Mock<IClubRegionLookup>().Object, new Mock<IMemberClubsLookup>().Object), store);
+        }
+
+        // Klubbar: 1 = Varberg (Halland, värd), 3 = Luleå (Norrbotten).
+        private static OutOfCompetitionFlags FlagsWithRegions(params RegistrationRecord[] regs)
+        {
+            var store = new Mock<ICompetitionRegistrationStore>();
+            store.Setup(s => s.List(42)).Returns(regs);
+            var regions = new Mock<IClubRegionLookup>();
+            regions.Setup(r => r.OriginOf(It.IsAny<CompetitionInfo>())).Returns(new CompetitionOrigin(1, "Halland", "Hallands krets", "Vast"));
+            regions.Setup(r => r.OriginOf(1)).Returns(new ClubOrigin(1, "Varbergs PK", "Halland", "Hallands krets", "Vast"));
+            regions.Setup(r => r.OriginOf(3)).Returns(new ClubOrigin(3, "Luleå PK", "Norrbotten", "Norrbottens krets", "Nord"));
+            var memberClubs = new Mock<IMemberClubsLookup>();
+            memberClubs.Setup(m => m.ClubsOf(It.IsAny<IEnumerable<int>>())).Returns(new Dictionary<int, IReadOnlyList<int>>());
+            return new OutOfCompetitionFlags(store.Object, regions.Object, memberClubs.Object);
+        }
+
+        private static RegistrationRecord RegFor(int memberId, int clubId, params (string cls, bool? outside)[] classes)
+        {
+            var r = Reg(memberId, true, classes);
+            r.ClubId = clubId;
+            return r;
+        }
+
+        [Fact]
+        public void The_effective_state_is_the_decision_and_otherwise_the_suggestion()
+        {
+            var c = Comp();
+            c.ChampionshipParticipants = "own";
+            // 7: tävlar för Luleå, inget beslut → föreslås utanför. 8: samma klubb men arrangören sa "i mästerskapet". 9: Varberg → inget.
+            var flags = FlagsWithRegions(RegFor(7, 3, ("C2", null)), RegFor(8, 3, ("C2", false)), RegFor(9, 1, ("C2", null)));
+            var set = flags.Load(c, ChampionshipRule.For(c));
+
+            Assert.True(set.Contains(7, "C2"));    // förslaget gäller
+            Assert.False(set.Contains(8, "C2"));   // beslutet vinner över förslaget
+            Assert.False(set.Contains(9, "C2"));   // ingen anledning
+        }
+
+        [Fact]
+        public void A_decision_outside_counts_even_when_the_suggestion_says_nothing()
+        {
+            var c = Comp();
+            c.ChampionshipParticipants = "own";
+            var flags = FlagsWithRegions(RegFor(9, 1, ("C2", true)));
+            Assert.True(flags.Load(c, ChampionshipRule.For(c)).Contains(9, "C2"));
+        }
+
+        [Fact]
+        public void Without_participants_setting_there_are_no_suggestions()
+        {
+            var c = Comp();   // ChampionshipParticipants = null → alla deltar
+            var flags = FlagsWithRegions(RegFor(7, 3, ("C2", null)));
+            Assert.False(flags.Load(c, ChampionshipRule.For(c)).Contains(7, "C2"));
+        }
+
+        [Fact]
+        public void The_states_expose_decision_and_suggestion_separately_for_the_screens()
+        {
+            var c = Comp();
+            c.ChampionshipParticipants = "own";
+            var flags = FlagsWithRegions(RegFor(7, 3, ("C2", null)));
+            var s = Assert.Single(flags.States(c, ChampionshipRule.For(c)));
+            Assert.Null(s.Decision);
+            Assert.NotNull(s.Suggestion);
+            Assert.Equal("region", s.Suggestion!.Kind);
+            Assert.True(s.Effective);
         }
 
         [Fact]

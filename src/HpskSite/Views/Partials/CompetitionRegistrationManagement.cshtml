@@ -4036,12 +4036,17 @@ function faltOocRowHtml(classId, registration) {
     const sc = (registration.shootingClasses || []).find(x => (x.class || x.className || '').trim() === classId);
     if (!sc || !sc.outOfCompetitionApplies) return '';
     const safeId = `editOoc_${String(classId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-    const on = sc.outOfCompetition === true;
+    // Det GÄLLANDE läget: arrangörens beslut, annars förslaget (annan krets/landsdel/klubb). Skälet till ett förslag visas
+    // som text, så arrangören ser VARFÖR och kan kryssa ur den (= beslutet "i mästerskapet").
+    const on = sc.outOfCompetitionEffective === true;
+    const why = sc.outOfCompetition == null && sc.outOfCompetitionSuggestion
+        ? `<div class="form-text text-warning-emphasis"><i class="bi bi-lightbulb me-1"></i>Föreslås utanför mästerskapet: ${escapeAttr(sc.outOfCompetitionSuggestion)} Kryssa ur om skytten ska vara med.</div>`
+        : '';
     return `
         <div class="form-check ms-4 mb-1">
             <input class="form-check-input edit-ooc-cb" type="checkbox" id="${safeId}"
                    data-class-id="${escapeAttr(classId)}" data-initial="${on ? '1' : '0'}" ${on ? 'checked' : ''}>
-            <label class="form-check-label" for="${safeId}">Utanför mästerskapet</label>
+            <label class="form-check-label" for="${safeId}">Utanför mästerskapet</label>${why}
             <div class="form-text">Skytten skjuter och får resultatet i listan och kan få standardmedalj, men får ingen placering och
                 ingen mästerskapsmedalj. Placeringen går till nästa skytt.</div>
         </div>`;
