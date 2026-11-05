@@ -1275,6 +1275,81 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Arrangörens beslut "Utanför mästerskapet" för EN klassrad (utanför-mästerskapet, S5). Enda skrivvägen —
+        /// skytten kan aldrig skicka eller ta bort det, och <c>Save</c> rör det aldrig. Value null tar bort beslutet (då gäller
+        /// förslaget). Svarar med skälet när det inte går:
+        /// <list type="bullet">
+        /// <item>tävlingen använder inte beteendet (växeln av, inget mästerskap, inte fält) — då skrivs ingenting, så att en
+        /// tävling som inte slagits på inte kan få flaggor i förväg;</item>
+        /// <item>mästerskapet gäller inte klassens vapengrupp (där finns ingen mästerskapsplacering att stå utanför);</item>
+        /// <item>listan är publicerad — den är fast och ändras bara via "Rätta listan";</item>
+        /// <item>skytten ingår i ett lag (Stefan 2026-11-04: en skytt utanför mästerskapet får inte ingå i lag) — ta ur laget först.</item>
+        /// </list>
+        /// Prövas av arrangörens behörighet (inte bemanningens "Ge behörighet").
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("HasCompetitionOrganiserAccessAsync(tävlingen): arrangörens behörighet, inte bemanningens")]
+        public async Task<IActionResult> SetOutOfCompetition([FromBody] SetOutOfCompetitionRequest request)
+        {
+            try
+            {
+                if (request == null || request.RegistrationId <= 0 || string.IsNullOrWhiteSpace(request.ClassKey))
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var registration = _registrations.GetById(request.RegistrationId);
+                if (registration == null)
+                    return Json(new { success = false, message = "Anmälan hittades inte." });
+
+                var competitionId = registration.CompetitionId;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await _authService.HasCompetitionOrganiserAccessAsync(competitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+                if (!rule.OutOfCompetitionApplies)
+                    return Json(new { success = false, message = "Den här tävlingen använder inte \"Utanför mästerskapet\"." });
+                if (!rule.AppliesToClass(request.ClassKey))
+                    return Json(new { success = false, message = "Mästerskapet gäller inte den här vapengruppen, så det finns ingen mästerskapsplacering att stå utanför." });
+                if (competition.FaltskytteResultsOfficial)
+                    return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via \"Rätta listan\"." });
+
+                if (request.Value == true)
+                {
+                    var team = (await _teamService.GetTeamsForCompetitionAsync(competitionId))
+                        .FirstOrDefault(t => t.Members.Any(m => m.MemberId == registration.MemberId));
+                    if (team != null)
+                        return Json(new
+                        {
+                            success = false,
+                            message = $"{registration.MemberName} ingår i laget {team.Team.TeamName}. Ta ur laget först — en skytt utanför mästerskapet får inte ingå i ett lag."
+                        });
+                }
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var decidedBy = currentMember == null ? (int?)null : _memberService.GetByEmail(currentMember.Email ?? "")?.Id;
+
+                var outcome = _registrations.SetOutOfCompetition(competitionId, registration.Id, request.ClassKey, request.Value, decidedBy, "organiser");
+                return outcome switch
+                {
+                    HpskSite.Services.Registrations.OutOfCompetitionOutcome.RegistrationNotFound =>
+                        Json(new { success = false, message = "Anmälan hittades inte." }),
+                    HpskSite.Services.Registrations.OutOfCompetitionOutcome.ClassNotFound =>
+                        Json(new { success = false, message = "Anmälan har ingen sådan klass." }),
+                    _ => Json(new { success = true, changed = outcome == HpskSite.Services.Registrations.OutOfCompetitionOutcome.Changed })
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SetOutOfCompetition failed for registration {RegistrationId}", request?.RegistrationId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Toggle the at-the-desk attendance state on a registration (item #9). The flag
         /// lives on the registration document so it persists across page reloads and is
         /// visible to anyone reading the registrations table — no SQL migration needed.
@@ -2938,6 +3013,15 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Request model for the at-the-desk check-in toggle (item #9).
         /// </summary>
+        public class SetOutOfCompetitionRequest
+        {
+            public int RegistrationId { get; set; }
+            /// <summary>Klassen, i valfri form (Id eller visningsnamn).</summary>
+            public string ClassKey { get; set; } = "";
+            /// <summary>true = utanför mästerskapet, false = i mästerskapet (arrangörens beslut), null = ta bort beslutet (förslaget gäller).</summary>
+            public bool? Value { get; set; }
+        }
+
         public class SetCheckedInRequest
         {
             public int RegistrationId { get; set; }

@@ -323,6 +323,13 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
             }
         }
 
+        // Nodlagringen är en återställningsväg och bär inte beslutstabellen (som JoinMemberId).
+        public OutOfCompetitionOutcome SetOutOfCompetition(int competitionId, int registrationId, string classKey, bool? value,
+            int? decidedByMemberId, string reason = "organiser")
+            => throw new NotSupportedException("Anmälningar lagrade som noder kan inte bära beslutet 'Utanför mästerskapet'. Använd tabellagringen.");
+
+        public int ClearOutOfCompetition(int competitionId, int registrationId, string reason) => 0;
+
         public bool Delete(int competitionId, int registrationId)
         {
             var node = registrationId > 0 ? _contentService.GetById(registrationId) : null;

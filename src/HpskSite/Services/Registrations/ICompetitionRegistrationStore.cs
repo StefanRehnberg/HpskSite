@@ -66,5 +66,33 @@ namespace HpskSite.Services.Registrations
 
         /// <summary>Tar bort anmälan. False när den inte finns i tävlingen.</summary>
         bool Delete(int competitionId, int registrationId);
+
+        /// <summary>
+        /// <b>Enda skrivvägen för arrangörens beslut "Utanför mästerskapet"</b> för en klassrad (utanför-mästerskapet, S5). Beslutet bor i
+        /// <c>CompetitionRegistrationClassDecision</c>, som <see cref="Save"/> aldrig skriver. <paramref name="value"/> null tar bort beslutet
+        /// (då gäller förslaget). Varje ändring loggas i <c>ChampionshipDecisionLog</c>. Anmälan låses (UPDLOCK) så att en samtidig
+        /// <see cref="Save"/> inte kan städa bort beslutet mitt i. Klassnyckeln tas i valfri form (Id eller visningsnamn).
+        /// </summary>
+        OutOfCompetitionOutcome SetOutOfCompetition(int competitionId, int registrationId, string classKey, bool? value,
+            int? decidedByMemberId, string reason = "organiser");
+
+        /// <summary>
+        /// Tar bort ALLA beslut på anmälan (flaggan följer inte med när en anmälan flyttas till en annan tävling eller plats).
+        /// Loggas med <paramref name="reason"/>. Returnerar antalet borttagna beslut.
+        /// </summary>
+        int ClearOutOfCompetition(int competitionId, int registrationId, string reason);
+    }
+
+    /// <summary>Utfallet av <see cref="ICompetitionRegistrationStore.SetOutOfCompetition"/>.</summary>
+    public enum OutOfCompetitionOutcome
+    {
+        /// <summary>Beslutet sattes, ändrades eller togs bort.</summary>
+        Changed,
+        /// <summary>Beslutet fanns redan med samma värde (eller fanns inte och skulle tas bort). Inget loggades.</summary>
+        Unchanged,
+        /// <summary>Anmälan finns inte i tävlingen.</summary>
+        RegistrationNotFound,
+        /// <summary>Anmälan har ingen sådan klassrad — ett beslut kan inte sättas på något som inte finns.</summary>
+        ClassNotFound
     }
 }

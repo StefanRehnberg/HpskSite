@@ -221,6 +221,85 @@ VALUES (@0, @1, @2, @3, @4, @5)",
             return id;
         }
 
+        public OutOfCompetitionOutcome SetOutOfCompetition(int competitionId, int registrationId, string classKey, bool? value,
+            int? decidedByMemberId, string reason = "organiser")
+        {
+            var raw = (classKey ?? "").Trim();
+            if (raw.Length == 0) return OutOfCompetitionOutcome.ClassNotFound;
+            var key = ShootingClasses.Resolve(raw)?.Id ?? raw;
+            var why = Truncate(string.IsNullOrWhiteSpace(reason) ? "organiser" : reason.Trim(), 40);
+            var now = DateTime.Now;
+            var by = decidedByMemberId is > 0 ? decidedByMemberId : null;
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Låset serialiserar mot Save (som städar beslut vars klassrad försvunnit) — annars kunde Save radera beslutet mitt i.
+            var owner = db.Fetch<int>(
+                "SELECT MemberId FROM dbo.CompetitionRegistration WITH (UPDLOCK) WHERE Id = @0 AND CompetitionId = @1",
+                registrationId, competitionId);
+            if (owner.Count == 0) return OutOfCompetitionOutcome.RegistrationNotFound;
+            var memberId = owner[0];
+
+            var old = db.Fetch<bool>(
+                "SELECT OutOfCompetition FROM dbo.CompetitionRegistrationClassDecision WITH (UPDLOCK, HOLDLOCK) WHERE RegistrationId = @0 AND ClassKey = @1",
+                registrationId, key);
+            bool? oldValue = old.Count == 0 ? null : old[0];
+
+            if (value == null)
+            {
+                if (oldValue == null) return OutOfCompetitionOutcome.Unchanged;   // även en föräldralös tom rad: inget att ta bort
+                db.Execute("DELETE FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0 AND ClassKey = @1", registrationId, key);
+            }
+            else
+            {
+                // Ett beslut kan bara sättas på en klassrad som finns.
+                var classExists = db.ExecuteScalar<int>(
+                    "SELECT COUNT(*) FROM dbo.CompetitionRegistrationClass WHERE RegistrationId = @0 AND ClassKey = @1", registrationId, key) > 0;
+                if (!classExists) return OutOfCompetitionOutcome.ClassNotFound;
+                if (oldValue == value) return OutOfCompetitionOutcome.Unchanged;
+
+                if (oldValue == null)
+                    db.Execute(@"
+INSERT INTO dbo.CompetitionRegistrationClassDecision (RegistrationId, ClassKey, OutOfCompetition, SetByMemberId, SetAt)
+VALUES (@0, @1, @2, @3, @4)", registrationId, key, value.Value, by, now);
+                else
+                    db.Execute(@"
+UPDATE dbo.CompetitionRegistrationClassDecision SET OutOfCompetition = @2, SetByMemberId = @3, SetAt = @4
+WHERE RegistrationId = @0 AND ClassKey = @1", registrationId, key, value.Value, by, now);
+            }
+
+            db.Execute(@"
+INSERT INTO dbo.ChampionshipDecisionLog (CompetitionId, RegistrationId, MemberId, ClassKey, OldValue, NewValue, Reason, SetByMemberId, SetAt)
+VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8)",
+                competitionId, registrationId, memberId, key, oldValue, value, why, by, now);
+
+            scope.Complete();
+            return OutOfCompetitionOutcome.Changed;
+        }
+
+        public int ClearOutOfCompetition(int competitionId, int registrationId, string reason)
+        {
+            var why = Truncate(string.IsNullOrWhiteSpace(reason) ? "cleared" : reason.Trim(), 40);
+            var now = DateTime.Now;
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var owner = db.Fetch<int>(
+                "SELECT MemberId FROM dbo.CompetitionRegistration WITH (UPDLOCK) WHERE Id = @0 AND CompetitionId = @1", registrationId, competitionId);
+            if (owner.Count == 0) return 0;
+
+            db.Execute(@"
+INSERT INTO dbo.ChampionshipDecisionLog (CompetitionId, RegistrationId, MemberId, ClassKey, OldValue, NewValue, Reason, SetByMemberId, SetAt)
+SELECT @1, RegistrationId, @2, ClassKey, OutOfCompetition, NULL, @3, NULL, @4
+FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0", registrationId, competitionId, owner[0], why, now);
+            var removed = db.Execute("DELETE FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0", registrationId);
+            scope.Complete();
+            return removed;
+        }
+
+        private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
+
         public bool Delete(int competitionId, int registrationId)
         {
             if (competitionId <= 0 || registrationId <= 0) return false;

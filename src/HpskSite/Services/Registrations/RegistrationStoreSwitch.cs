@@ -93,5 +93,12 @@ namespace HpskSite.Services.Registrations
 
         public int Save(RegistrationRecord registration) => Writable.Save(registration);
         public bool Delete(int competitionId, int registrationId) => Writable.Delete(competitionId, registrationId);
+
+        public OutOfCompetitionOutcome SetOutOfCompetition(int competitionId, int registrationId, string classKey, bool? value,
+            int? decidedByMemberId, string reason = "organiser")
+            => Writable.SetOutOfCompetition(competitionId, registrationId, classKey, value, decidedByMemberId, reason);
+
+        public int ClearOutOfCompetition(int competitionId, int registrationId, string reason)
+            => Writable.ClearOutOfCompetition(competitionId, registrationId, reason);
     }
 }
