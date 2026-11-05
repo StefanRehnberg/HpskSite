@@ -4784,7 +4784,8 @@ function _faltSourceIcon(row) {
         : '<i class="bi bi-globe text-secondary me-2" title="Extern tävling (egen registrering)"></i>';
 }
 function _faltModeLabel(mode) { return mode === 'Poangfalt' ? 'Poängfält' : 'Normalfält'; }
-function _faltPlacementChip(p, n) {
+function _faltPlacementChip(p, n, outside) {
+    if (outside) return '<span class="badge bg-secondary text-white" title="Du stod utanför mästerskapet i den här klassen: resultatet och standardmedaljen gäller, men ingen plats i mästerskapet.">Utanför mästerskapet</span>';
     if (!p || !n) return '<span class="text-muted">—</span>';
     const pct = 100 * p / n;
     let cls = '';
@@ -4870,7 +4871,7 @@ function renderFaltskytteResultsTable(rows) {
                             <td class="text-end fw-semibold">${_faltHeadline(r)}</td>
                             <td class="text-end ${hitClass}">${_faltPct(r.hitPercent)}</td>
                             <td class="text-end">${_faltPct(r.figurePercent)}</td>
-                            <td class="text-center">${_faltPlacementChip(r.placement, r.participants)}</td>
+                            <td class="text-center">${_faltPlacementChip(r.placement, r.participants, r.outOfCompetition)}</td>
                             <td class="text-center">${_faltMedalIcon(r.standardMedal)}${_faltProofCue(r)}</td>
                             <td class="text-center">${actions}</td>
                         </tr>`;

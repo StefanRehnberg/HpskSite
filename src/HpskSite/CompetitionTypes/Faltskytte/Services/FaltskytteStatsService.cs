@@ -213,6 +213,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         var placement = ranked.FindIndex(s => s.MemberId == memberId && s.ShootingClass == mine.ShootingClass) + 1;
                         var participants = ranked.Count;
 
+                        // Utanför mästerskapet: platserna i den frusna bilden är redan räknade över de tävlande. Min sida
+                        // visar då ingen plats för den som är utanför, och deltagarmåttet räknar bara de tävlande.
+                        // Utan PlacementsAssigned (beteendet gäller inte tävlingen) ändras ingenting.
+                        var (placement2, participants2, outsideChampionship) = ResolvePlacement(
+                            ranked, memberId, mine.ShootingClass, placement, participants, frozen?.PlacementsAssigned == true);
+                        placement = placement2;
+                        participants = participants2;
+
                         // Medal comes from the materialized ledger, keyed by the shooter's raw class
                         // (the same key the publish-time materialization stores). null when the comp
                         // didn't award medals or results aren't published yet.
@@ -251,6 +259,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             FigurePercent = maxFigures > 0 ? Math.Round(100.0 * mine.TotalFigures / maxFigures, 1) : 0,
                             Placement = placement > 0 ? placement : null,
                             Participants = participants,
+                            OutOfCompetition = outsideChampionship,
                             StandardMedal = hostedMedal,
                             // pistol.nu-hosted medals are backed by the competition's own result
                             // list, so no member-uploaded proof is needed (same as Precision OnSite).
@@ -266,6 +275,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Plats och deltagarmått för en skytt i sin klassgrupp. När platserna är tilldelade (tävlingen använder "utanför
+        /// mästerskapet") gäller bildens plats och bara de tävlande räknas; den som är utanför får plats 0 (= ingen).
+        /// Annars oförändrat.
+        /// </summary>
+        internal static (int Placement, int Participants, bool Outside) ResolvePlacement(
+            IReadOnlyList<FaltskytteShooterResult> ranked, int memberId, string shootingClass,
+            int placement, int participants, bool placementsAssigned)
+        {
+            if (!placementsAssigned) return (placement, participants, false);
+            var mine = ranked.FirstOrDefault(s => s.MemberId == memberId && s.ShootingClass == shootingClass);
+            if (mine == null) return (placement, participants, false);
+            var competing = ranked.Count(s => !s.OutOfCompetition);
+            return mine.OutOfCompetition
+                ? (0, competing, true)
+                : (mine.Placement ?? placement, competing, false);
         }
 
         // ── External (self-entered TrainingScores rows) ──
@@ -550,6 +577,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public double? FigurePercent { get; set; }
         public int? Placement { get; set; }
         public int? Participants { get; set; }
+        /// <summary>Skytten stod utanför mästerskapet i den här klassen: ingen plats, men resultatet och standardmedaljen gäller.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool OutOfCompetition { get; set; }
         public string? StandardMedal { get; set; }   // "S" | "B" | null
         // Proof-of-placement cue for the medal: "has" (proof on file / pistol.nu-verified),
         // "missing" (self-reported medal without an uploaded proof), or null (no medal).
