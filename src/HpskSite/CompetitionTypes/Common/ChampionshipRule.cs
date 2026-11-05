@@ -42,7 +42,7 @@ namespace HpskSite.CompetitionTypes.Common
         {
             Scope = scope ?? "";
             StoredMedalsPerWeaponGroup = storedMedalsPerWeaponGroup;
-            _discipline = discipline ?? "";
+            _discipline = CanonicalDiscipline(discipline);
             _modeOn = ChampionshipParticipantsSetting.NormalizeMode(mode) != null;
             _weaponGroups = ChampionshipWeaponGroups.Parse(weaponGroups);
         }
@@ -133,6 +133,20 @@ namespace HpskSite.CompetitionTypes.Common
 
         /// <summary>De listade vapengrupperna (tom = alla). Bara för visning och avtryck.</summary>
         public IReadOnlyList<string> WeaponGroups => _weaponGroups;
+
+        /// <summary>
+        /// Grenens id, med samma uppslag som resten av koden (id, namn, sist fuzzy) — äldre tävlingar kan ha lagrat "Fältskjutning" eller
+        /// "Magnum Fält" i stället för id:t. Utan det räknades en sådan fälttävling inte som fält.
+        /// </summary>
+        private static string CanonicalDiscipline(string? discipline)
+        {
+            var t = (discipline ?? "").Trim();
+            if (t.Length == 0) return "";
+            var known = HpskSite.Models.CompetitionTypes.GetById(t)
+                     ?? HpskSite.Models.CompetitionTypes.GetByName(t)
+                     ?? HpskSite.Models.CompetitionTypes.GetFuzzy(t);
+            return known?.Id ?? t;
+        }
 
         private static bool IsFaltFamily(string discipline) =>
             discipline is "Faltskytte" or "MagnumFalt";

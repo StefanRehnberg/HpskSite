@@ -49,6 +49,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.ClubRosterService _roster;
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetitionFlags;
+        private readonly HpskSite.CompetitionTypes.Common.IClubRegionLookup _clubRegions;
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -71,10 +72,12 @@ namespace HpskSite.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.ClubRosterService roster,
-            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetitionFlags)
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetitionFlags,
+            HpskSite.CompetitionTypes.Common.IClubRegionLookup clubRegions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _outOfCompetitionFlags = outOfCompetitionFlags;
+            _clubRegions = clubRegions;
             _roster = roster;
             _competitions = competitions;
             _memberClubService = memberClubService;
@@ -1181,11 +1184,57 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ingen behörighet." });
 
                 var options = _memberClubService.GetClubOptions(target);
+
+                // Utanför mästerskapet: när tävlingen begränsar vilka som deltar, säg per klubb om en skytt som tävlar för den är med i
+                // mästerskapet — så anmälan kan varna INNAN skytten väljer fel klubb. Ingenting skickas för andra tävlingar.
+                object? championship = null;
+                var outsideByClub = new Dictionary<int, bool>();
+                if (competitionId is > 0)
+                {
+                    var comp = _competitions.Get(competitionId.Value);
+                    var rule = comp == null ? null : HpskSite.CompetitionTypes.Common.ChampionshipRule.For(comp);
+                    if (comp != null && rule!.OutOfCompetitionApplies
+                        && HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(comp.ChampionshipParticipants) != null)
+                    {
+                        var origin = _clubRegions.OriginOf(comp);
+                        var anyKnown = false;
+                        foreach (var o in options)
+                        {
+                            var clubOrigin = _clubRegions.OriginOf(o.Id);
+                            if (clubOrigin == null) continue;
+                            var q = HpskSite.CompetitionTypes.Common.OutOfCompetitionRules.Qualifies(
+                                rule.Kind, comp.ChampionshipParticipants, origin, comp.IsClubOnly, clubOrigin);
+                            if (q == null) continue;
+                            anyKnown = true;
+                            outsideByClub[o.Id] = q == false;
+                        }
+                        if (anyKnown)
+                        {
+                            var where = rule.Kind switch
+                            {
+                                HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Krets => origin.RegionName ?? origin.RegionCode ?? "",
+                                HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Landsdel => "landsdel " + origin.Area,
+                                _ => _clubService.GetClubNameById(origin.HostClubId) ?? ""
+                            };
+                            // Klasser mästerskapet gäller (tom lista = alla klasser): klienten varnar bara när en vald klass omfattas.
+                            var covered = rule.WeaponGroups.Count == 0
+                                ? null
+                                : ShootingClasses.All.Where(c => rule.AppliesToClass(c.Id)).Select(c => c.Id).ToList();
+                            championship = new { where, coveredClassIds = covered };
+                        }
+                    }
+                }
+
                 return Json(new
                 {
                     success = true,
                     memberId = target.Id,
-                    clubs = options.Select(o => new { id = o.Id, name = o.Name, isPrimary = o.IsPrimary })
+                    clubs = options.Select(o => new
+                    {
+                        id = o.Id, name = o.Name, isPrimary = o.IsPrimary,
+                        outsideChampionship = outsideByClub.TryGetValue(o.Id, out var outside) && outside
+                    }),
+                    championship
                 });
             }
             catch (Exception ex)

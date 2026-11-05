@@ -50,11 +50,28 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void The_suggestion_goes_quiet_if_ANY_of_the_shooters_clubs_is_in_the_district()
+        public void The_club_the_shooter_competes_for_decides_and_the_reason_points_to_the_club_that_would_count()
         {
-            // Tävlar för Luleå men är också medlem i Kungsbacka: skytten kan själv välja — inget förslag.
-            Assert.Null(Krets("own", 3, 3, 2));
-            Assert.NotNull(Krets("own", 3, 3));
+            // Tävlar för Luleå men är också medlem i Kungsbacka (i kretsen): förslaget GÄLLER (valet avgör — annars kunde en skytt
+            // anmäla sig för en klubb utanför kretsen och ändå få kretsens medalj), men skälet pekar ut Kungsbacka.
+            var s = Krets("own", 3, 3, 2);
+            Assert.NotNull(s);
+            Assert.Contains("Kungsbacka PK", s!.Reason);
+            Assert.Contains("Tävlar för", s.Reason);
+            // Utan någon klubb i kretsen finns inget att peka ut.
+            Assert.DoesNotContain("också medlem", Krets("own", 3, 3)!.Reason);
+            // Tävlar för Kungsbacka (i kretsen) → inget förslag, även om hen är medlem i Luleå också.
+            Assert.Null(Krets("own", 2, 2, 3));
+        }
+
+        [Fact]
+        public void Qualifies_answers_per_club_for_the_picker()
+        {
+            var host = HallandHost;
+            Assert.True(OutOfCompetitionRules.Qualifies(ChampionshipScopeKind.Krets, "own", host, false, Clubs[2]));
+            Assert.False(OutOfCompetitionRules.Qualifies(ChampionshipScopeKind.Krets, "own", host, false, Clubs[3]));
+            Assert.Null(OutOfCompetitionRules.Qualifies(ChampionshipScopeKind.Krets, null, host, false, Clubs[3]));   // alla deltar
+            Assert.Null(OutOfCompetitionRules.Qualifies(ChampionshipScopeKind.Sm, "own", host, false, Clubs[3]));     // SM: ingen begränsning
         }
 
         [Fact]
@@ -95,7 +112,8 @@ namespace HpskSite.Tests
             var host = new CompetitionOrigin(1, "Halland", "Hallands krets", "Vast");
             Assert.NotNull(OutOfCompetitionRules.Suggest(ChampionshipScopeKind.Klubb, "own", host, false, 2, new[] { 2 }, Origin));
             Assert.Null(OutOfCompetitionRules.Suggest(ChampionshipScopeKind.Klubb, "own", host, false, 1, new[] { 1 }, Origin));
-            Assert.Null(OutOfCompetitionRules.Suggest(ChampionshipScopeKind.Klubb, "own", host, false, 2, new[] { 2, 1 }, Origin));
+            // Tävlar för Kungsbacka men är också medlem i värdklubben: valet avgör, skälet pekar ut Varberg.
+            Assert.Contains("Varbergs PK", OutOfCompetitionRules.Suggest(ChampionshipScopeKind.Klubb, "own", host, false, 2, new[] { 2, 1 }, Origin)!.Reason);
             Assert.Null(OutOfCompetitionRules.Suggest(ChampionshipScopeKind.Klubb, "own", host, true, 2, new[] { 2 }, Origin));
         }
 

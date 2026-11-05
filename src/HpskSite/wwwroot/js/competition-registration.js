@@ -1619,6 +1619,7 @@ async function loadRepresentingClubs(memberId) {
 
     row.classList.add('d-none');
     sel.innerHTML = '';
+    repClubs = []; repChampionship = null; updateChampionshipNotice();
     if (!memberId) return;
 
     try {
@@ -1626,21 +1627,86 @@ async function loadRepresentingClubs(memberId) {
             `/umbraco/surface/Competition/GetMemberClubs?memberId=${encodeURIComponent(memberId)}&competitionId=${encodeURIComponent(COMPETITION_ID)}`,
             { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         const data = await resp.json();
-        if (!data.success || !Array.isArray(data.clubs) || data.clubs.length < 2) return;
+        if (!data.success || !Array.isArray(data.clubs) || data.clubs.length < 1) return;
 
         // A slow response must not attach one shooter's clubs to another.
         if (String(selectedTargetMemberId) !== String(memberId)) return;
 
-        sel.innerHTML = data.clubs.map(c =>
-            `<option value="${c.id}"${c.isPrimary ? ' selected' : ''}>` +
-            `${escapeHtmlForClub(c.name)}${c.isPrimary ? ' (primär)' : ''}</option>`).join('');
-        row.classList.remove('d-none');
+        // Utanför mästerskapet: klubbarnas läge mot mästerskapet (bara när tävlingen begränsar vilka som deltar). Varningen gäller
+        // även en skytt med EN klubb — då finns inget val, men hen ska veta.
+        repClubs = data.clubs;
+        repChampionship = data.championship || null;
+
+        if (data.clubs.length >= 2) {
+            sel.innerHTML = data.clubs.map(c =>
+                `<option value="${c.id}"${c.isPrimary ? ' selected' : ''}>` +
+                `${escapeHtmlForClub(c.name)}${c.isPrimary ? ' (primär)' : ''}${c.outsideChampionship ? ' – utanför mästerskapet' : ''}</option>`).join('');
+            row.classList.remove('d-none');
+        }
+        updateChampionshipNotice();
     } catch (e) {
         // Non-fatal: with no picker the server files the entry under the primary club, which
         // is exactly the pre-existing behaviour.
         console.error('Kunde inte hämta dina klubbar', e);
     }
 }
+
+// ── "Utanför mästerskapet" vid anmälan ─────────────────────────────────────────────────────────
+// Klubben skytten tävlar för avgör om hen är med i mästerskapet. En skytt med flera klubbar som väljer en klubb som inte får delta
+// varnas HÄR, innan anmälan, och uppmanas välja en klubb som är med (knapp). Texten säger sanningen om konsekvensen: resultat och
+// standardmedalj, men ingen placering och ingen mästerskapsmedalj. Visas bara när tävlingen begränsar vilka som deltar och en vald
+// klass omfattas av mästerskapet.
+let repClubs = [];
+let repChampionship = null;
+
+function updateChampionshipNotice() {
+    const note = document.getElementById('championshipClubNotice');
+    if (!note) return;
+    note.classList.add('d-none');
+    note.innerHTML = '';
+    if (!repChampionship || repClubs.length === 0) return;
+
+    const row = document.getElementById('representingClubRow');
+    const sel = document.getElementById('representingClubSelect');
+    const primary = repClubs.find(c => c.isPrimary) || repClubs[0];
+    const chosenId = (row && !row.classList.contains('d-none') && sel && sel.value) ? parseInt(sel.value, 10) : primary.id;
+    const chosen = repClubs.find(c => c.id === chosenId);
+    if (!chosen || !chosen.outsideChampionship) return;
+
+    // Gäller mästerskapet bara vissa vapengrupper: vänta tills en klass som omfattas är vald.
+    const picked = Array.from(document.querySelectorAll('input[type="radio"][name^="selected"][name$="Class"]:checked')).map(r => r.value);
+    const covered = repChampionship.coveredClassIds;
+    if (Array.isArray(covered) && !picked.some(id => covered.includes(id))) return;
+
+    const alternatives = repClubs.filter(c => !c.outsideChampionship && c.id !== chosenId);
+    const consequence = 'Du får resultat och kan få standardmedalj, men ingen placering och ingen mästerskapsmedalj.';
+    let html = `<strong>Du skjuter utanför mästerskapet.</strong> Du tävlar för ${escapeHtmlForClub(chosen.name)}, men mästerskapet gäller ${escapeHtmlForClub(repChampionship.where)}. ${consequence}`;
+    if (alternatives.length > 0) {
+        // Knapparna är heltäckande (btn-warning) så att de syns i både ljust och mörkt läge; ett klick byter "Tävlar för".
+        html += ` Vill du vara med i mästerskapet, välj en av dina andra klubbar som &quot;Tävlar för&quot;:`
+            + '<div class="d-flex flex-wrap gap-1 mt-2">'
+            + alternatives.map(a => `<button type="button" class="btn btn-sm btn-warning" data-champ-club="${a.id}">Tävla för ${escapeHtmlForClub(a.name)}</button>`).join('')
+            + '</div>';
+    } else {
+        html += ' Stämmer det inte? Kontakta arrangören.';
+    }
+    note.innerHTML = html;
+    note.classList.remove('d-none');
+}
+
+document.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('[data-champ-club]');
+    if (!btn) return;
+    const sel = document.getElementById('representingClubSelect');
+    if (!sel) return;
+    sel.value = btn.getAttribute('data-champ-club');
+    updateChampionshipNotice();
+});
+
+document.addEventListener('change', e => {
+    if (e.target.matches && (e.target.matches('#representingClubSelect') || e.target.matches('input[type="radio"][name^="selected"][name$="Class"]')))
+        updateChampionshipNotice();
+});
 
 function escapeHtmlForClub(s) {
     return String(s ?? '').replace(/[&<>"']/g, c =>

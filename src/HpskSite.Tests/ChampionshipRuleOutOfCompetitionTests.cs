@@ -35,6 +35,25 @@ namespace HpskSite.Tests
             Assert.True(rule.AppliesTo("R"));
         }
 
+        [Theory]
+        [InlineData("Magnum Fält")]     // fri text som sajten känner igen (CompetitionTypes.GetFuzzy)
+        [InlineData("Faltskytte")]
+        [InlineData("MagnumFalt")]
+        public void Legacy_spellings_of_the_field_types_count_as_field(string type)
+        {
+            Assert.True(ChampionshipRule.For(Falt(type: type)).OutOfCompetitionApplies);
+        }
+
+        [Theory]
+        [InlineData("Precision")]
+        [InlineData("Springskytte")]
+        [InlineData("Milsnabb")]
+        [InlineData("Fältskjutning")]   // lagrat så på pilotkandidaten 7352 i prod-dumpen: sajten känner inte igen värdet som någon gren (ingen Stationer-flik heller) — ett DATAFEL att rätta, inte något regeln ska gissa
+        public void Other_disciplines_still_do_not(string type)
+        {
+            Assert.False(ChampionshipRule.For(Falt(type: type)).OutOfCompetitionApplies);
+        }
+
         [Fact]
         public void Not_a_championship_or_not_field_means_the_list_and_flags_do_nothing()
         {

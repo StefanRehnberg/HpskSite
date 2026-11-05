@@ -68,6 +68,10 @@
 							</div>
 						</div>
 
+						@* Utanför mästerskapet: varning när klubben skytten tävlar för inte är med i mästerskapet (fylls av competition-registration.js,
+						   updateChampionshipNotice). Dold när tävlingen inte begränsar vilka som deltar. *@
+						<div id="championshipClubNotice" class="alert alert-warning py-2 px-3 small mt-2 mb-0 d-none" role="alert" aria-live="polite"></div>
+
 						<!-- Quick-create new member (admin only) -->
 						<div id="quickCreateSection" style="display:none" class="mt-2">
 							<button type="button" class="btn btn-outline-success btn-sm" id="quickCreateToggleBtn" onclick="toggleQuickCreateForm()">
