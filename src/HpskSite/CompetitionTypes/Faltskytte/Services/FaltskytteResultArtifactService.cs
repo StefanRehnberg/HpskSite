@@ -205,6 +205,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 UpdatedAt = results.UpdatedAt,
                 IsOfficial = results.IsOfficial,
                 ClassGroups = results.ClassGroups.Select(cg => MapClassGroup(cg, scoring)).ToList(),
+                PlacementsAssigned = results.PlacementsAssigned,
                 ParticipantCount = results.ClassGroups
                     .SelectMany(cg => cg.Shooters)
                     .Select(s => s.MemberId)
@@ -259,6 +260,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 Club = s.Club,
                 ShootingClass = s.ShootingClass,
                 StandardMedal = s.StandardMedal,
+                OutOfCompetition = s.OutOfCompetition,
+                Placement = s.Placement,
                 ScoreOverride = scoring.Primary(s),
                 XCountOverride = scoring.Secondary(s),
 

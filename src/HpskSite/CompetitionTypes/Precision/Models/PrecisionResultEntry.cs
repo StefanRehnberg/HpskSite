@@ -129,6 +129,16 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // Standard Medal Award (Standardmedalj): null/""/B/S
         public string? StandardMedal { get; set; }
 
+        /// <summary>Utanför mästerskapet (fält, arrangörens beslut). Utelämnas ur JSON när falsk — äldre artefakter och andra grenar oförändrade.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool OutOfCompetition { get; set; }
+
+        /// <summary>Platsen i klassgruppen över dem som tävlar; null för en utanför-skytt och när beteendet inte gäller.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public int? Placement { get; set; }
+
         /// <summary>
         /// "DNS" / "DNF" when the shooter has a CompetitionParticipantStatus row, otherwise null.
         /// The shooter keeps their placement on whatever they scored — this only explains why the
@@ -318,6 +328,11 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// Fältet saknas i gammal JSON och blir då false, vilket är precis rätt.
         /// </summary>
         public bool MedalAwardsComputed { get; set; }
+
+        /// <summary>Sant när <see cref="PrecisionShooterResult.Placement"/> är satt för den här artefakten (utanför mästerskapet, fält). Saknas i gammal JSON = falskt.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool PlacementsAssigned { get; set; }
 
         /// <summary>
         /// Vilken INDELNING medaljerna i den här artefakten räknades i: sant = en uppsättning

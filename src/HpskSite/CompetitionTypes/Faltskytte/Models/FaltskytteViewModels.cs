@@ -410,6 +410,23 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Standard medal: "S" (silver), "B" (bronze), or null</summary>
         public string? StandardMedal { get; set; }
 
+        /// <summary>
+        /// Skytten skjuter UTANFÖR MÄSTERSKAPET i den här klassen (arrangörens beslut): får resultatet och kan få standardmedalj, men
+        /// ingen placering och ingen mästerskapsmedalj. Utelämnas ur JSON när den är falsk, så en tävling som inte använder beteendet
+        /// serialiseras exakt som förut.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool OutOfCompetition { get; set; }
+
+        /// <summary>
+        /// Platsen i klassgruppen räknad bara över dem som tävlar (antal tävlande före + 1); null för den som är utanför, och null överallt
+        /// när beteendet inte gäller tävlingen (klienterna räknar då som förut). Sätts bara när <see cref="FaltskylteFinalResults.PlacementsAssigned"/>.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public int? Placement { get; set; }
+
         // ── Särskjutning (shoot-off) — populated only for championship medal-tied shooters ──
 
         /// <summary>Variation-formatted summary per round, e.g. ["5/4","4/4"] for Normal,
@@ -534,6 +551,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Full per-weapon-class config (includes Förutsättningar, target groups, etc.)</summary>
         public FaltskytteCompetitionConfig Config { get; set; } = new();
         public List<FaltskytteClassGroup> ClassGroups { get; set; } = new();
+
+        /// <summary>
+        /// Sant när servern har räknat platserna (<see cref="FaltskytteShooterResult.Placement"/>) för en tävling som använder
+        /// "Utanför mästerskapet". Klienterna ritar bara serverns plats när det är sant; annars räknar de som förut. Utelämnas när falsk.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [Newtonsoft.Json.JsonProperty(DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore)]
+        public bool PlacementsAssigned { get; set; }
 
         /// <summary>
         /// Oavgjorda och avgjorda medaljstrider per MÄSTERSKAPSKATEGORI.

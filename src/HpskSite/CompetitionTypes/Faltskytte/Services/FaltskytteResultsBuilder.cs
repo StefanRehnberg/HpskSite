@@ -55,6 +55,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly OutOfCompetitionFlags _outOfCompetition;
 
         public FaltskytteResultsBuilder(
             IContentService contentService,
@@ -64,8 +65,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             FaltskytteShootOffService shootOffService,
             ILogger<FaltskytteResultsBuilder> logger,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            OutOfCompetitionFlags outOfCompetition)
         {
+            _outOfCompetition = outOfCompetition;
             _competitions = competitions;
             _results = results;
             _contentService = contentService;
@@ -251,6 +254,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var medalService = new FaltskytteStandardMedalService();
                 medalService.CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
             }
+
+            // ── Utanför mästerskapet (S6) ───────────────────────────────────────────
+            // Skytten får resultatet och står kvar i klassgruppen med sin standardmedalj (beräknad ovan på ALLA), men får ingen
+            // plats och ingen mästerskapsmedalj. Platsen räknas över de tävlande i klassgruppen (visningsgruppen, den sammanslagna om
+            // klasserna slagits ihop); mästerskapskategorierna nedan räknas bara över de tävlande. Gäller inte tävlingen beteendet
+            // (växeln av, inget mästerskap, inte fält) sätts ingenting och allt är som förut.
+            var outside = _outOfCompetition.Load(competition, championshipRule);
+            var placementsAssigned = championshipRule.OutOfCompetitionApplies;
+            if (placementsAssigned)
+            {
+                foreach (var s in shooterResults)
+                    s.OutOfCompetition = outside.Contains(s.MemberId, s.ShootingClass);
+                foreach (var cg in classGroups)
+                {
+                    var place = 0;
+                    foreach (var s in cg.Shooters)
+                        s.Placement = s.OutOfCompetition ? null : ++place;
+                }
+            }
             // ── Mästerskapskategorier och särskjutning ───────────────────────────────
             //
             // ⚠️ MEDALJEN AVGÖRS PER MÄSTERSKAPSKATEGORI, INTE PER SKICKLIGHETSKLASS.
@@ -280,7 +302,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 // mästerskapsmedalj, ingen särskjutning och ingen prisutdelning som mästerskap. Placeringen i klassgrupperna
                 // ovan och standardmedaljerna är oförändrade. Utan lista (eller utan växeln) är filtret alltid sant.
                 categoryStandings = shooterResults
-                    .Where(s => championshipRule.AppliesToClass(s.ShootingClass))
+                    .Where(s => championshipRule.AppliesToClass(s.ShootingClass) && !s.OutOfCompetition)
                     .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                     .Select(g => new FaltskytteCategoryStanding
@@ -385,6 +407,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     StationCount = stationCount,
                     Config = competitionConfig,
                     ClassGroups = classGroups,
+                    PlacementsAssigned = placementsAssigned,
                     MedalCategoryTies = medalCategoryTies,
                     CompetitionName = competitionName,
                     CompetitionDate = competitionDateStr,
