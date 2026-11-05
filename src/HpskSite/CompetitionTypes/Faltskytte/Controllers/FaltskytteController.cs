@@ -46,6 +46,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
         private readonly OfficialFaltskytteList _officialFalt;
         private readonly FaltskytteMedalLedger _medalLedger;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,10 +74,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             FaltskytteConfigurationService configurations,
             HpskSite.Services.Hosting.DatabaseLock dbLock,
             OfficialFaltskytteList officialFalt,
-            FaltskytteMedalLedger medalLedger)
+            FaltskytteMedalLedger medalLedger,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _officialFalt = officialFalt;
+            _outOfCompetition = outOfCompetition;
             _medalLedger = medalLedger;
             _competitions = competitions;
             _dbLock = dbLock;
@@ -1306,6 +1309,27 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             if (!request.IsSubCompetition)
             {
+                // Stämpling: förslaget "skjuter utanför mästerskapet" blir beslut FÖRE listan publiceras, så att den frusna bilden
+                // och allt som läser den bygger på beslut. Misslyckas den publiceras listan ändå (förslaget gäller då fortfarande
+                // live), men felet loggas.
+                if (request.IsOfficial)
+                {
+                    try
+                    {
+                        var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+                        if (rule.OutOfCompetitionApplies)
+                        {
+                            var stamped = _outOfCompetition.StampSuggestions(competition, rule);
+                            if (stamped > 0)
+                                _logger.LogInformation("Publicering av tävling {CompetitionId}: {Count} förslag 'utanför mästerskapet' stämplades som beslut", request.CompetitionId, stamped);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Stämpling av 'utanför mästerskapet' misslyckades vid publicering av tävling {CompetitionId}", request.CompetitionId);
+                    }
+                }
+
                 var officialSaved = _competitions.Update(request.CompetitionId, null, c => c.FaltskytteResultsOfficial = request.IsOfficial);
                 if (officialSaved.PublishProblem != null)
                     return Json(new { success = false, message = officialSaved.PublishProblem });

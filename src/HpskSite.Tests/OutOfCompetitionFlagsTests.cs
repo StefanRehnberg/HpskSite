@@ -156,6 +156,51 @@ namespace HpskSite.Tests
             Assert.False(set.Contains(7, "A1"));
         }
 
+        private static (OutOfCompetitionFlags flags, Mock<ICompetitionRegistrationStore> store) FlagsWithRegionsAndStore(params RegistrationRecord[] regs)
+        {
+            var store = new Mock<ICompetitionRegistrationStore>();
+            store.Setup(s => s.List(42)).Returns(regs);
+            store.Setup(s => s.StampOutOfCompetition(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+            var regions = new Mock<IClubRegionLookup>();
+            regions.Setup(r => r.OriginOf(It.IsAny<CompetitionInfo>())).Returns(new CompetitionOrigin(1, "Halland", "Hallands krets", "Vast"));
+            regions.Setup(r => r.OriginOf(1)).Returns(new ClubOrigin(1, "Varbergs PK", "Halland", "Hallands krets", "Vast"));
+            regions.Setup(r => r.OriginOf(3)).Returns(new ClubOrigin(3, "Luleå PK", "Norrbotten", "Norrbottens krets", "Nord"));
+            var memberClubs = new Mock<IMemberClubsLookup>();
+            memberClubs.Setup(m => m.ClubsOf(It.IsAny<IEnumerable<int>>())).Returns(new Dictionary<int, IReadOnlyList<int>>());
+            return (new OutOfCompetitionFlags(store.Object, regions.Object, memberClubs.Object), store);
+        }
+
+        [Fact]
+        public void Stamping_turns_only_undecided_suggestions_into_decisions()
+        {
+            var c = Comp();
+            c.ChampionshipParticipants = "own";
+            // 7: förslag utan beslut → stämplas. 8: arrangören sa "i mästerskapet" → rörs inte. 9: ingen anledning → rörs inte.
+            // 10: redan beslutat "utanför" (ingen förslagsrad) → rörs inte.
+            var (flags, store) = FlagsWithRegionsAndStore(
+                RegFor(7, 3, ("C2", null)), RegFor(8, 3, ("C2", false)), RegFor(9, 1, ("C2", null)), RegFor(10, 3, ("C2", true)));
+
+            var n = flags.StampSuggestions(c, ChampionshipRule.For(c));
+
+            Assert.Equal(1, n);
+            store.Verify(s => s.StampOutOfCompetition(42, 70, "C2", It.IsAny<string>()), Times.Once);
+            store.Verify(s => s.StampOutOfCompetition(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public void Stamping_does_nothing_without_participants_setting_or_with_the_switch_off()
+        {
+            var (flags, store) = FlagsWithRegionsAndStore(RegFor(7, 3, ("C2", null)));
+            var noSetting = Comp();                    // alla deltar → inga förslag
+            Assert.Equal(0, flags.StampSuggestions(noSetting, ChampionshipRule.For(noSetting)));
+
+            var off = Comp("off");
+            off.ChampionshipParticipants = "own";
+            Assert.Equal(0, flags.StampSuggestions(off, ChampionshipRule.For(off)));
+
+            store.Verify(s => s.StampOutOfCompetition(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        }
+
         [Theory]
         [InlineData(null)]
         [InlineData("off")]

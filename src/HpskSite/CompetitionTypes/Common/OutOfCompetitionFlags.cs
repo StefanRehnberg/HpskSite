@@ -30,8 +30,9 @@ namespace HpskSite.CompetitionTypes.Common
     /// Läget för en klassrad: arrangörens beslut (om något) och förslaget (om något). Det GÄLLANDE värdet är beslutet, annars förslaget.
     /// </summary>
     public sealed record OutOfCompetitionState(
-        int RegistrationId, int MemberId, string ClassKey, bool? Decision, OutOfCompetitionSuggestion? Suggestion)
+        int RegistrationId, int MemberId, string ClassKey, bool? Decision, OutOfCompetitionSuggestion? Suggestion, string? ClassRaw = null)
     {
+        // ClassKey är den normaliserade jämförelsenyckeln; ClassRaw är klassen som anmälan lagrar den (det storen tar emot).
         public bool Effective => Decision ?? Suggestion != null;
     }
 
@@ -95,10 +96,27 @@ namespace HpskSite.CompetitionTypes.Common
                     }
 
                     list.Add(new OutOfCompetitionState(reg.Id, reg.MemberId, ShootingClasses.NormalizeKey(cls.Class),
-                        cls.OutOfCompetition, cls.OutOfCompetition == null ? suggestion : null));
+                        cls.OutOfCompetition, cls.OutOfCompetition == null ? suggestion : null, cls.Class));
                 }
             }
             return list;
+        }
+
+        /// <summary>
+        /// STÄMPLING vid publicering: varje förslag (klassrad utan beslut vars gällande värde är "utanför") blir ett beslut, så att
+        /// listan inte ändras av att förutsättningarna (skyttens klubbar, tävlingens "vilka deltar") ändras efter publiceringen.
+        /// Skriver aldrig över ett beslut arrangören satt — storen skriver bara när inget beslut finns. Idempotent. Returnerar antalet
+        /// stämplade klassrader.
+        /// </summary>
+        public int StampSuggestions(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
+        {
+            var stamped = 0;
+            foreach (var s in States(competition, rule))
+            {
+                if (s.Decision != null || s.Suggestion == null) continue;
+                if (_registrations.StampOutOfCompetition(competition.Id, s.RegistrationId, s.ClassRaw ?? s.ClassKey, "suggestion-stamped")) stamped++;
+            }
+            return stamped;
         }
 
         public OutOfCompetitionSet Load(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)

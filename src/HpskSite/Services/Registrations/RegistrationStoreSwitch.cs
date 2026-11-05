@@ -100,5 +100,8 @@ namespace HpskSite.Services.Registrations
 
         public int ClearOutOfCompetition(int competitionId, int registrationId, string reason)
             => Writable.ClearOutOfCompetition(competitionId, registrationId, reason);
+
+        public bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason)
+            => Writable.StampOutOfCompetition(competitionId, registrationId, classKey, reason);
     }
 }

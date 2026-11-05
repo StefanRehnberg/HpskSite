@@ -298,6 +298,43 @@ FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0", regist
             return removed;
         }
 
+        public bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason)
+        {
+            var raw = (classKey ?? "").Trim();
+            if (raw.Length == 0) return false;
+            var key = ShootingClasses.Resolve(raw)?.Id ?? raw;
+            var why = Truncate(string.IsNullOrWhiteSpace(reason) ? "stamped" : reason.Trim(), 40);
+            var now = DateTime.Now;
+
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+
+            // Samma lås som SetOutOfCompetition: en samtidig arrangörsändring avgör, stämplingen väntar och ser då beslutet.
+            var owner = db.Fetch<int>(
+                "SELECT MemberId FROM dbo.CompetitionRegistration WITH (UPDLOCK) WHERE Id = @0 AND CompetitionId = @1",
+                registrationId, competitionId);
+            if (owner.Count == 0) return false;
+
+            var hasDecision = db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.CompetitionRegistrationClassDecision WITH (UPDLOCK, HOLDLOCK) WHERE RegistrationId = @0 AND ClassKey = @1",
+                registrationId, key) > 0;
+            if (hasDecision) return false;
+
+            var classExists = db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.CompetitionRegistrationClass WHERE RegistrationId = @0 AND ClassKey = @1", registrationId, key) > 0;
+            if (!classExists) return false;
+
+            db.Execute(@"
+INSERT INTO dbo.CompetitionRegistrationClassDecision (RegistrationId, ClassKey, OutOfCompetition, SetByMemberId, SetAt)
+VALUES (@0, @1, 1, NULL, @2)", registrationId, key, now);
+            db.Execute(@"
+INSERT INTO dbo.ChampionshipDecisionLog (CompetitionId, RegistrationId, MemberId, ClassKey, OldValue, NewValue, Reason, SetByMemberId, SetAt)
+VALUES (@0, @1, @2, @3, NULL, 1, @4, NULL, @5)", competitionId, registrationId, owner[0], key, why, now);
+
+            scope.Complete();
+            return true;
+        }
+
         private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
         public bool Delete(int competitionId, int registrationId)

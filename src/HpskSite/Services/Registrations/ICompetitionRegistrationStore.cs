@@ -81,6 +81,13 @@ namespace HpskSite.Services.Registrations
         /// Loggas med <paramref name="reason"/>. Returnerar antalet borttagna beslut.
         /// </summary>
         int ClearOutOfCompetition(int competitionId, int registrationId, string reason);
+
+        /// <summary>
+        /// Gör FÖRSLAGET "utanför mästerskapet" till ett beslut (stämpling vid publicering). Skriver BARA när klassraden finns och inget
+        /// beslut redan finns — ett beslut arrangören hunnit sätta (åt något håll) vinner alltid. Loggas med <paramref name="reason"/>,
+        /// utan beslutsfattare (systemet). Returnerar true när ett beslut skrevs.
+        /// </summary>
+        bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason);
     }
 
     /// <summary>Utfallet av <see cref="ICompetitionRegistrationStore.SetOutOfCompetition"/>.</summary>
