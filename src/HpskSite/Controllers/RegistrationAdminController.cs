@@ -1229,6 +1229,10 @@ namespace HpskSite.Controllers
                 // Update the registration in-place. Don't touch shootingClasses or
                 // registrationDate — the spot, classes, and date all transfer to the new
                 // shooter as-is. (The storage renames the node after the new shooter.)
+                // "Utanför mästerskapet" är ett beslut om DEN HÄR skytten, inte om platsen: det följer inte med till mottagaren. Rensas FÖRE
+                // flytten så att beslutsloggen (Reason 'transferred') får den förra skytten som medlem.
+                _registrations.ClearOutOfCompetition(registration.CompetitionId, registration.Id, "transferred");
+
                 registration.MemberId = request.ToMemberId;
                 registration.MemberName = toMember.Name ?? "";
                 if (toClubId > 0) registration.ClubId = toClubId;
