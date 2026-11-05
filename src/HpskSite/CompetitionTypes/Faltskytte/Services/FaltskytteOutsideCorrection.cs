@@ -216,8 +216,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 using var scope = _scopeProvider.CreateScope(autoComplete: true);
                 var at = scope.Database.ExecuteScalar<DateTime?>(
-                    "SELECT MAX(AtUtc) FROM dbo.CompetitionChange WHERE TargetKind = 'competition' AND TargetId = @0 AND [Action] = @1",
-                    competitionId, ChangeAction);
+                    "SELECT MAX(AtUtc) FROM dbo.CompetitionChange WHERE TargetKind = @2 AND TargetId = @0 AND [Action] = @1",
+                    competitionId, ChangeAction, HpskSite.Models.Competitions.CompetitionFieldTable.NodeAlias);
                 return HpskSite.Services.Hosting.SwedishTime.FromUtc(at);
             }
             catch (Exception ex)
@@ -277,7 +277,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             // Anledningen får inte plats i beslutsloggen (40 tecken) — den bor i tävlingens ändringslogg, och den läses också av
             // tittarnotisen ("Listan rättades {datum}"). Varningsnivå: en rättning av en publicerad lista ska gå att spåra i loggen.
-            _changes.Record("competition", competitionId, ChangeAction, new Dictionary<string, (object?, object?)>
+            _changes.Record(HpskSite.Models.Competitions.CompetitionFieldTable.NodeAlias, competitionId, ChangeAction, new Dictionary<string, (object?, object?)>
             {
                 ["shooter"] = (null, t.Registration.MemberName),
                 ["class"] = (null, t.ClassRaw),
