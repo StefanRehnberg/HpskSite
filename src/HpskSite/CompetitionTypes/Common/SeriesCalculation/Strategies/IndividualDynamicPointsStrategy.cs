@@ -28,7 +28,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 var compScores = context.CompetitionResults.GetValueOrDefault(comp.CompetitionId);
                 if (compScores == null || !compScores.Any()) continue;
 
-                foreach (var classGroup in compScores.GroupBy(s => s.ShootingClass))
+                foreach (var classGroup in compScores.Contenders().GroupBy(s => s.ShootingClass))
                 {
                     var entries = classGroup
                         .Select(s => (s.MemberId, s.TotalScore, s.XCount))

@@ -33,6 +33,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly OfficialFaltskytteList _officialFalt;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
 
         public FaltskytteSeriesScoreSource(
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -40,8 +41,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ClubService clubService,
             ILogger<FaltskytteSeriesScoreSource> logger,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            OfficialFaltskytteList officialFalt)
+            OfficialFaltskytteList officialFalt,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
         {
+            _outOfCompetition = outOfCompetition;
             _officialFalt = officialFalt;
             _competitions = competitions;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
@@ -138,6 +141,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                 var isPoang = modeByCompetition[compId];
 
+                // Vilka som skjöt utanför mästerskapet i den här omgången (tom när beteendet inte gäller tävlingen). Serien rankar
+                // bara de tävlande (se ShooterCompetitionScoreExtensions.Contenders).
+                var roundInfo = _competitions.GetSaved(compId);
+                var outside = roundInfo == null
+                    ? HpskSite.CompetitionTypes.Common.OutOfCompetitionSet.None
+                    : _outOfCompetition.Load(roundInfo, HpskSite.CompetitionTypes.Common.ChampionshipRule.For(roundInfo));
+
                 set.ByCompetition[compId] = rows
                     .GroupBy(r => new { r.MemberId, r.ShootingClass })
                     .Select(g =>
@@ -158,7 +168,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             ClubId = ResolveClubId(club, clubIdByName, syntheticClubIds),
                             ShootingClass = ShootingClasses.GetById(g.Key.ShootingClass)?.Name ?? g.Key.ShootingClass,
                             TotalScore = isPoang ? hits + figures : hits,
-                            XCount = isPoang ? poangmal : figures
+                            XCount = isPoang ? poangmal : figures,
+                            OutOfCompetition = outside.Contains(g.Key.MemberId, g.Key.ShootingClass)
                         };
                     })
                     .ToList();

@@ -25,5 +25,19 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Models
         public string ShootingClass { get; set; } = "";
         public int TotalScore { get; set; }
         public int XCount { get; set; }
+
+        /// <summary>
+        /// Skytten skjöt utanför mästerskapet i den här tävlingen och klassen: resultatet står kvar men skytten tävlar inte, så
+        /// hen får ingen placeringspoäng, tar ingen från de tävlande och räknas inte i ett klubblags poäng. Sätts bara av en
+        /// poängkälla som känner beteendet (fält); övriga lämnar den falsk och allt räknas som förut.
+        /// </summary>
+        public bool OutOfCompetition { get; set; }
+    }
+
+    public static class ShooterCompetitionScoreExtensions
+    {
+        /// <summary>De som tävlar: alla utom dem som skjuter utanför mästerskapet. EN definition för varje strategi som rankar.</summary>
+        public static IEnumerable<ShooterCompetitionScore> Contenders(this IEnumerable<ShooterCompetitionScore> scores)
+            => scores.Where(s => !s.OutOfCompetition);
     }
 }

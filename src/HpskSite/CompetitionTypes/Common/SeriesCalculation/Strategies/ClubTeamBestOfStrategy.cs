@@ -236,6 +236,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                         if (compScores == null) continue;
 
                         var clubShooters = compScores
+                            .Contenders()
                             .Where(s => s.ClubId == clubId && s.ShootingClass == shootingClass)
                             .OrderByDescending(s => s.TotalScore)
                             .ThenByDescending(s => s.XCount)
@@ -301,6 +302,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
 
                     // Group by member, take best score per member (shooter counts once)
                     var bestScorePerMember = compScores
+                        .Contenders()
                         .Where(s => s.ClubId == clubId)
                         .GroupBy(s => s.MemberId)
                         .Select(g => g.OrderByDescending(s => s.TotalScore).ThenByDescending(s => s.XCount).First())

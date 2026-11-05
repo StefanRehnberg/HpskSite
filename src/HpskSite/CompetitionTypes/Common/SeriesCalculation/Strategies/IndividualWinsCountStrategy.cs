@@ -28,7 +28,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                 var compScores = context.CompetitionResults.GetValueOrDefault(comp.CompetitionId);
                 if (compScores == null || !compScores.Any()) continue;
 
-                var byClass = compScores.GroupBy(s => s.ShootingClass);
+                var byClass = compScores.Contenders().GroupBy(s => s.ShootingClass);
                 foreach (var classGroup in byClass)
                 {
                     var maxScore = classGroup.Max(s => s.TotalScore);
