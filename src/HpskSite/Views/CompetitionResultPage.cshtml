@@ -12,7 +12,7 @@
 @inject HpskSite.Services.Kretsgranskning.KretsCalendarService KretsCalendar
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
-@inject HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteOutsideCorrectionService OutsideCorrection
+@inject IServiceProvider Services
 @{
     Layout = null;
     // Sidan visas antingen för resultatnoden (barn till tävlingen) eller, när listorna ligger i
@@ -116,9 +116,12 @@
     // Rättad publicerad lista ("Flytta utanför mästerskapet", S6): tittaren ska se att placeringarna ändrats efter publiceringen.
     // Bara huvudlistan och bara medan den är officiell; datumet ur tävlingens ändringslogg.
     string correctedNotice = "";
-    if (!isSubCompetitionView && competitionInfo?.FaltskytteResultsOfficial == true)
+    // Bara när tävlingen använder "Utanför mästerskapet": annars varken hämtas rättningstjänsten eller körs någon fråga.
+    if (!isSubCompetitionView && competitionInfo?.FaltskytteResultsOfficial == true
+        && HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competitionInfo).OutOfCompetitionApplies)
     {
-        var correctedAt = OutsideCorrection.LatestCorrection(competition.Id);
+        var correctedAt = Services.GetRequiredService<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteOutsideCorrectionService>()
+            .LatestCorrection(competition.Id);
         if (correctedAt != null)
             correctedNotice = "Listan rättades " + correctedAt.Value.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("sv-SE"))
                 + ". En skytt har flyttats utanför mästerskapet, så placeringarna efter hen har ändrats.";

@@ -27,9 +27,11 @@ namespace HpskSite.Models
         public bool? OutOfCompetition { get; set; }
 
         /// <summary>Vem som satt beslutet (medlems-id), för läsning. Null = okänt eller gallrat.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
         public int? OutOfCompetitionSetBy { get; set; }
 
-        /// <summary>När beslutet sattes (svensk tid), för läsning.</summary>
+        /// <summary>När beslutet sattes (svensk tid), för läsning. ⚠️ Aldrig i JSON: skyttens egen anmälan bär klassraderna, och arrangörens id får inte lämna servern.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
         public DateTime? OutOfCompetitionSetAt { get; set; }
 
         /// <summary>

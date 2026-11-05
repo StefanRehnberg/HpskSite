@@ -1319,7 +1319,7 @@ namespace HpskSite.Controllers
                 if (!rule.AppliesToClass(request.ClassKey))
                     return Json(new { success = false, message = "Mästerskapet gäller inte den här vapengruppen, så det finns ingen mästerskapsplacering att stå utanför." });
                 if (competition.FaltskytteResultsOfficial)
-                    return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via \"Rätta listan\"." });
+                    return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via Resultat-fliken (Rätta listan, \"Flytta utanför mästerskapet\")." });
 
                 if (request.Value == true)
                 {
