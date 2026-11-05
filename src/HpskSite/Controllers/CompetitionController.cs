@@ -1573,6 +1573,8 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
+                var oocRule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+
                 // PERFORMANCE FIX: Direct query to competition children instead of full tree traversal
                 var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _).ToList();
                 // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a).
@@ -1955,7 +1957,11 @@ namespace HpskSite.Controllers
                             className = ShootingClasses.GetById(sc.Class)?.Name ?? sc.Class,
                             startPreference = sc.StartPreference,
                             teamNumber = sc.TeamNumber,
-                            joinMemberId = sc.JoinMemberId
+                            joinMemberId = sc.JoinMemberId,
+                            // Arrangörens beslut "Utanför mästerskapet" för klassen (null = inget beslut) och om mästerskapet
+                            // gäller klassens vapengrupp alls. Bara för visning i Redigera anmälan; skrivs via SetOutOfCompetition.
+                            outOfCompetition = sc.OutOfCompetition,
+                            outOfCompetitionApplies = oocRule.OutOfCompetitionApplies && oocRule.AppliesToClass(sc.Class)
                         }).ToList();
 
                         return new

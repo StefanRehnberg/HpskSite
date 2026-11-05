@@ -4029,6 +4029,24 @@ async function populateEditClubSelect(registration) {
     }
 }
 
+// "Utanför mästerskapet" — EN kontroll per klassrad i Redigera anmälan, bara när tävlingen använder beteendet och mästerskapet gäller
+// klassens vapengrupp (servern avgör: outOfCompetitionApplies). Visar det GÄLLANDE läget och skrivs bara när arrangören ändrar den
+// (RegistrationAdmin/SetOutOfCompetition, efter att anmälan sparats). Syns inte alls för andra tävlingar.
+function faltOocRowHtml(classId, registration) {
+    const sc = (registration.shootingClasses || []).find(x => (x.class || x.className || '').trim() === classId);
+    if (!sc || !sc.outOfCompetitionApplies) return '';
+    const safeId = `editOoc_${String(classId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    const on = sc.outOfCompetition === true;
+    return `
+        <div class="form-check ms-4 mb-1">
+            <input class="form-check-input edit-ooc-cb" type="checkbox" id="${safeId}"
+                   data-class-id="${escapeAttr(classId)}" data-initial="${on ? '1' : '0'}" ${on ? 'checked' : ''}>
+            <label class="form-check-label" for="${safeId}">Utanför mästerskapet</label>
+            <div class="form-text">Skytten skjuter och får resultatet i listan och kan få standardmedalj, men får ingen placering och
+                ingen mästerskapsmedalj. Placeringen går till nästa skytt.</div>
+        </div>`;
+}
+
 async function editCompetitionRegistration(registrationId) {
     const registration = competitionRegistrations.find(r => r.id === registrationId);
     if (!registration) return;
@@ -4063,7 +4081,7 @@ async function editCompetitionRegistration(registrationId) {
                     <label class="form-check-label" for="${safeId}">
                         ${escapeAttr(c.name)}
                     </label>
-                </div>`;
+                </div>${faltOocRowHtml(c.id, registration)}`;
         }).join('') + orphanExisting.map(id => {
             const safeId = `editCls_${id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
             return `
@@ -4073,7 +4091,7 @@ async function editCompetitionRegistration(registrationId) {
                     <label class="form-check-label" for="${safeId}">
                         ${escapeAttr(window.getShootingClassName(id))} <span class="badge bg-warning text-dark">befintlig</span>
                     </label>
-                </div>`;
+                </div>${faltOocRowHtml(id, registration)}`;
         }).join('');
     } else {
         // Fallback when the parent view didn't pass an allowed-class list — show whatever
@@ -4563,6 +4581,13 @@ function saveCompetitionRegistrationChanges() {
         return;
     }
 
+    // "Utanför mästerskapet": bara de klassrader arrangören faktiskt ändrat, och bara klasser som finns kvar efter sparningen.
+    // Läses FÖRE sparningen — modalen rivs när den stängs.
+    const keptKeys = new Set(classes.map(c => c.class));
+    const oocChanges = Array.from(document.querySelectorAll('#competitionEditClassList .edit-ooc-cb'))
+        .filter(cb => keptKeys.has(cb.dataset.classId) && cb.checked !== (cb.dataset.initial === '1'))
+        .map(cb => ({ classKey: cb.dataset.classId, value: cb.checked }));
+
     // Deltävling opt-in: read the modal's checkbox when rendered (competition has a
     // configured subCompetitionName), otherwise fall back to whatever the registration
     // already had so a fee re-compute doesn't accidentally drop the surcharge.
@@ -4664,7 +4689,22 @@ function saveCompetitionRegistrationChanges() {
             // public lists were left showing the old club.
             // Shown as ONE non-blocking banner. These were two alert()s, i.e. up to two native
             // dialogs that freeze the tab — and a class change always produces the fee note.
-            showDeskSaveNotice([result.feeChangeNote, result.clubPropagationNote], 'info');
+            // Beslutet "Utanför mästerskapet" skrivs separat (egen tabell, egen skrivväg). Ett nej från servern visas i samma banderoll.
+            const oocNotes = [];
+            for (const ch of oocChanges) {
+                try {
+                    const r = await fetch('/umbraco/surface/RegistrationAdmin/SetOutOfCompetition', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+                        body: JSON.stringify({ registrationId: data.registrationId, classKey: ch.classKey, value: ch.value })
+                    });
+                    const d = await r.json();
+                    if (!d.success) oocNotes.push('Utanför mästerskapet sparades inte: ' + (d.message || 'okänt fel'));
+                } catch (e) {
+                    oocNotes.push('Utanför mästerskapet sparades inte: ' + (e.message || 'nätverksfel'));
+                }
+            }
+            showDeskSaveNotice([result.feeChangeNote, result.clubPropagationNote, ...oocNotes], oocNotes.length ? 'warning' : 'info');
             const registrationId = parseInt(document.getElementById('competitionEditRegistrationId').value, 10);
             loadCompetitionRegistrations();
 
