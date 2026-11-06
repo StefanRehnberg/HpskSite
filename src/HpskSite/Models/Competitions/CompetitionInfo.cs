@@ -178,11 +178,8 @@ namespace HpskSite.Models.Competitions
         /// <summary>Arrangörens val: false = utanför-skyttar visas "på rätt plats", true = samlade sist i klassen.</summary>
         public bool HideOutOfCompetitionInPlace { get; set; }
 
-        /// <summary>
-        /// Växeln för utanför-mästerskapet-beteendet PER TÄVLING: null = av (dagens beteende, alla befintliga tävlingar), "on" = på.
-        /// Tillstånd, följer aldrig med en kopia. Läs via <c>ChampionshipRule</c>, aldrig direkt.
-        /// </summary>
-        public string? ChampionshipMode { get; set; }
+        // (Växeln ChampionshipMode är borttagen 2026-11-06: utanför-mästerskapet gäller alltid fält-/MagnumFältmästerskap. Kolumnen
+        //  Competition.ChampionshipMode finns kvar i databasen, nullbar och oläst, tills en städmigrering tar bort den.)
 
         /// <summary>Filerna som de lagrade mediareferenserna (MediaPicker3-JSON).</summary>
         public string? InvitationFile { get; set; }

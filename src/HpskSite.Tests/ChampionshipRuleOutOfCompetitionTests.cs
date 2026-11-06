@@ -7,30 +7,31 @@ namespace HpskSite.Tests
 {
     /// <summary>
     /// S4/S5: <see cref="ChampionshipRule.OutOfCompetitionApplies"/> och <see cref="ChampionshipRule.AppliesTo(string?)"/>.
-    /// Beteendet kräver ALLA tre: växeln på tävlingen är "on", tävlingen är ett mästerskap och grenen är fält/MagnumFält.
-    /// Är något falskt gäller alla grupper och ingen flagga — exakt dagens beteende.
+    /// Beteendet gäller ALLTID när tävlingen är ett mästerskap och grenen är fält/MagnumFält — det finns ingen växel per tävling
+    /// (Stefan 2026-11-06). Är något av de två falskt gäller alla grupper och ingen flagga — exakt dagens beteende.
     /// </summary>
     public class ChampionshipRuleOutOfCompetitionTests
     {
-        private static CompetitionInfo Falt(string? mode = "on", string? scope = CompetitionScopeHelper.Kretsmasterskap,
+        private static CompetitionInfo Falt(string? scope = CompetitionScopeHelper.Kretsmasterskap,
             string? groups = "C", string type = "Faltskytte") =>
-            new() { CompetitionType = type, CompetitionScope = scope, ChampionshipMode = mode, ChampionshipWeaponGroups = groups };
+            new() { CompetitionType = type, CompetitionScope = scope, ChampionshipWeaponGroups = groups };
 
         [Fact]
-        public void On_a_field_championship_with_the_switch_on_the_behaviour_applies()
+        public void On_a_field_championship_the_behaviour_always_applies()
         {
             Assert.True(ChampionshipRule.For(Falt()).OutOfCompetitionApplies);
             Assert.True(ChampionshipRule.For(Falt(type: "MagnumFalt")).OutOfCompetitionApplies);
+            // Alla mästerskapsnivåer, utan någon inställning på tävlingen alls.
+            foreach (var scope in new[] { CompetitionScopeHelper.Klubbmasterskap, CompetitionScopeHelper.Kretsmasterskap,
+                                          CompetitionScopeHelper.Landsdelsmasterskap, CompetitionScopeHelper.SvensktMasterskap })
+                Assert.True(ChampionshipRule.For(Falt(scope: scope, groups: null)).OutOfCompetitionApplies);
         }
 
-        [Theory]
-        [InlineData(null)]
-        [InlineData("off")]
-        [InlineData("pilot:7")]
-        public void Without_the_switch_nothing_changes_and_every_group_applies(string? mode)
+        [Fact]
+        public void With_no_weapon_group_list_every_group_decides_the_championship()
         {
-            var rule = ChampionshipRule.For(Falt(mode));
-            Assert.False(rule.OutOfCompetitionApplies);
+            var rule = ChampionshipRule.For(Falt(groups: null));
+            Assert.True(rule.OutOfCompetitionApplies);
             Assert.True(rule.AppliesTo("A"));
             Assert.True(rule.AppliesTo("R"));
         }
@@ -101,8 +102,8 @@ namespace HpskSite.Tests
             Assert.True(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,C")).SplitsStandardMedalGroupC);
             // Mästerskap bara i A/B: C avgör inget mästerskap, så C delas inte för standardmedaljerna.
             Assert.False(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,B")).SplitsStandardMedalGroupC);
-            // Växeln av: listan verkar inte.
-            Assert.True(ChampionshipRule.For(Falt(mode: null, scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,B")).SplitsStandardMedalGroupC);
+            // En gren som inte är fält ignorerar listan: som förut.
+            Assert.True(ChampionshipRule.For(Falt(type: "Precision", scope: CompetitionScopeHelper.Landsdelsmasterskap, groups: "A,B")).SplitsStandardMedalGroupC);
             // Krets och klubb delade aldrig C för standardmedaljerna.
             Assert.False(ChampionshipRule.For(Falt(scope: CompetitionScopeHelper.Kretsmasterskap, groups: "C")).SplitsStandardMedalGroupC);
         }

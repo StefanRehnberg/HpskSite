@@ -45,7 +45,7 @@ namespace HpskSite.Services.Registrations
             foreach (var t in new[] { "CompetitionRegistrationClassDecision", "ChampionshipDecisionLog" })
                 if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0)
                     missing.Add(t + " (add-out-of-competition-and-patrol-max.sql)");
-            foreach (var c in new[] { "MaxPatrolSize", "ChampionshipWeaponGroups", "ChampionshipParticipants", "ChampionshipMode", "HideOutOfCompetitionInPlace", "FaltskyttePublishedGroups" })
+            foreach (var c in new[] { "MaxPatrolSize", "ChampionshipWeaponGroups", "ChampionshipParticipants", "HideOutOfCompetitionInPlace", "FaltskyttePublishedGroups" })
                 if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Competition', @0) IS NULL THEN 0 ELSE 1 END", c) == 0)
                     missing.Add("Competition." + c + " (add-out-of-competition-and-patrol-max.sql)");
             if (db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM sys.index_columns ic

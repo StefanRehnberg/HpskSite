@@ -15,10 +15,11 @@ namespace HpskSite.Tests
     /// </summary>
     public class OutOfCompetitionFlagsTests
     {
-        private static CompetitionInfo Comp(string? mode = "on", string? groups = null) => new()
+        // type = grenen; en annan gren än fält gör att beteendet inte gäller tävlingen.
+        private static CompetitionInfo Comp(string type = "Faltskytte", string? groups = null) => new()
         {
-            Id = 42, CompetitionType = "Faltskytte", CompetitionScope = CompetitionScopeHelper.Kretsmasterskap,
-            ChampionshipMode = mode, ChampionshipWeaponGroups = groups
+            Id = 42, CompetitionType = type, CompetitionScope = CompetitionScopeHelper.Kretsmasterskap,
+            ChampionshipWeaponGroups = groups
         };
 
         private static RegistrationRecord Reg(int memberId, bool active, params (string cls, bool? outside)[] classes) => new()
@@ -194,20 +195,20 @@ namespace HpskSite.Tests
             var noSetting = Comp();                    // alla deltar → inga förslag
             Assert.Equal(0, flags.StampSuggestions(noSetting, ChampionshipRule.For(noSetting)));
 
-            var off = Comp("off");
-            off.ChampionshipParticipants = "own";
-            Assert.Equal(0, flags.StampSuggestions(off, ChampionshipRule.For(off)));
+            var notField = Comp("Precision");          // en gren utan beteendet
+            notField.ChampionshipParticipants = "own";
+            Assert.Equal(0, flags.StampSuggestions(notField, ChampionshipRule.For(notField)));
 
             store.Verify(s => s.StampOutOfCompetition(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
         [Theory]
-        [InlineData(null)]
-        [InlineData("off")]
-        public void Without_the_switch_nothing_is_read_at_all(string? mode)
+        [InlineData("Precision")]
+        [InlineData("Springskytte")]
+        public void In_a_discipline_without_the_behaviour_nothing_is_read_at_all(string type)
         {
             var (flags, store) = Flags(Reg(7, true, ("C2", true)));
-            var c = Comp(mode);
+            var c = Comp(type);
             var set = flags.Load(c, ChampionshipRule.For(c));
 
             Assert.Same(OutOfCompetitionSet.None, set);

@@ -17,10 +17,10 @@ namespace HpskSite.Tests
     /// </summary>
     public class OutOfCompetitionFreezeTests
     {
-        private static CompetitionInfo Comp(string? mode = "on", string? participants = "own") => new()
+        private static CompetitionInfo Comp(string type = "Faltskytte", string? participants = "own") => new()
         {
-            Id = 42, CompetitionType = "Faltskytte", CompetitionScope = CompetitionScopeHelper.Kretsmasterskap,
-            ChampionshipMode = mode, ChampionshipParticipants = participants
+            Id = 42, CompetitionType = type, CompetitionScope = CompetitionScopeHelper.Kretsmasterskap,
+            ChampionshipParticipants = participants
         };
 
         private static RegistrationRecord RegFor(int memberId, int clubId, params (string cls, bool? decision)[] classes) => new()
@@ -79,11 +79,11 @@ namespace HpskSite.Tests
         }
 
         [Theory]
-        [InlineData(null)]
-        [InlineData("off")]
-        public void Freezing_does_nothing_when_the_behaviour_does_not_apply(string? mode)
+        [InlineData("Precision")]
+        [InlineData("Springskytte")]
+        public void Freezing_does_nothing_when_the_behaviour_does_not_apply(string type)
         {
-            var c = Comp(mode);
+            var c = Comp(type);
             var (flags, store) = Setup(RegFor(7, 3, ("C2", null)));
 
             var (outside, inside) = flags.FreezeDecisions(c, ChampionshipRule.For(c));

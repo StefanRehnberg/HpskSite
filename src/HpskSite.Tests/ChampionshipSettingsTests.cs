@@ -42,14 +42,6 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void The_mode_is_on_or_off_and_nothing_else()
-        {
-            Assert.Equal("on", ChampionshipParticipantsSetting.NormalizeMode("ON"));
-            Assert.Null(ChampionshipParticipantsSetting.NormalizeMode("pilot:7"));
-            Assert.Null(ChampionshipParticipantsSetting.NormalizeMode(""));
-        }
-
-        [Fact]
         public void The_form_value_is_normalised_on_the_way_in()
         {
             Assert.Equal("A,C", CompetitionFieldBag.ToNodeValue("championshipWeaponGroups", "c,A,zzz"));
@@ -59,18 +51,16 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void A_copy_keeps_the_definition_but_never_the_mode()
+        public void A_copy_keeps_the_championship_definition()
         {
             var source = new CompetitionInfo
             {
-                ChampionshipWeaponGroups = "C", ChampionshipParticipants = "own", HideOutOfCompetitionInPlace = true,
-                ChampionshipMode = "on"
+                ChampionshipWeaponGroups = "C", ChampionshipParticipants = "own", HideOutOfCompetitionInPlace = true
             };
             var copy = CompetitionFieldTable.CopyDefinition(source);
             Assert.Equal("C", copy.ChampionshipWeaponGroups);
             Assert.Equal("own", copy.ChampionshipParticipants);
             Assert.True(copy.HideOutOfCompetitionInPlace);
-            Assert.Null(copy.ChampionshipMode);
         }
     }
 }

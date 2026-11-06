@@ -34,22 +34,20 @@ namespace HpskSite.CompetitionTypes.Common
         public bool StoredMedalsPerWeaponGroup { get; }
 
         private readonly string _discipline;
-        private readonly bool _modeOn;
         private readonly IReadOnlyList<string> _weaponGroups;
 
         private ChampionshipRule(string? scope, bool storedMedalsPerWeaponGroup,
-            string? discipline = null, string? mode = null, string? weaponGroups = null)
+            string? discipline = null, string? weaponGroups = null)
         {
             Scope = scope ?? "";
             StoredMedalsPerWeaponGroup = storedMedalsPerWeaponGroup;
             _discipline = CanonicalDiscipline(discipline);
-            _modeOn = ChampionshipParticipantsSetting.NormalizeMode(mode) != null;
             _weaponGroups = ChampionshipWeaponGroups.Parse(weaponGroups);
         }
 
         public static ChampionshipRule For(CompetitionInfo? competition) =>
             new(competition?.CompetitionScope, competition?.MedalsPerWeaponGroup ?? false,
-                competition?.CompetitionType, competition?.ChampionshipMode, competition?.ChampionshipWeaponGroups);
+                competition?.CompetitionType, competition?.ChampionshipWeaponGroups);
 
         /// <summary>För de ställen som bara har omfattningen och arrangörens lagrade val (t.ex. en sparad artefakt).</summary>
         public static ChampionshipRule ForScope(string? scope, bool storedMedalsPerWeaponGroup = false) =>
@@ -109,11 +107,12 @@ namespace HpskSite.CompetitionTypes.Common
         // ── Utanför mästerskapet och vilka vapengrupper som avgör mästerskapet (S4/S5) ───────────
 
         /// <summary>
-        /// Gäller utanför-mästerskapet-beteendet den här tävlingen? Tre villkor, alla: växeln på TÄVLINGEN är "on" (null = av, alla
-        /// befintliga tävlingar), tävlingen är ett mästerskap, och grenen är fält eller MagnumFält (precision och springskytte ignorerar
-        /// flaggan i första bygget; skidskytte ingår inte). Är något falskt beter sig allt som idag.
+        /// Gäller utanför-mästerskapet-beteendet den här tävlingen? Två villkor, båda: tävlingen är ett mästerskap, och grenen är fält
+        /// eller MagnumFält (precision och springskytte ignorerar flaggan i första bygget; skidskytte ingår inte). Det finns ingen
+        /// växel per tävling (Stefan 2026-11-06: "det är så det ska fungera"). Utan att någon markerats utanför och utan inställningen
+        /// "vilka deltar" är alla tävlande och inget ändras mot förr — placeringarna blir bara serverns i stället för radnumret.
         /// </summary>
-        public bool OutOfCompetitionApplies => _modeOn && IsChampionship && IsFaltFamily(_discipline);
+        public bool OutOfCompetitionApplies => IsChampionship && IsFaltFamily(_discipline);
 
         /// <summary>
         /// Avgör tävlingen mästerskapet i den här vapengruppen ("A", "C", "R" … — <see cref="ChampionshipCategory.WeaponGroupFor"/>)?
