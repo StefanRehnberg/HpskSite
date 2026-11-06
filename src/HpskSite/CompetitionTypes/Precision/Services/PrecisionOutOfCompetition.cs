@@ -38,5 +38,47 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// </summary>
         public static IEnumerable<PrecisionShooterResult> Competing(IEnumerable<PrecisionShooterResult> shooters, Func<string, bool> appliesToClass) =>
             shooters.Where(s => !s.OutOfCompetition && appliesToClass(s.ShootingClass));
+
+        // ── Finalen: en gäst står aldrig i en finalstartlista (Stefan 2026-11-06: "Gäst får inte skjuta final") ────────────────────────────
+
+        /// <summary>
+        /// Resultatrader utan de skyttar som står utanför mästerskapet (per skytt OCH klass). Matas till kvalrankingen FÖRE finalistgränsen
+        /// räknas, så att 1/6-gränsen, "X av N går vidare", kvalplatserna och "alla skjuter final" bara gäller de tävlande — en gäst får inte
+        /// ta en plats och inte flytta gränsen. Tom mängd = ingen förändring (samma lista tillbaka).
+        /// </summary>
+        public static List<PrecisionResultEntry> ExcludeGuests(List<PrecisionResultEntry> results, OutOfCompetitionSet outside) =>
+            outside.Count == 0 ? results : results.Where(r => !outside.Contains(r.MemberId, r.ShootingClass)).ToList();
+
+        /// <summary>
+        /// Tar bort skyttar som står utanför mästerskapet ur en startlista som ska bli finalstartlista ("fortsätt i samma ordning" kopierar
+        /// kvalstartlistan). Skjutlagsnumren BEHÅLLS (löftet är samma skjutlag och plats; platsen en gäst lämnar blir en lucka), tomma skjutlag
+        /// faller bort. Returnerar antalet borttagna.
+        /// </summary>
+        public static int ExcludeGuests(StartListConfiguration config, OutOfCompetitionSet outside)
+        {
+            if (outside.Count == 0 || config.Teams == null) return 0;
+            var removed = 0;
+            foreach (var team in config.Teams)
+            {
+                var kept = (team.Shooters ?? new List<StartListShooter>())
+                    .Where(sh => !outside.Contains(sh.MemberId, sh.WeaponClass)).ToList();
+                removed += (team.Shooters?.Count ?? 0) - kept.Count;
+                team.Shooters = kept;
+                team.ShooterCount = kept.Count;
+                team.WeaponClasses = kept.Select(sh => sh.WeaponClass).Distinct().OrderBy(c => c).ToList();
+            }
+            config.Teams = config.Teams.Where(t => (t.Shooters?.Count ?? 0) > 0).ToList();
+            return removed;
+        }
+
+        /// <summary>
+        /// Skälet att vägra när någon läggs in på en FINALstartlista för hand, eller null. Utan klass avgör medlemsnivån (skytten står utanför i
+        /// någon klass) — hellre ett nej som går att förklara än en gäst i finalen.
+        /// </summary>
+        public static string? FinalsAddRefusal(OutOfCompetitionSet outside, int memberId, string? weaponClass, string name)
+        {
+            var isGuest = string.IsNullOrWhiteSpace(weaponClass) ? outside.HasMember(memberId) : outside.Contains(memberId, weaponClass);
+            return isGuest ? $"{name} skjuter utanför mästerskapet och får inte stå i finalen." : null;
+        }
     }
 }

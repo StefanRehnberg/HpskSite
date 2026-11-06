@@ -94,6 +94,127 @@ namespace HpskSite.Tests
             Assert.Null(b.Placement);
         }
 
+        // ── Finalen: en gäst står aldrig i en finalstartlista ─────────────────────
+        private static PrecisionResultEntry R(int memberId, string cls = "C1") => new() { MemberId = memberId, ShootingClass = cls, SeriesNumber = 1 };
+
+        [Fact]
+        public void ExcludeGuests_resultat_tar_bort_gasten_fore_rankingen()
+        {
+            var rows = new List<PrecisionResultEntry> { R(1), R(2), R(3) };
+            var kept = PrecisionOutOfCompetition.ExcludeGuests(rows, OutOfCompetitionSet.None.With(2, "C1"));
+            Assert.Equal(new[] { 1, 3 }, kept.Select(r => r.MemberId).ToArray());
+        }
+
+        [Fact]
+        public void ExcludeGuests_resultat_ar_per_skytt_och_klass()
+        {
+            var rows = new List<PrecisionResultEntry> { R(1, "C1"), R(1, "B1") };
+            var kept = PrecisionOutOfCompetition.ExcludeGuests(rows, OutOfCompetitionSet.None.With(1, "C1"));
+            Assert.Single(kept);
+            Assert.Equal("B1", kept[0].ShootingClass);
+        }
+
+        [Fact]
+        public void ExcludeGuests_resultat_med_tom_mangd_ger_samma_lista_tillbaka()
+        {
+            var rows = new List<PrecisionResultEntry> { R(1), R(2) };
+            Assert.Same(rows, PrecisionOutOfCompetition.ExcludeGuests(rows, OutOfCompetitionSet.None));
+        }
+
+        [Fact]
+        public void Finalistgransen_raknas_over_de_tavlande_inte_gasterna()
+        {
+            // 60 startande varav 1 gäst: gränsen är ceil(59/6) = 10 → max(10, 10) = 10; med gästen hade den varit ceil(60/6) = 10.
+            // Välj antal där ceil ändras: 67 startande → 12, utan en gäst (66) → 11.
+            var qualification = new PrecisionFinalsQualificationService(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PrecisionFinalsQualificationService>.Instance);
+            var withGuest = Enumerable.Range(1, 67).Select(i => R(i)).ToList();
+            var outside = OutOfCompetitionSet.None.With(67, "C1");
+            var withoutGuest = PrecisionOutOfCompetition.ExcludeGuests(withGuest, outside);
+            Assert.Equal(12, qualification.CalculateQualificationCutoff(withGuest.Count));
+            Assert.Equal(11, qualification.CalculateQualificationCutoff(withoutGuest.Count));
+        }
+
+        private static StartListConfiguration Cfg() => new()
+        {
+            Teams = new List<StartListTeam>
+            {
+                new() { TeamNumber = 1, Shooters = new List<StartListShooter> { new() { MemberId = 1, WeaponClass = "C1" }, new() { MemberId = 2, WeaponClass = "C1" } } },
+                new() { TeamNumber = 2, Shooters = new List<StartListShooter> { new() { MemberId = 3, WeaponClass = "C1" } } },
+            }
+        };
+
+        [Fact]
+        public void ExcludeGuests_startlista_tar_bort_gasten_och_behaller_skjutlagsnumren()
+        {
+            var cfg = Cfg();
+            var removed = PrecisionOutOfCompetition.ExcludeGuests(cfg, OutOfCompetitionSet.None.With(3, "C1"));
+            Assert.Equal(1, removed);
+            Assert.Single(cfg.Teams);                       // skjutlag 2 blev tomt och föll bort
+            Assert.Equal(1, cfg.Teams[0].TeamNumber);       // numret behålls
+            Assert.Equal(2, cfg.Teams[0].ShooterCount);
+        }
+
+        [Fact]
+        public void ExcludeGuests_startlista_lamnar_en_lucka_efter_gasten()
+        {
+            var cfg = Cfg();
+            PrecisionOutOfCompetition.ExcludeGuests(cfg, OutOfCompetitionSet.None.With(1, "C1"));
+            Assert.Equal(new[] { 2 }, cfg.Teams.First(t => t.TeamNumber == 1).Shooters!.Select(s => s.MemberId).ToArray());
+        }
+
+        [Fact]
+        public void ExcludeGuests_startlista_utan_gaster_ar_oforandrad()
+        {
+            var cfg = Cfg();
+            Assert.Equal(0, PrecisionOutOfCompetition.ExcludeGuests(cfg, OutOfCompetitionSet.None));
+            Assert.Equal(2, cfg.Teams.Count);
+        }
+
+        [Fact]
+        public void Manuellt_tillagg_pa_final_vagras_for_gast()
+        {
+            var outside = OutOfCompetitionSet.None.With(2, "C1");
+            Assert.NotNull(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 2, "C1", "Anna"));
+            Assert.Contains("Anna", PrecisionOutOfCompetition.FinalsAddRefusal(outside, 2, "C1", "Anna")!);
+            Assert.Null(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 3, "C1", "Bo"));
+            Assert.Null(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 2, "B1", "Anna"));   // tävlar i en annan klass
+        }
+
+        [Fact]
+        public void Manuellt_tillagg_utan_klass_prövas_pa_medlemsniva()
+        {
+            var outside = OutOfCompetitionSet.None.With(2, "C1");
+            Assert.NotNull(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 2, null, "Anna"));
+            Assert.NotNull(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 2, "", "Anna"));
+            Assert.Null(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 9, null, "Bo"));
+        }
+
+        // ── Textspärr: finalvägarna är kopplade till gästfiltret (kommentarsrader räknas inte) ──
+        [Theory]
+        [InlineData("CompetitionTypes/Precision/Services/PrecisionQualifyingResultsService.cs", "PrecisionOutOfCompetition.ExcludeGuests(results,")]
+        [InlineData("CompetitionTypes/Precision/Controllers/PrecisionStartListController.cs", "PrecisionOutOfCompetition.ExcludeGuests(qualConfig,")]
+        [InlineData("CompetitionTypes/Precision/Controllers/PrecisionStartListController.cs", "PrecisionOutOfCompetition.FinalsAddRefusal(")]
+        [InlineData("CompetitionTypes/Precision/Services/PrecisionResultsBuilder.cs", "PrecisionOutOfCompetition.Mark(")]
+        [InlineData("CompetitionTypes/Precision/Services/PrecisionResultsBuilder.cs", "PrecisionOutOfCompetition.AssignPlacements(")]
+        public void Gastfiltret_ar_kopplat_pa_varje_finalvag(string relativeFile, string call)
+        {
+            var path = System.IO.Path.Combine(SiteRoot(), relativeFile.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            var src = System.IO.File.ReadAllText(path);
+            var i = 0;
+            var found = false;
+            while ((i = src.IndexOf(call, i, StringComparison.Ordinal)) >= 0)
+            {
+                var lineStart = src.LastIndexOf('\n', i) + 1;
+                if (!src.Substring(lineStart, i - lineStart).Contains("//", StringComparison.Ordinal)) { found = true; break; }
+                i += call.Length;
+            }
+            Assert.True(found, $"{relativeFile} anropar inte längre {call} (utanför en kommentar) — en gäst kunde då hamna i finalen.");
+        }
+
+        private static string SiteRoot([System.Runtime.CompilerServices.CallerFilePath] string thisFile = "") =>
+            System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(thisFile))!, "HpskSite");
+
         // ── Competing (medaljkandidater, särskjutning, medaljantal) ───────────────
         [Fact]
         public void Competing_utesluter_gaster()

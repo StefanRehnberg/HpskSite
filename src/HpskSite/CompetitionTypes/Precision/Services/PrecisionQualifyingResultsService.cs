@@ -32,6 +32,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private readonly ILogger<PrecisionQualifyingResultsService> _logger;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly OutOfCompetitionFlags _outOfCompetition;
 
         public PrecisionQualifyingResultsService(
             IContentService contentService,
@@ -40,8 +41,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             ILogger<PrecisionQualifyingResultsService> logger,
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            OutOfCompetitionFlags outOfCompetition)
         {
+            _outOfCompetition = outOfCompetition;
             _results = results;
             _startLists = startLists;
             _competitions = competitions;
@@ -198,6 +201,15 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var results = await GetQualifyingResultsAsync(competition);
+
+            // ⚠️ Utanför mästerskapet: en gäst står aldrig i finalen (Stefan 2026-11-06). Filtret sitter HÄR, FÖRE rankingen, så att allt som
+            // läser rankingen ärver det: 1/6-gränsen och "X av N går vidare" räknas över de tävlande, kvalplatserna matchar resultatlistans
+            // platser, "alla skjuter final" och "placera om efter resultat" tar inte med gästen, och kvalgruppens kontrollsumma ändras när
+            // en gäst flaggas så att en redan låst grupp blir inaktuell. Gör ingenting när beteendet inte gäller tävlingen.
+            var outsideRule = ChampionshipRule.For(competition);
+            if (outsideRule.OutOfCompetitionApplies)
+                results = PrecisionOutOfCompetition.ExcludeGuests(results, _outOfCompetition.Load(competition, outsideRule));
+
             var shooterInfo = GetShooterInfoFromStartList(competitionId);
 
             // ⚠️ Vid ett MÄSTERSKAP grupperas finalisterna per mästerskapskategori, inte per

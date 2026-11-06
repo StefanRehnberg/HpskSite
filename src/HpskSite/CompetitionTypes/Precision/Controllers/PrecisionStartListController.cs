@@ -49,6 +49,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly OutOfCompetitionFlags _outOfCompetition;
         /// <summary>Resultatet av en sparning genom startlistornas lagring.</summary>
         private readonly record struct ListSaveOutcome(bool Success);
 
@@ -93,9 +94,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             BrokenLaneService brokenLanes,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            OutOfCompetitionFlags outOfCompetition)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _outOfCompetition = outOfCompetition;
             _registrations = registrations;
             _startLists = startLists;
             _competitions = competitions;
@@ -862,6 +865,25 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (startList == null)
                 {
                     return Json(new { success = false, message = deny });
+                }
+
+                // En skytt utanför mästerskapet får inte läggas in på en FINALstartlista (Stefan 2026-11-06). Kvallistan påverkas inte: gästen skjuter
+                // grundomgången som alla andra.
+                if (startList.Kind == HpskSite.Models.StartLists.StartListKind.Finals)
+                {
+                    var addCompetition = _competitions.GetSaved(startList.CompetitionId);
+                    if (addCompetition != null)
+                    {
+                        var addRule = ChampionshipRule.For(addCompetition);
+                        if (addRule.OutOfCompetitionApplies)
+                        {
+                            var addName = _memberService.GetById(request.MemberId)?.Name ?? "Skytten";
+                            var refusal = PrecisionOutOfCompetition.FinalsAddRefusal(
+                                _outOfCompetition.Load(addCompetition, addRule), request.MemberId, request.WeaponClass, addName);
+                            if (refusal != null)
+                                return Json(new { success = false, message = refusal });
+                        }
+                    }
                 }
 
                 // Get configuration
@@ -2613,6 +2635,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
             var qualConfig = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
             if (qualConfig?.Teams == null || qualConfig.Teams.Count == 0) return empty;
+
+            // ⚠️ En skytt utanför mästerskapet står aldrig i finalen (Stefan 2026-11-06: "Gäst får inte skjuta final"), inte heller när finalen
+            // är en kopia av kvalstartlistan. Skjutlagsnumren behålls — platsen gästen lämnar blir en lucka. Gör ingenting när beteendet inte
+            // gäller tävlingen.
+            var cloneCompetition = _competitions.GetSaved(competitionId);
+            if (cloneCompetition != null)
+            {
+                var cloneRule = ChampionshipRule.For(cloneCompetition);
+                if (cloneRule.OutOfCompetitionApplies)
+                {
+                    PrecisionOutOfCompetition.ExcludeGuests(qualConfig, _outOfCompetition.Load(cloneCompetition, cloneRule));
+                    if (qualConfig.Teams.Count == 0) return empty;
+                }
+            }
 
             // Skär ned till vapengruppen. ⚠️ SKJUTLAGSNUMREN BEHÅLLS — hela poängen med
             // "forsätt i samma ordning" är att skytten står på samma skjutlag och plats som i
