@@ -722,7 +722,7 @@ namespace HpskSite.Controllers
                     var comp = _competitions.Get(competitionId);
                     // teamResultSeriesCount har aldrig funnits på doktypen (C3-planen S1) — standardvärdet gäller.
                     var total = comp?.NumberOfSeriesOrStations ?? 0;
-                    var finals = comp?.NumberOfFinalSeries ?? 0;
+                    var finals = comp?.EffectiveFinalSeries ?? 0;
                     var qualifying = total - finals;
                     if (qualifying > 0) return qualifying;
                     if (total > 0) return total;

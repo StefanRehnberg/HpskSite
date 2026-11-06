@@ -193,6 +193,13 @@ namespace HpskSite.Models.Competitions
         /// <summary>Typens id ur katalogen (samma regel som <c>CompetitionTypes.GetFuzzy</c>). Null = okänd.</summary>
         public string? TypeId => string.IsNullOrWhiteSpace(CompetitionType) ? null : HpskSite.Models.CompetitionTypes.GetFuzzy(CompetitionType)?.Id;
 
+        /// <summary>
+        /// Det antal finalserier som GÄLLER (0 för en gren utan finalomgång) — ENDA läsningen resultat-, final- och prisutdelningskoden får göra.
+        /// <see cref="NumberOfFinalSeries"/> är det LAGRADE värdet (redigering, visning); en gren utan final kan ha ett gammalt värde kvar.
+        /// Spärr: <c>FinalSeriesGuardTests</c>.
+        /// </summary>
+        public int EffectiveFinalSeries => HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(TypeId, NumberOfFinalSeries);
+
         /// <summary>Sista tävlingsdagen: slutdatumet när det är satt och inte före start, annars startdagen.</summary>
         public DateTime? LastDay =>
             CompetitionEndDate.HasValue && CompetitionDate.HasValue && CompetitionEndDate.Value.Date >= CompetitionDate.Value.Date

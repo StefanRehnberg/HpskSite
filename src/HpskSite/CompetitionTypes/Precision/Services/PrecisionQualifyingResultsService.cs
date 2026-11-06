@@ -77,7 +77,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             if (competition == null)
                 return (false, "Tävlingen hittades inte.", null);
 
-            var numberOfFinalSeries = competition.NumberOfFinalSeries;
+            var numberOfFinalSeries = competition.EffectiveFinalSeries;
             if (numberOfFinalSeries <= 0)
                 return (false, "Denna tävling har inga finalserier konfigurerade.", null);
 
@@ -231,7 +231,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         {
             var qualSeriesCount = PrecisionFamilyResultReader.QualifyingSeriesCount(
                 competition.NumberOfSeriesOrStations,
-                competition.NumberOfFinalSeries);
+                competition.EffectiveFinalSeries);
 
             using var db = _databaseFactory.CreateDatabase();
             return await PrecisionFamilyResultReader.FetchAsync(db,

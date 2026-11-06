@@ -577,7 +577,7 @@ namespace HpskSite.Services
             }
 
             var numberOfSeries = competition.NumberOfSeriesOrStations;
-            var numberOfFinalSeries = competition.NumberOfFinalSeries;
+            var numberOfFinalSeries = competition.EffectiveFinalSeries;
             var qualificationSeries = numberOfFinalSeries > 0
                 ? numberOfSeries - numberOfFinalSeries
                 : numberOfSeries;

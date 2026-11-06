@@ -2257,7 +2257,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
 
                 // Check if this is a championship
-                var numberOfFinalSeries = competition.NumberOfFinalSeries;
+                var numberOfFinalSeries = competition.EffectiveFinalSeries;
                 if (numberOfFinalSeries <= 0)
                 {
                     return Json(new { Success = false, Message = "Denna tävling har ingen final." });
@@ -2433,7 +2433,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
                     return Json(new { Success = false, Message = "Du har inte behörighet att hantera denna tävling." });
 
-                if (competition.NumberOfFinalSeries <= 0)
+                if (competition.EffectiveFinalSeries <= 0)
                     return Json(new { Success = false, Message = "Denna tävling har inga finalserier konfigurerade." });
 
                 var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
@@ -2638,8 +2638,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             // 2026-10-03). Ordningen och platserna är löftet — inte klockslaget.
             var comp = _competitions.GetSaved(competitionId);
             int qualSeries = PrecisionFamilyResultReader.QualifyingSeriesCount(
-                comp?.NumberOfSeriesOrStations ?? 0, comp?.NumberOfFinalSeries ?? 0);
-            int finalSeries = comp?.NumberOfFinalSeries ?? 0;
+                comp?.NumberOfSeriesOrStations ?? 0, comp?.EffectiveFinalSeries ?? 0);
+            int finalSeries = comp?.EffectiveFinalSeries ?? 0;
             foreach (var team in qualConfig.Teams)
             {
                 team.StartTime = SkjutlagTiming.ShiftAfterOwnQualification(team.StartTime, qualSeries);
@@ -2914,8 +2914,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             // när grundomgångens sista skjutlag är klart, intervall ur finalseriernas antal.
             var compNode = _competitions.GetSaved(competitionId);
             int nsQual = PrecisionFamilyResultReader.QualifyingSeriesCount(
-                compNode?.NumberOfSeriesOrStations ?? 0, compNode?.NumberOfFinalSeries ?? 0);
-            int nsFinal = compNode?.NumberOfFinalSeries ?? 0;
+                compNode?.NumberOfSeriesOrStations ?? 0, compNode?.EffectiveFinalSeries ?? 0);
+            int nsFinal = compNode?.EffectiveFinalSeries ?? 0;
             string? suggestedStart = null;
             try
             {

@@ -1805,7 +1805,7 @@ namespace HpskSite.Controllers
 
             var comp = _competitions.GetSaved(competitionId);
             int numSeries = comp?.NumberOfSeriesOrStations ?? 0;
-            int numFinal = comp?.NumberOfFinalSeries ?? 0;
+            int numFinal = comp?.EffectiveFinalSeries ?? 0;
             int qualSeries = numFinal > 0 ? Math.Max(1, numSeries - numFinal) : Math.Max(1, numSeries);
 
             var rows = await GetCompetitionResultsInternal(competitionId);
@@ -2796,7 +2796,7 @@ namespace HpskSite.Controllers
             
             // Get competition configuration for finals
             var numberOfSeriesOrStations = competition.NumberOfSeriesOrStations;
-            var numberOfFinalSeries = competition.NumberOfFinalSeries;
+            var numberOfFinalSeries = competition.EffectiveFinalSeries;
             var isAwardingStandardMedals = competition.IsAwardingStandardMedals;
             var competitionTypeId = competition.CompetitionType ?? "Precision";
 

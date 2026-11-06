@@ -317,7 +317,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // Get competition configuration for finals
             var competition = _competitions.GetSaved(competitionId);
             var numberOfSeriesOrStations = competition?.NumberOfSeriesOrStations ?? 0;
-            var numberOfFinalSeries = competition?.NumberOfFinalSeries ?? 0;
+            var numberOfFinalSeries = competition?.EffectiveFinalSeries ?? 0;
             var hasFinalsRound = numberOfFinalSeries > 0;
             var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
 
