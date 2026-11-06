@@ -126,6 +126,41 @@ namespace HpskSite.CompetitionTypes.Common
             return stamped;
         }
 
+        /// <summary>
+        /// FRYSNING (Stefan 2026-11-06): när en officiell lista publiceras eller räknas om får VARJE klassrad utan beslut ett — "utanför" där det
+        /// finns ett förslag, annars "tävlar". Efter det är listans mängd alltid beslut, och ingenting som ändras senare (skyttens klubbar,
+        /// tävlingens "vilka deltar", en ny anmälan, ett klassbyte) kan tyst göra en gäst till mästare eller tvärtom. Skriver aldrig över ett
+        /// beslut. Idempotent. Returnerar antalet nya "utanför"- och "tävlar"-beslut.
+        /// </summary>
+        public (int Outside, int Inside) FreezeDecisions(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
+        {
+            int outside = 0, inside = 0;
+            foreach (var s in States(competition, rule))
+            {
+                if (s.Decision != null) continue;
+                var cls = s.ClassRaw ?? s.ClassKey;
+                if (s.Suggestion != null)
+                {
+                    if (_registrations.StampOutOfCompetition(competition.Id, s.RegistrationId, cls, "suggestion-stamped")) outside++;
+                }
+                else if (_registrations.StampInCompetition(competition.Id, s.RegistrationId, cls, "publish-frozen")) inside++;
+            }
+            return (outside, inside);
+        }
+
+        /// <summary>
+        /// Bara arrangörens BESLUT (Stefan 2026-11-06: förslag visas inte publikt eller live). Används av allt som visas för tävlande eller
+        /// räknas in i resultat och serier: resultatbyggaren (live-tavlan, den preliminära och officiella listan), serierna och rättningen.
+        /// Förslagen syns bara för funktionärer (anmälningslistans banner, Redigera anmälan, patrullvyn) och blir beslut vid publicering.
+        /// </summary>
+        public OutOfCompetitionSet LoadDecided(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
+        {
+            var set = new HashSet<(int, string)>();
+            foreach (var s in States(competition, rule))
+                if (s.Decision == true) set.Add((s.MemberId, s.ClassKey));
+            return set.Count == 0 ? OutOfCompetitionSet.None : new OutOfCompetitionSet(set);
+        }
+
         public OutOfCompetitionSet Load(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
         {
             var set = new HashSet<(int, string)>();

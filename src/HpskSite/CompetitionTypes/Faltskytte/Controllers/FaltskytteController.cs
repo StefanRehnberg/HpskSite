@@ -1340,9 +1340,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
                         if (rule.OutOfCompetitionApplies)
                         {
-                            var stamped = _outOfCompetition.StampSuggestions(competition, rule);
-                            if (stamped > 0)
-                                _logger.LogInformation("Publicering av tävling {CompetitionId}: {Count} förslag 'utanför mästerskapet' stämplades som beslut", request.CompetitionId, stamped);
+                            var (stampedOut, stampedIn) = _outOfCompetition.FreezeDecisions(competition, rule);
+                            if (stampedOut > 0 || stampedIn > 0)
+                                _logger.LogInformation("Publicering av tävling {CompetitionId}: {Out} förslag 'utanför mästerskapet' och {In} 'tävlar' stämplades som beslut", request.CompetitionId, stampedOut, stampedIn);
                         }
                     }
                     catch (Exception ex)

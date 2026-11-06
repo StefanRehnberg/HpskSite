@@ -146,7 +146,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var roundInfo = _competitions.GetSaved(compId);
                 var outside = roundInfo == null
                     ? HpskSite.CompetitionTypes.Common.OutOfCompetitionSet.None
-                    : _outOfCompetition.Load(roundInfo, HpskSite.CompetitionTypes.Common.ChampionshipRule.For(roundInfo));
+                    : _outOfCompetition.LoadDecided(roundInfo, HpskSite.CompetitionTypes.Common.ChampionshipRule.For(roundInfo));
 
                 set.ByCompetition[compId] = rows
                     .GroupBy(r => new { r.MemberId, r.ShootingClass })

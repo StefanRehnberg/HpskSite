@@ -299,6 +299,16 @@ FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0", regist
         }
 
         public bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason)
+            => StampDecision(competitionId, registrationId, classKey, reason, true);
+
+        public bool StampInCompetition(int competitionId, int registrationId, string classKey, string reason)
+            => StampDecision(competitionId, registrationId, classKey, reason, false);
+
+        /// <summary>
+        /// Skriver ETT beslut (utanför = 1, tävlar = 0) för en klassrad som inte har något, och loggar det. Skriver aldrig över ett beslut.
+        /// Båda stämplingarna (förslaget som blir "utanför", och frysningen av "tävlar") går hit.
+        /// </summary>
+        private bool StampDecision(int competitionId, int registrationId, string classKey, string reason, bool outside)
         {
             var raw = (classKey ?? "").Trim();
             if (raw.Length == 0) return false;
@@ -326,10 +336,10 @@ FROM dbo.CompetitionRegistrationClassDecision WHERE RegistrationId = @0", regist
 
             db.Execute(@"
 INSERT INTO dbo.CompetitionRegistrationClassDecision (RegistrationId, ClassKey, OutOfCompetition, SetByMemberId, SetAt)
-VALUES (@0, @1, 1, NULL, @2)", registrationId, key, now);
+VALUES (@0, @1, @2, NULL, @3)", registrationId, key, outside, now);
             db.Execute(@"
 INSERT INTO dbo.ChampionshipDecisionLog (CompetitionId, RegistrationId, MemberId, ClassKey, OldValue, NewValue, Reason, SetByMemberId, SetAt)
-VALUES (@0, @1, @2, @3, NULL, 1, @4, NULL, @5)", competitionId, registrationId, owner[0], key, why, now);
+VALUES (@0, @1, @2, @3, NULL, @6, @4, NULL, @5)", competitionId, registrationId, owner[0], key, why, now, outside);
 
             scope.Complete();
             return true;

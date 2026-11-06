@@ -88,6 +88,14 @@ namespace HpskSite.Services.Registrations
         /// utan beslutsfattare (systemet). Returnerar true när ett beslut skrevs.
         /// </summary>
         bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason);
+
+        /// <summary>
+        /// FRYSER att skytten tävlar: skriver beslutet "inte utanför" för en klassrad som inte har något beslut (stämpling när en officiell
+        /// lista publiceras eller räknas om). Samma regler som <see cref="StampOutOfCompetition"/>: skriver aldrig över ett beslut, loggas
+        /// utan beslutsfattare. Efter det kan ingenting som ändras senare (skyttens klubbar, tävlingens "vilka deltar") tyst göra skytten
+        /// till gäst. Returnerar true när ett beslut skrevs.
+        /// </summary>
+        bool StampInCompetition(int competitionId, int registrationId, string classKey, string reason);
     }
 
     /// <summary>Utfallet av <see cref="ICompetitionRegistrationStore.SetOutOfCompetition"/>.</summary>

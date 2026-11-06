@@ -40,6 +40,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly FaltskytteMedalLedger _medalLedger;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
 
         public FaltskytteResultArtifactService(
             IContentService contentService,
@@ -48,8 +49,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             IServiceProvider services,
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            FaltskytteMedalLedger medalLedger)
+            FaltskytteMedalLedger medalLedger,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
         {
+            _outOfCompetition = outOfCompetition;
             _medalLedger = medalLedger;
             _competitions = competitions;
             _results = results;
@@ -78,6 +81,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     // här vore att publicera något arrangören inte bett om; PublishResults äger
                     // skapandet och anropar oss efteråt.
                     return false;
+                }
+
+                // Frysning (Stefan 2026-11-06): en OFFICIELL lista har alltid beslut för varje klassrad, så att en omräkning (Uppdatera,
+                // särskjutning, sammanslagning, konfiguration) aldrig tyst ändrar vem som tävlar om mästerskapet — inte heller för en sen
+                // anmälan, vars förslag stämplas här. Gör ingenting när beteendet inte gäller tävlingen.
+                if (competition.FaltskytteResultsOfficial)
+                {
+                    var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+                    if (rule.OutOfCompetitionApplies)
+                    {
+                        var (frozenOut, frozenIn) = _outOfCompetition.FreezeDecisions(competition, rule);
+                        if (frozenOut > 0 || frozenIn > 0)
+                            _logger.LogWarning("Omräkning av officiell lista, tävling {CompetitionId} ({Reason}): {Out} förslag 'utanför' och {In} 'tävlar' stämplades som beslut",
+                                competitionId, reason, frozenOut, frozenIn);
+                    }
                 }
 
                 var build = await _builder.BuildAsync(competitionId, null, subCompetitionOnly: false);

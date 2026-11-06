@@ -332,6 +332,8 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
 
         public bool StampOutOfCompetition(int competitionId, int registrationId, string classKey, string reason) => false;
 
+        public bool StampInCompetition(int competitionId, int registrationId, string classKey, string reason) => false;
+
         public bool Delete(int competitionId, int registrationId)
         {
             var node = registrationId > 0 ? _contentService.GetById(registrationId) : null;
