@@ -390,6 +390,7 @@ namespace HpskSite.Composers
             //   FinalsStartListBuilder — turn snapshot + per-class config into a finals StartListConfiguration
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsQualificationService>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionQualifyingResultsService>();
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionResultsBuilder>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder>();
 
             // Printable Kvitto (receipt) builder — shared by the /kvitto page.
