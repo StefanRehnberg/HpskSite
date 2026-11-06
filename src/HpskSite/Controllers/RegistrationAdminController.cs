@@ -1324,7 +1324,14 @@ namespace HpskSite.Controllers
                 switch (_outOfCompetitionLock.Reason(competition))
                 {
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished:
-                        return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via Resultat-fliken (Rätta listan, \"Flytta utanför mästerskapet\")." });
+                        // Rätta-flödet ("Flytta utanför mästerskapet") finns bara för fält; i precisionsfamiljen avpublicerar arrangören, ändrar och publicerar igen.
+                        return Json(new
+                        {
+                            success = false,
+                            message = HpskSite.CompetitionTypes.Common.OutOfCompetitionLock.IsPrecisionFamily(competition.TypeId)
+                                ? "Resultatlistan är publicerad. Avpublicera den först på Resultat-fliken, ändra, och publicera igen."
+                                : "Resultatlistan är publicerad och ändras bara via Resultat-fliken (Rätta listan, \"Flytta utanför mästerskapet\")."
+                        });
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.FinalsBuilt:
                         return Json(new { success = false, message = "Finalstartlistan är redan byggd. En skytt utanför mästerskapet får inte stå i finalen, så vilka som är utanför kan inte ändras nu. Bygg om finalstartlistan först." });
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.QualifyingFrozen:
@@ -1392,7 +1399,13 @@ namespace HpskSite.Controllers
                 switch (_outOfCompetitionLock.Reason(competition))
                 {
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished:
-                        return Json(new { success = false, message = "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"." });
+                        return Json(new
+                        {
+                            success = false,
+                            message = HpskSite.CompetitionTypes.Common.OutOfCompetitionLock.IsPrecisionFamily(competition.TypeId)
+                                ? "Resultatlistan är publicerad. Avpublicera den först på Resultat-fliken, ändra, och publicera igen."
+                                : "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"."
+                        });
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.FinalsBuilt:
                         return Json(new { success = false, message = "Finalstartlistan är redan byggd. Vilka som deltar och vilka vapengrupper som avgör mästerskapet kan inte ändras nu. Bygg om finalstartlistan först." });
                     case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.QualifyingFrozen:

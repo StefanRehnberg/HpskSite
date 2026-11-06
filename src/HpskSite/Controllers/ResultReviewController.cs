@@ -500,9 +500,13 @@ namespace HpskSite.Controllers
                     foreach (var g in root["ClassGroups"] as JArray ?? new JArray())
                     {
                         var name = (string?)g["DisplayClassName"] ?? (string?)g["ClassName"] ?? (string?)g["Name"] ?? "";
-                        var count = (g["Shooters"] as JArray)?.Count ?? (g["Results"] as JArray)?.Count ?? 0;
+                        // En skytt utanför mästerskapet är inte med i tävlingen och räknas inte som deltagare (Stefan 2026-11-06); antalet utanför visas
+                        // bredvid, så granskaren ser att de finns. Listan bär OutOfCompetition per skytt (utelämnad = tävlar).
+                        var shootersArray = g["Shooters"] as JArray;
+                        var outsideCount = shootersArray?.Count(s => (bool?)s["OutOfCompetition"] == true) ?? 0;
+                        var count = (shootersArray?.Count ?? (g["Results"] as JArray)?.Count ?? 0) - outsideCount;
                         starters += count;
-                        classes.Add(new { name, starters = count, underFive = count < 5 });
+                        classes.Add(new { name, starters = count, underFive = count < 5, outside = outsideCount });
                         var raw = (string?)g["ClassName"] ?? "";
                         if (raw.Contains('+')) merged.Add(raw);
                     }

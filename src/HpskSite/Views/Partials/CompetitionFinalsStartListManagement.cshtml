@@ -600,9 +600,14 @@
         const leaderTxt = lead.leaderName && lead.leaderName !== 'Unknown'
             ? `${esc(lead.leaderName)} (${lead.leaderScore}) först.`
             : 'Den som leder står först.';
-        const shbTxt = shb >= shooters
+        // Skyttar utanför mästerskapet står inte i rankingen och räknas inte i "X av N"; kortet säger hur många som hållits utanför.
+        const outside = withResults.reduce((n, c) => n + (c.outsideCount || 0), 0);
+        const outsideTxt = outside > 0
+            ? ` ${outside} ${outside === 1 ? 'skytt' : 'skyttar'} utanför mästerskapet räknas inte med och går inte till final.`
+            : '';
+        const shbTxt = (shb >= shooters
             ? `Bästa sjättedelen, minst 10, går vidare — med ${shooters} skyttar betyder det <strong>alla ${shooters}</strong>.`
-            : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`;
+            : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`) + outsideTxt;
         const shbNote = isChampionship
             ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Regeln för mästerskap</span>'
             : '';

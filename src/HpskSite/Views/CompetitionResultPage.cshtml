@@ -572,7 +572,19 @@
             .map(letter => CR_SERIES_SEGMENTS.find(s => s.delmoment === letter))
             .filter(Boolean);
 
-        function crFlattenByWeaponGroup(classGroups) {
+        // Platsen i klassen: serverns när den har räknat den (en tävling med "Utanför mästerskapet" — den som är utanför får ingen plats, '–'),
+        // annars ordningen som förut. Gamla listor har inget placementsAssigned och ritas som de alltid gjort. Samma regel som fältets faltClassPlace.
+        function crClassPlace(shooter, idx, assigned) {
+            if (!assigned) return idx + 1;
+            return shooter.outOfCompetition ? '–' : (shooter.placement != null ? shooter.placement : idx + 1);
+        }
+
+        // Antalet deltagare i en klass: en skytt utanför mästerskapet är inte med i tävlingen och räknas inte (Stefan 2026-11-06).
+        function crParticipantCount(shooters) {
+            return (shooters || []).filter(s => !s.outOfCompetition).length;
+        }
+
+        function crFlattenByWeaponGroup(classGroups, placementsAssigned) {
             const byCode = new Map();
             (classGroups || []).forEach(group => {
                 const code = crGroupWeaponCode(group);
@@ -583,7 +595,7 @@
                     const t = crShooterTotals(shooter);
                     byCode.get(code).push(Object.assign({}, shooter, {
                         __officialClassName: shooter.shootingClass || group.className || '',
-                        __officialPlace: idx + 1,
+                        __officialPlace: crClassPlace(shooter, idx, placementsAssigned),
                         __sortTotal: t.total,
                         __sortX: t.xCount,
                         // Delmomentspoängen i regelns ordning (C, sedan B). Tom lista för grenar
@@ -623,9 +635,18 @@
                 // Lika på ALLA nycklar delar plats. Den sista officiella särskiljningen är
                 // särskjutning eller lottning — en människas beslut, inte sorteringens — så den
                 // platta listan skiljer inte skyttar den inte ärligt kan skilja åt.
-                let pos = 0;
+                // Den som skjuter utanför mästerskapet får ingen plats och räknas inte i placeringen (utan sådana skyttar är `contenders`
+                // exakt i + 1 och jämförelsen mot föregående rad densamma som förut).
+                let pos = 0, contenders = 0, prevCompeting = null;
                 shooters.forEach((s, i) => {
-                    if (i === 0 || crCmpKeys(shooters[i - 1], s) !== 0) pos = i + 1;
+                    if (s.outOfCompetition) {
+                        s.__flatPos = '–';
+                        s.__flatClassLabel = `${s.__officialClassName} · –`;
+                        return;
+                    }
+                    contenders++;
+                    if (prevCompeting === null || crCmpKeys(prevCompeting, s) !== 0) pos = contenders;
+                    prevCompeting = s;
                     s.__flatPos = pos;
                     s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
                 });
@@ -710,7 +731,7 @@
                 const crFlattenable = crFlattenableGroups(results.classGroups);
                 html += crViewToggleHtml(crFlattenable);
                 const crGroupsToRender = (crFlatMode && crFlattenable)
-                    ? crFlattenByWeaponGroup(results.classGroups)
+                    ? crFlattenByWeaponGroup(results.classGroups, results.placementsAssigned === true)
                     : results.classGroups;
 
                 if (crGroupsToRender && crGroupsToRender.length > 0) {
@@ -808,7 +829,7 @@
                         html += `
                             <div class="class-results-section">
                                 <div class="class-header"${renameAttr}>
-                                    <span class="class-header-name">${displayName}</span> (${classGroup.shooters.length} deltagare)${renameBtn}
+                                    <span class="class-header-name">${displayName}</span> (${crParticipantCount(classGroup.shooters)} deltagare)${renameBtn}
                                 </div>
                                 <table class="results-table results-table-fixed">
                                     <thead>
@@ -872,7 +893,7 @@
                         classGroup.shooters.forEach((shooter, index) => {
                             // In the flattened view the position is a shared reading rank (see
                             // crFlattenByWeaponGroup); per class it is the server's official order.
-                            const position = shooter.__flatPos || (index + 1);
+                            const position = shooter.__flatPos != null ? shooter.__flatPos : crClassPlace(shooter, index, results.placementsAssigned === true);
                             let qualificationScore = 0;
 
                             const { seriesScores, total: totalScore, xCount: totalXCount } = crShooterTotals(shooter);
@@ -888,7 +909,7 @@
                             html += `
                                 <tr class="${rowClass}">
                                     <td class="text-center">${position}</td>
-                                    <td class="results-cell-truncate" title="${shooter.name}">${shooter.name}</td>
+                                    <td class="results-cell-truncate" title="${shooter.name}">${shooter.name}${shooter.outOfCompetition ? '<div class="small text-muted">Utanför mästerskapet</div>' : ''}</td>
                                     <td class="results-cell-truncate" title="${shooter.club}">${shooter.club}</td>
                                     <td class="text-center">${shooter.__flatClassLabel || shooter.shootingClass || classGroup.className}</td>
                             `;
@@ -979,6 +1000,11 @@
                                 </table>
                             </div>
                         `;
+
+                        // Förklaringen sitter UNDER tabellen (och följer med i utskriften) — inte i ett no-print-fält. Samma ord som fältets.
+                        if ((classGroup.shooters || []).some(s => s.outOfCompetition)) {
+                            html += `<div class="text-muted small mt-1 mb-2"><i class="bi bi-info-circle me-1"></i>Utanför mästerskapet: skytten får ingen placering och ingen mästerskapsmedalj. Standardmedalj kan ändå delas ut.${numberOfFinalSeries > 0 ? ' Skytten tas inte ut till final och räknas inte med i antalet som går vidare.' : ''}</div>`;
+                        }
 
                         // Särskjutning footnotes — surfaced from CalculateFinalResults when a shoot-off
                         // resolved a medal-tier tie ("Särskjutning avgjorde guldet: Anna 50 vs Berit 47").
@@ -1383,7 +1409,7 @@
                     const classHasShootOff = (group.shooters || []).some(s => Array.isArray(s.shootOffRounds) && s.shootOffRounds.length > 0);
 
                     html += `<div class="mb-4">`;
-                    html += `<h4 class="border-bottom pb-2">${displayName} <small class="text-muted">(${group.shooters.length} deltagare)</small></h4>`;
+                    html += `<h4 class="border-bottom pb-2">${displayName} <small class="text-muted">(${crParticipantCount(group.shooters)} deltagare)</small></h4>`;
                     html += `<div class="table-responsive"><table class="table table-sm table-hover">`;
                     html += `<thead class="table-light"><tr>
                         <th style="width:50px" class="text-center">Plats</th>

@@ -2891,6 +2891,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             var snapshot = _qualifyingResultsService.GetSnapshot(competitionId);
             var availableRankings = await _qualifyingResultsService.GetAvailableClassRankingsAsync(competitionId);
             var staleness = await _qualifyingResultsService.ComputeStalenessAsync(competitionId, snapshot);
+            var outsideByGroup = await _qualifyingResultsService.GetOutsideCountsByGroupAsync(competitionId);
 
             // Result list group names come from the merge config applied to the actual
             // sub-classes with results. Snapshot can also contain "orphan" groups (frozen
@@ -2933,6 +2934,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         leaderName = leader?.Name ?? "",
                         leaderScore = leader?.QualificationScore ?? 0,
                         shbFinalists,
+                        // Skyttar utanför mästerskapet i gruppen — de är inte med i rankingen och räknas inte i "X av N" (Stefan 2026-11-06).
+                        outsideCount = outsideByGroup.TryGetValue(group, out var oc) ? oc : 0,
                         // championshipClass kept for client-side backward compat
                         championshipClass = group,
                         totalShooters = ranking?.TotalShooters ?? 0,

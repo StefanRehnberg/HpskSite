@@ -198,7 +198,20 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             }
         }
 
-        private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition)
+        /// <summary>
+        /// Hur många skyttar som står utanför mästerskapet i varje grupp (samma gruppering som rankingen). Finalkortet säger "N skyttar utanför
+        /// mästerskapet räknas inte med" — rankingen själv innehåller dem inte.
+        /// </summary>
+        public async Task<Dictionary<string, int>> GetOutsideCountsByGroupAsync(int competitionId)
+        {
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return new();
+            var guests = await BuildFullRankingsAsync(competitionId, competition, guestsOnly: true);
+            return guests.ToDictionary(r => r.ChampionshipClass, r => r.QualifiedShooters.Count);
+        }
+
+        private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(
+            int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition, bool guestsOnly = false)
         {
             var results = await GetQualifyingResultsAsync(competition);
 
@@ -208,7 +221,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // en gäst flaggas så att en redan låst grupp blir inaktuell. Gör ingenting när beteendet inte gäller tävlingen.
             var outsideRule = ChampionshipRule.For(competition);
             if (outsideRule.OutOfCompetitionApplies)
-                results = PrecisionOutOfCompetition.ExcludeGuests(results, _outOfCompetition.Load(competition, outsideRule));
+            {
+                var outsideSet = _outOfCompetition.Load(competition, outsideRule);
+                results = guestsOnly
+                    ? PrecisionOutOfCompetition.OnlyGuests(results, outsideSet)
+                    : PrecisionOutOfCompetition.ExcludeGuests(results, outsideSet);
+            }
+            else if (guestsOnly)
+            {
+                results = new List<PrecisionResultEntry>();
+            }
 
             var shooterInfo = GetShooterInfoFromStartList(competitionId);
 

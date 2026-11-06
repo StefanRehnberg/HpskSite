@@ -106,6 +106,16 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void OnlyGuests_ar_motsatsen_till_ExcludeGuests()
+        {
+            var rows = new List<PrecisionResultEntry> { R(1), R(2), R(3) };
+            var outside = OutOfCompetitionSet.None.With(2, "C1");
+            Assert.Equal(new[] { 2 }, PrecisionOutOfCompetition.OnlyGuests(rows, outside).Select(r => r.MemberId).ToArray());
+            Assert.Equal(rows.Count, PrecisionOutOfCompetition.OnlyGuests(rows, outside).Count + PrecisionOutOfCompetition.ExcludeGuests(rows, outside).Count);
+            Assert.Empty(PrecisionOutOfCompetition.OnlyGuests(rows, OutOfCompetitionSet.None));
+        }
+
+        [Fact]
         public void ExcludeGuests_resultat_ar_per_skytt_och_klass()
         {
             var rows = new List<PrecisionResultEntry> { R(1, "C1"), R(1, "B1") };
@@ -214,6 +224,9 @@ namespace HpskSite.Tests
         [InlineData("Controllers/CompetitionResultsController.cs", "g.Shooters.Count(s => !s.OutOfCompetition)")]
         [InlineData("Controllers/CompetitionResultsController.cs", "cg.Shooters.Where(s => !s.OutOfCompetition)")]
         [InlineData("CompetitionTypes/Faltskytte/Controllers/FaltskytteController.cs", "filteredResults.Where(r => !outsideForMerge.Contains(r.MemberId, r.ShootingClass))")]
+        [InlineData("CompetitionTypes/Common/SeriesCalculation/ScoreSources/PrecisionFamilySeriesScoreSource.cs", "OutOfCompetition = outside.Contains(g.Key.MemberId, g.Key.ShootingClass)")]
+        [InlineData("Controllers/ResultReviewController.cs", "(bool?)s[\"OutOfCompetition\"] == true")]
+        [InlineData("CompetitionTypes/Precision/Controllers/PrecisionStartListController.cs", "outsideCount = outsideByGroup.TryGetValue(group, out var oc) ? oc : 0")]
         public void Hederspriser_och_sammanslagningsanalys_raknar_inte_gaster(string relativeFile, string call) =>
             AssertWired(relativeFile, call);
 

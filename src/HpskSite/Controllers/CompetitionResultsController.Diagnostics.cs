@@ -257,6 +257,23 @@ namespace HpskSite.Controllers
             }, Formatting.Indented), "application/json");
         }
 
+        /// <summary>
+        /// GET .../verifyrefreshartifact?confirm=golden-master&amp;id=123 — räknar om och SPARAR resultatartefakten för EN tävling, som Uppdatera gör.
+        /// Enbart för att kunna se den publika sidan med en flaggad gäst i rehearsal-databasen (sidan renderar ur den sparade artefakten). Samma guard
+        /// som övriga verify-endpoints (404 utom i Development med HPSK_VERIFY_ENDPOINTS, tillåten databas och hash-nyckel). SKRIVER — anropas aldrig
+        /// av golden-körningarna.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("VerifyGuard: 404 utom i Development med HPSK_VERIFY_ENDPOINTS, tillåten databas och hash-nyckel; finns bara i DEBUG-bygget")]
+        public async Task<IActionResult> VerifyRefreshArtifact(string? confirm, int id)
+        {
+            var refuse = VerifyGuard(confirm);
+            if (refuse != null) return refuse;
+            if (id <= 0) return Json(new { error = "Ange ?id=<tävlings-id>." });
+            var ok = await RefreshResultArtifactAsync(id, "verify (test)");
+            return Json(new { id, refreshed = ok });
+        }
+
         private IActionResult? VerifyGuard(string? confirm)
         {
             var sp = HttpContext.RequestServices;

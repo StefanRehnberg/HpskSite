@@ -20,6 +20,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
         private readonly ILogger<PrecisionFamilySeriesScoreSource> _logger;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly OutOfCompetitionFlags _outOfCompetition;
 
         private static readonly Dictionary<string, string> TableByType = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -36,8 +38,12 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
             IMemberService memberService,
             ClubService clubService,
-            ILogger<PrecisionFamilySeriesScoreSource> logger)
+            ILogger<PrecisionFamilySeriesScoreSource> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            OutOfCompetitionFlags outOfCompetition)
         {
+            _competitions = competitions;
+            _outOfCompetition = outOfCompetition;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
             _memberService = memberService;
             _clubService = clubService;
@@ -92,6 +98,14 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                 // ("C_Vet_Y") or the display Name ("C Vet Y") for the same class depending on which
                 // entry surface wrote the row, and grouping on it raw splits one shooter's series
                 // into two part-scores. See ShootingClasses.ToCanonicalName.
+                //
+                // Vilka som skjöt utanför mästerskapet i den här omgången (tom när beteendet inte gäller tävlingen). Serien rankar bara de
+                // tävlande (se ShooterCompetitionScoreExtensions.Contenders) — en gäst får ingen placeringspoäng (Stefan 2026-11-06).
+                var roundInfo = _competitions.GetSaved(compId);
+                var outside = roundInfo == null
+                    ? OutOfCompetitionSet.None
+                    : _outOfCompetition.Load(roundInfo, ChampionshipRule.For(roundInfo));
+
                 set.ByCompetition[compId] = rows
                     .GroupBy(r => new { r.MemberId, ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass) })
                     .Select(g =>
@@ -108,7 +122,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                             ClubId = clubId,
                             ShootingClass = g.Key.ShootingClass,
                             TotalScore = g.Sum(r => CalculateTotalFromShots(r.Shots)),
-                            XCount = g.Sum(r => CalculateXCountFromShots(r.Shots))
+                            XCount = g.Sum(r => CalculateXCountFromShots(r.Shots)),
+                            OutOfCompetition = outside.Contains(g.Key.MemberId, g.Key.ShootingClass)
                         };
                     })
                     .ToList();

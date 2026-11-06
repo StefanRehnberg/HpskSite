@@ -59,6 +59,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         public static List<PrecisionResultEntry> ExcludeGuests(List<PrecisionResultEntry> results, OutOfCompetitionSet outside) =>
             outside.Count == 0 ? results : results.Where(r => !outside.Contains(r.MemberId, r.ShootingClass)).ToList();
 
+        /// <summary>Motsatsen till <see cref="ExcludeGuests(List{PrecisionResultEntry}, OutOfCompetitionSet)"/>: bara gästernas rader (för att kunna säga hur många som står utanför).</summary>
+        public static List<PrecisionResultEntry> OnlyGuests(List<PrecisionResultEntry> results, OutOfCompetitionSet outside) =>
+            outside.Count == 0 ? new List<PrecisionResultEntry>() : results.Where(r => outside.Contains(r.MemberId, r.ShootingClass)).ToList();
+
         /// <summary>
         /// Tar bort skyttar som står utanför mästerskapet ur en startlista som ska bli finalstartlista ("fortsätt i samma ordning" kopierar
         /// kvalstartlistan). Skjutlagsnumren BEHÅLLS (löftet är samma skjutlag och plats; platsen en gäst lämnar blir en lucka), tomma skjutlag
