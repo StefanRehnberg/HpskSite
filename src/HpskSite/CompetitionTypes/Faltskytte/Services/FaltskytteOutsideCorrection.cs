@@ -236,7 +236,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             if (before.Results == null)
                 return new OutsideCorrectionPreview { Ok = false, Message = before.Error ?? "Listan kunde inte räknas." };
 
-            var set = _flags.LoadDecided(t.Competition, t.Rule).With(t.Registration.MemberId, t.ClassRaw);
+            var set = _flags.Load(t.Competition, t.Rule).With(t.Registration.MemberId, t.ClassRaw);
             var after = await _builder.BuildAsync(competitionId, null, false, set);
             if (after.Results == null)
                 return new OutsideCorrectionPreview { Ok = false, Message = after.Error ?? "Listan kunde inte räknas." };

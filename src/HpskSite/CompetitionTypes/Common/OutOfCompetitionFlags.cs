@@ -149,18 +149,11 @@ namespace HpskSite.CompetitionTypes.Common
         }
 
         /// <summary>
-        /// Bara arrangörens BESLUT (Stefan 2026-11-06: förslag visas inte publikt eller live). Används av allt som visas för tävlande eller
-        /// räknas in i resultat och serier: resultatbyggaren (live-tavlan, den preliminära och officiella listan), serierna och rättningen.
-        /// Förslagen syns bara för funktionärer (anmälningslistans banner, Redigera anmälan, patrullvyn) och blir beslut vid publicering.
+        /// Gällande mängd = arrangörens beslut, annars förslaget. ✔ Förslaget följer av arrangörens egen inställning "vilka deltar" och visas
+        /// därför redan i den preliminära listan och på live-tavlan (Stefan 2026-11-06: en gäst ska inte ses som ledare under tävlingen);
+        /// arrangören rättar ett felaktigt förslag direkt i Redigera anmälan. Vid publicering fryses förslagen till beslut
+        /// (<see cref="FreezeDecisions"/>).
         /// </summary>
-        public OutOfCompetitionSet LoadDecided(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
-        {
-            var set = new HashSet<(int, string)>();
-            foreach (var s in States(competition, rule))
-                if (s.Decision == true) set.Add((s.MemberId, s.ClassKey));
-            return set.Count == 0 ? OutOfCompetitionSet.None : new OutOfCompetitionSet(set);
-        }
-
         public OutOfCompetitionSet Load(HpskSite.Models.Competitions.CompetitionInfo competition, ChampionshipRule rule)
         {
             var set = new HashSet<(int, string)>();

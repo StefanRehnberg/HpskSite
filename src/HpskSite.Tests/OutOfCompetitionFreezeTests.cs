@@ -10,10 +10,10 @@ using Xunit;
 namespace HpskSite.Tests
 {
     /// <summary>
-    /// Stefan 2026-11-06: (1) när en officiell lista publiceras eller räknas om FRYSES vem som tävlar — varje klassrad utan beslut får ett
-    /// ("utanför" där det finns ett förslag, annars "tävlar"); (2) bara arrangörens BESLUT visas publikt och live (förslag syns bara för
-    /// funktionärer). Ett test som inte kan falla är värdelöst: varje påstående här faller om motsvarande rad i
-    /// <see cref="OutOfCompetitionFlags"/> byts mot det gamla beteendet (stämpla bara "utanför"; läs förslag som beslut).
+    /// Stefan 2026-11-06: när en officiell lista publiceras eller räknas om FRYSES vem som tävlar — varje klassrad utan beslut får ett
+    /// ("utanför" där det finns ett förslag, annars "tävlar"). Förslaget visas redan live som utanför (det följer av arrangörens
+    /// "vilka deltar"), så det som fryses är det som visades. Ett test som inte kan falla är värdelöst: påståendena här faller om
+    /// motsvarande rad i <see cref="OutOfCompetitionFlags"/> byts mot det gamla beteendet (stämpla bara "utanför"; ignorera förslag).
     /// </summary>
     public class OutOfCompetitionFreezeTests
     {
@@ -94,32 +94,34 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Only_decisions_are_public_while_staff_still_see_the_suggestion()
+        public void A_suggestion_already_counts_as_outside_in_live_views_and_a_decision_overrides_it()
         {
             var c = Comp();
-            // 7: förslag utan beslut. 10: beslut "utanför". 8: beslut "tävlar" trots att hen är från annan krets.
-            var (flags, _) = Setup(RegFor(7, 3, ("C2", null)), RegFor(10, 3, ("C2", true)), RegFor(8, 3, ("C2", false)));
-            var rule = ChampionshipRule.For(c);
+            // 7: förslag utan beslut (annan krets). 10: beslut "utanför". 8: beslut "tävlar" trots annan krets. 9: egen krets.
+            var (flags, _) = Setup(RegFor(7, 3, ("C2", null)), RegFor(10, 3, ("C2", true)), RegFor(8, 3, ("C2", false)), RegFor(9, 1, ("C2", null)));
 
-            var decided = flags.LoadDecided(c, rule);
-            Assert.False(decided.Contains(7, "C2"));    // förslaget visas inte publikt
-            Assert.True(decided.Contains(10, "C2"));    // beslutet gör det
-            Assert.False(decided.Contains(8, "C2"));
+            var set = flags.Load(c, ChampionshipRule.For(c));
 
-            var effective = flags.Load(c, rule);         // funktionärernas bild: förslaget räknas
-            Assert.True(effective.Contains(7, "C2"));
-            Assert.True(effective.Contains(10, "C2"));
-            Assert.False(effective.Contains(8, "C2"));
+            Assert.True(set.Contains(7, "C2"));     // förslaget visas som utanför redan i den preliminära listan och live
+            Assert.True(set.Contains(10, "C2"));
+            Assert.False(set.Contains(8, "C2"));    // arrangörens beslut "tävlar" vinner över förslaget
+            Assert.False(set.Contains(9, "C2"));
         }
 
         [Fact]
-        public void Decided_set_is_empty_when_the_behaviour_does_not_apply()
+        public void Freezing_stamps_exactly_what_the_live_list_already_showed()
         {
-            var c = Comp(mode: null);
-            var (flags, store) = Setup(RegFor(10, 3, ("C2", true)));
+            // Det som frysts vid publicering får inte skilja sig från det som visades live: "utanför" för just de i gällande mängd.
+            var c = Comp();
+            var (flags, store) = Setup(RegFor(7, 3, ("C2", null)), RegFor(9, 1, ("C2", null)));
+            var live = flags.Load(c, ChampionshipRule.For(c));
 
-            Assert.False(flags.LoadDecided(c, ChampionshipRule.For(c)).Contains(10, "C2"));
-            store.Verify(s => s.List(It.IsAny<int>()), Times.Never);   // inget läses alls
+            flags.FreezeDecisions(c, ChampionshipRule.For(c));
+
+            Assert.True(live.Contains(7, "C2"));
+            Assert.False(live.Contains(9, "C2"));
+            store.Verify(s => s.StampOutOfCompetition(42, 70, "C2", It.IsAny<string>()), Times.Once);   // 7 var utanför live → fryses utanför
+            store.Verify(s => s.StampInCompetition(42, 90, "C2", It.IsAny<string>()), Times.Once);       // 9 tävlade live → fryses som tävlar
         }
     }
 }
