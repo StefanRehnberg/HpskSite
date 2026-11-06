@@ -91,6 +91,32 @@ namespace HpskSite.Services
             return null;
         }
 
+        /// <summary>
+        /// Publicering av en officiell fältlista (Stefan 2026-11-06: ett lag med en skytt utanför mästerskapet VÄGRAS): ingår en skytt som är
+        /// utanför (beslut ELLER förslag, samma bild som listan bygger på) i ett lag stoppas publiceringen med ett besked som namnger skytten och laget,
+        /// i stället för att stämpla en gäst i ett lag. Null = inget hinder (och inget läses när beteendet inte gäller tävlingen).
+        /// </summary>
+        public async Task<string?> OutsideMemberInTeamErrorAsync(int competitionId)
+        {
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return null;
+            var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+            if (!rule.OutOfCompetitionApplies) return null;
+
+            var outside = _outOfCompetition.Load(competition, rule);
+            foreach (var team in await GetTeamsForCompetitionAsync(competitionId))
+            {
+                foreach (var member in team.Members)
+                {
+                    if (!outside.HasMember(member.MemberId)) continue;
+                    var name = _registrations.FindForMember(competitionId, member.MemberId)?.MemberName;
+                    if (string.IsNullOrWhiteSpace(name)) name = GetMemberDisplayName(member.MemberId);
+                    return $"{name} skjuter utanför mästerskapet men ingår i laget {team.Team.TeamName}. Ta ur {name} ur laget innan listan publiceras — en skytt utanför mästerskapet får inte ingå i ett lag.";
+                }
+            }
+            return null;
+        }
+
         public async Task<(bool success, string message, int? teamId)> CreateTeamAsync(
             int competitionId, string teamName, string teamClass, int clubId,
             int[] memberIds, int? spareId, int createdByMemberId, bool isRelay = false)
@@ -297,6 +323,10 @@ namespace HpskSite.Services
             var team = await db.FirstOrDefaultAsync<CompetitionTeamDto>($"SELECT {TeamSelectCols} FROM CompetitionTeam WHERE Id = @0", teamId);
             if (team == null)
                 return (false, "Laget finns inte.");
+
+            // Utanför mästerskapet: samma regel som CreateTeamAsync/UpdateTeamAsync (gå med själv var den enda vägen utan kontroll).
+            var outsideError = OutOfCompetitionTeamError(team.CompetitionId, new[] { memberId });
+            if (outsideError != null) return (false, outsideError);
 
             var members = await db.FetchAsync<CompetitionTeamMemberDto>("WHERE TeamId = @0", teamId);
             var (coreMembers, maxSpares) = TeamClassHelper.GetTeamSize(team.TeamClass);

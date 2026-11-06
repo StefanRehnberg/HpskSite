@@ -48,6 +48,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly FaltskytteMedalLedger _medalLedger;
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
         private readonly FaltskytteOutsideCorrectionService _outsideCorrection;
+        private readonly HpskSite.Services.CompetitionTeamService _teamService;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -77,9 +78,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             OfficialFaltskytteList officialFalt,
             FaltskytteMedalLedger medalLedger,
             HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition,
-            FaltskytteOutsideCorrectionService outsideCorrection)
+            FaltskytteOutsideCorrectionService outsideCorrection,
+            HpskSite.Services.CompetitionTeamService teamService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _teamService = teamService;
             _officialFalt = officialFalt;
             _outOfCompetition = outOfCompetition;
             _outsideCorrection = outsideCorrection;
@@ -1327,6 +1330,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 // live), men felet loggas.
                 if (request.IsOfficial)
                 {
+                    // Ett lag med en skytt utanför mästerskapet vägras (Stefan 2026-11-06): publiceringen stoppas innan något stämplas.
+                    var teamBlock = await _teamService.OutsideMemberInTeamErrorAsync(request.CompetitionId);
+                    if (teamBlock != null)
+                        return Json(new { success = false, message = teamBlock });
+
                     try
                     {
                         var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
