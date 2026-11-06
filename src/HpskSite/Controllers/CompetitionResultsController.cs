@@ -68,6 +68,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.MemberTokenService _tokens;
         private readonly PrecisionResultsBuilder _precisionResults;
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
+        private readonly HpskSite.Services.CompetitionTeamService _teamService;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -96,12 +97,14 @@ namespace HpskSite.Controllers
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.MemberTokenService tokens,
             PrecisionResultsBuilder precisionResults,
-            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition,
+            HpskSite.Services.CompetitionTeamService teamService)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _tokens = tokens;
             _precisionResults = precisionResults;
             _outOfCompetition = outOfCompetition;
+            _teamService = teamService;
             _registrations = registrations;
             _results = results;
             _startLists = startLists;
@@ -2312,6 +2315,12 @@ namespace HpskSite.Controllers
                 // Raderna skrivs aldrig tillbaka härifrån; det här är bara analysens kopia.
                 foreach (var r in results) r.ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass);
 
+                // En skytt utanför mästerskapet är inte med i tävlingen och räknas inte in i "färre än fem deltagare" eller i medaljantalet
+                // (Stefan 2026-11-06). Gäller analysen och medaljöversikten nedan; raderna skrivs aldrig tillbaka härifrån.
+                var analysisRule = ChampionshipRule.For(competition);
+                if (analysisRule.OutOfCompetitionApplies)
+                    results = PrecisionOutOfCompetition.ExcludeGuests(results, _outOfCompetition.Load(competition, analysisRule));
+
                 // ⚠️ DEN SPARADE KONFIGURATIONEN returneras vid sidan av förslagen.
                 //
                 // Analysen svarar på "vad KAN slås samman" (klasser med färre än fem deltagare
@@ -2363,14 +2372,15 @@ namespace HpskSite.Controllers
                         var cached = JsonConvert.DeserializeObject<FinalResults>(existingJson);
                         if (cached?.ClassGroups != null)
                         {
-                            var classInfos = cached.ClassGroups.Select(g => new ClassInfo
+                            // Artefaktens skyttar bär OutOfCompetition; en gäst räknas inte som deltagare (Stefan 2026-11-06).
+                            var classInfos = cached.ClassGroups.Select(g => new { g, n = g.Shooters.Count(s => !s.OutOfCompetition) }).Select(x => new ClassInfo
                             {
-                                ClassName = g.ClassName,
-                                WeaponGroup = ShootingClasses.GetWeaponClassCode(g.ClassName),
-                                ParticipantCount = g.Shooters.Count,
-                                BelowThreshold = g.Shooters.Count < 5,
-                                MedalImpact = g.Shooters.Count < 5
-                                    ? GetMedalImpactText(g.Shooters.Count, g.ClassName.Contains("Jun"))
+                                ClassName = x.g.ClassName,
+                                WeaponGroup = ShootingClasses.GetWeaponClassCode(x.g.ClassName),
+                                ParticipantCount = x.n,
+                                BelowThreshold = x.n < 5,
+                                MedalImpact = x.n < 5
+                                    ? GetMedalImpactText(x.n, x.g.ClassName.Contains("Jun"))
                                     : ""
                             }).ToList();
 
@@ -2378,7 +2388,7 @@ namespace HpskSite.Controllers
                             var syntheticResults = new List<PrecisionResultEntry>();
                             foreach (var cg in cached.ClassGroups)
                             {
-                                foreach (var shooter in cg.Shooters)
+                                foreach (var shooter in cg.Shooters.Where(s => !s.OutOfCompetition))
                                 {
                                     // The class ID from the registry; an unknown name (a merged group) stays as it is —
                                     // never manufacture an id by replacing spaces.
@@ -2905,6 +2915,12 @@ namespace HpskSite.Controllers
                 // store a snapshot — sub results are always live-recomputed in GetResultsList.
                 if (newIsOfficial && !request.IsSubCompetition)
                 {
+                    // Inga gäster i lag (Stefan 2026-11-06): ligger en skytt utanför mästerskapet (beslut ELLER förslag) i ett lag stoppas
+                    // publiceringen med ett besked som namnger skytten och laget — hellre det än att stämpla en gäst i ett lag. Som fältets PublishResults.
+                    var outsideInTeam = await _teamService.OutsideMemberInTeamErrorAsync(request.CompetitionId);
+                    if (outsideInTeam != null)
+                        return Json(new { Success = false, Message = outsideInTeam });
+
                     FreezeOutOfCompetitionDecisions(competition, "publicering");
                     var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
                     if (dbResults.Any())

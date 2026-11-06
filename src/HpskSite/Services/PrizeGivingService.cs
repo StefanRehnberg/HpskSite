@@ -384,9 +384,11 @@ namespace HpskSite.Services
             if (!section.Enabled) return section;
 
             var classGroups = artifact.ClassGroups ?? new List<PrecisionClassGroup>();
-            var allShooters = classGroups.SelectMany(cg => cg.Shooters).ToList();
+            // En skytt utanför mästerskapet är inte med i tävlingen: hon räknas inte i deltagarantalet (och därmed inte i kvoten) och är aldrig
+            // hederspriskandidat (Stefan 2026-11-06). Artefaktens skyttar bär OutOfCompetition; utan någon gäst är allt som förut.
+            var (allShooters, anyOutside) = HpskSite.CompetitionTypes.Precision.Services.PrecisionOutOfCompetition.SplitByOutside(classGroups);
 
-            section.ParticipantCount = artifact.ParticipantCount > 0
+            section.ParticipantCount = artifact.ParticipantCount > 0 && !anyOutside
                 ? artifact.ParticipantCount
                 : allShooters.Select(s => s.MemberId).Distinct().Count();
             section.Minimum = ChampionshipMedalCount.MinimumHonoraryAwards(section.ParticipantCount);

@@ -39,6 +39,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         public static IEnumerable<PrecisionShooterResult> Competing(IEnumerable<PrecisionShooterResult> shooters, Func<string, bool> appliesToClass) =>
             shooters.Where(s => !s.OutOfCompetition && appliesToClass(s.ShootingClass));
 
+        /// <summary>
+        /// Artefaktens skyttar uppdelade i de som är med i tävlingen och en flagga för om någon står utanför. Hederspriserna räknar deltagare och
+        /// kandidater ur de tävlande (Stefan 2026-11-06: "en gäst är inte med i tävlingen så ska inte räknas in"); utan någon gäst är allt som förut.
+        /// </summary>
+        public static (List<PrecisionShooterResult> Competing, bool AnyOutside) SplitByOutside(IEnumerable<PrecisionClassGroup> classGroups)
+        {
+            var all = classGroups.SelectMany(cg => cg.Shooters).ToList();
+            return (all.Where(s => !s.OutOfCompetition).ToList(), all.Any(s => s.OutOfCompetition));
+        }
+
         // ── Finalen: en gäst står aldrig i en finalstartlista (Stefan 2026-11-06: "Gäst får inte skjuta final") ────────────────────────────
 
         /// <summary>

@@ -190,6 +190,33 @@ namespace HpskSite.Tests
             Assert.Null(PrecisionOutOfCompetition.FinalsAddRefusal(outside, 9, null, "Bo"));
         }
 
+        // ── Hederspriser och klassammanslagning: en gäst är inte med i tävlingen och räknas inte in ──
+        [Fact]
+        public void SplitByOutside_delar_upp_de_tavlande_och_gasterna()
+        {
+            var a = S(1); var guest = S(2); guest.OutOfCompetition = true; var c = S(3, "B1");
+            var (competing, anyOutside) = PrecisionOutOfCompetition.SplitByOutside(new[] { G("C1", a, guest), G("B1", c) });
+            Assert.Equal(new[] { 1, 3 }, competing.Select(s => s.MemberId).ToArray());
+            Assert.True(anyOutside);
+        }
+
+        [Fact]
+        public void SplitByOutside_utan_gaster_ar_oforandrad()
+        {
+            var (competing, anyOutside) = PrecisionOutOfCompetition.SplitByOutside(new[] { G("C1", S(1), S(2)) });
+            Assert.Equal(2, competing.Count);
+            Assert.False(anyOutside);
+        }
+
+        [Theory]
+        [InlineData("Services/PrizeGivingService.cs", "PrecisionOutOfCompetition.SplitByOutside(classGroups)")]
+        [InlineData("Controllers/CompetitionResultsController.cs", "PrecisionOutOfCompetition.ExcludeGuests(results, _outOfCompetition.Load(competition, analysisRule))")]
+        [InlineData("Controllers/CompetitionResultsController.cs", "g.Shooters.Count(s => !s.OutOfCompetition)")]
+        [InlineData("Controllers/CompetitionResultsController.cs", "cg.Shooters.Where(s => !s.OutOfCompetition)")]
+        [InlineData("CompetitionTypes/Faltskytte/Controllers/FaltskytteController.cs", "filteredResults.Where(r => !outsideForMerge.Contains(r.MemberId, r.ShootingClass))")]
+        public void Hederspriser_och_sammanslagningsanalys_raknar_inte_gaster(string relativeFile, string call) =>
+            AssertWired(relativeFile, call);
+
         // ── Textspärr: finalvägarna är kopplade till gästfiltret (kommentarsrader räknas inte) ──
         [Theory]
         [InlineData("CompetitionTypes/Precision/Services/PrecisionQualifyingResultsService.cs", "PrecisionOutOfCompetition.ExcludeGuests(results,")]
@@ -197,7 +224,10 @@ namespace HpskSite.Tests
         [InlineData("CompetitionTypes/Precision/Controllers/PrecisionStartListController.cs", "PrecisionOutOfCompetition.FinalsAddRefusal(")]
         [InlineData("CompetitionTypes/Precision/Services/PrecisionResultsBuilder.cs", "PrecisionOutOfCompetition.Mark(")]
         [InlineData("CompetitionTypes/Precision/Services/PrecisionResultsBuilder.cs", "PrecisionOutOfCompetition.AssignPlacements(")]
-        public void Gastfiltret_ar_kopplat_pa_varje_finalvag(string relativeFile, string call)
+        public void Gastfiltret_ar_kopplat_pa_varje_finalvag(string relativeFile, string call) =>
+            AssertWired(relativeFile, call);
+
+        private static void AssertWired(string relativeFile, string call)
         {
             var path = System.IO.Path.Combine(SiteRoot(), relativeFile.Replace('/', System.IO.Path.DirectorySeparatorChar));
             var src = System.IO.File.ReadAllText(path);

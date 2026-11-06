@@ -986,6 +986,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         registrations.Where(r => r.IsSubCompetition).Select(r => r.MemberId));
                     filteredResults = allResults.Where(r => subCompMemberIds.Contains(r.MemberId));
                 }
+                // En skytt utanför mästerskapet är inte med i tävlingen och räknas inte in i "färre än fem deltagare" (Stefan 2026-11-06).
+                var outsideForMerge = OutsideChampionship(competition);
+                if (outsideForMerge.Count > 0)
+                    filteredResults = filteredResults.Where(r => !outsideForMerge.Contains(r.MemberId, r.ShootingClass));
                 var classCounts = filteredResults
                     .GroupBy(r => new { r.MemberId, r.ShootingClass })
                     .Select(g => g.Key)

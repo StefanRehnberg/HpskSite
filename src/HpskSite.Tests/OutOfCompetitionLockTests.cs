@@ -93,6 +93,18 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Precisionens_publicering_stoppas_av_en_gast_i_ett_lag()
+        {
+            // "Inga gäster i lag" (Stefan 2026-11-06). Som fältets PublishResults: kontrollen sker FÖRE frysningen, så en gäst inte stämplas in i ett lag.
+            var src = ReadController();
+            var toggle = src.IndexOf("public async Task<IActionResult> ToggleResultsOfficial(", StringComparison.Ordinal);
+            var guard = CodeIndexOf(src, "_teamService.OutsideMemberInTeamErrorAsync(request.CompetitionId)", toggle);
+            var freeze = CodeIndexOf(src, "FreezeOutOfCompetitionDecisions(competition, \"publicering\")", toggle);
+            Assert.True(guard > toggle, "Publiceringen kontrollerar inte om en gäst ligger i ett lag");
+            Assert.True(guard < freeze, "Lagkontrollen måste ske FÖRE frysningen");
+        }
+
+        [Fact]
         public void Klassbyte_flyttar_gastflaggan_med_skytten()
         {
             // Lagringen raderar beslutet när klassraden byts ut ("class-removed"). Utan att flaggan läses FÖRE ändringen och stämplas på den nya
