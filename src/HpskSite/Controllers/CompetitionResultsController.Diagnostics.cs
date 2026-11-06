@@ -25,7 +25,8 @@ namespace HpskSite.Controllers
     {
         private static readonly string[] WriteProofTables =
         {
-            "CompetitionResultList", "StandardMedalAward", "CompetitionRegistration", "CompetitionRegistrationClass"
+            "CompetitionResultList", "StandardMedalAward", "CompetitionRegistration", "CompetitionRegistrationClass",
+            "CompetitionStartList" // finalvägen läser startlistor; endpointen får aldrig skriva dem (FreezeClassResultsAsync gör det)
         };
 
         // Egenskaper som bär tid (maskas — tal maskas ALDRIG) respektive personuppgifter (hashas/maskas).

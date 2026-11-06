@@ -64,6 +64,15 @@ $baseline = Get-Content $Ref -Raw -Encoding UTF8 | ConvertFrom-Json
 $current = Get-Content $tmp -Raw -Encoding UTF8 | ConvertFrom-Json
 $bad = 0
 if ($current.header.WROTE_SOMETHING) { "FAIL: the endpoint reports that something was written"; $bad++ }
+# A competition that THROWS in both runs hashes identically ({exception: type}) and would look "identical" -- an assertion that cannot fail.
+# So any 'fel' (exception) in either run is a failure in itself, whatever the hashes say.
+$throwing = @($current.competitions.PSObject.Properties | Where-Object { $_.Value.kind -eq 'fel' } | ForEach-Object { $_.Name })
+$throwingRef = @($baseline.competitions.PSObject.Properties | Where-Object { $_.Value.kind -eq 'fel' } | ForEach-Object { $_.Name })
+if ($throwing.Count -gt 0 -or $throwingRef.Count -gt 0) {
+  "FAIL: competitions that threw an exception: now=[$($throwing -join ',')] reference=[$($throwingRef -join ',')]"; $bad++
+}
+$missingNow = @($current.competitions.PSObject.Properties | Where-Object { $_.Value.kind -eq 'saknas' }).Count
+"competitions not found ('saknas', expected to be the same in both runs): $missingNow"
 $allIds = @($baseline.competitions.PSObject.Properties.Name) + @($current.competitions.PSObject.Properties.Name) | Select-Object -Unique
 $same = 0; $shown = 0
 foreach ($id in $allIds) {

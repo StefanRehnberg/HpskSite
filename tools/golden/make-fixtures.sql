@@ -37,6 +37,7 @@ BEGIN
     END
     CLOSE d; DEALLOCATE d;
     DELETE FROM dbo.CompetitionResultList WHERE CompetitionId IN (SELECT CloneId FROM dbo.GoldenFixture);
+    DELETE FROM dbo.CompetitionStartList WHERE CompetitionId IN (SELECT CloneId FROM dbo.GoldenFixture);
     DELETE FROM dbo.Competition WHERE Id IN (SELECT CloneId FROM dbo.GoldenFixture);
     DELETE FROM dbo.GoldenFixture;
 END
@@ -123,6 +124,25 @@ BEGIN
     WHERE c.object_id = OBJECT_ID('dbo.CompetitionResultList') AND c.is_identity = 0 AND c.is_computed = 0 AND TYPE_NAME(c.user_type_id) <> 'timestamp';
     SET @sql = N'INSERT dbo.CompetitionResultList (' + @rlCols + N') SELECT ' + @rlSel + N' FROM dbo.CompetitionResultList WHERE CompetitionId = @src';
     EXEC sp_executesql @sql, N'@src INT, @clone INT', @src, @clone;
+
+    -- start lists (qualifying first, then finals with QualificationStartListId remapped to the cloned qualifying list).
+    -- Needed so the finals path (finalist stars, contenders) is exercised on clones of championship competitions.
+    DECLARE @slCols NVARCHAR(MAX), @slSelQ NVARCHAR(MAX), @slSelF NVARCHAR(MAX);
+    SELECT @slCols = STRING_AGG(CAST(QUOTENAME(c.name) AS NVARCHAR(MAX)), ','),
+           @slSelQ = STRING_AGG(CAST(CASE c.name WHEN 'CompetitionId' THEN '@clone' ELSE 's.' + QUOTENAME(c.name) END AS NVARCHAR(MAX)), ','),
+           @slSelF = STRING_AGG(CAST(CASE c.name WHEN 'CompetitionId' THEN '@clone'
+                                     WHEN 'QualificationStartListId' THEN 'ISNULL(m.newId, s.QualificationStartListId)'
+                                     ELSE 's.' + QUOTENAME(c.name) END AS NVARCHAR(MAX)), ',')
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID('dbo.CompetitionStartList') AND c.is_identity = 0 AND c.is_computed = 0 AND TYPE_NAME(c.user_type_id) <> 'timestamp';
+    CREATE TABLE #slmap (oldId INT, newId INT);
+    SET @sql = N'MERGE dbo.CompetitionStartList t USING (SELECT * FROM dbo.CompetitionStartList WHERE CompetitionId = @src AND Kind <> 1) s ON 1 = 0 '
+             + N'WHEN NOT MATCHED THEN INSERT (' + @slCols + N') VALUES (' + @slSelQ + N') OUTPUT s.Id, inserted.Id INTO #slmap(oldId, newId);';
+    EXEC sp_executesql @sql, N'@src INT, @clone INT', @src, @clone;
+    SET @sql = N'INSERT dbo.CompetitionStartList (' + @slCols + N') SELECT ' + @slSelF
+             + N' FROM dbo.CompetitionStartList s LEFT JOIN #slmap m ON m.oldId = s.QualificationStartListId WHERE s.CompetitionId = @src AND s.Kind = 1';
+    EXEC sp_executesql @sql, N'@src INT, @clone INT', @src, @clone;
+    DROP TABLE #slmap;
 
     FETCH NEXT FROM s INTO @src, @code, @scope;
 END
