@@ -60,6 +60,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
+        private readonly OutOfCompetitionFlags _outOfCompetition;
 
         public PrecisionResultsBuilder(
             ILogger<PrecisionResultsBuilder> logger,
@@ -69,8 +70,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             ParticipantStatusService participantStatusService,
             UmbracoStartListRepository startListRepository,
             IMemberService memberService,
-            ClubService clubService)
+            ClubService clubService,
+            OutOfCompetitionFlags outOfCompetition)
         {
+            _outOfCompetition = outOfCompetition;
             _logger = logger;
             _competitions = competitions;
             _startLists = startLists;
@@ -301,7 +304,12 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             finalistStarts.Contains(FinalistKey(memberId, ShootingClasses.NormalizeKey(shootingClass)))
             || finalistStarts.Contains(FinalistKey(memberId, "*"));
 
-        public async Task<FinalResults> BuildAsync(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null)
+        /// <param name="outsideOverride">
+        /// ENBART Rätta-flödets "hur ser listan ut om…" (förhandsvisningen) — den mängd som står utanför mästerskapet i stället för den lagrade.
+        /// Aldrig ett skrivande anrop. Null = den lagrade (beslut, annars förslag).
+        /// </param>
+        public async Task<FinalResults> BuildAsync(List<PrecisionResultEntry> results, int competitionId, List<ClassMergeAction>? merges = null,
+            OutOfCompetitionSet? outsideOverride = null)
         {
             if (!results.Any())
             {
@@ -448,6 +456,14 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // mästerskapsklasser? Nivåspärren (bara klubb och krets) ligger i MedalGrouping.
             var championshipRule = ChampionshipRule.For(competition);
             var medalsPerWeaponGroup = championshipRule.MedalsPerWeaponGroup;
+
+            // ── Utanför mästerskapet ──────────────────────────────────────────────────
+            // Flaggan sätts på varje skytt FÖRE medaljkandidaterna väljs, så regeln ligger hos LÄSAREN: en gäst är aldrig medaljkandidat,
+            // vad en finalstartlista än innehåller (clone, rerank, manuellt tillägg, en lista byggd före flaggningen). Gör ingenting när
+            // beteendet inte gäller tävlingen — då är allt som förut. Se PrecisionOutOfCompetition.
+            var placementsAssigned = competition != null && championshipRule.OutOfCompetitionApplies;
+            if (placementsAssigned)
+                PrecisionOutOfCompetition.Mark(shooterResults, outsideOverride ?? _outOfCompetition.Load(competition!, championshipRule));
             var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
             var medalAwards = new List<PrecisionMedalCategoryAwards>();
             var medalAwardsComputed = false;
@@ -525,9 +541,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     // finalstartlista än") är ingen det — samma försiktighet som
                     // HasShotEverythingDue, annars är vi tillbaka i kvalrundefelet.
                     var contenders = !hasFinalsRound
-                        ? classGroups.SelectMany(cg => cg.Shooters).ToList()
+                        ? PrecisionOutOfCompetition.Competing(classGroups.SelectMany(cg => cg.Shooters), championshipRule.AppliesToClass).ToList()
                         : finalistsKnown
-                            ? classGroups.SelectMany(cg => cg.Shooters)
+                            ? PrecisionOutOfCompetition.Competing(classGroups.SelectMany(cg => cg.Shooters), championshipRule.AppliesToClass)
                                 .Where(s => IsFinalistStart(finalistStarts, s.MemberId, s.ShootingClass))
                                 .ToList()
                             : new List<PrecisionShooterResult>();
@@ -673,8 +689,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 if (useMedalCategories)
                 {
                     var splitCForAwards = championshipRule.SplitsChampionshipClassC;
-                    var participantsByCategory = classGroups
-                        .SelectMany(cg => cg.Shooters)
+                    // Antalet medaljer räknas över de TÄVLANDE (en skytt utanför ingår inte i mästerskapet, som i fält).
+                    var participantsByCategory = PrecisionOutOfCompetition.Competing(
+                            classGroups.SelectMany(cg => cg.Shooters), championshipRule.AppliesToClass)
                         .GroupBy(sh => ChampionshipCategory.For(sh.ShootingClass, splitCForAwards))
                         .Where(gr => !string.IsNullOrWhiteSpace(gr.Key))
                         .ToDictionary(
@@ -829,6 +846,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 }
             }
 
+            // Placeringen SIST: särskjutningen ovan omsorterar klassgrupperna, och platsen ska vara den som visas. Standardmedaljerna nedan
+            // beror inte på ordningen och räknas på ALLA skyttar (en gäst får sin standardmedalj men ingen mästerskapsmedalj).
+            if (placementsAssigned)
+                PrecisionOutOfCompetition.AssignPlacements(classGroups);
+
             // Calculate Standard Medal Awards if enabled
             var isAwardingStandardMedals = competition?.IsAwardingStandardMedals ?? false;
             var isClubOnly = competition?.IsClubOnly ?? false;
@@ -961,6 +983,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 MedalAwards = medalAwards,
                 MedalAwardsComputed = medalAwardsComputed,
                 MedalsPerWeaponGroup = medalsPerWeaponGroup,
+                PlacementsAssigned = placementsAssigned,
                 ParticipantCount = classGroups
                     .SelectMany(g => g.Shooters)
                     .Select(sh => sh.MemberId)
