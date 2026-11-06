@@ -2097,6 +2097,19 @@ namespace HpskSite.Controllers
                     // competition has none. Lets the Anmälningar tab show a Deltävling column
                     // (with a check on rows where the shooter opted in) only when relevant.
                     subCompetitionName = competition.SubCompetitionName ?? "",
+                    // Mästerskapets läge för kortet "Mästerskap: vilka deltar?" överst i Anmälningar-fliken. Null = inget fält-/MagnumFältmästerskap.
+                    championship = oocRule.OutOfCompetitionApplies ? (object)new
+                    {
+                        applies = true,
+                        official = competition.FaltskytteResultsOfficial,
+                        kind = oocRule.Kind.ToString(),
+                        participants = HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(competition.ChampionshipParticipants) ?? "all",
+                        weaponGroups = oocRule.WeaponGroups,
+                        knownGroups = HpskSite.CompetitionTypes.Common.ChampionshipWeaponGroups.OfferedFor(
+                            competition.CompetitionType,
+                            registrationContents.SelectMany(r => r.Classes).Select(c => HpskSite.CompetitionTypes.Common.ChampionshipCategory.WeaponGroupFor(c.Class)),
+                            oocRule.WeaponGroups)
+                    } : null,
                     // "ledger" = avgifterna i liggaren (P3/P4). Anmälningar-flikens JS väljer väg på den.
                     paymentModel
                 });

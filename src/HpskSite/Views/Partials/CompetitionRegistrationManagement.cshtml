@@ -352,6 +352,34 @@
             #regFilterCard:not(.reg-show-more) .reg-more-filter { display: none; }
         }
     </style>
+    @* Mästerskap: vilka deltar? Bara för ett mästerskap i fält/MagnumFält (servern avgör, svaret bär "championship"). Två val: vilka som
+       deltar (styr förslagen om vem som skjuter utanför) och vilka vapengrupper som avgör mästerskapet. Låst när listan är publicerad. *@
+    <div class="card mb-3 d-none" id="regChampCard">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+                <div>
+                    <h6 class="mb-1"><i class="bi bi-trophy me-1"></i>Mästerskap: vilka deltar?</h6>
+                    <p class="small text-muted mb-0" id="regChampSummary"></p>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="regChampEditBtn">Ändra…</button>
+            </div>
+            <div class="d-none mt-3" id="regChampForm">
+                <div class="alert alert-danger small d-none" id="regChampError" role="alert"></div>
+                <label class="form-label" for="regChampParticipants">Vilka deltar i mästerskapet</label>
+                <select id="regChampParticipants" class="form-select mb-1"></select>
+                <div class="form-text mb-3" id="regChampParticipantsHelp"></div>
+                <fieldset class="mb-3">
+                    <legend class="form-label fs-6 mb-1">Vapengrupper som avgör mästerskapet</legend>
+                    <div id="regChampGroups" class="d-flex flex-wrap gap-3 mb-1"></div>
+                    <div class="form-text">Ingen vald betyder alla vapengrupper. En grupp som inte är vald skjuts som en vanlig tävling: placering och standardmedaljer, men ingen mästare och ingen mästerskapsmedalj.</div>
+                </fieldset>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-primary" id="regChampSave">Spara</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="regChampCancel">Avbryt</button>
+                </div>
+            </div>
+        </div>
+    </div>
     @* "N föreslås utanför mästerskapet" — bara när tävlingen använder beteendet och något förslag väntar på beslut.
        Förslaget blir ett beslut när resultatlistan publiceras; därför försvinner bannern av sig själv efteråt. *@
     <div class="alert alert-warning d-none align-items-center flex-wrap gap-2 mb-3" id="regOocBanner" role="status">
@@ -1733,6 +1761,7 @@ function loadCompetitionRegistrations() {
             populateCompetitionClubFilter();
             populateShootingClassFilter();
             updatePaymentSummary();
+            renderChampionshipCard(data.championship);
             updateOocBanner();
             filterCompetitionRegistrations();
         } else {
@@ -3034,6 +3063,104 @@ function oocStateOf(reg) {
         outside: rows.some(sc => sc.outOfCompetitionEffective === true)
     };
 }
+
+// ── Mästerskap: vilka deltar? (kortet överst) ─────────────────────────────────────────────────
+// Servern avgör om kortet visas (championship != null = fält-/MagnumFältmästerskap) och vilka val nivån har. Låst när listan är publicerad.
+let champState = null;
+
+function champParticipantOptions(c) {
+    const own = { Krets: 'Bara kretsens egna klubbar', Landsdel: 'Bara landsdelens egna klubbar', Klubb: 'Bara klubbens egna medlemmar' }[c.kind];
+    const opts = [['all', 'Alla deltar']];
+    if (own) opts.push(['own', own]);
+    if (c.kind === 'Krets') opts.push(['own+neighbours', 'Kretsen och angränsande kretsar']);
+    return opts;
+}
+
+function champSummary(c) {
+    const opt = champParticipantOptions(c).find(o => o[0] === c.participants);
+    const who = c.participants === 'all'
+        ? 'Alla deltar. Ingen markeras automatiskt: du markerar en enskild skytt som utanför i Redigera anmälan.'
+        : (opt ? opt[1] : c.participants) + ' deltar. Skyttar som tävlar för en klubb utanför föreslås som utanför mästerskapet.';
+    const groups = (c.weaponGroups && c.weaponGroups.length)
+        ? 'Mästerskap i vapengrupp ' + c.weaponGroups.join(', ') + '; övriga grupper skjuts som en vanlig tävling.'
+        : 'Alla vapengrupper avgör mästerskapet.';
+    const locked = c.official ? ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet).' : '';
+    return who + ' ' + groups + locked;
+}
+
+function champShowError(msg) {
+    const el = document.getElementById('regChampError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('d-none', !msg);
+}
+
+function champOpenForm() {
+    const c = champState;
+    if (!c) return;
+    champShowError('');
+    const sel = document.getElementById('regChampParticipants');
+    sel.innerHTML = champParticipantOptions(c).map(o => `<option value="${o[0]}"${o[0] === c.participants ? ' selected' : ''}>${escapeHtmlSafe(o[1])}</option>`).join('');
+    sel.disabled = c.kind === 'Sm';
+    document.getElementById('regChampParticipantsHelp').textContent = c.kind === 'Sm'
+        ? 'I ett svenskt mästerskap deltar alla; där finns inga automatiska förslag.'
+        : 'Styr förslagen. Den som tävlar för en klubb utanför föreslås som utanför mästerskapet, och du kan alltid ändra enskilda skyttar.';
+    document.getElementById('regChampGroups').innerHTML = (c.knownGroups || []).map(g =>
+        `<div class="form-check"><input class="form-check-input reg-champ-group" type="checkbox" id="regChampG_${escapeHtmlSafe(g)}" value="${escapeHtmlSafe(g)}"${(c.weaponGroups || []).includes(g) ? ' checked' : ''}>` +
+        `<label class="form-check-label" for="regChampG_${escapeHtmlSafe(g)}">${escapeHtmlSafe(g)}</label></div>`).join('');
+    document.getElementById('regChampForm').classList.remove('d-none');
+    document.getElementById('regChampEditBtn').classList.add('d-none');
+}
+
+function champCloseForm() {
+    document.getElementById('regChampForm')?.classList.add('d-none');
+    const btn = document.getElementById('regChampEditBtn');
+    if (btn && champState && !champState.official) btn.classList.remove('d-none');
+}
+
+async function champSave() {
+    const c = champState;
+    if (!c) return;
+    const btn = document.getElementById('regChampSave');
+    btn.disabled = true;
+    champShowError('');
+    try {
+        const resp = await fetch('/umbraco/surface/RegistrationAdmin/SetChampionshipSettings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+            body: JSON.stringify({
+                competitionId: $('.competition-registration-management').data('competition-id'),
+                participants: document.getElementById('regChampParticipants').value,
+                weaponGroups: Array.from(document.querySelectorAll('.reg-champ-group:checked')).map(x => x.value)
+            })
+        });
+        const d = await resp.json();
+        if (!d.success) { champShowError(d.message || 'Det gick inte att spara.'); return; }
+        champCloseForm();
+        loadCompetitionRegistrations();     // förslagen och bannern räknas om
+    } catch (e) {
+        champShowError('Ett fel uppstod.');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function renderChampionshipCard(c) {
+    const card = document.getElementById('regChampCard');
+    if (!card) return;
+    champState = c || null;
+    card.classList.toggle('d-none', !c);
+    if (!c) return;
+    document.getElementById('regChampSummary').textContent = champSummary(c);
+    document.getElementById('regChampEditBtn').classList.toggle('d-none', !!c.official);
+    document.getElementById('regChampForm').classList.add('d-none');
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('regChampEditBtn')?.addEventListener('click', champOpenForm);
+    document.getElementById('regChampCancel')?.addEventListener('click', champCloseForm);
+    document.getElementById('regChampSave')?.addEventListener('click', champSave);
+});
 
 function updateOocBanner() {
     const banner = document.getElementById('regOocBanner');

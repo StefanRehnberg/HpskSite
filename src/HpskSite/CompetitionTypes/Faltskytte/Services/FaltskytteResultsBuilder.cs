@@ -260,7 +260,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // Skytten får resultatet och står kvar i klassgruppen med sin standardmedalj (beräknad ovan på ALLA), men får ingen
             // plats och ingen mästerskapsmedalj. Platsen räknas över de tävlande i klassgruppen (visningsgruppen, den sammanslagna om
             // klasserna slagits ihop); mästerskapskategorierna nedan räknas bara över de tävlande. Gäller inte tävlingen beteendet
-            // (växeln av, inget mästerskap, inte fält) sätts ingenting och allt är som förut.
+            // (inget mästerskap, inte fält/MagnumFält) sätts ingenting och allt är som förut.
             // outsideOverride: ENBART Rätta-flödets "hur ser listan ut om…" (förhandsvisningen) — aldrig ett skrivande anrop.
             var outside = outsideOverride ?? _outOfCompetition.Load(competition, championshipRule);
             var placementsAssigned = championshipRule.OutOfCompetitionApplies;
@@ -302,7 +302,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var splitC = championshipRule.SplitsChampionshipClassC;
                 // Utanför mästerskapet (S4): en vapengrupp som mästerskapet inte gäller får ingen kategori alls — alltså ingen
                 // mästerskapsmedalj, ingen särskjutning och ingen prisutdelning som mästerskap. Placeringen i klassgrupperna
-                // ovan och standardmedaljerna är oförändrade. Utan lista (eller utan växeln) är filtret alltid sant.
+                // ovan och standardmedaljerna är oförändrade. Utan lista är filtret alltid sant.
                 categoryStandings = shooterResults
                     .Where(s => championshipRule.AppliesToClass(s.ShootingClass) && !s.OutOfCompetition)
                     .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))

@@ -1283,8 +1283,8 @@ namespace HpskSite.Controllers
         /// skytten kan aldrig skicka eller ta bort det, och <c>Save</c> rör det aldrig. Value null tar bort beslutet (då gäller
         /// förslaget). Svarar med skälet när det inte går:
         /// <list type="bullet">
-        /// <item>tävlingen använder inte beteendet (växeln av, inget mästerskap, inte fält) — då skrivs ingenting, så att en
-        /// tävling som inte slagits på inte kan få flaggor i förväg;</item>
+        /// <item>tävlingen använder inte beteendet (inget mästerskap, inte fält/MagnumFält) — då skrivs ingenting, så att en
+        /// tävling där flaggan inte har någon mening inte kan få flaggor;</item>
         /// <item>mästerskapet gäller inte klassens vapengrupp (där finns ingen mästerskapsplacering att stå utanför);</item>
         /// <item>listan är publicerad — den är fast och ändras bara via "Rätta listan";</item>
         /// <item>skytten ingår i ett lag (Stefan 2026-11-04: en skytt utanför mästerskapet får inte ingå i lag) — ta ur laget först.</item>
@@ -1349,6 +1349,69 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SetOutOfCompetition failed for registration {RegistrationId}", request?.RegistrationId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Arrangörens två inställningar för mästerskapet i en fält-/MagnumFälttävling: <b>vilka som deltar</b> (alla, bara egna, egna + angränsande
+        /// kretsar) och <b>vilka vapengrupper som avgör mästerskapet</b> (inga valda = alla). Styr förslagen "skjuter utanför mästerskapet" och
+        /// var det finns en mästerskapsplacering alls. Vägras efter publicering: en ändring av vapengrupper hade tyst ändrat en publicerad
+        /// lista vid nästa omräkning (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet). Prövas av arrangörens behörighet.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("HasCompetitionOrganiserAccessAsync(tävlingen): arrangörens behörighet, som SetOutOfCompetition")]
+        public async Task<IActionResult> SetChampionshipSettings([FromBody] SetChampionshipSettingsRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävling hittades inte." });
+
+                if (!await _authService.HasCompetitionOrganiserAccessAsync(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet." });
+
+                var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
+                if (!rule.OutOfCompetitionApplies)
+                    return Json(new { success = false, message = "Inställningarna gäller bara mästerskap i fält och MagnumFält." });
+                if (competition.FaltskytteResultsOfficial)
+                    return Json(new { success = false, message = "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"." });
+
+                // Vilka deltar: bara de former tävlingens nivå har förslag för (SM har aldrig förslag, grannkretsar bara för kretsmästerskap).
+                var asked = (request.Participants ?? "").Trim().ToLowerInvariant();
+                var participants = HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(asked);   // null = alla
+                if (asked.Length > 0 && asked != HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.All && participants == null)
+                    return Json(new { success = false, message = "Okänt val för \"Vilka deltar\"." });
+                if (participants != null && rule.Kind == HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Sm)
+                    return Json(new { success = false, message = "I ett svenskt mästerskap deltar alla; där finns inga automatiska förslag." });
+                if (participants == HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.OwnPlusNeighbours
+                    && rule.Kind != HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Krets)
+                    return Json(new { success = false, message = "Angränsande kretsar kan bara väljas för kretsmästerskap." });
+
+                // Vapengrupper: bara kända koder; inga valda = alla.
+                var wanted = (request.WeaponGroups ?? Array.Empty<string>()).Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+                var groups = HpskSite.CompetitionTypes.Common.ChampionshipWeaponGroups.Canonicalize(string.Join(",", wanted));
+                if (wanted.Count > 0 && groups == null)
+                    return Json(new { success = false, message = "Okänd vapengrupp." });
+
+                var saved = _competitions.Update(request.CompetitionId, null, c =>
+                {
+                    c.ChampionshipParticipants = participants;
+                    c.ChampionshipWeaponGroups = groups;
+                });
+                if (saved.PublishProblem != null)
+                    return Json(new { success = false, message = saved.PublishProblem });
+
+                return Json(new { success = true, participants = participants ?? "all", weaponGroups = groups == null ? new string[0] : groups.Split(',') });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SetChampionshipSettings failed for competition {CompetitionId}", request?.CompetitionId);
                 return Json(new { success = false, message = "Ett fel uppstod." });
             }
         }
@@ -3017,6 +3080,15 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Request model for the at-the-desk check-in toggle (item #9).
         /// </summary>
+        public class SetChampionshipSettingsRequest
+        {
+            public int CompetitionId { get; set; }
+            /// <summary>"all" (alla deltar), "own" (egen krets/landsdel/klubb) eller "own+neighbours" (kretsmästerskap: egen + angränsande).</summary>
+            public string? Participants { get; set; }
+            /// <summary>Vapengruppskoder som avgör mästerskapet ("A", "C", "R" …). Tom lista = alla grupper.</summary>
+            public string[]? WeaponGroups { get; set; }
+        }
+
         public class SetOutOfCompetitionRequest
         {
             public int RegistrationId { get; set; }

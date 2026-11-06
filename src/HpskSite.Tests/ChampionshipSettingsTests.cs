@@ -62,5 +62,34 @@ namespace HpskSite.Tests
             Assert.Equal("own", copy.ChampionshipParticipants);
             Assert.True(copy.HideOutOfCompetitionInPlace);
         }
+
+        [Fact]
+        public void The_offered_weapon_groups_for_a_field_competition_are_the_field_groups_and_nothing_from_other_disciplines()
+        {
+            var offered = ChampionshipWeaponGroups.OfferedFor("Faltskytte", Array.Empty<string?>(), Array.Empty<string?>());
+
+            Assert.Equal(new[] { "A", "A Opt", "B", "C", "R" }, offered);
+            foreach (var other in new[] { "AG", "AM", "AP", "L", "M" })
+                Assert.DoesNotContain(other, offered);        // precisionens och springskyttets koder hör inte till ett fältmästerskap
+        }
+
+        [Fact]
+        public void Used_and_already_stored_groups_are_always_offered_and_unknown_codes_never()
+        {
+            // En tävling där någon anmälts i en grupp utanför fältets vanliga, och ett gammalt val som inte får försvinna ur listan.
+            var offered = ChampionshipWeaponGroups.OfferedFor("Faltskytte", new string?[] { "M", "zzz", "", null }, new string?[] { "L" });
+
+            Assert.Contains("M", offered);
+            Assert.Contains("L", offered);
+            Assert.DoesNotContain("zzz", offered);
+            Assert.Equal(offered.OrderBy(c => c, StringComparer.Ordinal).ToList(), offered);   // ordnade
+        }
+
+        [Fact]
+        public void A_discipline_without_a_base_list_offers_only_what_is_used_or_stored()
+        {
+            Assert.Empty(ChampionshipWeaponGroups.OfferedFor("MagnumFalt", Array.Empty<string?>(), Array.Empty<string?>()));
+            Assert.Equal(new[] { "M" }, ChampionshipWeaponGroups.OfferedFor("MagnumFalt", new string?[] { "m" }, Array.Empty<string?>()));
+        }
     }
 }
