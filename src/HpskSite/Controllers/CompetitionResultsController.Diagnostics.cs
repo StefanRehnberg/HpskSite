@@ -1,6 +1,7 @@
 #if DEBUG
 using System.Security.Cryptography;
 using System.Text;
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Faltskytte.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -120,6 +121,137 @@ namespace HpskSite.Controllers
                     writeProofBefore = before,
                     writeProofAfter = after,
                     WROTE_SOMETHING = wroteSomething
+                },
+                competitions = perCompetition
+            }, Formatting.Indented), "application/json");
+        }
+
+        /// <summary>
+        /// GET /umbraco/surface/competitionresults/verifyfinals?confirm=golden-master&amp;ids=1,2,3 — FINALVÄGENS golden-master
+        /// (expertgruppens K5: VerifyRecompute kör bara CalculateFinalResults, aldrig kvalrankingen eller finalstartlisteberäkningen).
+        /// Per tävling med final: kvalrankingen (alla skyttar per grupp), finalistgränsen (kortets "X av N går vidare"), den
+        /// genererade finalstartlistan (ur en ögonblicksbild i minnet, utan sparade inställningar) och de LAGRADE finalisternas
+        /// starter. SKRIVSKYDDAT: anropar aldrig FreezeClassResultsAsync/UnfreezeClassAsync, Generate*-endpoints eller
+        /// startlistelagrets Update — ögonblicksbilden byggs bara i minnet. Skrivbeviset (CompetitionStartList m.fl.) bevisar det.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("VerifyGuard: 404 utom i Development med HPSK_VERIFY_ENDPOINTS, tillåten databas och hash-nyckel; finns bara i DEBUG-bygget")]
+        public async Task<IActionResult> VerifyFinals(string? confirm, string? ids, bool full = false)
+        {
+            var refuse = VerifyGuard(confirm);
+            if (refuse != null) return refuse;
+
+            var cfg = HttpContext.RequestServices.GetRequiredService<IConfiguration>();
+            var hmacKey = cfg["Verify:HashKey"];
+            if (string.IsNullOrWhiteSpace(hmacKey)) return NotFound();
+
+            var idList = (ids ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var v) ? v : 0).Where(v => v > 0).Distinct().OrderBy(v => v).ToList();
+            if (idList.Count == 0) return Json(new { error = "Ange ?ids=1,2,3 (tävlings-id)." });
+
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(hmacKey));
+            var sp = HttpContext.RequestServices;
+            var qualifying = sp.GetRequiredService<HpskSite.CompetitionTypes.Precision.Services.PrecisionQualifyingResultsService>();
+            var qualification = sp.GetRequiredService<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsQualificationService>();
+            var startListBuilder = sp.GetRequiredService<HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder>();
+
+            var before = ReadWriteProof();
+            var perCompetition = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var id in idList)
+            {
+                var comp = _competitions.GetSaved(id);
+                object? payload;
+                string kind;
+                try
+                {
+                    if (comp == null) { kind = "saknas"; payload = null; }
+                    else if (CompetitionFinals.Effective(comp.TypeId, comp.NumberOfFinalSeries) <= 0) { kind = "ingen-final"; payload = null; }
+                    else
+                    {
+                        kind = "final";
+                        var rankings = await qualifying.GetAvailableClassRankingsAsync(id);
+
+                        // Ögonblicksbild i MINNET av "alla grupper låsta" — samma form som FreezeClassResultsAsync skriver, men aldrig sparad.
+                        var snapshot = new HpskSite.CompetitionTypes.Precision.Models.QualifyingResultsSnapshot { CompetitionId = id };
+                        foreach (var r in rankings)
+                            snapshot.ClassSnapshots[r.ChampionshipClass] = new HpskSite.CompetitionTypes.Precision.Models.ClassResultsSnapshot
+                            {
+                                ChampionshipClass = r.ChampionshipClass,
+                                QualifiedShooters = r.QualifiedShooters
+                            };
+                        var noConfig = new Dictionary<string, HpskSite.CompetitionTypes.Precision.Models.FinalsClassConfig>();
+                        var preview = startListBuilder.PreviewBuckets(snapshot, noConfig);
+                        var built = startListBuilder.Build(snapshot, noConfig, new HpskSite.CompetitionTypes.Precision.Models.FinalsStartListSettings());
+
+                        // Kortets "X av N går vidare" per grupp (samma två anrop som PrecisionStartListController.BuildQualifyingSnapshotResponse).
+                        var card = rankings.Select(r =>
+                        {
+                            var cutoff = qualification.CalculateQualificationCutoff(r.QualifiedShooters.Count);
+                            return new
+                            {
+                                Group = r.ChampionshipClass,
+                                Total = r.QualifiedShooters.Count,
+                                Cutoff = cutoff,
+                                Finalists = HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder.FinalistsWithTies(
+                                    r.QualifiedShooters.Select(s => s.QualificationScore).ToList(), cutoff)
+                            };
+                        }).ToList();
+
+                        // De LAGRADE finalisternas starter (det medaljlogiken läser) — nycklarna är "medlem|klass", så de görs om till objekt
+                        // med MemberId (som Canonicalise hashar) i stället för en rå sträng med ett id i.
+                        var stored = _precisionResults.GetFinalistStarts(id)
+                            .Select(k => k.Split('|', 2))
+                            .Select(p => new { MemberId = int.TryParse(p[0], out var m) ? m : 0, Class = p.Length > 1 ? p[1] : "" })
+                            .OrderBy(x => x.Class, StringComparer.Ordinal).ThenBy(x => x.MemberId)
+                            .ToList();
+
+                        payload = new
+                        {
+                            Rankings = rankings,
+                            Preview = preview,
+                            Card = card,
+                            BuildMessage = built.Message,
+                            BuiltTeams = built.Ok && built.Configuration?.Teams != null
+                                ? built.Configuration.Teams.Select(t => new
+                                {
+                                    t.Label,
+                                    Shooters = (t.Shooters ?? new()).Select(s => new { s.Position, s.MemberId, s.WeaponClass, s.QualificationRank, s.QualificationScore }).ToList()
+                                }).ToList()
+                                : null,
+                            StoredFinalists = stored
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    kind = "fel";
+                    payload = new { exception = ex.GetType().Name };
+                }
+
+                var token = payload == null ? JValue.CreateNull() : JToken.FromObject(payload, JsonSerializer.CreateDefault());
+                var canonical = Canonicalise(token, hmac);
+                var json = canonical.ToString(Formatting.None);
+                perCompetition[id.ToString()] = new
+                {
+                    kind,
+                    hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))),
+                    json = full ? canonical : null
+                };
+            }
+
+            var after = ReadWriteProof();
+            return Content(JsonConvert.SerializeObject(new
+            {
+                header = new
+                {
+                    commit = cfg["Verify:Commit"] ?? Environment.GetEnvironmentVariable("HPSK_COMMIT"),
+                    database = before.Count > 0 ? ReadDbName() : null,
+                    mode = "finals",
+                    competitions = idList.Count,
+                    writeProofBefore = before,
+                    writeProofAfter = after,
+                    WROTE_SOMETHING = !before.SequenceEqual(after)
                 },
                 competitions = perCompetition
             }, Formatting.Indented), "application/json");

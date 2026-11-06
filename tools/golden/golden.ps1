@@ -15,6 +15,7 @@
 #>
 param(
   [ValidateSet('Capture','Compare')] [string]$Mode = 'Compare',
+  [ValidateSet('Results','Finals')] [string]$Target = 'Results',
   [string]$Ref,
   [string]$Out,
   [string]$Base = 'https://localhost:44380',
@@ -32,7 +33,10 @@ function Get-Ids {
 
 function Invoke-Golden([string]$file) {
   $ids = Get-Ids
-  $url = "$Base/umbraco/surface/competitionresults/verifyrecompute?confirm=golden-master&full=true&ids=$ids"
+  # -Target Finals = the finals path (qualifying ranking, finalist cut, generated finals start list, stored finalists);
+  # -Target Results (default) = CalculateFinalResults. Take and compare references of the SAME target.
+  $endpoint = if ($Target -eq 'Finals') { 'verifyfinals' } else { 'verifyrecompute' }
+  $url = "$Base/umbraco/surface/competitionresults/$endpoint`?confirm=golden-master&full=true&ids=$ids"
   $code = curl.exe -sk -m 580 -o $file -w "%{http_code}" $url
   if ($code -ne '200') { Write-Error "endpoint answered HTTP $code (404 = guard refused, see the log for 'VerifyRecompute avvisad')"; exit 2 }
 }
