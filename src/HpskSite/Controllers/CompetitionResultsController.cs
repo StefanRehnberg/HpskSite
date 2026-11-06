@@ -67,6 +67,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.MemberTokenService _tokens;
         private readonly PrecisionResultsBuilder _precisionResults;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -94,11 +95,13 @@ namespace HpskSite.Controllers
             HpskSite.Services.StartLists.IStartListStore startLists,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.MemberTokenService tokens,
-            PrecisionResultsBuilder precisionResults)
+            PrecisionResultsBuilder precisionResults,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _tokens = tokens;
             _precisionResults = precisionResults;
+            _outOfCompetition = outOfCompetition;
             _registrations = registrations;
             _results = results;
             _startLists = startLists;
@@ -2902,6 +2905,7 @@ namespace HpskSite.Controllers
                 // store a snapshot — sub results are always live-recomputed in GetResultsList.
                 if (newIsOfficial && !request.IsSubCompetition)
                 {
+                    FreezeOutOfCompetitionDecisions(competition, "publicering");
                     var dbResults = await GetCompetitionResultsInternal(request.CompetitionId);
                     if (dbResults.Any())
                     {
@@ -3160,6 +3164,23 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// FRYSNING av vilka som står utanför mästerskapet (Stefan 2026-11-06, samma regel som fältets <c>FaltskytteResultArtifactService</c>): en
+        /// OFFICIELL lista har beslut för varje klassrad, så att en omräkning aldrig tyst ändrar vem som tävlar om mästerskapet — inte heller för
+        /// en sen anmälan, vars förslag stämplas här. Anropas av varje skrivväg för en officiell precisionslista, FÖRE räkningen. Gör ingenting
+        /// när beteendet inte gäller tävlingen (<see cref="ChampionshipRule.OutOfCompetitionApplies"/>), så precisionsfamiljen påverkas inte
+        /// förrän den släpps in.
+        /// </summary>
+        private void FreezeOutOfCompetitionDecisions(HpskSite.Models.Competitions.CompetitionInfo competition, string reason)
+        {
+            var rule = ChampionshipRule.For(competition);
+            if (!rule.OutOfCompetitionApplies) return;
+            var (frozenOut, frozenIn) = _outOfCompetition.FreezeDecisions(competition, rule);
+            if (frozenOut > 0 || frozenIn > 0)
+                _logger.LogWarning("Officiell lista, tävling {CompetitionId} ({Reason}): {Out} förslag 'utanför' och {In} 'tävlar' stämplades som beslut",
+                    competition.Id, reason, frozenOut, frozenIn);
+        }
+
+        /// <summary>
         /// Den sparade resultatlistans ålder mot resultaten. Inaktuell = ingen sparad lista, eller en
         /// resultatrad ändrad efter att listan sparades (<c>lastUpdated</c> sätts av varje skrivväg för
         /// resultData). Särskjutning, klassbyte och borttagning räknar redan om listan själva, så
@@ -3176,7 +3197,18 @@ namespace HpskSite.Controllers
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var newest = db.ExecuteScalar<DateTime?>(
                     $"SELECT MAX(LastModified) FROM [{table}] WHERE CompetitionId = @0", competitionId);
-                return (newest.HasValue && newest.Value > saved, saved);
+                if (newest.HasValue && newest.Value > saved) return (true, saved);
+
+                // Utanför mästerskapet: en ändrad gästflagga ändrar listan lika mycket som en ändrad resultatrad (placeringar, medaljer,
+                // finalister) men skriver inget i resultattabellen — beslutsloggen är det som vet. Bara när beteendet gäller tävlingen.
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition != null && ChampionshipRule.For(competition).OutOfCompetitionApplies)
+                {
+                    var lastDecision = db.ExecuteScalar<DateTime?>(
+                        "SELECT MAX(SetAt) FROM dbo.ChampionshipDecisionLog WHERE CompetitionId = @0", competitionId);
+                    if (lastDecision.HasValue && lastDecision.Value > saved) return (true, saved);
+                }
+                return (false, saved);
             }
             catch (Exception ex)
             {
@@ -3221,6 +3253,8 @@ namespace HpskSite.Controllers
 
                 var resultPage = _results.Get(competition.Id);
                 if (resultPage == null) return false;
+
+                if (resultPage.IsOfficial) FreezeOutOfCompetitionDecisions(competition, reason);
 
                 // ⚠️ Den sparade sammanslagningen MÅSTE med. Utan den räknas artefakten om
                 // utan arrangörens klassammanslagning — samma tysta förlust som

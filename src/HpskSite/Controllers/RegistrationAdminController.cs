@@ -50,6 +50,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader _outOfCompetitionLock;
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -77,9 +78,11 @@ namespace HpskSite.Controllers
             BrokenLaneService brokenLanes,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader outOfCompetitionLock)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _outOfCompetitionLock = outOfCompetitionLock;
             _competitions = competitions;
             _brokenLanes = brokenLanes;
             _registrations = registrations;
@@ -1318,8 +1321,15 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Den här tävlingen använder inte \"Utanför mästerskapet\"." });
                 if (!rule.AppliesToClass(request.ClassKey))
                     return Json(new { success = false, message = "Mästerskapet gäller inte den här vapengruppen, så det finns ingen mästerskapsplacering att stå utanför." });
-                if (competition.FaltskytteResultsOfficial)
-                    return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via Resultat-fliken (Rätta listan, \"Flytta utanför mästerskapet\")." });
+                switch (_outOfCompetitionLock.Reason(competition))
+                {
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished:
+                        return Json(new { success = false, message = "Resultatlistan är publicerad och ändras bara via Resultat-fliken (Rätta listan, \"Flytta utanför mästerskapet\")." });
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.FinalsBuilt:
+                        return Json(new { success = false, message = "Finalstartlistan är redan byggd. En skytt utanför mästerskapet får inte stå i finalen, så vilka som är utanför kan inte ändras nu. Bygg om finalstartlistan först." });
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.QualifyingFrozen:
+                        return Json(new { success = false, message = "En kvalgrupp är låst inför finalen. Lås upp gruppen först, så att finalisterna räknas om efter ändringen." });
+                }
 
                 if (request.Value == true)
                 {
@@ -1379,8 +1389,15 @@ namespace HpskSite.Controllers
                 var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
                 if (!rule.OutOfCompetitionApplies)
                     return Json(new { success = false, message = "Inställningarna gäller bara mästerskap i fält och MagnumFält." });
-                if (competition.FaltskytteResultsOfficial)
-                    return Json(new { success = false, message = "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"." });
+                switch (_outOfCompetitionLock.Reason(competition))
+                {
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished:
+                        return Json(new { success = false, message = "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"." });
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.FinalsBuilt:
+                        return Json(new { success = false, message = "Finalstartlistan är redan byggd. Vilka som deltar och vilka vapengrupper som avgör mästerskapet kan inte ändras nu. Bygg om finalstartlistan först." });
+                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.QualifyingFrozen:
+                        return Json(new { success = false, message = "En kvalgrupp är låst inför finalen. Lås upp gruppen först, så att finalisterna räknas om efter ändringen." });
+                }
 
                 // Vilka deltar: bara de former tävlingens nivå har förslag för (SM har aldrig förslag, grannkretsar bara för kretsmästerskap).
                 var asked = (request.Participants ?? "").Trim().ToLowerInvariant();

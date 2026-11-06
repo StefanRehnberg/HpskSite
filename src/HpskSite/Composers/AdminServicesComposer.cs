@@ -371,6 +371,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.IClubRegionLookup, HpskSite.CompetitionTypes.Common.ClubRegionResolver>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.IMemberClubsLookup, HpskSite.CompetitionTypes.Common.MemberClubsLookup>();
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags>();
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader>();
             builder.Services.AddScoped<FaltskytteResultsBuilder>();
             builder.Services.AddScoped<FaltskytteResultArtifactService>();
             builder.Services.AddScoped<FaltskytteMedalLedger>();
