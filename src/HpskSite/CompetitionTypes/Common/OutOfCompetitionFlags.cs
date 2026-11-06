@@ -25,6 +25,14 @@ namespace HpskSite.CompetitionTypes.Common
             return new OutOfCompetitionSet(copy);
         }
 
+        /// <summary>En ny mängd med skytten i klassen borttagen (flyttas TILLBAKA IN). Förhandsvisningens motsvarighet till <see cref="With"/>.</summary>
+        public OutOfCompetitionSet Without(int memberId, string? shootingClassIdOrName)
+        {
+            var copy = new HashSet<(int, string)>(_set);
+            copy.Remove((memberId, ShootingClasses.NormalizeKey(shootingClassIdOrName)));
+            return new OutOfCompetitionSet(copy);
+        }
+
         /// <summary>Är skytten utanför mästerskapet i NÅGON klass? Lagbildningen frågar så — ett lag är klubbens, inte klassens.</summary>
         public bool HasMember(int memberId) => _set.Any(k => k.MemberId == memberId);
 

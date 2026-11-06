@@ -17,7 +17,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
     public static class OutsideConsequenceCalculator
     {
-        public static OutsideConsequences Compute(PrecisionFinalResults before, PrecisionFinalResults after, int movedMemberId, string movedClass)
+        /// <param name="movedOutside">Sant (förval): skytten flyttas UT ur mästerskapet. Falsk: skytten flyttas TILLBAKA IN.</param>
+        public static OutsideConsequences Compute(PrecisionFinalResults before, PrecisionFinalResults after, int movedMemberId, string movedClass, bool movedOutside = true)
         {
             var movedKey = ShootingClasses.NormalizeKey(movedClass);
             var placementLines = new List<(int sort, string text)>();
@@ -38,10 +39,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                     placementChanges++;
                     var isMoved = s.MemberId == movedMemberId && ShootingClasses.NormalizeKey(s.ShootingClass) == movedKey;
-                    if (isMoved)
+                    if (isMoved && movedOutside)
                     {
                         moved.Add(s.Placement is int was
                             ? $"{s.Name} får ingen placering i {label} (har plats {was} nu)."
+                            : $"{s.Name} får ingen placering i {label}.");
+                    }
+                    else if (isMoved)
+                    {
+                        // Tillbaka in: skytten får en plats i klassen igen, och de som står efter hen flyttas ned.
+                        moved.Add(a.Placement is int now
+                            ? (s.Placement is int was2
+                                ? $"{s.Name} får plats {now} i {label} (har plats {was2} nu)."
+                                : $"{s.Name} får plats {now} i {label} (har ingen placering nu).")
                             : $"{s.Name} får ingen placering i {label}.");
                     }
                     else if (s.Placement is int from && a.Placement is int to)
@@ -110,6 +120,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public IReadOnlyList<string> Lines { get; init; } = Array.Empty<string>();
         public int PlacementChanges { get; init; }
         public int MedalChanges { get; init; }
+
+        /// <summary>
+        /// Fingeravtryck av exakt dessa konsekvenser. Rättningen skickar tillbaka det, och servern räknar om konsekvenserna när den
+        /// tillämpar: skiljer de sig (någon har sedan dess matat in ett resultat, räknat om listan eller rättat en annan skytt) nekas
+        /// rättningen. Arrangören rättar alltså aldrig något annat än det hen läste.
+        /// </summary>
+        public string Token { get; init; } = "";
     }
 
     public sealed class OutsideCorrectionResult
@@ -144,6 +161,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly CompetitionChangeRecorder _changes;
         private readonly ILogger<FaltskytteOutsideCorrectionService> _logger;
         private readonly Umbraco.Cms.Infrastructure.Scoping.IScopeProvider _scopeProvider;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public FaltskytteOutsideCorrectionService(
             Umbraco.Cms.Infrastructure.Scoping.IScopeProvider scopeProvider,
@@ -154,8 +172,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             CompetitionTeamService teams,
             FaltskytteResultArtifactService artifacts,
             CompetitionChangeRecorder changes,
-            ILogger<FaltskytteOutsideCorrectionService> logger)
+            ILogger<FaltskytteOutsideCorrectionService> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _scopeProvider = scopeProvider;
             _builder = builder;
             _competitions = competitions;
@@ -171,8 +191,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             HpskSite.Models.Competitions.CompetitionInfo Competition, ChampionshipRule Rule,
             HpskSite.Models.Registrations.RegistrationRecord Registration, string ClassRaw);
 
-        /// <summary>Prövar att flytten går. Returnerar felet, annars null och målet.</summary>
-        private async Task<(string? Error, Target? Target)> CheckAsync(int competitionId, int registrationId, string classKey)
+        /// <summary>
+        /// Prövar att flytten går. <paramref name="outside"/> sant = flytta UT ur mästerskapet, falskt = flytta TILLBAKA IN.
+        /// Returnerar felet, annars null och målet.
+        /// </summary>
+        private async Task<(string? Error, Target? Target)> CheckAsync(int competitionId, int registrationId, string classKey, bool outside)
         {
             var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
             if (competition == null) return ("Tävlingen hittades inte.", null);
@@ -195,15 +218,80 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             var current = _flags.States(competition, rule)
                 .FirstOrDefault(s => s.RegistrationId == registration.Id && s.ClassKey == key);
-            if (current?.Effective == true)
-                return ($"{registration.MemberName} skjuter redan utanför mästerskapet i den här klassen.", null);
+            if (outside)
+            {
+                if (current?.Effective == true)
+                    return ($"{registration.MemberName} skjuter redan utanför mästerskapet i den här klassen.", null);
 
-            var team = (await _teams.GetTeamsForCompetitionAsync(competitionId))
-                .FirstOrDefault(t => t.Members.Any(m => m.MemberId == registration.MemberId));
-            if (team != null)
-                return ($"{registration.MemberName} ingår i laget {team.Team.TeamName}. Ta ur laget först — en skytt utanför mästerskapet får inte ingå i ett lag.", null);
+                var team = (await _teams.GetTeamsForCompetitionAsync(competitionId))
+                    .FirstOrDefault(t => t.Members.Any(m => m.MemberId == registration.MemberId));
+                if (team != null)
+                    return ($"{registration.MemberName} ingår i laget {team.Team.TeamName}. Ta ur laget först — en skytt utanför mästerskapet får inte ingå i ett lag.", null);
+            }
+            else if (current?.Effective != true)
+            {
+                return ($"{registration.MemberName} skjuter redan i mästerskapet i den här klassen.", null);
+            }
 
             return (null, new Target(competition, rule, registration, cls.Class));
+        }
+
+        /// <summary>
+        /// Konsekvenserna av flytten: den PUBLICERADE listan (artefakten som skrevs vid publicering/omräkning, annars ett nytt bygge) jämförd
+        /// med listan som den blir. Allt som skiljer visas, även sådant som inte hör till flytten (ett resultat som matats in sedan publiceringen):
+        /// rättningen räknar om hela listan, och arrangören ska se vad hen faktiskt ändrar.
+        /// </summary>
+        private async Task<(OutsideCorrectionPreview? Preview, string? Error, Target? Target)> ConsequencesAsync(
+            int competitionId, int registrationId, string classKey, bool outside)
+        {
+            var (error, t) = await CheckAsync(competitionId, registrationId, classKey, outside);
+            if (error != null || t == null) return (null, error, null);
+
+            // Utgångspunkten är den PUBLICERADE artefakten (resultData: klassgrupperna med platser och medaljställningarna), som skrivs
+            // samtidigt med den frusna bilden — inte den frusna bilden själv, som saknar medaljställningarna. Saknas den räknas listan nytt.
+            PrecisionFinalResults? beforeArtifact = null;
+            var published = _results.Get(competitionId)?.ResultData;
+            if (!string.IsNullOrWhiteSpace(published))
+            {
+                try { beforeArtifact = Newtonsoft.Json.JsonConvert.DeserializeObject<PrecisionFinalResults>(published); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Kunde inte läsa den publicerade artefakten för tävling {CompetitionId}", competitionId); }
+            }
+            if (beforeArtifact == null)
+            {
+                var before = await _builder.BuildAsync(competitionId);
+                if (before.Results == null)
+                    return (null, before.Error ?? "Listan kunde inte räknas.", null);
+                beforeArtifact = FaltskytteResultArtifactService.BuildArtifact(t.Competition, before);
+            }
+
+            var live = _flags.Load(t.Competition, t.Rule);
+            var set = outside ? live.With(t.Registration.MemberId, t.ClassRaw) : live.Without(t.Registration.MemberId, t.ClassRaw);
+            var after = await _builder.BuildAsync(competitionId, null, false, set);
+            if (after.Results == null)
+                return (null, after.Error ?? "Listan kunde inte räknas.", null);
+
+            var c = OutsideConsequenceCalculator.Compute(
+                beforeArtifact,
+                FaltskytteResultArtifactService.BuildArtifact(t.Competition, after),
+                t.Registration.MemberId, t.ClassRaw, outside);
+
+            return (new OutsideCorrectionPreview
+            {
+                Ok = true,
+                MemberName = t.Registration.MemberName,
+                ClassName = ShootingClasses.GetById(t.ClassRaw)?.Name ?? t.ClassRaw,
+                Lines = c.Lines,
+                PlacementChanges = c.PlacementChanges,
+                MedalChanges = c.MedalChanges,
+                Token = ConsequenceToken(outside, c)
+            }, null, t);
+        }
+
+        /// <summary>Fingeravtryck av riktning och exakta konsekvenser (rader och antal). Samma konsekvenser ger samma värde.</summary>
+        public static string ConsequenceToken(bool outside, OutsideConsequences c)
+        {
+            var text = (outside ? "ut" : "in") + "|" + c.PlacementChanges + "|" + c.MedalChanges + "|" + string.Join("\n", c.Lines);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))[..16];
         }
 
         /// <summary>
@@ -227,38 +315,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             }
         }
 
-        public async Task<OutsideCorrectionPreview> PreviewAsync(int competitionId, int registrationId, string classKey)
+        /// <param name="outside">Sant: flytta skytten UT ur mästerskapet. Falskt: flytta skytten TILLBAKA IN.</param>
+        public async Task<OutsideCorrectionPreview> PreviewAsync(int competitionId, int registrationId, string classKey, bool outside = true)
         {
-            var (error, t) = await CheckAsync(competitionId, registrationId, classKey);
-            if (error != null || t == null) return new OutsideCorrectionPreview { Ok = false, Message = error };
-
-            var before = await _builder.BuildAsync(competitionId);
-            if (before.Results == null)
-                return new OutsideCorrectionPreview { Ok = false, Message = before.Error ?? "Listan kunde inte räknas." };
-
-            var set = _flags.Load(t.Competition, t.Rule).With(t.Registration.MemberId, t.ClassRaw);
-            var after = await _builder.BuildAsync(competitionId, null, false, set);
-            if (after.Results == null)
-                return new OutsideCorrectionPreview { Ok = false, Message = after.Error ?? "Listan kunde inte räknas." };
-
-            var c = OutsideConsequenceCalculator.Compute(
-                FaltskytteResultArtifactService.BuildArtifact(t.Competition, before),
-                FaltskytteResultArtifactService.BuildArtifact(t.Competition, after),
-                t.Registration.MemberId, t.ClassRaw);
-
-            return new OutsideCorrectionPreview
-            {
-                Ok = true,
-                MemberName = t.Registration.MemberName,
-                ClassName = ShootingClasses.GetById(t.ClassRaw)?.Name ?? t.ClassRaw,
-                Lines = c.Lines,
-                PlacementChanges = c.PlacementChanges,
-                MedalChanges = c.MedalChanges
-            };
+            var (preview, error, _) = await ConsequencesAsync(competitionId, registrationId, classKey, outside);
+            return preview ?? new OutsideCorrectionPreview { Ok = false, Message = error };
         }
 
+        /// <param name="expectedToken">Fingeravtrycket från förhandsvisningen arrangören läste (<see cref="OutsideCorrectionPreview.Token"/>).</param>
+        /// <param name="outside">Sant: flytta skytten UT ur mästerskapet. Falskt: flytta skytten TILLBAKA IN.</param>
         public async Task<OutsideCorrectionResult> ApplyAsync(
-            int competitionId, int registrationId, string classKey, string? reason, bool confirmed, int? decidedByMemberId)
+            int competitionId, int registrationId, string classKey, string? reason, bool confirmed, int? decidedByMemberId,
+            string? expectedToken = null, bool outside = true)
         {
             var why = (reason ?? "").Trim();
             if (why.Length < MinReasonLength)
@@ -268,10 +336,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             if (!confirmed)
                 return new OutsideCorrectionResult { Ok = false, Message = "Bekräfta att du har kontrollerat att inga medaljer beställts eller delats ut, eller att du kontaktat kretsen." };
 
-            var (error, t) = await CheckAsync(competitionId, registrationId, classKey);
-            if (error != null || t == null) return new OutsideCorrectionResult { Ok = false, Message = error };
+            // Konsekvenserna räknas om NU och måste vara exakt de arrangören läste: har någon sedan dess matat in ett resultat, räknat om
+            // listan eller rättat en annan skytt, nekas rättningen i stället för att tyst ändra något hen inte såg.
+            var (current, error, t) = await ConsequencesAsync(competitionId, registrationId, classKey, outside);
+            if (current == null || t == null) return new OutsideCorrectionResult { Ok = false, Message = error };
+            if (string.IsNullOrEmpty(expectedToken) || !string.Equals(expectedToken, current.Token, StringComparison.Ordinal))
+                return new OutsideCorrectionResult
+                {
+                    Ok = false,
+                    Message = "Listan har ändrats sedan du tittade på konsekvenserna. Visa konsekvenserna igen och kontrollera dem innan du fortsätter."
+                };
 
-            var outcome = _registrations.SetOutOfCompetition(competitionId, t.Registration.Id, t.ClassRaw, true, decidedByMemberId, "correction");
+            var outcome = _registrations.SetOutOfCompetition(competitionId, t.Registration.Id, t.ClassRaw, outside, decidedByMemberId, "correction");
             if (outcome == OutOfCompetitionOutcome.RegistrationNotFound || outcome == OutOfCompetitionOutcome.ClassNotFound)
                 return new OutsideCorrectionResult { Ok = false, Message = "Anmälan eller klassen hittades inte." };
 
@@ -281,12 +357,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 ["shooter"] = (null, t.Registration.MemberName),
                 ["class"] = (null, t.ClassRaw),
+                ["to"] = (null, outside ? "utanför" : "i mästerskapet"),
                 ["reason"] = (null, why)
             });
-            _logger.LogWarning("Publicerad fältlista RÄTTAD: {Member} flyttad utanför mästerskapet i {Class}, tävling {CompetitionId}. Anledning: {Reason}",
-                t.Registration.MemberName, t.ClassRaw, competitionId, why);
+            _logger.LogWarning("Publicerad fältlista RÄTTAD: {Member} flyttad {Direction} i {Class}, tävling {CompetitionId}. Anledning: {Reason}",
+                t.Registration.MemberName, outside ? "utanför mästerskapet" : "tillbaka in i mästerskapet", t.ClassRaw, competitionId, why);
 
-            var refreshed = await _artifacts.RefreshAsync(competitionId, "flyttad utanför mästerskapet (rättning)");
+            var refreshed = await _artifacts.RefreshAsync(competitionId, outside ? "flyttad utanför mästerskapet (rättning)" : "flyttad tillbaka in i mästerskapet (rättning)");
             return new OutsideCorrectionResult { Ok = true, ListRefreshed = refreshed };
         }
     }

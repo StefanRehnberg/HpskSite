@@ -123,5 +123,21 @@ namespace HpskSite.Tests
             store.Verify(s => s.StampOutOfCompetition(42, 70, "C2", It.IsAny<string>()), Times.Once);   // 7 var utanför live → fryses utanför
             store.Verify(s => s.StampInCompetition(42, 90, "C2", It.IsAny<string>()), Times.Once);       // 9 tävlade live → fryses som tävlar
         }
+
+        [Fact]
+        public void Without_removes_one_shooter_in_one_class_and_leaves_the_original_set_untouched()
+        {
+            // Rätta listan, "flytta tillbaka in": förhandsvisningen räknar listan med skytten borttagen ur mängden.
+            var c = Comp();
+            var (flags, _) = Setup(RegFor(10, 3, ("C2", true), ("C1", true)));
+            var set = flags.Load(c, ChampionshipRule.For(c));
+
+            var less = set.Without(10, "C2");
+
+            Assert.False(less.Contains(10, "C2"));
+            Assert.True(less.Contains(10, "C1"));       // bara den klassen
+            Assert.True(set.Contains(10, "C2"));        // originalmängden rörs aldrig
+            Assert.True(less.With(10, "C2").Contains(10, "C2"));
+        }
     }
 }

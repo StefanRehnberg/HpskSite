@@ -97,5 +97,54 @@ namespace HpskSite.Tests
             var c = OutsideConsequenceCalculator.Compute(before, after, 2, "C2");
             Assert.Empty(c.Lines);
         }
+
+        [Fact]
+        public void Moving_a_shooter_back_in_gives_the_place_back_and_moves_those_behind_down()
+        {
+            // Eva (id 5) stod utanför (ingen placering); tillbaka in får hon plats 5 och Fia flyttas ned till 6.
+            var before = List(S(1, "Ann", 1), S(2, "Bo", 2), S(3, "Cia", 3), S(4, "Dan", 4), S(5, "Eva", null), S(6, "Fia", 5));
+            var after = List(S(1, "Ann", 1), S(2, "Bo", 2), S(3, "Cia", 3), S(4, "Dan", 4), S(5, "Eva", 5), S(6, "Fia", 6));
+
+            var c = OutsideConsequenceCalculator.Compute(before, after, 5, "C2", movedOutside: false);
+
+            Assert.Equal(new[]
+            {
+                "Eva får plats 5 i C2 (har ingen placering nu).",
+                "Fia går från plats 5 till plats 6 i C2."
+            }, c.Lines);
+            Assert.Equal(2, c.PlacementChanges);
+        }
+
+        [Fact]
+        public void Moving_back_in_can_take_a_medal_from_someone_else()
+        {
+            // Bo (silver) står utanför; tillbaka in tar han silvret, och Cia (silver nu) går ned till brons.
+            var before = List(S(1, "Ann", 1), S(2, "Bo", null), S(3, "Cia", 2), S(4, "Dan", 3));
+            before.MedalAwards.Add(Cat(5, ("Guld", 1, "Ann"), ("Silver", 3, "Cia"), ("Brons", 4, "Dan")));
+            var after = List(S(1, "Ann", 1), S(2, "Bo", 2), S(3, "Cia", 3), S(4, "Dan", 4));
+            after.MedalAwards.Add(Cat(6, ("Guld", 1, "Ann"), ("Silver", 2, "Bo"), ("Brons", 3, "Cia")));
+
+            var c = OutsideConsequenceCalculator.Compute(before, after, 2, "C2", movedOutside: false);
+
+            Assert.Contains("Bo får mästerskapssilver i C (har ingen medalj nu).", c.Lines);
+            Assert.Contains("Cia går från mästerskapssilver till mästerskapsbrons i C.", c.Lines);
+            Assert.Contains("Dan förlorar mästerskapsbrons i C.", c.Lines);
+            Assert.Equal(3, c.MedalChanges);
+        }
+
+        [Fact]
+        public void The_token_identifies_exactly_the_consequences_that_were_read()
+        {
+            var lines = new[] { "Eva får ingen placering i C2 (har plats 5 nu).", "Fia går från plats 6 till plats 5 i C2." };
+            var same = FaltskytteOutsideCorrectionService.ConsequenceToken(true, new OutsideConsequences(lines, 2, 0));
+
+            Assert.Equal(same, FaltskytteOutsideCorrectionService.ConsequenceToken(true, new OutsideConsequences(lines.ToArray(), 2, 0)));
+            // Ett resultat som matats in sedan förhandsvisningen ger andra rader → ett annat fingeravtryck → rättningen nekas.
+            Assert.NotEqual(same, FaltskytteOutsideCorrectionService.ConsequenceToken(true,
+                new OutsideConsequences(new[] { lines[0], "Fia går från plats 6 till plats 4 i C2." }, 2, 0)));
+            Assert.NotEqual(same, FaltskytteOutsideCorrectionService.ConsequenceToken(true, new OutsideConsequences(lines, 2, 1)));
+            // Samma rader men åt andra hållet (ut/in) är en annan åtgärd.
+            Assert.NotEqual(same, FaltskytteOutsideCorrectionService.ConsequenceToken(false, new OutsideConsequences(lines, 2, 0)));
+        }
     }
 }

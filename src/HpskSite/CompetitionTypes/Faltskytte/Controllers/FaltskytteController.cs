@@ -1418,6 +1418,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             public string ClassKey { get; set; } = "";
             public string? Reason { get; set; }
             public bool Confirmed { get; set; }
+
+            /// <summary>Fingeravtrycket från förhandsvisningen arrangören läste. Krävs vid ändringen.</summary>
+            public string? Token { get; set; }
+
+            /// <summary>Sant (förval): flytta UT ur mästerskapet. Falskt: flytta TILLBAKA IN.</summary>
+            public bool Outside { get; set; } = true;
         }
 
         [HttpPost]
@@ -1432,10 +1438,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await _adminAuthorizationService.HasCompetitionOrganiserAccessAsync(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var p = await _outsideCorrection.PreviewAsync(request.CompetitionId, request.RegistrationId, request.ClassKey);
+                var p = await _outsideCorrection.PreviewAsync(request.CompetitionId, request.RegistrationId, request.ClassKey, request.Outside);
                 return p.Ok
                     ? Json(new { success = true, memberName = p.MemberName, className = p.ClassName, lines = p.Lines,
-                                 placementChanges = p.PlacementChanges, medalChanges = p.MedalChanges })
+                                 placementChanges = p.PlacementChanges, medalChanges = p.MedalChanges, token = p.Token })
                     : Json(new { success = false, message = p.Message });
             }
             catch (Exception ex)
@@ -1459,7 +1465,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 var memberId = await GetCurrentMemberIdAsync();
                 var r = await _outsideCorrection.ApplyAsync(request.CompetitionId, request.RegistrationId, request.ClassKey,
-                    request.Reason, request.Confirmed, memberId > 0 ? memberId : null);
+                    request.Reason, request.Confirmed, memberId > 0 ? memberId : null, request.Token, request.Outside);
                 return r.Ok
                     ? Json(new { success = true, listRefreshed = r.ListRefreshed })
                     : Json(new { success = false, message = r.Message });
