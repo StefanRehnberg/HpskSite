@@ -19,6 +19,10 @@ namespace HpskSite.Services.Hosting
             new("dbo.LedgerPayment", "SELECT MAX(SourceItemId) FROM dbo.LedgerPayment WHERE SourceType = 'competition-registration'"),
             new("sbx.LedgerPayment", "SELECT MAX(SourceItemId) FROM sbx.LedgerPayment WHERE SourceType = 'competition-registration'"),
             new("dbo.CompetitionFeeChoice", "SELECT MAX(RegistrationId) FROM dbo.CompetitionFeeChoice"),
+            // Utanför mästerskapet: beslutsloggen har INGEN främmande nyckel och överlever att en anmälan raderas — ett återanvänt
+            // anmälnings-id hade annars fått gamla lograder. Beslutstabellen följer anmälan (cascade) men listas för fullständighetens skull.
+            new("dbo.ChampionshipDecisionLog", "SELECT MAX(RegistrationId) FROM dbo.ChampionshipDecisionLog"),
+            new("dbo.CompetitionRegistrationClassDecision", "SELECT MAX(RegistrationId) FROM dbo.CompetitionRegistrationClassDecision"),
             IdentityFloor.NodesOfType("competitionRegistration"),
             IdentityFloor.NodesOfType("competitionTeamRegistration"),
             new("dbo.umbracoPropertyData", @"SELECT MAX(COALESCE(pd.intValue, TRY_CONVERT(int, LEFT(pd.varcharValue, 20))))
