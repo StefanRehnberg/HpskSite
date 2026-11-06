@@ -251,6 +251,14 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>Den som kom in via tävlingen och inte längre har tillgång till den: raden tas bort.</summary>
+        /// <summary>Alla en medlems "via tävlingen"-rader (sajtadmin som öppnat planeringar innan läsarvägen fanns).</summary>
+        public void DropCompetitionRowsForMember(int memberId)
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            s.Database.Execute("UPDATE PlanningMember SET RemovedAt = @1, RemovedBy = 0 WHERE MemberId = @0 AND ViaCompetition = 1 AND RemovedAt IS NULL",
+                memberId, Now);
+        }
+
         public void DropCompetitionParticipant(int planningId, int participantId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);

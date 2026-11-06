@@ -176,6 +176,13 @@ namespace HpskSite.Controllers
         private async Task<PlanningMemberRow?> ApplyCompetitionAccessAsync(int planningId, int memberId, PlanningMemberRow? participant)
         {
             if (participant is { IsActive: true } && !participant.ViaCompetition) return participant;
+            // Stefan 2026-11-06: sajtadmin blir ALDRIG deltagare genom tävlingen — hen öppnar som läsare (support) utan spår.
+            // En rad som skapades innan dess tas bort (mjukt, syns inte).
+            if (await _auth.IsCurrentUserAdminAsync())
+            {
+                if (participant is { IsActive: true }) _planning.DropCompetitionParticipant(planningId, participant.Id);
+                return null;
+            }
             var link = _planning.LinkFor(planningId);
             var hasAccess = link != null && await _auth.HasCompetitionOrganiserAccessAsync(link.TargetId);
             if (participant is { IsActive: true })
@@ -268,10 +275,13 @@ namespace HpskSite.Controllers
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
+            var isAdmin = await _auth.IsCurrentUserAdminAsync();
+            // Sajtadmin är aldrig med "via tävlingen": rader som skapades av en öppning förut tas bort så att de inte
+            // syns som egna planeringar.
+            if (isAdmin) _planning.DropCompetitionRowsForMember(me);
             var mine = _planning.ForMember(me);
             var mineIds = mine.Select(m => m.PlanningId).ToHashSet();
             var listed = _planning.Listed().Where(p => !mineIds.Contains(p.Id)).ToList();
-            var isAdmin = await _auth.IsCurrentUserAdminAsync();
             var support = new List<PlanningRow>();
             Dictionary<int, int> pendingAll = new();
             if (isAdmin)
