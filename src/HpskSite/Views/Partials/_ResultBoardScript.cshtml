@@ -302,7 +302,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 var res=sh.results||sh.Results||[];
                 var tot=0,tx=0,sr=[];
                 res.forEach(function(r){var shots=JSON.parse(r.shots||r.Shots||'[]');var s=0,x=0;shots.forEach(function(v){s+=(v==='X'||v==='x')?10:(parseInt(v)||0);if(v==='X'||v==='x')x++});sr.push({s:s,x:x});tot+=s;tx+=x});
-                all.push({nm:nm,cl:cl,sc:sc,sr:sr,tot:tot,tx:tx,medal:sh.standardMedal||sh.StandardMedal||''});
+                all.push({nm:nm,cl:cl,sc:sc,sr:sr,tot:tot,tx:tx,medal:sh.standardMedal||sh.StandardMedal||'',outside:(sh.outOfCompetition===true||sh.OutOfCompetition===true)});
             });
         });
         if(!all.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
@@ -319,11 +319,16 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         } else if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
         else{for(var i=1;i<=maxSeries;i++)h+='<th class="rb-series-col">'+i+'</th>'}
         h+='<th>Tot</th><th>X</th>';if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
+        var contenders=0;
         all.forEach(function(sh,pos0){
-            var pos=pos0+1,sr=sh.sr,qs=0;
+            // Den som skjuter utanför mästerskapet får ingen plats och ingen pallfärg, och räknas inte i placeringen (utan sådana skyttar är
+            // contenders exakt pos0+1 som förut). Samma regel som fältets tavla.
+            if(!sh.outside)contenders++;
+            var pos=sh.outside?'–':contenders,sr=sh.sr,qs=0;
             if(useFinals)qs=sr.slice(0,qualSeriesCount).reduce(function(a,v){return a+v.s},0);
-            var pc=pos<=3?' rb-pos-'+pos:'';
-            h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+sh.nm+'</td><td>'+sh.sc+'</td><td>'+sh.cl+'</td>';
+            var pc=(!sh.outside&&pos<=3)?' rb-pos-'+pos:'';
+            var nmCell=sh.outside?sh.nm+'<div style="font-size:.75rem;opacity:.65">Utanför mästerskapet</div>':sh.nm;
+            h+='<tr><td class="'+pc.trim()+'">'+pos+'</td><td>'+nmCell+'</td><td>'+sh.sc+'</td><td>'+sh.cl+'</td>';
             if(isGrouped12){
                 var grps=[[0,4],[4,8],[8,12]];
                 grps.forEach(function(g){var gt=0;for(var i=g[0];i<g[1];i++){var v=i<sr.length?sr[i].s:0;gt+=v;h+='<td class="rb-series-col">'+(i<sr.length?v:'-')+'</td>'}h+='<td class="rb-subtotal">'+gt+'</td>'});
