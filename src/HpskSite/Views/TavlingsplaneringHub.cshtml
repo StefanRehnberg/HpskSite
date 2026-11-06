@@ -163,13 +163,17 @@
     function filters() {
         const mine = data.plannings.filter(p => p.status !== 'Archived'), arch = data.plannings.filter(p => p.status === 'Archived');
         const f = [['mine', `Mina planeringar (${mine.length})`], ['listed', `Kan be om att vara med (${data.listed.length})`], ['archived', `Arkiverade (${arch.length})`]];
-        if (data.isSiteAdmin) f.push(['support', `Förfrågningar som väntar — support (${data.support.length})`]);
+        if (data.isSiteAdmin) {
+            f.push(['support', `Förfrågningar som väntar — support (${data.support.length})`]);
+            f.push(['all', `Alla andra planeringar — support (${(data.all || []).length})`]);
+        }
         return f;
     }
     function current() {
         const f = $('plhFilter').value;
         if (f === 'listed') return data.listed.map(p => Object.assign({ kind: 'listed' }, p));
         if (f === 'support') return data.support.map(p => Object.assign({ kind: 'support' }, p));
+        if (f === 'all') return (data.all || []).map(p => Object.assign({ kind: 'all' }, p));
         return data.plannings.filter(p => (p.status === 'Archived') === (f === 'archived')).map(p => Object.assign({ kind: 'mine' }, p));
     }
     function menu(items) {
@@ -204,6 +208,7 @@
                 f === 'listed' ? 'Ingen planering visas för alla medlemmar just nu.'
                 : f === 'archived' ? 'Inga arkiverade planeringar.'
                 : f === 'support' ? 'Inga förfrågningar väntar.'
+                : f === 'all' ? 'Det finns inga andra planeringar.'
                 : 'Du är inte med i någon planering ännu. Skapa en under <b>Åtgärder → Ny planering</b>, eller vänta på en inbjudan — den kommer med mejl.'}</div>`;
             return;
         }
@@ -254,8 +259,9 @@
     function rowHtml(p, sub, nSubs) {
         {
             const mine = p.kind === 'mine';
-            const open = mine ? `/tavlingsplanering/${p.id}` : '';
-            const name = mine ? `<a class="plh-name" href="${open}">${esc(p.name)}</a>` : `<span class="fw-semibold">${esc(p.name)}</span>`;
+            const canOpen = mine || p.kind === 'all'; // sajtadmin öppnar andras planeringar som läsare (support)
+            const open = canOpen ? `/tavlingsplanering/${p.id}` : '';
+            const name = canOpen ? `<a class="plh-name" href="${open}">${esc(p.name)}</a>` : `<span class="fw-semibold">${esc(p.name)}</span>`;
             const level = mine ? esc(p.accessLabel) : p.kind === 'listed' ? '<span class="text-muted">Inte med</span>' : '<span class="text-muted">Support</span>';
             const next = p.nextMeetingAt ? esc(fmt(p.nextMeetingAt)) : '<span class="text-muted">—</span>';
             const items = mine && p.readOnly ? [
@@ -264,6 +270,8 @@
                 { href: open, icon: 'bi-box-arrow-up-right', label: 'Öppna' },
                 { divider: true },
                 { icon: 'bi-box-arrow-right', label: 'Lämna planeringen…', danger: true, fn: () => leave(p) },
+            ] : p.kind === 'all' ? [
+                { href: open, icon: 'bi-box-arrow-up-right', label: 'Öppna (läsa)' },
             ] : p.kind === 'listed' ? [
                 p.requested ? { icon: 'bi-x-circle', label: 'Dra tillbaka förfrågan', fn: () => withdraw(p) }
                             : { icon: 'bi-person-plus', label: 'Be om att få vara med…', fn: () => ask(p) },

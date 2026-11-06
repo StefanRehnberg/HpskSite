@@ -531,7 +531,10 @@
             html.push(`<div class="pl-card"><p class="mb-0">Du <b>följer</b> planeringen: du läser allt, även meddelandena, men skriver inte och svarar inte på mötestider.
                 Vill du vara med och bestämma — be den sammankallande ändra din nivå till <i>Deltar</i>.</p></div>`);
         }
-        if (p.me.isParentReader) {
+        if (p.me.isSupportReader) {
+            html.push(`<div class="pl-card" id="plSupportReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen som sajtadmin (support).
+                Du är inte med i den: du skriver inget här och får inga notiser härifrån.</p></div>`);
+        } else if (p.me.isParentReader) {
             html.push(`<div class="pl-card" id="plParentReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen eftersom du kan ändra i
                 ${p.planning.parent && p.planning.parent.url ? `<a href="${esc(p.planning.parent.url)}">${esc(p.planning.parent.name)}</a>` : 'huvudplaneringen'}.
                 Du är inte med i den: du skriver inget här och får inga notiser härifrån. Vill du vara med — be den sammankallande bjuda in dig.</p></div>`);

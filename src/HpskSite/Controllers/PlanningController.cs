@@ -155,6 +155,13 @@ namespace HpskSite.Controllers
             var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, false);
             if (!c.IsParticipant && allowParentReader && _planning.ReadsSubViaParent(p, me))
                 c = new PlanningCaller(null, false, ParentReader: true);
+            // Stefan 2026-11-06: sajtadmin kan ÖPPNA vilken planering som helst (support) — som LÄSARE, aldrig deltagare:
+            // skriver inget, får inga notiser, ingen kontaktinfo. Bara de läsande anropen (allowParentReader) släpper in.
+            else if (!c.IsParticipant && allowParentReader && await _auth.IsCurrentUserAdminAsync())
+            {
+                c = new PlanningCaller(null, false, ParentReader: true);
+                _logger.LogWarning("Sajtadmin {Member} läser planering {Id} som support", me, planningId);
+            }
             if (!PlanningAccess.CanReadContent(c)) return null;
             return new Ctx(p, c, me);
         }
@@ -272,9 +279,11 @@ namespace HpskSite.Controllers
                 pendingAll = _planning.AllPendingCounts();
                 support = pendingAll.Keys.Where(k => !mineIds.Contains(k)).Select(k => _planning.Get(k)).Where(p => p != null).Select(p => p!).ToList();
             }
+            // Stefan 2026-11-06: sajtadmin ser ALLA planeringar (och kan öppna dem som läsare — se ResolveAsync).
+            var allRows = isAdmin ? _planning.AllPlannings().Where(p => !mineIds.Contains(p.Id)).ToList() : new List<PlanningRow>();
             var ownerIds = mine.Where(m => m.Access == PlanningAccessLevel.Owner).Select(m => m.PlanningId).ToList();
             var pending = _planning.PendingCounts(ownerIds);
-            var conveners = _planning.ConvenerNames(mineIds.Concat(listed.Select(p => p.Id)).Concat(support.Select(p => p.Id)));
+            var conveners = _planning.ConvenerNames(mineIds.Concat(listed.Select(p => p.Id)).Concat(support.Select(p => p.Id)).Concat(allRows.Select(p => p.Id)));
             var myRequests = _planning.OpenRequestsByMember(me);
             // Stefan 2026-10-25: delplaneringarna under sin huvudplanering — varje rad säger vilken huvudplanering den hör
             // till, huvudplaneringar man inte själv är med i följer med som rubriker, och den som leder huvudplaneringen ser
@@ -308,6 +317,11 @@ namespace HpskSite.Controllers
                 {
                     id = p.Id, name = p.Name, targetText = p.TargetText, targetStart = D(p.TargetStart),
                     conveners = Conv(p.Id), requested = myRequests.ContainsKey(p.Id),
+                }),
+                all = allRows.Select(p => new
+                {
+                    id = p.Id, name = p.Name, status = p.Status, targetText = p.TargetText, conveners = Conv(p.Id),
+                    nextMeetingAt = (string?)null, parentId = p.ParentPlanningId,
                 }),
                 support = support.Select(p => new
                 {
@@ -429,7 +443,7 @@ namespace HpskSite.Controllers
                 {
                     participantId = c.ParticipantId, isParticipant = c.IsParticipant,
                     viaLink = c.ViaLink, isGuest = c.Participant?.IsGuest ?? false, name = c.Participant?.DisplayName,
-                    access = c.Access, accessLabel = c.ParentReader && !c.IsParticipant ? ParentReaderLabel : PlanningAccessLevel.Label(c.Access),
+                    access = c.Access, accessLabel = c.ParentReader && !c.IsParticipant ? (_planning.ReadsSubViaParent(x.Planning, x.MemberId) ? ParentReaderLabel : "Läser (sajtadmin, support)") : PlanningAccessLevel.Label(c.Access),
                     notifyMode = c.Participant?.NotifyMode, notifyLabel = PlanningNotifyMode.Label(c.Participant?.NotifyMode),
                     canEdit = PlanningAccess.CanEditPlanning(c), canManage = PlanningAccess.CanManagePlanning(c),
                     canInvite = PlanningAccess.CanInvite(c), canReadMessages = PlanningAccess.CanReadMessages(c),
@@ -447,6 +461,7 @@ namespace HpskSite.Controllers
                     viaCompetition = c.Participant?.ViaCompetition ?? false,
                     // Läser delplaneringen genom huvudplaneringen (Kan ändra där; inte med, inga notiser).
                     isParentReader = c.ParentReader && !c.IsParticipant,
+                    isSupportReader = c.ParentReader && !c.IsParticipant && !_planning.ReadsSubViaParent(x.Planning, x.MemberId),
                     // Stefan 2026-10-25: Ny delplanering (Översikt) och Flytta ett område inom familjen (Uppgifter).
                     canCreateSub = PlanningAccess.CanCreateSub(c, x.Planning),
                     canMoveAreas = PlanningAccess.CanMoveAreas(c),

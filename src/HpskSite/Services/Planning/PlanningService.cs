@@ -506,6 +506,13 @@ namespace HpskSite.Services.Planning
                 "SELECT * FROM Planning WHERE ListedForMembers = 1 AND Status = N'Active' AND DeletedAt IS NULL ORDER BY UpdatedAt DESC");
         }
 
+        /// <summary>Alla planeringar som inte är borttagna — bara för sajtadmins supportlista.</summary>
+        public List<PlanningRow> AllPlannings()
+        {
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<PlanningRow>("SELECT * FROM Planning WHERE DeletedAt IS NULL ORDER BY UpdatedAt DESC");
+        }
+
         /// <summary>De sammankallande per planering (namnen), för listan.</summary>
         public Dictionary<int, List<string>> ConvenerNames(IEnumerable<int> planningIds)
         {
