@@ -73,6 +73,28 @@ namespace HpskSite.Tests
             Assert.DoesNotContain("discipline is \"Faltskytte\"", src);
         }
 
+        [Theory]
+        [InlineData("Precision")]
+        [InlineData("Milsnabb")]
+        [InlineData("Duell")]
+        [InlineData("NationellHelmatch")]
+        [InlineData("MagnumPrecision")]
+        [InlineData("Standardpistol")]
+        [InlineData("Sportpistol")]
+        public void Precisionsfamiljen_erbjuds_inget_vapengruppsval(string discipline)
+        {
+            // Stefan 2026-11-06: ingen vapengruppsinställning för precision. Finalen och medaljerna följer mästerskapskategorierna; en grupp "utanför"
+            // skulle ge en kategorifinal utan mästare.
+            Assert.Empty(ChampionshipWeaponGroups.OfferedFor(discipline, new[] { "A", "B", "C" }, new[] { "C" }));
+        }
+
+        [Fact]
+        public void Falt_erbjuds_fortfarande_sina_vapengrupper()
+        {
+            var offered = ChampionshipWeaponGroups.OfferedFor("Faltskytte", System.Array.Empty<string>(), System.Array.Empty<string>());
+            Assert.Equal(new[] { "A", "A Opt", "B", "C", "R" }.OrderBy(x => x, System.StringComparer.Ordinal).ToArray(), offered.ToArray());
+        }
+
         private static string Here([System.Runtime.CompilerServices.CallerFilePath] string f = "") => f;
     }
 }

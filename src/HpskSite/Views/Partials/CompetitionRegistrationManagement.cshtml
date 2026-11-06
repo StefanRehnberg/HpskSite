@@ -3076,6 +3076,11 @@ function champParticipantOptions(c) {
     return opts;
 }
 
+// Låst = listan är publicerad, finalstartlistan byggd eller en kvalgrupp låst (servern skickar lockReason; gamla svar har bara official).
+function champLocked(c) {
+    return !!c.official || (!!c.lockReason && c.lockReason !== 'None');
+}
+
 function champSummary(c) {
     const opt = champParticipantOptions(c).find(o => o[0] === c.participants);
     const who = c.participants === 'all'
@@ -3084,8 +3089,19 @@ function champSummary(c) {
     const groups = (c.weaponGroups && c.weaponGroups.length)
         ? 'Mästerskap i vapengrupp ' + c.weaponGroups.join(', ') + '; övriga grupper skjuts som en vanlig tävling.'
         : 'Alla vapengrupper avgör mästerskapet.';
-    const locked = c.official ? ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet).' : '';
-    return who + ' ' + groups + locked;
+    // Varför kortet är låst: publicerad lista (fält: avpublicera eller Rätta; precisionsfamiljen: avpublicera), byggd finalstartlista eller låst kvalgrupp.
+    const locked = c.lockReason === 'FinalsBuilt'
+        ? ' Finalstartlistan är byggd, så inställningarna är låsta (bygg om finalstartlistan först).'
+        : c.lockReason === 'QualifyingFrozen'
+            ? ' En kvalgrupp är låst inför finalen, så inställningarna är låsta (lås upp gruppen först).'
+            : c.official
+                ? (c.canCorrect === false
+                    ? ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först).'
+                    : ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet).')
+                : '';
+    // Grenar utan vapengruppsval (precisionsfamiljen) nämner inte vapengrupperna alls: mästerskapet gäller alla.
+    const hasGroupChoice = (c.knownGroups || []).length > 0 || (c.weaponGroups || []).length > 0;
+    return who + ' ' + (hasGroupChoice ? groups : '') + locked;
 }
 
 function champShowError(msg) {
@@ -3108,6 +3124,8 @@ function champOpenForm() {
     document.getElementById('regChampGroups').innerHTML = (c.knownGroups || []).map(g =>
         `<div class="form-check"><input class="form-check-input reg-champ-group" type="checkbox" id="regChampG_${escapeHtmlSafe(g)}" value="${escapeHtmlSafe(g)}"${(c.weaponGroups || []).includes(g) ? ' checked' : ''}>` +
         `<label class="form-check-label" for="regChampG_${escapeHtmlSafe(g)}">${escapeHtmlSafe(g)}</label></div>`).join('');
+    // Inget vapengruppsval för grenar som inte har det (precisionsfamiljen): rubriken och hjälptexten göms.
+    document.getElementById('regChampGroups').closest('fieldset')?.classList.toggle('d-none', (c.knownGroups || []).length === 0);
     document.getElementById('regChampForm').classList.remove('d-none');
     document.getElementById('regChampEditBtn').classList.add('d-none');
 }
@@ -3115,7 +3133,7 @@ function champOpenForm() {
 function champCloseForm() {
     document.getElementById('regChampForm')?.classList.add('d-none');
     const btn = document.getElementById('regChampEditBtn');
-    if (btn && champState && !champState.official) btn.classList.remove('d-none');
+    if (btn && champState && !champLocked(champState)) btn.classList.remove('d-none');
 }
 
 async function champSave() {
@@ -3152,7 +3170,7 @@ function renderChampionshipCard(c) {
     card.classList.toggle('d-none', !c);
     if (!c) return;
     document.getElementById('regChampSummary').textContent = champSummary(c);
-    document.getElementById('regChampEditBtn').classList.toggle('d-none', !!c.official);
+    document.getElementById('regChampEditBtn').classList.toggle('d-none', champLocked(c));
     document.getElementById('regChampForm').classList.add('d-none');
 }
 
@@ -4239,7 +4257,7 @@ function faltOocRowHtml(classId, registration) {
                    data-class-id="${escapeAttr(classId)}" data-initial="${on ? '1' : '0'}" ${on ? 'checked' : ''}>
             <label class="form-check-label" for="${safeId}">Utanför mästerskapet</label>${why}
             <div class="form-text">Skytten skjuter och får resultatet i listan och kan få standardmedalj, men får ingen placering och
-                ingen mästerskapsmedalj. Placeringen går till nästa skytt.</div>
+                ingen mästerskapsmedalj. Placeringen går till nästa skytt. Har tävlingen final tas skytten inte ut till den.</div>
         </div>`;
 }
 

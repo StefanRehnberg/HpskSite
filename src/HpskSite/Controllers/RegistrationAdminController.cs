@@ -1425,6 +1425,8 @@ namespace HpskSite.Controllers
 
                 // Vapengrupper: bara kända koder; inga valda = alla.
                 var wanted = (request.WeaponGroups ?? Array.Empty<string>()).Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+                if (wanted.Count > 0 && HpskSite.CompetitionTypes.Common.PrecisionFamilyResultReader.SupportedTypes.Contains(competition.TypeId ?? "", StringComparer.OrdinalIgnoreCase))
+                    return Json(new { success = false, message = "Vapengrupper kan inte väljas för den här grenen — mästerskapet gäller alla vapengrupper." });
                 var groups = HpskSite.CompetitionTypes.Common.ChampionshipWeaponGroups.Canonicalize(string.Join(",", wanted));
                 if (wanted.Count > 0 && groups == null)
                     return Json(new { success = false, message = "Okänd vapengrupp." });

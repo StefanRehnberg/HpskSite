@@ -34,6 +34,9 @@ namespace HpskSite.CompetitionTypes.Common
             var known = KnownCodes.ToDictionary(c => c, c => c, StringComparer.OrdinalIgnoreCase);
             var offered = new HashSet<string>(StringComparer.Ordinal);
             var d = (discipline ?? "").Trim();
+            // Precisionsfamiljen har ingen vapengruppsinställning (Stefan 2026-11-06): finalen och medaljerna följer mästerskapskategorierna, och en
+            // grupp "utanför" skulle ge en kategorifinal utan mästare. Kortet erbjuder därför inget val.
+            if (PrecisionFamilyResultReader.SupportedTypes.Contains(d, StringComparer.OrdinalIgnoreCase)) return new List<string>();
             if (d.Equals("Faltskytte", StringComparison.OrdinalIgnoreCase))
                 foreach (var c in FaltCodes) if (known.TryGetValue(c, out var k)) offered.Add(k);
             foreach (var g in usedGroups.Concat(storedGroups))

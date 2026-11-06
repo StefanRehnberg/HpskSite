@@ -49,6 +49,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.ClubRosterService _roster;
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetitionFlags;
+        private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader _outOfCompetitionLock;
         private readonly HpskSite.CompetitionTypes.Common.IClubRegionLookup _clubRegions;
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,9 +74,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.ClubRosterService roster,
             HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetitionFlags,
-            HpskSite.CompetitionTypes.Common.IClubRegionLookup clubRegions)
+            HpskSite.CompetitionTypes.Common.IClubRegionLookup clubRegions,
+            HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader outOfCompetitionLock)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _outOfCompetitionLock = outOfCompetitionLock;
             _outOfCompetitionFlags = outOfCompetitionFlags;
             _clubRegions = clubRegions;
             _roster = roster;
@@ -2089,6 +2092,11 @@ namespace HpskSite.Controllers
                     classBreakdown = classBreakdown
                 };
 
+                // Varför är mästerskapskortet låst (om det är det)? Läses bara när beteendet gäller tävlingen.
+                var oocLock = oocRule.OutOfCompetitionApplies
+                    ? _outOfCompetitionLock.Reason(competition!)
+                    : HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.None;
+
                 return Json(new {
                     success = true,
                     registrations = registrations,
@@ -2101,7 +2109,11 @@ namespace HpskSite.Controllers
                     championship = oocRule.OutOfCompetitionApplies ? (object)new
                     {
                         applies = true,
-                        official = competition.FaltskytteResultsOfficial,
+                        // official = resultatlistan är publicerad (kortet är då låst). lockReason säger VARFÖR kortet är låst: publicerad, byggd
+                        // finalstartlista eller låst kvalgrupp (precisionsfamiljen). canCorrect = Rätta-flödet finns (bara fält).
+                        official = competition.FaltskytteResultsOfficial || oocLock == HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished,
+                        lockReason = oocLock.ToString(),
+                        canCorrect = !HpskSite.CompetitionTypes.Common.OutOfCompetitionLock.IsPrecisionFamily(competition.TypeId),
                         kind = oocRule.Kind.ToString(),
                         participants = HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(competition.ChampionshipParticipants) ?? "all",
                         weaponGroups = oocRule.WeaponGroups,
