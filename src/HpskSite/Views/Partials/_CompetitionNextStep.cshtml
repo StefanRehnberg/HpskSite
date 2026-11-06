@@ -193,7 +193,7 @@
                 // färger här och blått där fick Sune att tro att det var olika saker, och gul text
                 // på ljusgult gick knappt att läsa (Sune 4).
                 actions = '<div class="ns-choices w-100">'
-                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="clone" data-group="' + esc(g) + '"><strong><i class="bi bi-arrow-right-circle me-1"></i>Fortsätt i samma ordning</strong><span>Alla går vidare och står kvar på sina platser från grundomgången.</span></button>'
+                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="clone" data-group="' + esc(g) + '"><strong><i class="bi bi-arrow-right-circle me-1"></i>Fortsätt i samma ordning</strong><span>Alla går vidare och står kvar på sina platser från grundomgången.' + (ci.outside > 0 ? ' ' + (ci.outside === 1 ? 'En skytt utanför mästerskapet tas' : ci.outside + ' skyttar utanför mästerskapet tas') + ' inte med.' : '') + '</span></button>'
                     + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="rerank" data-group="' + esc(g) + '"><strong><i class="bi bi-sort-numeric-down me-1"></i>Placera om efter resultat</strong><span>Alla ' + ci.shooters + ' går vidare, i poängordning. ' + ci.leaderTxt + '</span></button>'
                     + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="wizard" data-group="' + esc(g) + '"><strong><i class="bi bi-trophy me-1"></i>Mästerskapsfinal</strong><span>' + ci.shbTxt + '</span>' + ci.shbNote + '</button>'
                     + '</div>';

@@ -611,7 +611,7 @@
         const shbNote = isChampionship
             ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Regeln för mästerskap</span>'
             : '';
-        return { ready: withResults.length > 0, shooters, leaderTxt, shbTxt, shbNote };
+        return { ready: withResults.length > 0, shooters, leaderTxt, shbTxt, shbNote, outside };
     }
 
     // Ingen lista än — visa de tre metoderna, scopade till gruppen.
@@ -629,7 +629,9 @@
                 grundomgångens serier är inmatade.</p>`;
         }
 
-        const { shooters, leaderTxt, shbTxt, shbNote } = choiceInfo(group);
+        const { shooters, leaderTxt, shbTxt, shbNote, outside } = choiceInfo(group);
+        // "Fortsätt i samma ordning" kopierar grundomgångens startlista; en skytt utanför mästerskapet tas inte med (platsen blir en lucka).
+        const outsideShort = outside > 0 ? ` ${outside === 1 ? 'En skytt utanför mästerskapet tas' : outside + ' skyttar utanför mästerskapet tas'} inte med.` : '';
 
         return `
             <p class="small mb-3">
@@ -641,7 +643,7 @@
                     <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
                             data-fn-action="clone" data-fn-group="${esc(group)}">
                         <i class="bi bi-arrow-right-circle me-1"></i><strong>Fortsätt i samma ordning</strong>
-                        <span class="d-block small">Alla går vidare och står kvar på sina platser från grundomgången.</span>
+                        <span class="d-block small">Alla går vidare och står kvar på sina platser från grundomgången.${outsideShort}</span>
                     </button>
                 </div>
                 <div class="col-md-4">
