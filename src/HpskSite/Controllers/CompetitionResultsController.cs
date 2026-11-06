@@ -3706,10 +3706,26 @@ namespace HpskSite.Controllers
                 }
 
                 // 3. Update registration
+                //
+                // ⚠️ "Utanför mästerskapet" följer SKYTTEN, inte klassnyckeln: en skytt som står utanför i den gamla klassen står utanför i den
+                // nya. Registreringens beslut hör till klassraden, och när klassraden byts ut raderar lagringen beslutet ("class-removed") —
+                // utan att det flyttas blir en gäst tyst mästerskapsdeltagare vid ett klassbyte (expertgruppen K7). Läses FÖRE ändringen,
+                // stämplas efter. Gör ingenting när beteendet inte gäller tävlingen.
+                var carryOutside = false;
+                var outsideRule = ChampionshipRule.For(competition);
+                if (outsideRule.OutOfCompetitionApplies)
+                    carryOutside = _outOfCompetition.Load(competition, outsideRule).Contains(request.MemberId, request.OldShootingClass);
+
                 bool registrationUpdated = false;
                 try
                 {
                     registrationUpdated = UpdateRegistrationShooterClass(request.CompetitionId, request.MemberId, request.OldShootingClass, newClass.Name);
+                    if (registrationUpdated && carryOutside)
+                    {
+                        var movedRegistration = _registrations.FindForMember(request.CompetitionId, request.MemberId);
+                        if (movedRegistration != null)
+                            _registrations.StampOutOfCompetition(request.CompetitionId, movedRegistration.Id, newClass.Name, "class-changed");
+                    }
                 }
                 catch (Exception ex)
                 {

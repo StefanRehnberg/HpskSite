@@ -92,6 +92,22 @@ namespace HpskSite.Tests
             Assert.True(freezeAtRefresh < calcAtRefresh, "Besluten måste frysas FÖRE räkningen");
         }
 
+        [Fact]
+        public void Klassbyte_flyttar_gastflaggan_med_skytten()
+        {
+            // Lagringen raderar beslutet när klassraden byts ut ("class-removed"). Utan att flaggan läses FÖRE ändringen och stämplas på den nya
+            // klassen blir en gäst tyst mästerskapsdeltagare vid ett klassbyte (expertgruppen K7).
+            var src = ReadController();
+            var change = src.IndexOf("public async Task<IActionResult> ChangeShooterClass(", StringComparison.Ordinal);
+            Assert.True(change > 0, "ChangeShooterClass hittades inte");
+            var read = CodeIndexOf(src, "carryOutside = _outOfCompetition.Load(competition, outsideRule).Contains(request.MemberId, request.OldShootingClass)", change);
+            var update = CodeIndexOf(src, "UpdateRegistrationShooterClass(request.CompetitionId", change);
+            var stamp = CodeIndexOf(src, "_registrations.StampOutOfCompetition(request.CompetitionId, movedRegistration.Id, newClass.Name, \"class-changed\")", change);
+            Assert.True(read > change, "Klassbytet läser inte om skytten står utanför");
+            Assert.True(read < update, "Flaggan måste läsas FÖRE registreringen ändras (beslutet raderas av ändringen)");
+            Assert.True(stamp > update, "Flaggan måste stämplas på den nya klassen EFTER registreringen ändrats");
+        }
+
         /// <summary>Första träffen på en rad som INTE är en kommentar. En bortkommenterad kod får inte räknas som kvar (A/B 2026-11-06: den räknades).</summary>
         private static int CodeIndexOf(string src, string needle, int from)
         {
