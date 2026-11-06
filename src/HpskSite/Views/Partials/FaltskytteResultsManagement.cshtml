@@ -965,6 +965,16 @@ function faltExtractStationConfigs(results) {
     return configs;
 }
 
+// Plats i klassen i arrangörens lista och utskrifter: serverns plats när den har räknats (en tävling med "Utanför mästerskapet":
+// skytten utanför får ingen plats, '–'), annars ordningen som förut. Samma regel som resultatsidans faltClassPlace.
+function faltOrgPlace(results, shooter, idx) {
+    if (results.placementsAssigned !== true) return idx + 1;
+    return shooter.outOfCompetition ? '–' : (shooter.placement != null ? shooter.placement : idx + 1);
+}
+function faltOrgOutside(results, shooter) {
+    return results.placementsAssigned === true && shooter.outOfCompetition === true;
+}
+
 function renderFaltResultList(results, container) {
     const isPoang = results.scoringMode === 'Poang';
     const stationConfigs = faltExtractStationConfigs(results);
@@ -990,8 +1000,8 @@ function renderFaltResultList(results, container) {
 
         group.shooters.forEach((shooter, idx) => {
             html += `<tr>
-                <td class="text-center">${idx + 1}</td>
-                <td>${hpskEsc(shooter.name)}</td>
+                <td class="text-center">${faltOrgPlace(results, shooter, idx)}</td>
+                <td>${hpskEsc(shooter.name)}${faltOrgOutside(results, shooter) ? '<div class="small text-muted">Utanför mästerskapet</div>' : ''}</td>
                 <td>${hpskEsc(shooter.club)}</td>
                 <td class="text-center">${shooter.shootingClass}</td>`;
 
@@ -1097,8 +1107,8 @@ function faltPrintResultList(event) {
         w.document.write('</tr></thead><tbody>');
 
         group.shooters.forEach(function(shooter, idx) {
-            w.document.write('<tr><td>' + (idx+1) + '</td>');
-            w.document.write('<td>' + hpskEsc(shooter.name) + '</td>');
+            w.document.write('<tr><td>' + faltOrgPlace(results, shooter, idx) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.name) + (faltOrgOutside(results, shooter) ? ' <small>(utanför mästerskapet)<' + '/small>' : '') + '</td>');
             w.document.write('<td>' + hpskEsc(shooter.club) + '</td>');
             w.document.write('<td>' + hpskEsc(shooter.shootingClass) + '</td>');
             for (var i = 1; i <= results.stationCount; i++) {
@@ -1233,8 +1243,8 @@ function faltPrintSubCompResultList(event) {
         w.document.write('</tr></thead><tbody>');
 
         group.shooters.forEach(function(shooter, idx) {
-            w.document.write('<tr><td>' + (idx+1) + '</td>');
-            w.document.write('<td>' + hpskEsc(shooter.name) + '</td>');
+            w.document.write('<tr><td>' + faltOrgPlace(results, shooter, idx) + '</td>');
+            w.document.write('<td>' + hpskEsc(shooter.name) + (faltOrgOutside(results, shooter) ? ' <small>(utanför mästerskapet)<' + '/small>' : '') + '</td>');
             w.document.write('<td>' + hpskEsc(shooter.club) + '</td>');
             w.document.write('<td>' + hpskEsc(shooter.shootingClass) + '</td>');
             for (var i = 1; i <= results.stationCount; i++) {
