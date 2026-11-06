@@ -206,6 +206,7 @@ namespace HpskSite.Composers
             // Växeln väljer nod- eller tabellagring per anrop (SiteSetting Registrations:Store, fas 1c)
             // och vägrar skrivningar under frysning (fas 1d).
             builder.Services.AddSingleton<HpskSite.Services.SiteSettings.SiteSettingService>();
+            builder.Services.AddHostedService<HpskSite.Services.SiteSettings.OutOfCompetitionDisciplinesHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.NodeRegistrationStore>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.SqlRegistrationStore>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.SwitchingRegistrationStore>();

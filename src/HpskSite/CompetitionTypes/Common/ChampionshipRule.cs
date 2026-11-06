@@ -112,7 +112,7 @@ namespace HpskSite.CompetitionTypes.Common
         /// växel per tävling (Stefan 2026-11-06: "det är så det ska fungera"). Utan att någon markerats utanför och utan inställningen
         /// "vilka deltar" är alla tävlande och inget ändras mot förr — placeringarna blir bara serverns i stället för radnumret.
         /// </summary>
-        public bool OutOfCompetitionApplies => IsChampionship && IsFaltFamily(_discipline);
+        public bool OutOfCompetitionApplies => IsChampionship && IsEnabledDiscipline(_discipline);
 
         /// <summary>
         /// Avgör tävlingen mästerskapet i den här vapengruppen ("A", "C", "R" … — <see cref="ChampionshipCategory.WeaponGroupFor"/>)?
@@ -147,7 +147,7 @@ namespace HpskSite.CompetitionTypes.Common
             return known?.Id ?? t;
         }
 
-        private static bool IsFaltFamily(string discipline) =>
-            discipline is "Faltskytte" or "MagnumFalt";
+        /// <summary>Använder grenen "Utanför mästerskapet"? Listan är sajtinställningen <c>OutOfCompetition:Disciplines</c> (<see cref="OutOfCompetitionDisciplines"/>), förval fält.</summary>
+        private static bool IsEnabledDiscipline(string discipline) => OutOfCompetitionDisciplines.Allows(discipline);
     }
 }
