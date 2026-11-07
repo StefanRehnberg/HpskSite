@@ -91,10 +91,10 @@
   };
 
   // ── Dialoger (bootstrap-modal, aldrig alert/confirm) ────────────────────────
-  function modal(title, bodyNodes, buttons) {
+  function modal(title, bodyNodes, buttons, wide) {
     return new Promise(resolve => {
       const el = h('div', { class: 'modal fade', tabindex: '-1' },
-        h('div', { class: 'modal-dialog modal-dialog-centered' }, h('div', { class: 'modal-content' },
+        h('div', { class: 'modal-dialog modal-dialog-centered' + (wide ? ' modal-xl' : '') }, h('div', { class: 'modal-content' },
           h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, title), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
           h('div', { class: 'modal-body' }, bodyNodes),
           h('div', { class: 'modal-footer' }, buttons.map(b => h('button', {
@@ -112,7 +112,7 @@
 
   // ── Vyer ───────────────────────────────────────────────────────────────────
   function clearEditors() { for (const e of S.editors) { try { e.destroy(); } catch { /* redan borta */ } } S.editors = []; }
-  function view(nodes) { clearEditors(); clearTimeout(S.timer); body.replaceChildren(...[].concat(nodes)); }
+  function view(nodes) { clearEditors(); clearTimeout(S.timer); body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
   const header = (sub) => h('div', { class: 'mb-3' },
     h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)),
     h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null, supportBanner());
@@ -336,6 +336,7 @@
     Object.assign(S, { page: r, blocks: parsed.blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
       dirty: false, editVersion: 0, banner: null, statusText: 'Sparat', statusErr: false });
     if (!S.docs) { const d = await api('GET', 'Documents'); S.docs = d.success ? d.documents : []; }
+    if (!S.personas) { const pr = await api('GET', 'PreviewPersonas'); S.personas = pr.success ? pr.personas : []; }
     renderEditor();
   }
 
@@ -456,10 +457,27 @@
       h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser sidan?'), visSel, consequence,
         S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
-      menuToggle(),
+      menuToggle(), previewRow(),
       blocksEl, addBlockBar(), moreCard()]);
     drawBlocks();
     paintStatus(); paintEditorBanner();
+  }
+
+  // "Se som": förhandsvisar sidan för en vald fast tittare. Servern renderar (samma renderare och regler som besökarna), svaret läggs i en sandlådad iframe.
+  function previewRow() {
+    const sel = h('select', { class: 'form-select w-auto', 'aria-label': 'Se som' }, (S.personas || []).map(x => h('option', { value: x.key }, x.label)));
+    return h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-4' },
+      h('span', { class: 'fw-semibold' }, 'Se sidan som'), sel,
+      h('button', { class: 'btn btn-outline-secondary', onclick: async e => {
+        e.target.disabled = true;
+        if (S.dirty) await saveNow();                                   // förhandsvisningen läser det sparade utkastet
+        const r = await api('POST', 'Preview', { pageId: S.page.id, persona: sel.value });
+        e.target.disabled = false;
+        if (!r.success) { setBanner('danger', r.message || 'Förhandsvisningen gick inte att göra.'); return; }
+        const kids = [alertBox(r.decision === 'Serve' ? 'info' : 'warning', r.notice)];
+        if (r.document) kids.push(h('iframe', { sandbox: '', srcdoc: r.document, title: 'Förhandsvisning', style: 'width:100%;height:55vh;border:1px solid var(--bs-border-color);border-radius:.5rem;background:#fff' }));
+        modal('Se sidan som: ' + sel.options[sel.selectedIndex].text, kids, [{ label: 'Stäng', value: true, cls: 'btn-primary' }], true);
+      } }, h('i', { class: 'bi bi-eye me-1' }), 'Förhandsvisa'));
   }
 
   // "Mer": återställningspunkt, tidigare versioner och adressbyte (avancerat). Inget av det publicerar något.

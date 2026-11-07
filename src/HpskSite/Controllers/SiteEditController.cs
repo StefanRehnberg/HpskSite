@@ -227,6 +227,49 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// "Se som": renderar sidans utkast (annars publicerade innehåll) för en vald FAST tittare (Utloggad, Inloggad, Medlem, Styrelse) och ger ett dokument till en
+        /// sandlådad iframe. Samma renderare och åtkomstregler som besökarna; adminens egen roll påverkar inte bilden. POST med antiforgery och <c>no-store</c> — aldrig en
+        /// parameter på den publika adressen.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> Preview(string ownerType, int ownerId, int pageId, string persona, [FromServices] SiteBlockDataFactory blockData)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            Response.Headers["Cache-Control"] = "private, no-store";
+            if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förhandsvisningar på kort tid.", "rate");
+            var who = SitePagePreview.Persona(g.OwnerType, persona);
+            if (who == null) return Fail("Okänd tittare.");
+
+            SitePageRow? page; SitePageVersionRow? version;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+            {
+                page = SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId);
+                version = page == null ? null
+                    : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId) ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
+            }
+            if (page == null || !page.IsFree || version == null) return Fail("Sidan finns inte.");
+            var content = SiteBlockSchema.Parse(version.BlocksJson, SiteContentKind.FreePage, page.VisibilityLevel, SiteTemplates.For(g.OwnerType));
+            if (!content.Ok) return Fail("Sidan kan inte visas ännu: " + content.Errors[0].Message);
+
+            var node = UmbracoContext.Content?.GetById(g.OwnerId);
+            var r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node), g.OwnerUrl);
+            return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
+        }
+
+        /// <summary>Tittarna man kan förhandsvisa som, för den här ägarens typ.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> PreviewPersonas(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            return Json(new { success = true, personas = SitePagePreview.Personas(g.OwnerType).Select(p => new { key = p.Key, label = p.Label }) });
+        }
+
+        /// <summary>
         /// Klubbens ändringslogg: vem gjorde vad och när (senaste 100). Bara ägarens EGEN admin — stödläget läser inte loggen, som också visar stödpersonens egna spår.
         /// Namnet slås upp live; en borttagen medlem visas som "Borttagen medlem" (raden står kvar). Aldrig innehåll, bara åtgärd, sida och tid.
         /// </summary>
