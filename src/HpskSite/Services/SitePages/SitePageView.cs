@@ -13,6 +13,11 @@ namespace HpskSite.Services.SitePages
         /// <summary>Nyckeln för en fri sida i <see cref="PageKey"/> (sidan har ingen mallnyckel; <see cref="PageId"/> pekar ut den).</summary>
         public const string FreePageKey = "page";
 
+        /// <summary>Nyckeln för redigeringsytan Hemsidan (<c>/{ägare}/hemsidan/</c>).</summary>
+        public const string HemsidanKey = "hemsidan";
+
+        public bool IsHemsidan => PageKey == HemsidanKey;
+
         /// <summary>En av ägarens egna (fria) sidor, inte en systemsida.</summary>
         public bool IsFreePage => PageId != null && PageKey == FreePageKey;
 

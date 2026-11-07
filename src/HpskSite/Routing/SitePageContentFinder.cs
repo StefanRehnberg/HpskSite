@@ -64,7 +64,10 @@ namespace HpskSite.Routing
                 // brytare 2 PÅ, och bara för en adress som ser ut som en slugg (ingen SQL för skräp).
                 var last = seg[^1];
                 if (SiteTemplates.ClubTemplate.PageBySlug(last) == null && SiteTemplates.RegionTemplate.PageBySlug(last) == null)
+                {
+                    if (string.Equals(last, HemsidanSlug, StringComparison.OrdinalIgnoreCase)) return TryFindHemsidan(request, seg);
                     return seg.Length >= 3 && IsSlugShaped(last) && await TryFindFreePageAsync(request, seg);
+                }
 
                 if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;
                 var cache = uc.Content;
@@ -113,6 +116,29 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "SitePageContentFinder: {Path} kunde inte avgöras", request.Uri.AbsolutePath);
                 return false;
             }
+        }
+
+        /// <summary>Redigeringsytans adress: <c>/{ägare}/hemsidan/</c>. Ett reserverat ord (<see cref="SitePageSlugRules"/>), aldrig en egen sida.</summary>
+        public const string HemsidanSlug = "hemsidan";
+
+        /// <summary>
+        /// Hemsidan (redigeringsytan): bara när ägaren har brytare 2 PÅ. Findern avgör inte vem som får se den (filtret efter inloggningen
+        /// kräver ägarens EGEN admin, annars 404 för alla — även utloggade, så att ytans existens inte avslöjas).
+        /// </summary>
+        private bool TryFindHemsidan(IPublishedRequestBuilder request, string[] seg)
+        {
+            if (seg.Length < 2 || !_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;
+            var cache = uc.Content;
+            var owner = _routes.Owner(cache, seg[..^1]);
+            var ownerType = owner?.ContentType.Alias switch { "club" => SiteTemplates.Club, "regionalPage" => SiteTemplates.Region, _ => null };
+            if (owner == null || ownerType == null || !_owners.IsEditingEnabled(ownerType, owner.Id)) return false;
+            if (_routes.TreeRoute(cache, seg) != null) return false;
+            var http = _http.HttpContext;
+            if (http == null) return false;
+            http.Items[SitePageRequest.ItemKey] = new SitePageRequest(ownerType, owner.Id, SitePageRequest.HemsidanKey);
+            request.SetPublishedContent(owner);
+            request.SetTemplate(new Umbraco.Cms.Core.Models.Template(_shortStrings, PageViews.Hemsidan, PageViews.Hemsidan));
+            return true;
         }
 
         private static string LoginUrl(IPublishedRequestBuilder request) =>

@@ -134,6 +134,8 @@ namespace HpskSite.Controllers
             {
                 success = true, ownerName = g.OwnerName, ownerUrl = g.OwnerUrl, termsAccepted = accepted, termsVersion = SiteOwnerData.CurrentTermsVersion,
                 maxPages = SitePageStore.MaxFreePagesPerOwner,
+                // Systemsidorna som ett länkblock får peka på (aldrig Admin, som saknar adress).
+                systemPages = SiteTemplates.For(g.OwnerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p => new { key = p.Key, label = p.Label }),
                 pages = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Select(Row),
                 trash = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId, deleted: true).Select(Row),
             });
@@ -159,6 +161,27 @@ namespace HpskSite.Controllers
                 url = slug == null ? null : g.OwnerUrl + slug + "/", hasUnpublishedChanges = page.HasUnpublishedChanges, published = page.PublishedVersionId != null,
                 blocksJson = version.BlocksJson, savedDate = version.SavedDate,
             });
+        }
+
+        private sealed class DocRow
+        {
+            public int Id { get; set; }
+            public string Title { get; set; } = "";
+            public int AccessLevel { get; set; }
+        }
+
+        /// <summary>Föreningens dokument att välja i ett dokumentblock: bara titel och nivå, aldrig filen. Bara ägarens egna.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ")]
+        public async Task<IActionResult> Documents(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            var typeInt = g.OwnerType == SiteTemplates.Club ? HpskSite.Models.DocumentOwnerType.Club : HpskSite.Models.DocumentOwnerType.Region;
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var docs = scope.Database.Fetch<DocRow>(
+                "SELECT Id, Title, AccessLevel FROM dbo.Documents WHERE OwnerType = @0 AND OwnerId = @1 ORDER BY Title", typeInt, g.OwnerId);
+            return Json(new { success = true, documents = docs.Select(d => new { id = d.Id, title = d.Title, level = HpskSite.Models.DocumentAccessLevel.GetLabel(d.AccessLevel) }) });
         }
 
         // ── Skriva ────────────────────────────────────────────────────────────

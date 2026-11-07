@@ -1,0 +1,26 @@
+/* Hemsidan (klubbsidorna 2b): redigeringsytan för klubbens och kretsens egna sidor. Bootstrap 5 + ljus/mörk via bootstrap-variabler. */
+#hemsidan-app .hs-card { border: 1px solid var(--bs-border-color); border-radius: .5rem; background: var(--bs-body-bg); }
+#hemsidan-app .hs-choice { display: block; border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem 1rem; cursor: pointer; margin-bottom: .5rem; }
+#hemsidan-app .hs-choice:hover { border-color: var(--bs-primary); }
+#hemsidan-app .hs-choice input { margin-right: .6rem; }
+#hemsidan-app .hs-choice.active { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+#hemsidan-app .hs-choice .hs-sub { display: block; font-size: .875rem; color: var(--bs-secondary-color); margin-left: 1.6rem; }
+#hemsidan-app .hs-block { border: 1px solid var(--bs-border-color); border-radius: .5rem; margin-bottom: 1rem; background: var(--bs-body-bg); }
+#hemsidan-app .hs-block-head { display: flex; align-items: center; gap: .5rem; padding: .5rem .75rem; border-bottom: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg); border-radius: .5rem .5rem 0 0; flex-wrap: wrap; }
+#hemsidan-app .hs-block-head .hs-type { font-weight: 600; flex: 1 1 auto; }
+#hemsidan-app .hs-block-body { padding: .75rem; }
+#hemsidan-app .hs-status { font-size: .875rem; color: var(--bs-secondary-color); min-width: 9rem; }
+#hemsidan-app .hs-status.err { color: var(--bs-danger); }
+#hemsidan-app .btn, #hemsidan-app .form-select, #hemsidan-app .form-control { min-height: 2.5rem; }
+#hemsidan-app .hs-bar { position: sticky; top: 0; z-index: 5; background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color); padding: .5rem 0; margin-bottom: 1rem; }
+#hemsidan-app .ck-editor__editable { min-height: 9rem; }
+#hemsidan-app .hs-badge-0 { background: var(--bs-success); }
+#hemsidan-app .hs-badge-1, #hemsidan-app .hs-badge-2 { background: var(--bs-primary); }
+#hemsidan-app .hs-badge-3 { background: var(--bs-warning); color: #000; }
+#hemsidan-app .hs-badge-4 { background: var(--bs-secondary); }
+@media (max-width: 767.98px) {
+  #hemsidan-app .hs-block-head .btn { min-width: 2.75rem; min-height: 2.75rem; }
+  #hemsidan-app table.hs-list thead { display: none; }
+  #hemsidan-app table.hs-list tr { display: block; border: 1px solid var(--bs-border-color); border-radius: .5rem; margin-bottom: .75rem; padding: .5rem .75rem; }
+  #hemsidan-app table.hs-list td { display: block; border: 0; padding: .15rem 0; }
+}

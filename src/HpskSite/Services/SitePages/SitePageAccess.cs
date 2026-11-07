@@ -95,11 +95,15 @@ namespace HpskSite.Services.SitePages
         private readonly SitePageReader _reader;
         private readonly ILogger<SitePageAccessFilter> _logger;
 
-        public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, SitePageReader reader, ILogger<SitePageAccessFilter> logger)
+        private readonly AdminAuthorizationService _auth;
+
+        public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, SitePageReader reader, AdminAuthorizationService auth,
+            ILogger<SitePageAccessFilter> logger)
         {
             _viewers = viewers;
             _ctx = ctx;
             _reader = reader;
+            _auth = auth;
             _logger = logger;
         }
 
@@ -115,6 +119,17 @@ namespace HpskSite.Services.SitePages
         {
             try
             {
+                if (req.IsHemsidan)
+                {
+                    // Redigeringsytan: ägarens EGEN admin (varken sajt- eller kretsadmin), annars 404 för alla — även utloggade.
+                    string? code = null;
+                    if (req.OwnerType == SiteTemplates.Region && _ctx.TryGetUmbracoContext(out var huc) && huc.Content != null)
+                        code = huc.Content.GetById(req.OwnerId)?.Value<string>("regionCode");
+                    var own = req.OwnerType == SiteTemplates.Club ? await _auth.IsOwnClubAdmin(req.OwnerId) : await _auth.IsOwnRegionAdmin(code ?? "");
+                    if (!own) { context.Result = new NotFoundResult(); return false; }
+                    return true;
+                }
+
                 var template = SiteTemplates.For(req.OwnerType);
                 SitePageDef? page;
                 if (req.IsFreePage)
