@@ -12,6 +12,8 @@ namespace HpskSite.Services.SitePages
         public int? TemplateVersion { get; set; }
         public DateTime? EnabledDate { get; set; }
         public int? EnabledByMemberId { get; set; }
+        public bool EditingEnabled { get; set; }
+        public DateTime? TermsAcceptedDate { get; set; }
     }
 
     /// <summary>
@@ -208,7 +210,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopeProvider!.CreateScope(autoComplete: true);
             return scope.Database.Fetch<SiteOwnerRow>(
-                "SELECT OwnerType, OwnerId, IsEnabled, TemplateVersion, EnabledDate, EnabledByMemberId FROM dbo.SiteOwner ORDER BY OwnerType, OwnerId");
+                "SELECT OwnerType, OwnerId, IsEnabled, TemplateVersion, EnabledDate, EnabledByMemberId, EditingEnabled, TermsAcceptedDate FROM dbo.SiteOwner ORDER BY OwnerType, OwnerId");
         }
 
         protected virtual void WriteRow(string ownerType, int ownerId, bool enabled, int templateVersion, int? byMemberId)

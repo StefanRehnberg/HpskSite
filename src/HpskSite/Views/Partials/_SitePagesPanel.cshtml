@@ -37,15 +37,27 @@
     function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
     function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
 
+    // Egen redigering (brytare 2): bara när brytare 1 är på. Klubb kräver godkänd DPA (servern prövar), krets kräver bekräftat ansvarsavtal.
+    function editingCell(o) {
+        if (!o.enabled) return '<span class="text-body-secondary">–</span>';
+        var state = o.editing ? '<span class="badge text-bg-success">På</span>' : '<span class="badge text-bg-secondary">Av</span>';
+        var info = o.type === 'Club' ? (o.dpaAccepted ? '' : ' <span class="text-warning small" title="Klubben har inte godkänt DPA">DPA saknas</span>') : '';
+        var terms = o.editing ? ' <span class="small text-body-secondary">' + (o.termsAccepted ? 'villkor godkända' : 'villkor ej godkända') + '</span>' : '';
+        var label = o.editing ? 'Slå av redigering' : (o.type === 'Region' ? 'Slå på (kretsen har ansvarsavtal)' : 'Slå på redigering');
+        return state + info + terms + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-edit-type="' + esc(o.type) + '" data-sgp-edit-id="' + esc(o.id)
+            + '" data-sgp-edit="' + (o.editing ? '0' : '1') + '">' + label + '</button>';
+    }
+
     function render(d) {
         var c = d.counts;
         count.textContent = 'Klubbar på: ' + c.clubsOn + ' av ' + c.clubs + ' · Kretsar på: ' + c.regionsOn + ' av ' + c.regions
             + ' · visar ' + d.shown + ' av ' + d.total + ' · mallversion klubb ' + d.clubTemplateVersion + ', krets ' + d.regionTemplateVersion;
         if (!d.owners.length) { out.innerHTML = '<div class="text-body-secondary py-2">Inga träffar.</div>'; return; }
-        var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th>Typ</th><th>Krets</th><th>Läge</th><th class="text-end">Åtgärd</th></tr></thead><tbody>';
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th>Typ</th><th>Krets</th><th>Läge</th><th>Egen redigering</th><th class="text-end">Åtgärd</th></tr></thead><tbody>';
         d.owners.forEach(function (o) {
             html += '<tr><td>' + esc(o.name) + '</td><td>' + (o.type === 'Club' ? 'Klubb' : 'Krets') + '</td><td>' + esc(o.region || '') + '</td>'
                 + '<td>' + (o.enabled ? '<span class="badge text-bg-success">På</span> <span class="text-body-secondary">mall ' + esc(o.templateVersion) + '</span>' : '<span class="badge text-bg-secondary">Av</span>') + '</td>'
+                + '<td>' + editingCell(o) + '</td>'
                 + '<td class="text-end"><button type="button" class="btn btn-outline-secondary btn-sm" data-sgp-type="' + esc(o.type) + '" data-sgp-id="' + esc(o.id)
                 + '" data-sgp-enable="' + (o.enabled ? '0' : '1') + '">' + (o.enabled ? 'Slå av' : 'Slå på') + '</button></td></tr>';
         });
@@ -84,8 +96,35 @@
         }
     }
 
+    async function setEditing(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpEditType);
+            fd.append('ownerId', btn.dataset.sgpEditId);
+            fd.append('enabled', btn.dataset.sgpEdit === '1' ? 'true' : 'false');
+            if (btn.dataset.sgpEditType === 'Region') fd.append('confirmAgreement', 'true');
+            var r = await fetch(BASE + '/SetEditing', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
     // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
     out.addEventListener('click', function (e) {
+        var eb = e.target.closest('button[data-sgp-edit-id]');
+        if (eb) {
+            if (eb.dataset.armed === '1') { eb.dataset.armed = ''; setEditing(eb); return; }
+            eb.dataset.label = eb.textContent; eb.dataset.armed = '1'; eb.textContent = 'Tryck igen';
+            setTimeout(function () { if (eb.dataset.armed === '1') { eb.dataset.armed = ''; eb.textContent = eb.dataset.label; } }, 6000);
+            return;
+        }
         var btn = e.target.closest('button[data-sgp-id]');
         if (!btn) return;
         if (btn.dataset.armed === '1') { btn.dataset.armed = ''; set(btn); return; }

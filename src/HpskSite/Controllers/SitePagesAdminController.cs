@@ -33,10 +33,11 @@ namespace HpskSite.Controllers
         private readonly SiteOwnerService _owners;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly DpaAcceptanceService _dpa;
 
         public SitePagesAdminController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
-            AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, IMemberManager memberManager, IMemberService memberService)
+            AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, IMemberManager memberManager, IMemberService memberService, DpaAcceptanceService dpa)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth;
@@ -44,6 +45,50 @@ namespace HpskSite.Controllers
             _owners = owners;
             _memberManager = memberManager;
             _memberService = memberService;
+            _dpa = dpa;
+        }
+
+        /// <summary>
+        /// Brytare 2 (egen redigering) per ägare. Kräver brytare 1 PÅ. <b>Hård grind (plan v2 §7):</b> en klubb måste ha godkänt personuppgiftsbiträdesavtalet
+        /// (DPA, aktuell version) innan egen redigering slås på; en krets kräver att sajtadmin uttryckligen bekräftar att PUB-/ansvarsavtal finns
+        /// (<paramref name="confirmAgreement"/>) tills kretsens avtal är byggt. Att slå av kräver ingen grind. Loggas av <see cref="SiteOwnerService"/>.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> SetEditing(string ownerType, int ownerId, bool enabled, bool confirmAgreement = false)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region) return Json(new { success = false, message = "Okänd ägartyp." });
+            if (ownerId <= 0) return Json(new { success = false, message = "Ogiltigt id." });
+
+            var alias = ownerType == SiteTemplates.Club ? "club" : "regionalPage";
+            int found;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+                found = scope.Database.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM umbracoNode n JOIN umbracoContent c ON c.nodeId = n.id JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, ownerId);
+            if (found != 1) return Json(new { success = false, message = "Det här är inte en " + (ownerType == SiteTemplates.Club ? "klubb" : "krets") + "." });
+
+            if (enabled)
+            {
+                var row = _owners.ListAll().FirstOrDefault(r => r.OwnerType == ownerType && r.OwnerId == ownerId);
+                if (row == null || !row.IsEnabled) return Json(new { success = false, message = "Slå på den nya sidstrukturen först." });
+                if (ownerType == SiteTemplates.Club)
+                {
+                    var dpa = await _dpa.GetStatusForClubAsync(ownerId);
+                    if (!dpa.Accepted)
+                        return Json(new { success = false, code = "dpa", message = "Klubben har inte godkänt personuppgiftsbiträdesavtalet (version " + dpa.CurrentVersion + "). Egen redigering kan inte slås på före det." });
+                }
+                else if (!confirmAgreement)
+                    return Json(new { success = false, code = "agreement", message = "Bekräfta att kretsen har ett ansvarsavtal innan egen redigering slås på." });
+            }
+
+            var cur = await _memberManager.GetCurrentMemberAsync();
+            var memberId = cur?.Email == null ? (int?)null : _memberService.GetByEmail(cur.Email)?.Id;
+            try { _owners.SetEditing(ownerType, ownerId, enabled, memberId); }
+            catch (InvalidOperationException ex) { return Json(new { success = false, message = ex.Message }); }
+            return Json(new { success = true });
         }
 
         public sealed class OwnerNodeRow
@@ -82,6 +127,7 @@ ORDER BY ct.alias, n.[text]");
                 return Json(new { success = false, message = "Tabellen SiteOwner kunde inte läsas — är Migrations/create-site-owner-table.sql körd? (" + ex.GetBaseException().Message + ")" });
             }
 
+            var dpa = await _dpa.GetAllStatusesAsync();
             var all = nodes.Select(n =>
             {
                 var ownerType = n.Alias == "club" ? SiteTemplates.Club : SiteTemplates.Region;
@@ -95,6 +141,9 @@ ORDER BY ct.alias, n.[text]");
                     enabled = row?.IsEnabled == true,
                     templateVersion = row?.TemplateVersion,
                     enabledDate = row?.EnabledDate,
+                    editing = row?.IsEnabled == true && row.EditingEnabled,
+                    termsAccepted = row?.TermsAcceptedDate != null,
+                    dpaAccepted = ownerType == SiteTemplates.Club && dpa.TryGetValue(n.Id, out var st) && st.Accepted,
                 };
             }).ToList();
 
