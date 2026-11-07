@@ -61,6 +61,32 @@ namespace HpskSite.Services.SitePages
         public bool IsEnabled(string ownerType, int ownerId) =>
             ownerId > 0 && Current().Enabled.Contains(Key(ownerType, ownerId));
 
+        /// <summary>
+        /// Brytare 2: får ägarens admin redigera egna sidor? Effektivt läge = <c>IsEnabled AND EditingEnabled</c> — på ETT ställe
+        /// (v3 A1). Slås brytare 1 av ser nästa begäran AV, och slås den på igen finns innehållet kvar.
+        /// </summary>
+        public bool IsEditingEnabled(string ownerType, int ownerId)
+        {
+            if (ownerId <= 0) return false;
+            var key = Key(ownerType, ownerId);
+            var s = Current();
+            return s.Enabled.Contains(key) && s.Editing.Contains(key);
+        }
+
+        /// <summary>Slå på eller av brytare 2. <see cref="Set"/> rör aldrig den. Raden måste finnas (brytare 1 först).</summary>
+        public void SetEditing(string ownerType, int ownerId, bool enabled, int? byMemberId)
+        {
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region)
+                throw new ArgumentOutOfRangeException(nameof(ownerType), ownerType, "Okänd ägartyp");
+            if (ownerId <= 0) throw new ArgumentOutOfRangeException(nameof(ownerId), ownerId, "Ogiltigt id");
+            if (WriteEditing(ownerType, ownerId, enabled) == 0)
+                throw new InvalidOperationException($"{ownerType} {ownerId} har ingen rad i SiteOwner: slå på den nya sidstrukturen först.");
+            ClearLocal();
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.SiteOwners);
+            _logger.LogWarning("Klubbsidorna: egen redigering för {OwnerType} {OwnerId} {State} av medlem {MemberId}",
+                ownerType, ownerId, enabled ? "PÅ" : "AV", byMemberId);
+        }
+
         /// <summary>Slå på eller av. Skrivs med MERGE; cachen töms och de andra instanserna meddelas efter att skrivningen är klar.</summary>
         public void Set(string ownerType, int ownerId, bool enabled, int? byMemberId)
         {
@@ -118,8 +144,9 @@ namespace HpskSite.Services.SitePages
             try
             {
                 var enabled = LoadEnabled();
+                var editing = LoadEditing();
                 if (_warnedMissing) { _warnedMissing = false; _logger.LogInformation("Tabellen SiteOwner finns nu."); }
-                return new Snapshot(enabled, _now() + Ttl);
+                return new Snapshot(enabled, editing, _now() + Ttl);
             }
             catch (Exception ex) when (IsMissingTable(ex))
             {
@@ -128,13 +155,35 @@ namespace HpskSite.Services.SitePages
                     _warnedMissing = true;
                     _logger.LogError("Tabellen SiteOwner saknas — klubbsidorna är AV för alla (dagens vy). Kör Migrations/create-site-owner-table.sql.");
                 }
-                return new Snapshot(new HashSet<string>(StringComparer.Ordinal), _now() + RetryAfterMissingTable);
+                return new Snapshot(new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal), _now() + RetryAfterMissingTable);
             }
             catch (Exception ex)
             {
                 // Senast kända mängd om det finns en (den var rätt för högst fem minuter sedan), annars AV.
                 _logger.LogError(ex, "SiteOwner kunde inte läsas — {What}", previous != null ? "den senast kända mängden används" : "klubbsidorna är AV tills vidare");
-                return new Snapshot(previous?.Enabled ?? new HashSet<string>(StringComparer.Ordinal), _now() + RetryAfterFailure);
+                return new Snapshot(previous?.Enabled ?? new HashSet<string>(StringComparer.Ordinal),
+                    previous?.Editing ?? new HashSet<string>(StringComparer.Ordinal), _now() + RetryAfterFailure);
+            }
+        }
+
+        /// <summary>
+        /// Ägare med brytare 2 (egen redigering) — läses i samma snapshot som brytare 1. Saknas kolumnen (migreringen
+        /// <c>create-site-pages-tables.sql</c> inte körd) är redigering AV för alla och det loggas Critical: brytare 1 ska
+        /// aldrig bli tyst AV av att brytare 2 inte kan läsas. Virtuell för testerna.
+        /// </summary>
+        protected virtual HashSet<string> LoadEditing()
+        {
+            try
+            {
+                using var scope = _scopeProvider!.CreateScope(autoComplete: true);
+                var rows = scope.Database.Fetch<SiteOwnerRow>(
+                    "SELECT OwnerType, OwnerId FROM dbo.SiteOwner WHERE IsEnabled = 1 AND EditingEnabled = 1");
+                return rows.Select(r => Key(r.OwnerType, r.OwnerId)).ToHashSet(StringComparer.Ordinal);
+            }
+            catch (Exception ex) when (IsMissingColumn(ex))
+            {
+                _logger.LogCritical("KLUBBSIDOR: kolumnen SiteOwner.EditingEnabled saknas — egen redigering är AV för alla. Kör Migrations/create-site-pages-tables.sql.");
+                return new HashSet<string>(StringComparer.Ordinal);
             }
         }
 
@@ -171,6 +220,16 @@ WHEN NOT MATCHED THEN INSERT (OwnerType, OwnerId, IsEnabled, TemplateVersion, En
             }
         }
 
+        protected virtual int WriteEditing(string ownerType, int ownerId, bool enabled)
+        {
+            using var scope = _scopeProvider!.CreateScope();
+            var n = scope.Database.Execute(
+                "UPDATE dbo.SiteOwner SET EditingEnabled = @2, UpdatedDate = SYSDATETIME() WHERE OwnerType = @0 AND OwnerId = @1",
+                ownerType, ownerId, enabled);
+            scope.Complete();
+            return n;
+        }
+
         protected virtual int DeleteRow(string ownerType, int ownerId)
         {
             using var scope = _scopeProvider!.CreateScope();
@@ -187,6 +246,14 @@ WHEN NOT MATCHED THEN INSERT (OwnerType, OwnerId, IsEnabled, TemplateVersion, En
             return false;
         }
 
-        private sealed record Snapshot(HashSet<string> Enabled, DateTime ExpiresAt);
+        /// <summary>SQL-fel 207 = "Invalid column name": kolumnen finns inte.</summary>
+        protected static bool IsMissingColumn(Exception ex)
+        {
+            for (var e = ex; e != null; e = e.InnerException)
+                if (e is SqlException sql && sql.Number == 207) return true;
+            return false;
+        }
+
+        private sealed record Snapshot(HashSet<string> Enabled, HashSet<string> Editing, DateTime ExpiresAt);
     }
 }

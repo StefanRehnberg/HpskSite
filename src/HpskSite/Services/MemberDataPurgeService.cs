@@ -188,6 +188,12 @@ namespace HpskSite.Services
             // Klubbsidorna steg 1 (2026-11-07): vem som slog på den nya sidstrukturen för en klubb/krets är en aktör, inte ett
             // ämne. Pekaren släpps (NULL-bar), raden och brytaren står kvar. ClearSql får inte vara tom eller nämna medlemskolumnen.
             ("SiteOwner",                            "EnabledByMemberId", "UpdatedDate = UpdatedDate"),
+            // Klubbsidorna steg 2a (2026-11-08): den som sparade en sida, en version, en loggrad eller öppnade stödläget är en aktör.
+            // Pekaren släpps (alla är NULL-bara); sidan, versionen och loggraden står kvar (loggen bär bara hash, aldrig text).
+            ("SitePage",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
+            ("SitePageVersion",                      "SavedByMemberId",   "SavedDate = SavedDate"),
+            ("SiteAudit",                            "ActorMemberId",     "CreatedDate = CreatedDate"),
+            ("SiteSupportGrant",                     "MemberId",          "CreatedDate = CreatedDate"),
         };
 
         /// <summary>
