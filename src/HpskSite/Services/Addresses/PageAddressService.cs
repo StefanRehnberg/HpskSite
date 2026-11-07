@@ -311,6 +311,16 @@ namespace HpskSite.Services.Addresses
             => ReservedOwnerChildSegments.Contains(segment, StringComparer.OrdinalIgnoreCase) || IsYearSegment(segment, out _);
 
         /// <summary>
+        /// Klubbsidorna steg 1/2: kretsens sidor i den nya sidstrukturen (<c>/{krets}/rekord/</c>, <c>/{krets}/kalender/</c> …) delar
+        /// namnrymd med kretsens klubbar (<c>/{krets}/{klubb}/</c>). En klubb som heter som en av dem skulle skugga kretsens sida
+        /// (eller tvärtom), så klubbnamnet vägras. Gäller också <c>hemsidan</c> (steg 2:s redigeringsyta).
+        /// </summary>
+        public static bool IsRegionTemplateSlug(string segment)
+            => string.Equals(segment, "hemsidan", StringComparison.OrdinalIgnoreCase)
+               || HpskSite.Services.SitePages.SiteTemplates.Slugs(HpskSite.Services.SitePages.SiteTemplates.Region)
+                    .Contains(segment, StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Delar två sorter namnrymd hos ägaren? Bara hos förbundets mästerskap, vars adress saknar sortsegment.
         /// </summary>
         public static bool SharesNamespace(PageAddressOwner owner, string kindA, string kindB)

@@ -97,6 +97,8 @@ namespace HpskSite.Services.Addresses
             {
                 if (PageAddressRules.IsReservedOwnerChildSegment(segment))
                     return $"Klubben kan inte heta \"{e.Name}\": ordet används i klubbens och kretsens adresser.";
+                if (PageAddressRules.IsRegionTemplateSlug(segment))
+                    return $"Klubben kan inte heta \"{e.Name}\": ordet används för kretsens egna sidor (till exempel Rekord och Kalender).";
                 var region = _content.GetById(parent.ParentId);
                 if (region?.ContentType.Alias == "regionalPage"
                     && ChildSegments(region.Id).Any(c => c.Id != parent.Id && c.Id != e.Id && SameSegment(c, segment)))
