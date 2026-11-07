@@ -11,6 +11,15 @@ namespace HpskSite.Services.SitePages
     public class SiteOwnerSchemaGuardHostedService : IsolatedBackgroundService
     {
         private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
+
+        /// <summary>
+        /// Alla Site*-tabeller sidstrukturen läser eller skriver. Ny tabell = en rad här (SiteSchemaTests fäller
+        /// bygget om en migrering i Migrations/ skapar en Site*-tabell som inte står i listan).
+        /// </summary>
+        public static readonly IReadOnlyList<string> RequiredTables = new[] { "dbo.SiteOwner" };
+
+        /// <summary>De tabeller i <see cref="RequiredTables"/> som <paramref name="exists"/> inte känner igen. Ren funktion.</summary>
+        public static List<string> MissingTables(Func<string, bool> exists) => RequiredTables.Where(t => !exists(t)).ToList();
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<SiteOwnerSchemaGuardHostedService> _logger;
 
@@ -30,10 +39,12 @@ namespace HpskSite.Services.SitePages
                 using var scope = _scopeFactory.CreateScope();
                 var factory = scope.ServiceProvider.GetRequiredService<IUmbracoDatabaseFactory>();
                 using var db = factory.CreateDatabase();
-                var exists = db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0) IS NULL THEN 0 ELSE 1 END", "dbo.SiteOwner") == 1;
-                if (!exists)
+                var missing = MissingTables(t =>
+                    db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0) IS NULL THEN 0 ELSE 1 END", t) == 1);
+                if (missing.Count > 0)
                     _logger.LogCritical(
-                        "KLUBBSIDOR: tabellen SiteOwner saknas — den nya sidstrukturen är AV för alla klubbar och kretsar. Kör Migrations/create-site-owner-table.sql (guardad, säker att köra om).");
+                        "KLUBBSIDOR: tabellerna {Tables} saknas — den nya sidstrukturen är AV eller halv för klubbar och kretsar. Kör migreringarna i Migrations/ (create-site-*.sql, guardade, säkra att köra om).",
+                        string.Join(", ", missing));
             }
             catch (Exception ex)
             {
