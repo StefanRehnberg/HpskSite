@@ -10,8 +10,11 @@
     @* Hem och Admin är Bootstrap-flikar på rotadressen (de växlar utan omladdning, med dagens flik-id:n och hashtolkare);
        varje annan post är en länk. Alla har id "{panel}-tab" och data-bs-target, så att dagens skript och djuplänkar
        (getElementById('clubCalendar-tab').click(), #clubCompetitions m.fl.) leder rätt: ett klick på en länk navigerar. *@
-    <ul class="nav nav-tabs" id="clubPageTabs" role="tablist">
-        @foreach (var item in sp.Menu())
+    var menuItems = sp.Menu().ToList();
+    var currentLabel = (menuItems.FirstOrDefault(i => i.Current) ?? menuItems.FirstOrDefault())?.Page.Label ?? "";
+    await Html.RenderPartialAsync("_SiteMenuToggle", ("clubPageTabs", currentLabel));
+    <ul class="nav nav-tabs collapse d-md-flex" id="clubPageTabs" role="tablist">
+        @foreach (var item in menuItems)
         {
             var icon = item.Page.Key switch
             {

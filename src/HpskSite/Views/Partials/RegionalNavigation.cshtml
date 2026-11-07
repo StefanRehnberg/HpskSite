@@ -9,8 +9,11 @@
 {
     @* Hem och Administration är Bootstrap-flikar på rotadressen; varje annan post är en länk med id "{panel}-tab"
        (se ClubNavigation.cshtml). *@
-    <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
-        @foreach (var item in sp.Menu())
+    var menuItems = sp.Menu().ToList();
+    var currentLabel = (menuItems.FirstOrDefault(i => i.Current) ?? menuItems.FirstOrDefault())?.Page.Label ?? "";
+    await Html.RenderPartialAsync("_SiteMenuToggle", ("regionPageTabs", currentLabel));
+    <ul class="nav nav-tabs mb-4 collapse d-md-flex" id="regionPageTabs" role="tablist">
+        @foreach (var item in menuItems)
         {
             var icon = item.Page.Key switch
             {
