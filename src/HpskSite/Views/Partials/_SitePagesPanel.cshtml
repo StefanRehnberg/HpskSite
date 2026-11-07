@@ -1,0 +1,106 @@
+@*
+    Klubbsidorna steg 1: slå på eller av den nya sidstrukturen per klubb och krets. Bara sajtadministratör.
+    AV = dagens vy. Ändringen syns direkt för alla besökare (cachen töms), så varje knapp kräver ett andra tryck.
+*@
+<div id="sgpPanel" class="mt-5">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-layout-text-window me-2"></i>Klubbsidor</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        Den nya sidstrukturen ger klubbens och kretsens flikar riktiga adresser (till exempel <code>/halland/klubben/banor/</code>).
+        Innehållet och vem som ser vad är detsamma som förut. Av betyder dagens vy. Ny klubb är av tills du slår på den.
+    </p>
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
+        <input type="search" id="sgpQ" class="form-control form-control-sm" style="max-width:16rem" placeholder="Sök klubb eller krets" aria-label="Sök klubb eller krets" />
+        <select id="sgpType" class="form-select form-select-sm" style="max-width:9rem" aria-label="Typ">
+            <option value="">Alla</option>
+            <option value="Club">Klubbar</option>
+            <option value="Region">Kretsar</option>
+        </select>
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="sgpOn" />
+            <label class="form-check-label" for="sgpOn">Bara påslagna</label>
+        </div>
+        <span id="sgpCount" class="ms-auto small text-body-secondary"></span>
+    </div>
+    <div id="sgpOut" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__sgpInit) return; window.__sgpInit = true;
+    var BASE = '/umbraco/surface/SitePagesAdmin';
+    var root = document.getElementById('sgpPanel');
+    var out = document.getElementById('sgpOut');
+    var count = document.getElementById('sgpCount');
+    var timer = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
+
+    function render(d) {
+        var c = d.counts;
+        count.textContent = 'Klubbar på: ' + c.clubsOn + ' av ' + c.clubs + ' · Kretsar på: ' + c.regionsOn + ' av ' + c.regions
+            + ' · visar ' + d.shown + ' av ' + d.total + ' · mallversion klubb ' + d.clubTemplateVersion + ', krets ' + d.regionTemplateVersion;
+        if (!d.owners.length) { out.innerHTML = '<div class="text-body-secondary py-2">Inga träffar.</div>'; return; }
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th>Typ</th><th>Krets</th><th>Läge</th><th class="text-end">Åtgärd</th></tr></thead><tbody>';
+        d.owners.forEach(function (o) {
+            html += '<tr><td>' + esc(o.name) + '</td><td>' + (o.type === 'Club' ? 'Klubb' : 'Krets') + '</td><td>' + esc(o.region || '') + '</td>'
+                + '<td>' + (o.enabled ? '<span class="badge text-bg-success">På</span> <span class="text-body-secondary">mall ' + esc(o.templateVersion) + '</span>' : '<span class="badge text-bg-secondary">Av</span>') + '</td>'
+                + '<td class="text-end"><button type="button" class="btn btn-outline-secondary btn-sm" data-sgp-type="' + esc(o.type) + '" data-sgp-id="' + esc(o.id)
+                + '" data-sgp-enable="' + (o.enabled ? '0' : '1') + '">' + (o.enabled ? 'Slå av' : 'Slå på') + '</button></td></tr>';
+        });
+        out.innerHTML = html + '</tbody></table></div>';
+    }
+
+    async function load(note) {
+        out.textContent = 'Läser…';
+        var p = new URLSearchParams({ q: document.getElementById('sgpQ').value, type: document.getElementById('sgpType').value, onlyOn: document.getElementById('sgpOn').checked ? 'true' : 'false', take: '100' });
+        try {
+            var r = await fetch(BASE + '/Overview?' + p.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            render(d);
+            if (note) out.insertAdjacentHTML('afterbegin', '<div class="mb-2">' + note + '</div>');
+        } catch (e) { out.innerHTML = '<span class="text-danger">Läget gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+
+    async function set(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpType);
+            fd.append('ownerId', btn.dataset.sgpId);
+            fd.append('enabled', btn.dataset.sgpEnable === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/Set', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    out.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-sgp-id]');
+        if (!btn) return;
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; set(btn); return; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = 'Tryck igen';
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+    });
+    document.getElementById('sgpQ').addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(); }, 300); });
+    document.getElementById('sgpType').addEventListener('change', function () { load(); });
+    document.getElementById('sgpOn').addEventListener('change', function () { load(); });
+
+    // Laddas när Underhåll-fliken öppnas första gången (undviker en fråga för varje sidvisning av /admin-page).
+    var tab = document.querySelector('[data-bs-target="#underhall"]');
+    var loaded = false;
+    function first() { if (!loaded) { loaded = true; load(); } }
+    if (tab) tab.addEventListener('shown.bs.tab', first);
+    if (document.getElementById('underhall') && document.getElementById('underhall').classList.contains('active')) first();
+})();
+</script>
