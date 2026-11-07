@@ -6,6 +6,7 @@
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
+@inject HpskSite.Services.BoardRoleService BoardRoles
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -55,9 +56,18 @@
         isRegionalAdmin = await AuthorizationService.IsRegionalAdminForRegion(regionCode);
     }
 
+    // Kretsstyrelsen = en aktiv styrelseroll hos kretsen (klubbsidorna F1; "kretsmedlem" kommer med 2d).
+    var isRegionBoard = false;
+    if (currentMember != null)
+    {
+        var boardMember = MemberService.GetByEmail(currentMember.Email ?? string.Empty);
+        if (boardMember != null)
+            isRegionBoard = BoardRoles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, Model.Id, boardMember.Id);
+    }
+
     // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
-        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, false, false, isRegionalAdmin));
+        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, false, isRegionBoard, isRegionalAdmin));
     ViewBag.sitePageView = sp;
 }
 

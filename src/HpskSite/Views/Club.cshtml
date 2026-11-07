@@ -8,6 +8,7 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
 @inject HpskSite.Services.ClubRosterService ClubRoster
+@inject HpskSite.Services.BoardRoleService BoardRoles
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -36,6 +37,7 @@
     var isLoggedIn = currentMember != null;
     var isClubAdmin = false;
     var isClubMember = false;
+    var isClubBoard = false;
 
     // Check if current member is club admin or member for this specific club
     if (currentMember != null && clubId > 0)
@@ -52,6 +54,8 @@
             // Aktiv medlem = en aktiv rad i ClubMembership (status annan än Utträdd/Avliden), aldrig de råa
             // egenskaperna, som räknade en utträdd som medlem (Stefans beslut 2026-11-07).
             isClubMember = ClubRoster.ActiveMemberIds(clubId).Contains(member.Id);
+            // Styrelse = en aktiv styrelseroll (BoardRoles.IsBoardMember), den enda källan för styrelsen (klubbsidorna F1).
+            isClubBoard = BoardRoles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Club, clubId, member.Id);
         }
     }
 
@@ -72,7 +76,7 @@
 
     // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, Model.Url(),
-        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, false, isClubAdmin));
+        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, isClubBoard, isClubAdmin));
     ViewBag.sitePageView = sp;
 
     // OpenGraph meta tags - use logo for social sharing preview
