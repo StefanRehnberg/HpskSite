@@ -88,6 +88,9 @@ namespace HpskSite.Routing
             // Efter ovanstående, så att gamla händelseadresser och klubbens långa form redan är omdirigerade.
             builder.ContentFinders().Insert<SitePageContentFinder>(3);
             builder.Services.AddScoped<SitePageViewFactory>();
+            // Efter inloggningen: tittaren prövas mot sidan finder pekat ut (404 / inloggning). Se SitePageAccessFilter.
+            builder.Services.AddScoped<SiteViewerResolver>();
+            builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }
 }
