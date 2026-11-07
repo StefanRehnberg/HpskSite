@@ -19,6 +19,8 @@ namespace HpskSite.Tests
         {
             var missing = SiteOwnerSchemaGuardHostedService.MissingTables(t => t != "dbo.SiteOwner");
             Assert.Equal(new[] { "dbo.SiteOwner" }, missing);
+            Assert.Contains("dbo.SitePage", SiteOwnerSchemaGuardHostedService.RequiredTables);
+            Assert.Contains("dbo.SitePageVersion", SiteOwnerSchemaGuardHostedService.RequiredTables);
             Assert.Empty(SiteOwnerSchemaGuardHostedService.MissingTables(_ => true));
         }
 

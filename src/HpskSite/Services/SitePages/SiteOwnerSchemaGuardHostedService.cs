@@ -16,7 +16,10 @@ namespace HpskSite.Services.SitePages
         /// Alla Site*-tabeller sidstrukturen läser eller skriver. Ny tabell = en rad här (SiteSchemaTests fäller
         /// bygget om en migrering i Migrations/ skapar en Site*-tabell som inte står i listan).
         /// </summary>
-        public static readonly IReadOnlyList<string> RequiredTables = new[] { "dbo.SiteOwner" };
+        public static readonly IReadOnlyList<string> RequiredTables = new[]
+        {
+            "dbo.SiteOwner", "dbo.SitePage", "dbo.SitePageVersion", "dbo.SiteMenuItem", "dbo.SitePageRef", "dbo.SiteAudit", "dbo.SiteSupportGrant"
+        };
 
         /// <summary>De tabeller i <see cref="RequiredTables"/> som <paramref name="exists"/> inte känner igen. Ren funktion.</summary>
         public static List<string> MissingTables(Func<string, bool> exists) => RequiredTables.Where(t => !exists(t)).ToList();
