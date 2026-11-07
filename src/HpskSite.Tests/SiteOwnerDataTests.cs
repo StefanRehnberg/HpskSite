@@ -71,6 +71,39 @@ namespace HpskSite.Tests
         }
 
         [SqlFact]
+        public void Villkoren_är_inte_accepterade_förrän_ägarens_admin_accepterat_den_aktuella_versionen()
+        {
+            using var f = new SiteSqlFixture();
+            f.Db.Execute("INSERT INTO dbo.SiteOwner (OwnerType, OwnerId, IsEnabled, EditingEnabled) VALUES ('Club', @0, 1, 1)", Gone);
+            Assert.False(SiteOwnerData.TermsAccepted(f.Db, "Club", Gone));
+            Assert.True(SiteOwnerData.AcceptTerms(f.Db, "Club", Gone, 7, Now));
+            Assert.True(SiteOwnerData.TermsAccepted(f.Db, "Club", Gone));
+            Assert.Equal(7, Scalar(f.Db, "SELECT TermsAcceptedByMemberId FROM dbo.SiteOwner WHERE OwnerId=@0", Gone));
+            // En äldre version av villkoren räknas inte.
+            f.Db.Execute("UPDATE dbo.SiteOwner SET TermsVersion = @1 WHERE OwnerId = @0", Gone, SiteOwnerData.CurrentTermsVersion - 1);
+            Assert.False(SiteOwnerData.TermsAccepted(f.Db, "Club", Gone));
+        }
+
+        [SqlFact]
+        public void Villkoren_hos_en_ägare_utan_rad_ger_false_och_accept_vägras()
+        {
+            using var f = new SiteSqlFixture();
+            Assert.False(SiteOwnerData.TermsAccepted(f.Db, "Club", Gone));
+            Assert.False(SiteOwnerData.AcceptTerms(f.Db, "Club", Gone, 7, Now));
+        }
+
+        [SqlFact]
+        public void Accepten_gäller_bara_den_ägare_och_den_sort_den_gavs_för()
+        {
+            using var f = new SiteSqlFixture();
+            f.Db.Execute("INSERT INTO dbo.SiteOwner (OwnerType, OwnerId, IsEnabled) VALUES ('Club', @0, 1)", Gone);
+            f.Db.Execute("INSERT INTO dbo.SiteOwner (OwnerType, OwnerId, IsEnabled) VALUES ('Region', @0, 1)", Gone);
+            SiteOwnerData.AcceptTerms(f.Db, "Club", Gone, 7, Now);
+            Assert.True(SiteOwnerData.TermsAccepted(f.Db, "Club", Gone));
+            Assert.False(SiteOwnerData.TermsAccepted(f.Db, "Region", Gone));   // sorten följer id:t
+        }
+
+        [SqlFact]
         public void En_ägare_utan_rader_ger_noll_och_kastar_inte()
         {
             using var f = new SiteSqlFixture();

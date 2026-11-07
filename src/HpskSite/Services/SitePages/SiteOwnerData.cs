@@ -13,6 +13,24 @@ namespace HpskSite.Services.SitePages
     /// </summary>
     public static class SiteOwnerData
     {
+        /// <summary>
+        /// Villkorens version. Höjs en ändring av villkoren som kräver en ny accept. ⚠️ Texten är ett UTKAST tills juristen granskat
+        /// (BBS-lagen, ansvar för klubbens innehåll, personuppgifter): ingen riktig klubb får skrivytan före dess.
+        /// </summary>
+        public const int CurrentTermsVersion = 1;
+
+        /// <summary>Har ägarens egen admin accepterat den aktuella versionen av villkoren? Läses färskt ur SQL (ingen cache).</summary>
+        public static bool TermsAccepted(IDatabase db, string ownerType, int ownerId) =>
+            db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1 AND TermsAcceptedDate IS NOT NULL AND TermsVersion >= @2",
+                ownerType, ownerId, CurrentTermsVersion) == 1;
+
+        /// <summary>Registrerar accepten (vem, när, vilken version). Returnerar false om ägaren saknar rad. En ny accept ersätter den gamla.</summary>
+        public static bool AcceptTerms(IDatabase db, string ownerType, int ownerId, int memberId, DateTime now) =>
+            db.Execute(
+                "UPDATE dbo.SiteOwner SET TermsAcceptedDate = @2, TermsAcceptedByMemberId = @3, TermsVersion = @4, UpdatedDate = @2 WHERE OwnerType = @0 AND OwnerId = @1",
+                ownerType, ownerId, now, memberId, CurrentTermsVersion) == 1;
+
         /// <summary>Raderar ägarens alla sidstrukturrader. Returnerar antalet borttagna <c>SiteOwner</c>-rader (0 eller 1).</summary>
         public static int DeleteAll(IDatabase db, string ownerType, int ownerId)
         {

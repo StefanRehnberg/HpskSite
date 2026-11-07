@@ -190,6 +190,7 @@ namespace HpskSite.Services
             ("SiteOwner",                            "EnabledByMemberId", "UpdatedDate = UpdatedDate"),
             // Klubbsidorna steg 2a (2026-11-08): den som sparade en sida, en version, en loggrad eller öppnade stödläget är en aktör.
             // Pekaren släpps (alla är NULL-bara); sidan, versionen och loggraden står kvar (loggen bär bara hash, aldrig text).
+            ("SiteOwner",                            "TermsAcceptedByMemberId", "UpdatedDate = UpdatedDate"),   // den som accepterade villkoren; accepten själv (datum, version) står kvar
             ("SitePage",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
             ("SitePageVersion",                      "SavedByMemberId",   "SavedDate = SavedDate"),
             ("SiteAudit",                            "ActorMemberId",     "CreatedDate = CreatedDate"),

@@ -46,6 +46,24 @@ namespace HpskSite.Services.SitePages
         public DateTime SavedDate { get; set; }
     }
 
+    /// <summary>Listrad: sidans rad plus dess aktuella adress (sluggen).</summary>
+    public sealed class SitePageListItem
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = "";
+        public string? PublishedTitle { get; set; }
+        public byte Visibility { get; set; }
+        public int? PublishedVersionId { get; set; }
+        public int? DraftVersionId { get; set; }
+        public int Revision { get; set; }
+        public DateTime UpdatedDate { get; set; }
+        public DateTime? DeletedDate { get; set; }
+        public string? Slug { get; set; }
+
+        /// <summary>Det användaren ser: "Publicerad", "Publicerad, med osparade ändringar" eller "Utkast".</summary>
+        public string Status => PublishedVersionId == null ? "Utkast" : DraftVersionId != null ? "Publicerad, med osparade ändringar" : "Publicerad";
+    }
+
     public enum SiteStoreOutcome
     {
         Ok,
@@ -173,6 +191,16 @@ namespace HpskSite.Services.SitePages
         public static List<SitePageRow> List(IDatabase db, string ownerType, int ownerId, bool deleted = false) =>
             db.Fetch<SitePageRow>(
                 $"SELECT {PageColumns} FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1 AND DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + " ORDER BY Title",
+                ownerType, ownerId);
+
+        /// <summary>Ägarens FRIA sidor för redigeringslistan, med aktuell adress. Aldrig innehåll. Mallkopior (systemsidor) ingår inte.</summary>
+        public static List<SitePageListItem> ListFree(IDatabase db, string ownerType, int ownerId, bool deleted = false) =>
+            db.Fetch<SitePageListItem>(
+                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate,
+                         (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug
+                  FROM dbo.SitePage p
+                  WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NULL AND p.DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + @"
+                  ORDER BY p.Title",
                 ownerType, ownerId);
 
         /// <summary>

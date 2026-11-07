@@ -93,6 +93,7 @@ namespace HpskSite.Routing
             // Läsvägen för egna sidor: läsaren är enkel (bara IScopeProvider) och används av findern, så den är en singleton.
             builder.Services.AddSingleton<SitePageReader>();
             builder.Services.AddScoped<SiteBlockDataFactory>();
+            builder.Services.AddScoped<ISiteOwnerFacts, SiteOwnerFacts>();
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }
