@@ -36,15 +36,20 @@ namespace HpskSite.Routing
         private readonly IHttpContextAccessor _http;
         private readonly SiteRouteLookup _routes;
         private readonly SiteOwnerService _owners;
+        private readonly SitePageReader _reader;
+        private readonly Umbraco.Cms.Core.Strings.IShortStringHelper _shortStrings;
         private readonly ILogger<SitePageContentFinder> _logger;
 
         public SitePageContentFinder(IUmbracoContextAccessor ctx, IHttpContextAccessor http, SiteRouteLookup routes,
-            SiteOwnerService owners, ILogger<SitePageContentFinder> logger)
+            SiteOwnerService owners, SitePageReader reader, Umbraco.Cms.Core.Strings.IShortStringHelper shortStrings,
+            ILogger<SitePageContentFinder> logger)
         {
             _ctx = ctx;
             _http = http;
             _routes = routes;
             _owners = owners;
+            _reader = reader;
+            _shortStrings = shortStrings;
             _logger = logger;
         }
 
@@ -55,10 +60,11 @@ namespace HpskSite.Routing
                 var seg = request.Uri.GetAbsolutePathDecoded().Split('/', StringSplitOptions.RemoveEmptyEntries);
                 if (seg.Length < 2) return false;
 
-                // Billigast först: finns sluggen i någon mall alls?
+                // Billigast först: finns sluggen i någon mall alls? Annars kan det vara en egen sida (steg 2) — bara när ägaren har
+                // brytare 2 PÅ, och bara för en adress som ser ut som en slugg (ingen SQL för skräp).
                 var last = seg[^1];
                 if (SiteTemplates.ClubTemplate.PageBySlug(last) == null && SiteTemplates.RegionTemplate.PageBySlug(last) == null)
-                    return false;
+                    return seg.Length >= 3 && IsSlugShaped(last) && await TryFindFreePageAsync(request, seg);
 
                 if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;
                 var cache = uc.Content;
@@ -82,14 +88,19 @@ namespace HpskSite.Routing
                 var http = _http.HttpContext;
                 if (http == null) return false;
 
-                // En sida som inte är öppen för en utloggad besökare: skicka till inloggning med återvändsadress i stället
-                // för att visa en sida som inte finns. Sluggarna är fasta och publika, så det avslöjar ingenting.
-                // (Dold är steg 2 och ger 404.) Vyn visar ändå bara den publika startsidan för en utloggad.
-                if (!SiteTemplates.For(ownerType).PageVisible(page, SiteViewer.Anonymous) && !await IsLoggedInAsync(http))
+                // En sida som inte är öppen för en utloggad besökare: inloggning med återvändsadress (Inloggade/Klubbmedlemmar) eller 404
+                // (Styrelse/Dold) — samma regel som filtret efter inloggningen (SitePageAccessRules). Sluggarna i mallen är fasta och
+                // publika, så en omdirigering avslöjar ingenting. Vyn visar ändå bara den publika startsidan för en utloggad.
+                if (!await IsLoggedInAsync(http))
                 {
-                    var back = request.Uri.AbsolutePath.TrimEnd('/') + "/";
-                    request.SetRedirect("/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(back));
-                    return true;
+                    switch (SitePageAccessRules.Decide(SiteTemplates.For(ownerType), page, SiteViewer.Anonymous))
+                    {
+                        case SitePageDecision.LoginRedirect:
+                            request.SetRedirect(LoginUrl(request));
+                            return true;
+                        case SitePageDecision.NotFound:
+                            return false;
+                    }
                 }
 
                 http.Items[SitePageRequest.ItemKey] = new SitePageRequest(ownerType, owner.Id, page.Key);
@@ -102,6 +113,61 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "SitePageContentFinder: {Path} kunde inte avgöras", request.Uri.AbsolutePath);
                 return false;
             }
+        }
+
+        private static string LoginUrl(IPublishedRequestBuilder request) =>
+            "/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(request.Uri.AbsolutePath.TrimEnd('/') + "/");
+
+        /// <summary>Ser sista segmentet ut som en slugg (a–z, 0–9, bindestreck, högst 60)? Allt annat är aldrig en egen sida: ingen SQL.</summary>
+        private static bool IsSlugShaped(string s) =>
+            s.Length is > 0 and <= SitePageSlugRules.MaxLength && s.All(c => c is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-');
+
+        /// <summary>
+        /// Klubbens/kretsens egen sida (steg 2): adressen slås upp i <c>PageAddress</c> (sorten sitepage, utan år) — bara när ägaren har
+        /// brytare 2 PÅ. En gammal adress (sluggbyte) ger 301 till den nya om sidan var öppen för minst medlemmar (v3 A8); en
+        /// Styrelse/Dold-sida ger 404. Findern avgör bara "finns och är publicerad": synligheten prövas efter inloggningen
+        /// (<see cref="SitePageAccessFilter"/>), färskt ur SQL.
+        /// </summary>
+        private async Task<bool> TryFindFreePageAsync(IPublishedRequestBuilder request, string[] seg)
+        {
+            if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;
+            var cache = uc.Content;
+            var owner = _routes.Owner(cache, seg[..^1]);
+            var ownerType = owner?.ContentType.Alias switch { "club" => SiteTemplates.Club, "regionalPage" => SiteTemplates.Region, _ => null };
+            if (owner == null || ownerType == null || !_owners.IsEditingEnabled(ownerType, owner.Id)) return false;
+
+            var hit = _reader.Resolve(ownerType, owner.Id, seg[^1].ToLowerInvariant());
+            if (hit == null) return false;
+            if (_routes.TreeRoute(cache, seg) != null) return false;   // en riktig nod på adressen har företräde
+
+            var http = _http.HttpContext;
+            if (http == null) return false;
+
+            if (!hit.IsCurrentAddress)
+            {
+                // Bara en sida som var öppen för minst medlemmar får peka vidare; en Styrelse/Dold-sida avslöjas inte.
+                if (hit.Page.VisibilityLevel > SiteVisibility.Klubbmedlemmar) return false;
+                var ownerUrl = "/" + string.Join('/', seg[..^1]) + "/";
+                request.SetRedirectPermanent(ownerUrl + hit.CurrentSlug + "/");
+                return true;
+            }
+
+            // Utloggad: samma regel som filtret efter inloggningen, men redan här så att ingen sida hinner renderas.
+            if (!await IsLoggedInAsync(http))
+            {
+                var def = new SitePageDef(SitePageRequest.FreePageKey, hit.CurrentSlug, hit.Page.Title, 0,
+                    new[] { new SiteBlockDef("page", hit.Page.VisibilityLevel) });
+                switch (SitePageAccessRules.Decide(SiteTemplates.For(ownerType), def, SiteViewer.Anonymous))
+                {
+                    case SitePageDecision.LoginRedirect: request.SetRedirect(LoginUrl(request)); return true;
+                    case SitePageDecision.NotFound: return false;
+                }
+            }
+
+            http.Items[SitePageRequest.ItemKey] = new SitePageRequest(ownerType, owner.Id, SitePageRequest.FreePageKey, hit.Page.Id);
+            request.SetPublishedContent(owner);
+            request.SetTemplate(new Umbraco.Cms.Core.Models.Template(_shortStrings, PageViews.SitePage, PageViews.SitePage));
+            return true;
         }
 
         /// <summary>Har besökaren en giltig medlemskaka? Läser kakan direkt (ingen databas).</summary>

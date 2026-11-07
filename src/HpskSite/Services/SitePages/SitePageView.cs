@@ -6,9 +6,15 @@ namespace HpskSite.Services.SitePages
     /// Finderns besked till vyn: den här begäran gäller sidan <see cref="PageKey"/> hos ägaren (en klubb eller krets).
     /// Ligger i <c>HttpContext.Items</c> under <see cref="ItemKey"/>. Saknas den är begäran ägarens rotadress (Hem).
     /// </summary>
-    public sealed record SitePageRequest(string OwnerType, int OwnerId, string PageKey)
+    public sealed record SitePageRequest(string OwnerType, int OwnerId, string PageKey, int? PageId = null)
     {
         public const string ItemKey = "Hpsk.SitePageRequest";
+
+        /// <summary>Nyckeln för en fri sida i <see cref="PageKey"/> (sidan har ingen mallnyckel; <see cref="PageId"/> pekar ut den).</summary>
+        public const string FreePageKey = "page";
+
+        /// <summary>En av ägarens egna (fria) sidor, inte en systemsida.</summary>
+        public bool IsFreePage => PageId != null && PageKey == FreePageKey;
 
         public static SitePageRequest? Current(HttpContext? http) =>
             http != null && http.Items.TryGetValue(ItemKey, out var v) ? v as SitePageRequest : null;

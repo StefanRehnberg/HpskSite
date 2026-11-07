@@ -94,7 +94,7 @@ namespace HpskSite.Tests
             using var f = new SiteSqlFixture();
             // CK_PageAddress_Kind måste tillåta 'sitepage' (migreringen). Annars kastar insättningen.
             PageAddressService.SetCurrentFlat(f.Db, PageAddressKinds.SitePage, 501, Club, "x");
-            Assert.Equal(1, Count(f.Db, "TargetKind='sitepage'"));
+            Assert.Equal(1, Count(f.Db, "TargetKind='sitepage' AND OwnerId=990001"));
         }
 
         [Fact]

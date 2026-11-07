@@ -18,15 +18,23 @@ namespace HpskSite.Services.SitePages
     }
 
     /// <summary>
-    /// Beslutet per begäran (klubbsidorna F0-spik a, plan v4 4.x). Ren funktion, testad utan databas.
-    /// Utloggad → inloggning (sluggarna är fasta och publika, så det avslöjar ingenting); inloggad utan rätt → 404.
+    /// Beslutet per begäran (klubbsidorna F0-spik a, plan v2 §4). Ren funktion, testad utan databas.
+    ///
+    /// <para><b>Åtkomstbesked:</b> en sida som är öppen för vilken inloggad medlem/klubbmedlem som helst (Inloggade, Klubbmedlemmar) skickar
+    /// en utloggad till inloggning (v3 B3: att sidan finns avslöjas medvetet, delade länkar ska fungera efter inloggning). En sida som BARA
+    /// styrelsen eller admin ser (Styrelse, Dold) ger <b>404 åt alla</b> som inte har rätt, även utloggade — annars skulle en
+    /// inloggningsomdirigering på just den adressen avslöja att en dold sida finns. Inloggad utan rätt → 404.</para>
     /// </summary>
     public static class SitePageAccessRules
     {
+        /// <summary>En vanlig inloggad klubbmedlem (inte styrelse, inte admin): avgör om en utloggad ska få en inloggning att gå till.</summary>
+        private static readonly SiteViewer PlainMember = new(true, true, false, false);
+
         public static SitePageDecision Decide(SiteTemplate template, SitePageDef page, SiteViewer viewer)
         {
             if (template.PageVisible(page, viewer)) return SitePageDecision.Serve;
-            return viewer.LoggedIn ? SitePageDecision.NotFound : SitePageDecision.LoginRedirect;
+            if (viewer.LoggedIn) return SitePageDecision.NotFound;
+            return template.PageVisible(page, PlainMember) ? SitePageDecision.LoginRedirect : SitePageDecision.NotFound;
         }
     }
 
@@ -84,12 +92,14 @@ namespace HpskSite.Services.SitePages
     {
         private readonly SiteViewerResolver _viewers;
         private readonly IUmbracoContextAccessor _ctx;
+        private readonly SitePageReader _reader;
         private readonly ILogger<SitePageAccessFilter> _logger;
 
-        public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, ILogger<SitePageAccessFilter> logger)
+        public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, SitePageReader reader, ILogger<SitePageAccessFilter> logger)
         {
             _viewers = viewers;
             _ctx = ctx;
+            _reader = reader;
             _logger = logger;
         }
 
@@ -106,7 +116,16 @@ namespace HpskSite.Services.SitePages
             try
             {
                 var template = SiteTemplates.For(req.OwnerType);
-                var page = template.PageByKey(req.PageKey);
+                SitePageDef? page;
+                if (req.IsFreePage)
+                {
+                    // En egen sida: synligheten läses FÄRSKT ur SQL (ingen cache av synlighet i steg 2) och sidan måste vara publicerad.
+                    var row = _reader.Page(req.OwnerType, req.OwnerId, req.PageId!.Value);
+                    page = row == null || row.PublishedVersionId == null
+                        ? null
+                        : new SitePageDef(SitePageRequest.FreePageKey, "", row.Title, 0, new[] { new SiteBlockDef("page", row.VisibilityLevel) });
+                }
+                else page = template.PageByKey(req.PageKey);
                 if (page == null) { context.Result = new NotFoundResult(); return false; }
 
                 string? regionCode = null;

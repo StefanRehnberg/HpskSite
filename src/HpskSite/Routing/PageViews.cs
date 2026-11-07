@@ -15,7 +15,13 @@ namespace HpskSite.Routing
         public const string FinalsStartList = "PrecisionFinalsStartListPage";
         public const string Event = "ClubSimpleEventPage";
 
-        public static readonly string[] All = { Competition, Series, Result, StartList, FinalsStartList, Event };
+        /// <summary>
+        /// Klubbens och kretsens egna sidor (klubbsidorna 2a). Ingen Umbraco-mall hör till vyn, så den står utanför
+        /// <see cref="All"/> (som kräver ett mellanled per mall): <c>SitePageContentFinder</c> sätter den som mall.
+        /// </summary>
+        public const string SitePage = "SitePage";
+
+        public static readonly string[] All ={ Competition, Series, Result, StartList, FinalsStartList, Event };
 
         /// <summary>Vyn för en nods mall: sidans egen vy när mallen är en av de gamla, annars mallen själv.</summary>
         public static string ForTemplate(string templateAlias) => templateAlias switch

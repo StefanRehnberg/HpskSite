@@ -27,12 +27,17 @@ namespace HpskSite.Tests
         public void Utloggad_på_en_inloggningssida_skickas_till_inloggning()
             => Assert.Equal(SitePageDecision.LoginRedirect, SitePageAccessRules.Decide(T, Page(SiteVisibility.Inloggade), Anon));
 
+        [Fact]
+        public void Utloggad_på_en_medlemssida_skickas_till_inloggning()
+            => Assert.Equal(SitePageDecision.LoginRedirect, SitePageAccessRules.Decide(T, Page(SiteVisibility.Klubbmedlemmar), Anon));
+
+        // Styrelse och Dold ger 404 åt ALLA utan rätt, även utloggade: en inloggningsomdirigering på just den adressen
+        // skulle avslöja att en dold sida finns (plan v2 §4).
         [Theory]
-        [InlineData(SiteVisibility.Klubbmedlemmar)]
         [InlineData(SiteVisibility.Styrelse)]
         [InlineData(SiteVisibility.Dold)]
-        public void Utloggad_på_en_stängd_sida_skickas_till_inloggning(SiteVisibility v)
-            => Assert.Equal(SitePageDecision.LoginRedirect, SitePageAccessRules.Decide(T, Page(v), Anon));
+        public void Utloggad_på_en_styrelse_eller_dold_sida_får_404_inte_inloggning(SiteVisibility v)
+            => Assert.Equal(SitePageDecision.NotFound, SitePageAccessRules.Decide(T, Page(v), Anon));
 
         [Theory]
         [InlineData(SiteVisibility.Styrelse)]

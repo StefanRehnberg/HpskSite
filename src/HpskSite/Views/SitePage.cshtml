@@ -1,0 +1,56 @@
+@using Umbraco.Extensions
+@using HpskSite.Services.SitePages
+@inject SitePageReader Reader
+@inject SiteBlockDataFactory BlockData
+@inject SiteViewerResolver Viewers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@*
+    Klubbens och kretsens EGNA sidor (klubbsidorna 2a). Modellen är ägarens nod (klubben eller kretsen); SitePageContentFinder har pekat ut
+    sidan (SitePageRequest.PageId) och SitePageAccessFilter har redan prövat att tittaren får se den — men innehållet prövas om här:
+    det publicerade innehållet tolkas mot sidans AKTUELLA synlighet och varje block prövas för tittaren (SiteBlockRenderer).
+    Egen vy: inget clubAdmin-JS, ingen CKEditor, inga modaler. Ingen canonical/OG ur Model.Url() (sidan har en egen adress).
+*@
+@{
+    Layout = "Master.cshtml";
+
+    var req = SitePageRequest.Current(Context);
+    (SitePageRow Page, SiteContentResult Content)? loaded = null;
+    var ownerName = Model?.Value<string>("clubName") ?? Model?.Value<string>("regionName") ?? Model?.Name ?? "";
+    if (req != null && req.IsFreePage && Model != null)
+    {
+        loaded = Reader.LoadPublished(req.OwnerType, req.OwnerId, req.PageId!.Value);
+    }
+
+    var body = "";
+    var title = "";
+    if (loaded != null && req != null && Model != null)
+    {
+        var regionCode = req.OwnerType == SiteTemplates.Region ? Model.Value<string>("regionCode") : null;
+        var viewer = await Viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
+        var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model));
+        body = SiteBlockRenderer.RenderAll(loaded.Value.Content.Blocks, loaded.Value.Page.VisibilityLevel, ctx);
+        title = loaded.Value.Page.PublishedTitle ?? loaded.Value.Page.Title;
+    }
+    else
+    {
+        Context.Response.StatusCode = 404;
+    }
+
+    ViewBag.Title = string.IsNullOrEmpty(title) ? ownerName : title + " – " + ownerName;
+    ViewBag.OgTitle = ownerName;   // generisk: ingen sidtitel i delningsförhandsvisningen av en sida som kan vara stängd
+    ViewBag.OgDescription = $"Välkommen till {ownerName}";
+}
+
+<div class="container my-4 site-page">
+    <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    @if (loaded != null)
+    {
+        <h1 class="h2 mb-4">@title</h1>
+        @Html.Raw(body) @* Allt i body är kodat av SiteBlockRenderer; textblockets HTML är sanerad (SiteHtmlSanitizer). *@
+    }
+    else
+    {
+        <h1 class="h2">Sidan finns inte</h1>
+        <p class="text-muted">Den här sidan finns inte eller har tagits bort.</p>
+    }
+</div>

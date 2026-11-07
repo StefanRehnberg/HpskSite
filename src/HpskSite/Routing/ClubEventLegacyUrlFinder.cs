@@ -90,6 +90,9 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<SitePageViewFactory>();
             // Efter inloggningen: tittaren prövas mot sidan finder pekat ut (404 / inloggning). Se SitePageAccessFilter.
             builder.Services.AddScoped<SiteViewerResolver>();
+            // Läsvägen för egna sidor: läsaren är enkel (bara IScopeProvider) och används av findern, så den är en singleton.
+            builder.Services.AddSingleton<SitePageReader>();
+            builder.Services.AddScoped<SiteBlockDataFactory>();
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }
