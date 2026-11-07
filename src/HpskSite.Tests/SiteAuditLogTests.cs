@@ -17,7 +17,7 @@ namespace HpskSite.Tests
         [Fact]
         public void Varje_åtgärd_koden_loggar_har_en_etikett_på_svenska()
         {
-            var rx = new Regex("[\"']((?:page|menu|terms|support|personal)-[a-z-]+)[\"']", RegexOptions.Compiled);
+            var rx = new Regex("[\"']((?:page|menu|terms|support|personal|slot)-[a-z-]+)[\"']", RegexOptions.Compiled);
             var actions = new SortedSet<string>();
             foreach (var file in new[] { "Services/SitePages/SitePageWriter.cs", "Controllers/SiteEditController.cs" })
                 foreach (Match m in rx.Matches(File.ReadAllText(Path.Combine(SourceDir(), file)))) actions.Add(m.Groups[1].Value);

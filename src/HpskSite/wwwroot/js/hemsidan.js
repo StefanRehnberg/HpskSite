@@ -87,6 +87,7 @@
 
   const S = {
     st: null, page: null, blocks: [], title: '', visibility: 2, revision: 0, published: false, hasUnpublished: false,
+    kind: 'free', minVis: 0, templateKey: null,
     dirty: false, editVersion: 0, saving: false, timer: null, ack: new Set(), editors: [], docs: null, banner: null, statusText: '', statusErr: false, hint: null,
   };
 
@@ -212,8 +213,37 @@
         ? h('table', { class: 'table align-middle hs-list' }, h('thead', {}, h('tr', {}, h('th', {}, 'Sida'), h('th', {}, 'Vem ser den'), h('th', {}, 'Status'), h('th', {}))), h('tbody', {}, rows))
         : h('div', { class: 'hs-card p-4 text-center' }, h('p', { class: 'mb-2' }, 'Ni har inga egna sidor än.'), h('p', { class: 'text-muted mb-3' }, 'Skapa en sida för till exempel banregler, klubbens historia eller hitta hit.')),
       h('p', { class: 'text-muted small mt-3' }, 'Klubbens vanliga sidor (Hem, Om klubben, Banor, Kalender m.fl.) hanteras som förut och finns kvar.'),
-      auditCard()]);
+      slotsCard(), auditCard()]);
     renderBanner();
+  }
+
+  // Egen text före/efter klubbens vanliga sidor (Hem, Om klubben, Banor …): en mallkopia per systemsida. Systemsidan är exakt som förut utan den.
+  function slotsCard() {
+    const slots = (S.st && S.st.slots) || [];
+    if (!slots.length) return null;
+    const rows = slots.map(x => h('tr', {},
+      h('td', {}, h('strong', {}, x.label)),
+      h('td', {}, x.page ? [visBadge(x.page.visibility), ' ', statusBadge({ status: x.page.status })] : h('span', { class: 'text-muted' }, 'Ingen egen text')),
+      h('td', { class: 'text-end' }, h('button', { class: 'btn btn-sm btn-outline-secondary', onclick: () => x.page ? openEditor(x.page.id) : chooseSlotVisibility(x) }, x.page ? 'Ändra' : 'Lägg till egen text'))));
+    return h('details', { class: 'hs-card p-3 mt-4' }, h('summary', { class: 'fw-semibold' }, 'Egen text på de vanliga sidorna'),
+      h('p', { class: 'text-muted small mt-2' }, 'Skriv egen text före eller efter innehållet på Hem, Om klubben, Banor och de andra vanliga sidorna. Sidorna är som förut tills ni lägger till något.'),
+      h('table', { class: 'table align-middle hs-list mb-0' }, h('tbody', {}, rows)));
+  }
+
+  async function chooseSlotVisibility(x) {
+    let chosen = Math.max(x.minVisibility, OWNER.type === 'Region' ? 1 : 2);        // förval: medlemmar (inloggade för en krets), aldrig öppnare än sidan tillåter
+    const box = h('div');
+    const draw = () => box.replaceChildren(h('div', {}, visOptions().filter(o => o.v >= x.minVisibility && o.v <= 3).map(o => h('label', { class: 'hs-choice ' + (chosen === o.v ? 'active' : '') },
+      h('input', { type: 'radio', name: 'slotvis', checked: chosen === o.v, onchange: () => { chosen = o.v; draw(); } }), h('strong', {}, o.t), h('span', { class: 'hs-sub' }, o.s))),
+      h('p', { class: 'text-muted small mt-2 mb-0' }, 'Texten syns bara för dem som får se sidan, och aldrig för fler än du väljer här. ' + CONSEQUENCE[chosen])));
+    draw();
+    const go = await modal('Vem ska se egen text på "' + x.label + '"?', box, [{ label: 'Avbryt', value: false }, { label: 'Fortsätt', value: true, cls: 'btn-primary' }]);
+    if (go !== true) return;
+    if (chosen === 0 && !await confirmPublic()) return;
+    const r = await api('POST', 'CreateSlotPage', { templateKey: x.key, visibility: chosen });
+    if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Det gick inte att skapa.' }; renderList(); return; }
+    await reloadState();
+    openEditor(r.pageId);
   }
 
   // "Vad som hänt": vem gjorde vad och när (senaste 100). Bara föreningens egna administratörer läser loggen, så den visas inte i stödläge.
@@ -332,8 +362,15 @@
     const r = await api('GET', 'Page', { pageId });
     if (!r.success) { view([header(), alertBox('danger', r.message || 'Sidan kunde inte öppnas.'), h('button', { class: 'btn btn-outline-secondary', onclick: load }, 'Tillbaka')]); return; }
     let parsed = null; try { parsed = JSON.parse(r.blocksJson); } catch { /* visas som fel nedan */ }
-    if (!parsed || !Array.isArray(parsed.blocks)) { view([header(), alertBox('danger', 'Sidans innehåll kunde inte läsas.')]); return; }
-    Object.assign(S, { page: r, blocks: parsed.blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
+    const isSlots = r.kind === 'slots';
+    const okShape = parsed && (isSlots ? parsed.slots && typeof parsed.slots === 'object' : Array.isArray(parsed.blocks));
+    if (!okShape) { view([header(), alertBox('danger', 'Sidans innehåll kunde inte läsas.')]); return; }
+    // Egen text på en systemsida har två platser, före och efter; i minnet bär varje block sin plats (pos) och den tas bort igen vid sparning.
+    const blocks = isSlots
+      ? [...(parsed.slots.before || []).map(b => ({ ...b, pos: 'before' })), ...(parsed.slots.after || []).map(b => ({ ...b, pos: 'after' }))]
+      : parsed.blocks;
+    Object.assign(S, { kind: r.kind || 'free', minVis: r.minVisibility || 0, templateKey: r.templateKey || null });
+    Object.assign(S, { page: r, blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
       dirty: false, editVersion: 0, banner: null, statusText: 'Sparat', statusErr: false });
     if (!S.docs) { const d = await api('GET', 'Documents'); S.docs = d.success ? d.documents : []; }
     if (!S.personas) { const pr = await api('GET', 'PreviewPersonas'); S.personas = pr.success ? pr.personas : []; }
@@ -362,7 +399,9 @@
   }
 
   function collectJson() {
-    return JSON.stringify({ schema: 1, blocks: S.blocks.map(b => ({ id: b.id, type: b.type, visibility: b.visibility, data: b.data })) });
+    const plain = b => ({ id: b.id, type: b.type, visibility: b.visibility, data: b.data });
+    if (S.kind === 'slots') return JSON.stringify({ schema: 1, slots: { before: S.blocks.filter(b => b.pos === 'before').map(plain), after: S.blocks.filter(b => b.pos === 'after').map(plain) } });
+    return JSON.stringify({ schema: 1, blocks: S.blocks.map(plain) });
   }
 
   // Sparar utkastet. Returnerar true när servern tog emot det.
@@ -430,9 +469,10 @@
   }
 
   function renderEditor() {
+    const slots = S.kind === 'slots';
     const titleInp = h('input', { class: 'form-control form-control-lg', maxlength: '120', value: S.title, 'aria-label': 'Sidans rubrik' });
     titleInp.addEventListener('input', () => { S.title = titleInp.value; markDirty(); });
-    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
+    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => !slots || o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
     visSel.addEventListener('change', async () => {
       const v = parseInt(visSel.value, 10);
       if (v === 0 && !await confirmPublic()) { visSel.value = S.visibility; return; }
@@ -454,11 +494,14 @@
       h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
 
     view([bar, supportBanner(), h('div', { id: 'hsBanner' }),
-      h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
-      h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser sidan?'), visSel, consequence,
-        S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
-      menuToggle(), previewRow(),
-      blocksEl, addBlockBar(), moreCard()]);
+      slots
+        ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Egen text på "' + S.title + '"'),
+            h('p', { class: 'text-muted mb-0' }, 'Texten visas före och efter sidans vanliga innehåll. Sidans eget innehåll ändras inte.'))
+        : h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
+      h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, slots ? 'Vem ser texten?' : 'Vem ser sidan?'), visSel, consequence,
+        !slots && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
+      slots ? null : menuToggle(), slots ? null : previewRow(),
+      blocksEl, slots ? null : addBlockBar(), moreCard()]);
     drawBlocks();
     paintStatus(); paintEditorBanner();
   }
@@ -516,7 +559,7 @@
         } }, 'Spara en återställningspunkt'),
         h('h2', { class: 'h6 mt-4' }, 'Tidigare versioner'),
         h('button', { class: 'btn btn-outline-secondary', onclick: loadVersions }, 'Visa tidigare versioner'), versionsEl,
-        h('h2', { class: 'h6 mt-4' }, 'Adress (avancerat)'),
+        ...(S.kind === 'slots' ? [] : [h('h2', { class: 'h6 mt-4' }, 'Adress (avancerat)'),
         h('p', { class: 'text-muted small' }, 'Adressen ändras aldrig av sig själv. Byter du den skickas den gamla vidare till den nya, så länkar som redan delats fortsätter fungera. Sidor som bara styrelsen eller administratörerna ser skickas inte vidare.'),
         h('div', { class: 'd-flex gap-2 flex-wrap' }, h('div', { class: 'flex-grow-1', style: 'min-width:14rem' }, slugInp),
           h('button', { class: 'btn btn-outline-danger', onclick: async e => {
@@ -529,7 +572,7 @@
             if (!r.success) { slugMsg.replaceChildren(alertBox('danger', r.message || 'Adressen går inte att använda.')); return; }
             S.page.slug = r.slug; S.page.url = r.url; slugInp.value = r.slug;
             slugMsg.replaceChildren(alertBox('success', 'Adressen är bytt: ' + r.url));
-          } }, 'Byt adress')), slugMsg));
+          } }, 'Byt adress')), slugMsg])));
   }
 
   // "Visa sidan i menyn": sparas direkt (det är inte en del av texten) och gäller först när sidan är publicerad.
@@ -551,18 +594,35 @@
       h('div', { class: 'd-flex flex-wrap gap-2' }, BLOCK_TYPES.map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t.type) }, h('i', { class: 'bi ' + t.icon + ' me-1' }), t.label))));
   }
 
-  function addBlock(type) {
+  function addBlock(type, pos) {
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
       : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' } : { title: 'Kontakt' };
-    S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data });
+    S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
   }
 
-  function move(i, d) { const j = i + d; if (j < 0 || j >= S.blocks.length) return; [S.blocks[i], S.blocks[j]] = [S.blocks[j], S.blocks[i]]; markDirty(); drawBlocks(); }
+  // Närmaste granne åt det håll i samma grupp (en slots före/efter är två egna listor); fri sida: bara nästa.
+  function neighbour(i, d) {
+    for (let j = i + d; j >= 0 && j < S.blocks.length; j += d) if (S.kind !== 'slots' || S.blocks[j].pos === S.blocks[i].pos) return j;
+    return -1;
+  }
+  function move(i, d) { const j = neighbour(i, d); if (j < 0) return; [S.blocks[i], S.blocks[j]] = [S.blocks[j], S.blocks[i]]; markDirty(); drawBlocks(); }
 
   function drawBlocks() {
     clearEditors();
     const el = document.getElementById('hsBlocks'); if (!el) return;
+    if (S.kind === 'slots') {
+      const group = (pos, title, help) => {
+        const items = S.blocks.map((b, i) => [b, i]).filter(([b]) => b.pos === pos);
+        return h('section', { class: 'mb-4', dataset: undefined },
+          h('h2', { class: 'h5' }, title), h('p', { class: 'text-muted small' }, help),
+          ...(items.length ? items.map(([b, i]) => blockCard(b, i)) : [h('div', { class: 'hs-card p-3 text-center text-muted mb-3' }, 'Ingen text här än.')]),
+          h('div', { class: 'd-flex flex-wrap gap-2' }, ['text', 'links'].map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t, pos) }, h('i', { class: 'bi ' + typeInfo(t).icon + ' me-1' }), typeInfo(t).label))));
+      };
+      el.replaceChildren(group('before', 'Före sidans innehåll', 'Visas överst på sidan.'), group('after', 'Efter sidans innehåll', 'Visas längst ner på sidan.'));
+      el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
+      return;
+    }
     el.replaceChildren(...(S.blocks.length ? S.blocks.map(blockCard) : [h('div', { class: 'hs-card p-4 text-center text-muted mb-3' }, 'Sidan har inget innehåll än. Lägg till ett block här under.')]));
     // CKEditor skapas först när elementen sitter i dokumentet.
     el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
@@ -590,8 +650,8 @@
     const head = h('div', { class: 'hs-block-head' },
       h('span', { class: 'hs-type' }, h('i', { class: 'bi ' + info.icon + ' me-2' }), info.label),
       visOptions().filter(o => o.v >= min).length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : null,
-      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: i === 0, 'aria-label': 'Flytta upp', onclick: () => move(i, -1) }, h('i', { class: 'bi bi-arrow-up' })),
-      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: i === S.blocks.length - 1, 'aria-label': 'Flytta ner', onclick: () => move(i, 1) }, h('i', { class: 'bi bi-arrow-down' })),
+      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, -1) < 0, 'aria-label': 'Flytta upp', onclick: () => move(i, -1) }, h('i', { class: 'bi bi-arrow-up' })),
+      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, 1) < 0, 'aria-label': 'Flytta ner', onclick: () => move(i, 1) }, h('i', { class: 'bi bi-arrow-down' })),
       h('button', { class: 'btn btn-sm btn-outline-danger', 'aria-label': 'Ta bort blocket', onclick: async () => {
         if (!await confirmDialog('Ta bort blocket?', 'Blocket "' + info.label + '" tas bort från sidan.', 'Ta bort', true)) return;
         S.blocks.splice(i, 1); markDirty(); drawBlocks();

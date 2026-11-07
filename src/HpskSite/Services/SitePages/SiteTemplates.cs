@@ -37,6 +37,23 @@ namespace HpskSite.Services.SitePages
             return page.Blocks.Any(b => !b.Retired && SiteAccess.CanSee(EffectiveVisibility(b), who));
         }
 
+        /// <summary>
+        /// Klubbens egen text före/efter en SYSTEMSIDA (slots, plan v3 D3): systemsidan måste finnas och får inte vara Admin (Admin har ingen egen adress).
+        /// </summary>
+        public bool CanHaveSlots(string pageKey) => PageByKey(pageKey) is { IsAdmin: false };
+
+        /// <summary>
+        /// Den ÖPPNASTE nivån någon av systemsidans block har (efter taket för personblock; systemblock bara för utloggade räknas inte). En slot på sidan får aldrig
+        /// vara öppnare än så ("ett slot kan aldrig vara bredare än vad Hem-panelens sektion tillåter", plan v3 D3): Rekord ligger bakom inloggning, så en slot där kan inte vara
+        /// "Alla". Null = sidan finns inte eller kan inte ha slots.
+        /// </summary>
+        public SiteVisibility? MostOpenLevel(string pageKey)
+        {
+            if (!CanHaveSlots(pageKey)) return null;
+            var levels = PageByKey(pageKey)!.Blocks.Where(b => !b.Retired && b.Visibility != SiteVisibility.Utloggad).Select(b => (int)EffectiveVisibility(b)).ToList();
+            return levels.Count == 0 ? SiteVisibility.Dold : (SiteVisibility)levels.Min();
+        }
+
         /// <summary>Blockets synlighet efter taket för personuppgiftsblock.</summary>
         public static SiteVisibility EffectiveVisibility(SiteBlockDef b) =>
             b.PersonalData ? SiteAccess.CapPersonal(b.Visibility) : b.Visibility;

@@ -113,6 +113,34 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>
+        /// Skapar ägarens mallkopia (egen text före/efter) för en systemsida — idempotent: finns den redan returneras den. Titeln är systemsidans (fast), synligheten får aldrig
+        /// vara öppnare än systemsidans öppnaste block (<see cref="SiteTemplate.MostOpenLevel"/>) och aldrig Utloggad. Loggas som <c>slot-create</c>.
+        /// </summary>
+        public static SiteWriteResult CreateTemplateCopy(IDatabase db, string ownerType, int ownerId, string templateKey, SiteVisibility visibility, SiteActor actor, DateTime now)
+        {
+            var template = SiteTemplates.For(ownerType);
+            var open = template.MostOpenLevel(templateKey);
+            if (open == null) return Invalid("templateKey", "Den sidan kan inte få egen text före eller efter.");
+            if (!SiteAccess.IsSelectable(visibility) || visibility > SiteVisibility.Dold) return Invalid("visibility", "Ogiltig synlighet.");
+            if (visibility < open.Value) return Invalid("visibility", $"Texten får inte vara öppnare än sidan själv ({SlotLevelLabel(open.Value)} eller strängare).");
+
+            if (!SitePageStore.LockOwner(db, ownerType, ownerId)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            var existing = SitePageStore.GetTemplateCopy(db, ownerType, ownerId, templateKey);
+            if (existing != null) return new SiteWriteResult(SiteWriteStatus.Ok, existing.Id, existing.Revision);
+
+            var title = template.PageByKey(templateKey)!.Label;
+            var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, templateKey, template.Version, actor.MemberId, actor.AsSupport, now);
+            if (created.Outcome != SiteStoreOutcome.Ok) return From(created);
+            Audit(db, ownerType, ownerId, actor, "page", created.PageId, "slot-create", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, created.PageId, created.Revision);
+        }
+
+        private static string SlotLevelLabel(SiteVisibility v) => v switch
+        {
+            SiteVisibility.Alla => "alla", SiteVisibility.Inloggade => "inloggade", SiteVisibility.Klubbmedlemmar => "medlemmar", SiteVisibility.Styrelse => "styrelsen", _ => "administratörer",
+        };
+
+        /// <summary>
         /// Autospar av utkastet. <paramref name="allowPersonalNumber"/> = admin har svarat "Det är inget personnummer" (loggas).
         /// </summary>
         public static SiteWriteResult SaveDraft(IDatabase db, ISiteOwnerFacts facts, int pageId, string ownerType, int ownerId, int expectedRevision,
@@ -120,10 +148,13 @@ namespace HpskSite.Services.SitePages
         {
             var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
             if (page == null) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (!page.IsFree) title = page.Title;                              // en mallkopia heter alltid som systemsidan; titeln kan inte ändras
             title = (title ?? "").Trim();
             if (title.Length is 0 or > 120) return Invalid("title", "Titeln måste vara 1–120 tecken.");
             var vis = visibility ?? page.VisibilityLevel;
             if (!SiteAccess.IsSelectable(vis) || vis > SiteVisibility.Dold) return Invalid("visibility", "Ogiltig synlighet.");
+            if (!page.IsFree && SiteTemplates.For(ownerType).MostOpenLevel(page.TemplateKey!) is { } floor && vis < floor)
+                return Invalid("visibility", "Texten får inte vara öppnare än sidan själv.");   // ett slot kan aldrig vara bredare än systemsidan
 
             var v = Validate(db, facts, page, ownerType, ownerId, title, blocksJson, vis, allowPersonalNumber, out var content);
             if (v != null) return v;
@@ -214,6 +245,9 @@ namespace HpskSite.Services.SitePages
 
         public static SiteWriteResult SoftDelete(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, SiteActor actor, DateTime now)
         {
+            // En mallkopia (egen text på en systemsida) raderas aldrig: tömmer man den är systemsidan som förut. Bara fria sidor går att radera.
+            var existing = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (existing == null || !existing.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
             var r = SitePageStore.SoftDelete(db, pageId, ownerType, ownerId, expectedRevision, actor.MemberId, now);
             if (r.Outcome == SiteStoreOutcome.Ok) Audit(db, ownerType, ownerId, actor, "page", pageId, "page-delete", null, now);
             return From(r);

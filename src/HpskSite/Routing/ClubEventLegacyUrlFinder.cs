@@ -95,6 +95,7 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<SiteBlockDataFactory>();
             builder.Services.AddScoped<ISiteOwnerFacts, SiteOwnerFacts>();
             builder.Services.AddScoped<ISiteSupportNotifier, SiteSupportNotifier>();
+            builder.Services.AddScoped<SiteSlotRenderer>();
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }

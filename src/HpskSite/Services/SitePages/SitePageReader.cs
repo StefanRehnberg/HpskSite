@@ -53,6 +53,21 @@ namespace HpskSite.Services.SitePages
             return SitePageStore.GetPage(scope.Database, pageId, ownerType, ownerId);
         }
 
+        /// <summary>
+        /// Ägarens publicerade egna text före/efter en systemsida (mallkopian), tolkad mot kopians AKTUELLA synlighet. Null = ingen kopia, inget publicerat, eller ogiltigt
+        /// innehåll (då visas inget). Synligheten läses färskt ur SQL — ingen cache.
+        /// </summary>
+        public (SiteVisibility Visibility, SiteContentResult Content)? LoadSlots(string ownerType, int ownerId, string templateKey)
+        {
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var page = SitePageStore.GetTemplateCopy(scope.Database, ownerType, ownerId, templateKey);
+            if (page == null || page.PublishedVersionId == null) return null;
+            var version = SitePageStore.GetPublished(scope.Database, page.Id, ownerType, ownerId);
+            if (version == null) return null;
+            var content = SiteBlockSchema.Parse(version.BlocksJson, SiteContentKind.TemplateCopy, page.VisibilityLevel, SiteTemplates.For(ownerType));
+            return content.Ok ? (page.VisibilityLevel, content) : null;
+        }
+
         /// <summary>Det publicerade innehållet, tolkat mot sidans AKTUELLA synlighet (en lagrad rad är inte betrodd). Null om det saknas eller är ogiltigt.</summary>
         public (SitePageRow Page, SiteContentResult Content)? LoadPublished(string ownerType, int ownerId, int pageId)
         {

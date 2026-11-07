@@ -298,6 +298,17 @@ namespace HpskSite.Services.SitePages
             return true;
         }
 
+        /// <summary>Ägarens mallkopia (slots) för en systemsida, eller null. En kopia per systemsida och ägare (unikt index, raderade räknas också).</summary>
+        public static SitePageRow? GetTemplateCopy(IDatabase db, string ownerType, int ownerId, string templateKey) =>
+            db.FirstOrDefault<SitePageRow>(
+                $"SELECT {PageColumns} FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1 AND TemplateKey = @2 AND DeletedDate IS NULL", ownerType, ownerId, templateKey);
+
+        /// <summary>Alla ägarens mallkopior (för Hemsidans lista över systemsidor).</summary>
+        public static List<SitePageListItem> ListTemplateCopies(IDatabase db, string ownerType, int ownerId) =>
+            db.Fetch<SitePageListItem>(
+                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.TemplateKey AS Slug, 0 AS InMenu
+                  FROM dbo.SitePage p WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NOT NULL AND p.DeletedDate IS NULL ORDER BY p.Id", ownerType, ownerId);
+
         /// <summary>
         /// Autospar: skriver utkastet på plats. Oförändrat innehåll (samma hash och titel) räknas inte som en ändring: revisionen
         /// höjs ändå inte och inget skrivs. <paramref name="expectedRevision"/> är revisionen klienten läste.

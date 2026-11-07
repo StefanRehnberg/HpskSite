@@ -143,6 +143,7 @@ namespace HpskSite.Controllers
             if (g.Error != null) return g.Error;
             using var scope = _scopes.CreateScope(autoComplete: true);
             var accepted = SiteOwnerData.TermsAccepted(scope.Database, g.OwnerType, g.OwnerId);
+            var copies = SitePageStore.ListTemplateCopies(scope.Database, g.OwnerType, g.OwnerId);
             object Row(SitePageListItem p) => new
             {
                 id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu,
@@ -155,6 +156,16 @@ namespace HpskSite.Controllers
                 maxPages = SitePageStore.MaxFreePagesPerOwner,
                 // Systemsidorna som ett länkblock får peka på (aldrig Admin, som saknar adress).
                 systemPages = SiteTemplates.For(g.OwnerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p => new { key = p.Key, label = p.Label }),
+                // Egen text före/efter systemsidorna: varje sida som kan ha det, hur öppen texten får vara, och ägarens kopia om den finns.
+                slots = SiteTemplates.For(g.OwnerType).Pages.Where(p => SiteTemplates.For(g.OwnerType).CanHaveSlots(p.Key)).OrderBy(p => p.Order).Select(p =>
+                {
+                    var copy = copies.FirstOrDefault(c => c.Slug == p.Key);   // ListTemplateCopies lägger mallnyckeln i Slug
+                    return new
+                    {
+                        key = p.Key, label = p.Label, minVisibility = (int)SiteTemplates.For(g.OwnerType).MostOpenLevel(p.Key)!.Value,
+                        page = copy == null ? null : new { id = copy.Id, status = copy.Status, visibility = copy.Visibility, revision = copy.Revision },
+                    };
+                }),
                 pages = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Select(Row),
                 trash = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId, deleted: true).Select(Row),
             });
@@ -169,14 +180,16 @@ namespace HpskSite.Controllers
             if (g.Error != null) return g.Error;
             using var scope = _scopes.CreateScope(autoComplete: true);
             var page = SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId);
-            if (page == null || !page.IsFree) return Fail("Sidan finns inte.");
+            if (page == null) return Fail("Sidan finns inte.");
             var version = SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId)
                           ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
             if (version == null) return Fail("Sidan saknar innehåll.");
             var slug = scope.Database.FirstOrDefault<string>("SELECT TOP 1 Slug FROM dbo.PageAddress WHERE TargetKind = 'sitepage' AND TargetId = @0 AND IsCurrent = 1", pageId);
             return Json(new
             {
-                success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug, inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
+                success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug,
+                kind = page.IsFree ? "free" : "slots", templateKey = page.TemplateKey,
+                minVisibility = page.IsFree ? 0 : (int)SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value, inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
                 url = slug == null ? null : g.OwnerUrl + slug + "/", hasUnpublishedChanges = page.HasUnpublishedChanges, published = page.PublishedVersionId != null,
                 blocksJson = version.BlocksJson, savedDate = version.SavedDate,
             });
@@ -505,6 +518,28 @@ namespace HpskSite.Controllers
                 if (r.Ok) scope.Complete();
             }
             return Json(new { success = r.Ok, slug = r.Slug, url = r.Ok ? g.OwnerUrl + r.Slug + "/" : null, message = r.Ok ? null : r.Message ?? "Adressen går inte att använda.", status = r.Status.ToString() });
+        }
+
+        /// <summary>
+        /// Skapar föreningens egen text före/efter en systemsida (en mallkopia). Idempotent: finns den redan returneras den. Synligheten får inte vara öppnare än
+        /// systemsidan själv (servern avgör, <see cref="SiteTemplate.MostOpenLevel"/>).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> CreateSlotPage(string ownerType, int ownerId, string templateKey, int visibility)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitecreate:{g.OwnerType}:{g.OwnerId}", CreatesPerDay, TimeSpan.FromDays(1))) return Fail($"Högst {CreatesPerDay} nya sidor per dygn.", "rate");
+            if (visibility < 0 || visibility > (int)SiteVisibility.Dold) return Fail("Ogiltig synlighet.");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.CreateTemplateCopy(scope.Database, g.OwnerType, g.OwnerId, templateKey ?? "", (SiteVisibility)visibility, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
         }
 
         /// <summary>Visa sidan i menyn eller inte. En sida syns i menyn först när den är publicerad, och bara för den som får se den.</summary>

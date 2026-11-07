@@ -260,6 +260,96 @@ namespace HpskSite.Tests
             Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-publish' AND ActedAsSupport=1 AND ActorMemberId=42", c.PageId));
         }
 
+        // ── Egen text före/efter systemsidor (mallkopia, slots) ────────────────────
+
+        private static string Slots(string before, string after) =>
+            "{\"schema\":1,\"slots\":{\"before\":[" + before + "],\"after\":[" + after + "]}}";
+        private static string SlotText(string id, int vis, string canary) =>
+            "{\"id\":\"" + id + "\",\"type\":\"text\",\"visibility\":" + vis + ",\"data\":{\"html\":\"<p>" + canary + "</p>\"}}";
+
+        [SqlFact]
+        public void Mallkopian_skapas_en_gång_med_systemsidans_titel_och_kan_inte_bli_en_andra()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var a = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            Assert.True(a.Ok, a.Message);
+            var b = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            Assert.Equal(a.PageId, b.PageId);                                                     // idempotent
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePage WHERE OwnerId=@0 AND TemplateKey='home'", Owner));
+            Assert.Equal("Hem", SitePageStore.GetPage(f.Db, a.PageId, Club, Owner)!.Title);       // systemsidans namn
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='slot-create'", a.PageId));
+            Assert.Empty(SitePageStore.ListFree(f.Db, Club, Owner));                              // en mallkopia är ingen fri sida i listan
+            Assert.Single(SitePageStore.ListTemplateCopies(f.Db, Club, Owner));
+        }
+
+        [SqlFact]
+        public void Mallkopia_vägras_för_admin_okänd_sida_och_en_synlighet_öppnare_än_systemsidan()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "admin", SiteVisibility.Dold, Admin, Now).Status);
+            Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "nope", SiteVisibility.Dold, Admin, Now).Status);
+            Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "records", SiteVisibility.Alla, Admin, Now).Status);      // Rekord ligger bakom inloggning
+            Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Utloggad, Admin, Now).Status);
+            Assert.True(SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Alla, Admin, Now).Ok);                                          // Hem har publika block
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.CreateTemplateCopy(f.Db, Club, 123456, "calendar", SiteVisibility.Inloggade, Admin, Now).Status); // ägaren saknar rad
+            Assert.Equal(0, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePage WHERE OwnerId=@0 AND TemplateKey IN ('admin','nope','records')", Owner));
+        }
+
+        [SqlFact]
+        public void Slots_sparas_och_publiceras_men_bara_text_och_länkar_och_titeln_är_fast()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts();
+            var c = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            var s = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "FÖRSÖK-ATT-BYTA-NAMN", Slots(SlotText("abcd1", 2, "FÖRE-TEXT"), SlotText("abcd2", 2, "EFTER-TEXT")), null, Admin, Now);
+            Assert.True(s.Ok, s.Message);
+            Assert.Equal("Hem", SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!.Title);       // klientens titel ignoreras
+            var bad = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, s.Revision, "Hem",
+                Slots("{\"id\":\"abcd3\",\"type\":\"heading\",\"visibility\":2,\"data\":{\"text\":\"x\",\"level\":2}}", ""), null, Admin, Now);
+            Assert.Equal(SiteWriteStatus.Invalid, bad.Status);                                     // rubrik får inte ligga i en slot
+            var asFree = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, s.Revision, "Hem", "{\"schema\":1,\"blocks\":[]}", null, Admin, Now);
+            Assert.Equal(SiteWriteStatus.Invalid, asFree.Status);                                  // fri sidas form får inte skrivas på en mallkopia
+            var p = SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, s.Revision, Admin, Now);
+            Assert.True(p.Ok, p.Message);
+            var content = SiteBlockSchema.Parse(SitePageStore.GetPublished(f.Db, c.PageId, Club, Owner)!.BlocksJson, SiteContentKind.TemplateCopy, SiteVisibility.Klubbmedlemmar, SiteTemplates.ClubTemplate);
+            Assert.True(content.Ok); Assert.Single(content.Before); Assert.Single(content.After);
+        }
+
+        [SqlFact]
+        public void En_slot_kan_inte_göras_öppnare_än_systemsidan_vid_sparning()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts();
+            var c = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "records", SiteVisibility.Inloggade, Admin, Now);
+            Assert.True(c.Ok);
+            var open = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "Rekord", Slots(SlotText("abcd1", 0, "X"), ""), SiteVisibility.Alla, Admin, Now);
+            Assert.Equal(SiteWriteStatus.Invalid, open.Status);                                    // Alla på Rekord (bakom inloggning)
+            Assert.True(SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "Rekord", Slots(SlotText("abcd1", 3, "X"), ""), SiteVisibility.Styrelse, Admin, Now).Ok);
+        }
+
+        [SqlFact]
+        public void En_mallkopia_kan_inte_raderas_men_en_fri_sida_kan()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var copy = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.SoftDelete(f.Db, copy.PageId, Club, Owner, copy.Revision, Admin, Now).Status);
+            Assert.NotNull(SitePageStore.GetPage(f.Db, copy.PageId, Club, Owner));                // kvar
+            var free = NewPage(f.Db, new Facts());
+            Assert.True(SitePageWriter.SoftDelete(f.Db, free.PageId, Club, Owner, free.Revision, Admin, Now).Ok);
+        }
+
+        [SqlFact]
+        public void Mallkopian_följer_ägaren_vid_radering_och_en_annan_ägares_kopia_rörs_inte()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var mine = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            var theirs = SitePageWriter.CreateTemplateCopy(f.Db, Club, OtherOwner, "home", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            Assert.NotEqual(mine.PageId, theirs.PageId);
+            SiteOwnerData.DeleteAll(f.Db, Club, Owner);
+            Assert.Equal(0, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePage WHERE OwnerId=@0", Owner));
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePage WHERE OwnerId=@0 AND TemplateKey='home'", OtherOwner));
+        }
+
         // ── Adressbyte ────────────────────────────────────────────────────────────
 
         [SqlFact]

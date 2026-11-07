@@ -80,6 +80,10 @@
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, Model.Url(),
         new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, isClubBoard, isClubAdmin));
     ViewBag.sitePageView = sp;
+    // Klubbens egen text före/efter systemsidorna (slots): bara när egen redigering är PÅ (annars ritas ingenting).
+    ViewBag.slotCtx = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
+        ? new HpskSite.Services.SitePages.SiteSlotContext(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, sp.Viewer, Model.Url(), Model)
+        : null;
     // Hemsidan (egna sidor): länken syns bara för klubbens EGEN admin och bara när brytare 2 är PÅ.
     ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
         && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, null);
@@ -207,6 +211,7 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubHome"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubHome")" id="clubHome" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("home", "before"))
                     @* "Det här händer i {klubben}" — samma flöde som startsidan och kretssidan, låst till
                        klubbens egna tävlingar, händelser och träningar. Ersätter "Utvalda tävlingar" (C3 F3). *@
                     @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedClubId = clubId, LockedClubName = clubName })
@@ -313,6 +318,7 @@ window.currentClubId = clubId;
                             </div>
                         </div>
                     </div>
+                    @await Html.PartialAsync("_SitePageSlots", ("home", "after"))
                 </div>
                 }
 
@@ -320,6 +326,7 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubAbout"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubAbout")" id="clubAbout" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("about", "before"))
                     @if (!string.IsNullOrEmpty(welcomeMessage))
                     {
                         <div class="card mb-4">
@@ -337,6 +344,7 @@ window.currentClubId = clubId;
                     {
                         <div class="alert alert-info">Ingen information om klubben har lagts till ännu.</div>
                     }
+                    @await Html.PartialAsync("_SitePageSlots", ("about", "after"))
                 </div>
                 }
 
@@ -344,6 +352,7 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubRanges"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubRanges")" id="clubRanges" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("ranges", "before"))
                     @*
                         Klubbens banor (omgjord 2026-10-11): ett kort per bana med samma karta som tävlingssidan
                         (röd punkt, Vägbeskrivning), klubbens fasta tider och länkar till banans egen sida
@@ -405,6 +414,7 @@ window.currentClubId = clubId;
                         load();
                     })();
                     </script>
+                    @await Html.PartialAsync("_SitePageSlots", ("ranges", "after"))
                 </div>
                 }
 
@@ -412,7 +422,9 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubCalendar"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubCalendar")" id="clubCalendar" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("calendar", "before"))
                     @await Html.PartialAsync("ClubCalendar")
+                    @await Html.PartialAsync("_SitePageSlots", ("calendar", "after"))
                 </div>
                 }
 
@@ -420,7 +432,9 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubCompetitions"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubCompetitions")" id="clubCompetitions" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("competitions", "before"))
                     @await Html.PartialAsync("ClubCompetitionsList")
+                    @await Html.PartialAsync("_SitePageSlots", ("competitions", "after"))
                 </div>
                 }
 
@@ -428,6 +442,7 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubMembers"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubMembers")" id="clubMembers" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("members", "before"))
                     @await Html.PartialAsync("ClubInstructorsPublicPanel")
                     @{
                         var ligaVD = new ViewDataDictionary(ViewData);
@@ -435,6 +450,7 @@ window.currentClubId = clubId;
                     }
                     @await Html.PartialAsync("ClubGuldserieLeaderboard", null, ligaVD)
                     @await Html.PartialAsync("ClubMembersDirectory")
+                    @await Html.PartialAsync("_SitePageSlots", ("members", "after"))
                 </div>
                 }
 
@@ -442,6 +458,7 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubRecords"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubRecords")" id="clubRecords" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("records", "before"))
                     @{
                         var clubRecVD = new ViewDataDictionary(ViewData);
                         clubRecVD["RecordsScopeType"] = "Club";
@@ -450,6 +467,7 @@ window.currentClubId = clubId;
                         clubRecVD["RecordsScopeName"] = clubName;
                     }
                     @await Html.PartialAsync("RecordsHallOfFame", null, clubRecVD)
+                    @await Html.PartialAsync("_SitePageSlots", ("records", "after"))
                 </div>
                 }
 
@@ -457,8 +475,10 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubDocuments"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubDocuments")" id="clubDocuments" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("documents", "before"))
                     @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
                     @await Html.PartialAsync("DocumentArchive")
+                    @await Html.PartialAsync("_SitePageSlots", ("documents", "after"))
                 </div>
                 }
 

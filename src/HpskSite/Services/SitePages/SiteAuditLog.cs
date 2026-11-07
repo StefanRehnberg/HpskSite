@@ -42,6 +42,7 @@ namespace HpskSite.Services.SitePages
             "page-slug" => "bytte adress på",
             "page-visibility" => "ändrade vem som ser",
             "page-restore-version" => "använde en tidigare version av",
+            "slot-create" => "lade till egen text på systemsidan",
             "menu-add" => "lade i menyn:",
             "menu-remove" => "tog ur menyn:",
             "terms-accepted" => "godkände villkoren för klubbens sidor",
