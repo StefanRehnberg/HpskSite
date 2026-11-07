@@ -5,6 +5,7 @@ using Xunit;
 namespace HpskSite.Tests
 {
     /// <summary>Klubbsidorna 2a: allt sidstrukturen lagrar per ägare tas bort när ägaren raderas — och inget annat. Mot SQL Server (HPSK_TEST_SQL).</summary>
+    [Collection(SiteSqlCollection.Name)]
     public class SiteOwnerDataTests
     {
         private const int Gone = 990001;

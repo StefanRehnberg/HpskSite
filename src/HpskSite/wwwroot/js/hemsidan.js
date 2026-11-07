@@ -409,9 +409,61 @@
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser sidan?'), visSel, consequence,
         S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
       menuToggle(),
-      blocksEl, addBlockBar()]);
+      blocksEl, addBlockBar(), moreCard()]);
     drawBlocks();
     paintStatus(); paintEditorBanner();
+  }
+
+  // "Mer": återställningspunkt, tidigare versioner och adressbyte (avancerat). Inget av det publicerar något.
+  function moreCard() {
+    const versionsEl = h('div', { class: 'mt-2' });
+    const slugMsg = h('div', { class: 'mt-2' });
+    const fmt = s => new Date(s).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
+
+    async function loadVersions() {
+      versionsEl.replaceChildren(h('span', { class: 'text-muted' }, 'Laddar …'));
+      const r = await api('GET', 'Versions', { pageId: S.page.id });
+      if (!r.success) { versionsEl.replaceChildren(alertBox('danger', r.message || 'Det gick inte att hämta versionerna.')); return; }
+      if (!r.versions.length) { versionsEl.replaceChildren(h('p', { class: 'text-muted mb-0' }, 'Det finns inga tidigare versioner än. De skapas när du publicerar eller sparar en återställningspunkt.')); return; }
+      versionsEl.replaceChildren(h('div', { class: 'list-group' }, r.versions.map(v => h('div', { class: 'list-group-item d-flex flex-wrap align-items-center gap-2' },
+        h('span', { class: 'me-auto' }, fmt(v.saved) + ' – ' + v.kind, v.support ? ' (stödläge)' : ''),
+        h('button', { class: 'btn btn-sm btn-outline-primary', onclick: async () => {
+          if (!await confirmDialog('Använda den här versionen?', 'Din nuvarande text i utkastet ersätts av versionen från ' + fmt(v.saved) + '. Ingenting publiceras förrän du publicerar.', 'Använd den här', false)) return;
+          if (S.dirty) await saveNow();
+          const x = await api('POST', 'RestoreVersion', { pageId: S.page.id, versionId: v.id, expectedRevision: S.revision });
+          if (!x.success) { setBanner('danger', x.message || 'Versionen kunde inte användas.'); return; }
+          await openEditor(S.page.id);
+          setBanner('success', 'Versionen ligger nu i utkastet. Publicera när du är nöjd.');
+        } }, 'Använd den här')))));
+    }
+
+    const slugInp = h('input', { class: 'form-control', maxlength: '60', value: S.page.slug || '', 'aria-label': 'Sidans adress' });
+    return h('details', { class: 'hs-card p-3 mt-3' }, h('summary', { class: 'fw-semibold' }, 'Mer: versioner och adress'),
+      h('div', { class: 'mt-3' },
+        h('h2', { class: 'h6' }, 'Återställningspunkt'),
+        h('p', { class: 'text-muted small' }, 'Spara en version du kan gå tillbaka till. Det publicerar ingenting.'),
+        h('button', { class: 'btn btn-outline-secondary', onclick: async e => {
+          e.target.disabled = true; if (S.dirty) await saveNow();
+          const r = await api('POST', 'SaveCheckpoint', { pageId: S.page.id });
+          e.target.disabled = false;
+          setBanner(r.success ? 'success' : 'danger', r.success ? 'Återställningspunkten är sparad.' : (r.message || 'Det gick inte att spara.'));
+        } }, 'Spara en återställningspunkt'),
+        h('h2', { class: 'h6 mt-4' }, 'Tidigare versioner'),
+        h('button', { class: 'btn btn-outline-secondary', onclick: loadVersions }, 'Visa tidigare versioner'), versionsEl,
+        h('h2', { class: 'h6 mt-4' }, 'Adress (avancerat)'),
+        h('p', { class: 'text-muted small' }, 'Adressen ändras aldrig av sig själv. Byter du den skickas den gamla vidare till den nya, så länkar som redan delats fortsätter fungera. Sidor som bara styrelsen eller administratörerna ser skickas inte vidare.'),
+        h('div', { class: 'd-flex gap-2 flex-wrap' }, h('div', { class: 'flex-grow-1', style: 'min-width:14rem' }, slugInp),
+          h('button', { class: 'btn btn-outline-danger', onclick: async e => {
+            const wanted = slugInp.value.trim().toLowerCase();
+            if (!wanted || wanted === S.page.slug) { slugMsg.replaceChildren(alertBox('info', 'Skriv en ny adress.')); return; }
+            if (!await confirmDialog('Byta adress?', 'Sidans adress blir /' + wanted + '/. Den gamla adressen skickas vidare till den nya.', 'Byt adress', false)) return;
+            e.target.disabled = true;
+            const r = await api('POST', 'SetSlug', { pageId: S.page.id, slug: wanted });
+            e.target.disabled = false;
+            if (!r.success) { slugMsg.replaceChildren(alertBox('danger', r.message || 'Adressen går inte att använda.')); return; }
+            S.page.slug = r.slug; S.page.url = r.url; slugInp.value = r.slug;
+            slugMsg.replaceChildren(alertBox('success', 'Adressen är bytt: ' + r.url));
+          } }, 'Byt adress')), slugMsg));
   }
 
   // "Visa sidan i menyn": sparas direkt (det är inte en del av texten) och gäller först när sidan är publicerad.

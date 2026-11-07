@@ -204,6 +204,51 @@ namespace HpskSite.Services.SitePages
                 $"SELECT {PageColumns} FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1 AND DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + " ORDER BY Title",
                 ownerType, ownerId);
 
+        /// <summary>En rad i versionshistoriken (aldrig innehållet).</summary>
+        public sealed class VersionListItem
+        {
+            public int Id { get; set; }
+            public int Revision { get; set; }
+            public string Title { get; set; } = "";
+            public bool IsPublish { get; set; }
+            public int? SavedByMemberId { get; set; }
+            public bool SavedAsSupport { get; set; }
+            public DateTime SavedDate { get; set; }
+            /// <summary>Det som visas för användaren: "Publicerad" eller "Återställningspunkt".</summary>
+            public string Kind => IsPublish ? "Publicerad" : "Återställningspunkt";
+        }
+
+        /// <summary>
+        /// Sidans tidigare versioner: publiceringar och återställningspunkter, senaste först, högst <paramref name="take"/>. Baslinjen (det tomma
+        /// startutkastet) och det pågående utkastet ingår inte. Bara versioner av just den här sidan hos den här ägaren.
+        /// </summary>
+        public static List<VersionListItem> ListVersions(IDatabase db, int pageId, string ownerType, int ownerId, int take = 10) =>
+            db.Fetch<VersionListItem>(
+                @"SELECT TOP (@3) v.Id, v.Revision, v.Title, v.IsPublish, v.SavedByMemberId, v.SavedAsSupport, v.SavedDate
+                  FROM dbo.SitePageVersion v JOIN dbo.SitePage p ON p.Id = v.PageId AND p.OwnerType = v.OwnerType AND p.OwnerId = v.OwnerId
+                  WHERE v.PageId = @0 AND v.OwnerType = @1 AND v.OwnerId = @2 AND v.IsBaseline = 0
+                    AND (v.IsPublish = 1 OR v.Id <> ISNULL(p.DraftVersionId, 0))
+                  ORDER BY v.Id DESC",
+                pageId, ownerType, ownerId, Math.Clamp(take, 1, 50));
+
+        /// <summary>
+        /// "Spara en återställningspunkt": en ny versionsrad med det pågående utkastets (annars det publicerades) innehåll, utan att röra utkast,
+        /// publicering eller revision. Samma hash som senaste punkten = ingen ny rad.
+        /// </summary>
+        public static SiteStoreResult SaveCheckpoint(IDatabase db, int pageId, string ownerType, int ownerId, int? byMemberId, bool asSupport, DateTime now)
+        {
+            var page = GetPage(db, pageId, ownerType, ownerId);
+            if (page == null) return new SiteStoreResult(SiteStoreOutcome.NotFound);
+            var src = GetDraft(db, pageId, ownerType, ownerId) ?? GetPublished(db, pageId, ownerType, ownerId);
+            if (src == null) return new SiteStoreResult(SiteStoreOutcome.NothingToPublish, pageId, page.Revision);
+            var last = db.FirstOrDefault<byte[]>(
+                "SELECT TOP 1 ContentHash FROM dbo.SitePageVersion WHERE PageId = @0 AND IsBaseline = 0 AND Id <> ISNULL((SELECT DraftVersionId FROM dbo.SitePage WHERE Id = @0), 0) ORDER BY Id DESC", pageId);
+            var hash = Hash(src.Title, src.BlocksJson);
+            if (last != null && last.AsSpan().SequenceEqual(hash)) return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, page.Revision);   // samma som senaste: ingen ny rad
+            InsertVersion(db, pageId, ownerType, ownerId, page.Revision, src.Title, src.BlocksJson, isBaseline: false, isPublish: false, byMemberId, asSupport, now);
+            return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, page.Revision);
+        }
+
         /// <summary>Ägarens FRIA sidor för redigeringslistan, med aktuell adress. Aldrig innehåll. Mallkopior (systemsidor) ingår inte.</summary>
         public static List<SitePageListItem> ListFree(IDatabase db, string ownerType, int ownerId, bool deleted = false) =>
             db.Fetch<SitePageListItem>(

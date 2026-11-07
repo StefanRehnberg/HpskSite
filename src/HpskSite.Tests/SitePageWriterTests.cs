@@ -8,6 +8,7 @@ namespace HpskSite.Tests
     /// Klubbsidorna 2a: skrivlagret (schema + personnummer + ägarprövning + butik + adress + referenser + audit) mot en riktig SQL
     /// Server (<c>HPSK_TEST_SQL</c>, annars hoppas de över MED NAMN). Varje prov i en transaktion som rullas tillbaka.
     /// </summary>
+    [Collection(SiteSqlCollection.Name)]
     public class SitePageWriterTests
     {
         private const string Club = "Club";
@@ -257,6 +258,112 @@ namespace HpskSite.Tests
             SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, 2, support, Now);
             Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePageVersion WHERE PageId=@0 AND IsPublish=1 AND SavedAsSupport=1 AND SavedByMemberId=42", c.PageId));
             Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-publish' AND ActedAsSupport=1 AND ActorMemberId=42", c.PageId));
+        }
+
+        // ── Adressbyte ────────────────────────────────────────────────────────────
+
+        [SqlFact]
+        public void Adressbyte_gör_den_gamla_till_historik_loggas_och_kan_gå_tillbaka()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts);                                        // regler-for-banan
+            var r = SitePageWriter.SetSlug(f.Db, facts, c.PageId, Club, Owner, "banregler", Admin, Now);
+            Assert.True(r.Ok, r.Message); Assert.Equal("banregler", r.Slug);
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.PageAddress WHERE TargetKind='sitepage' AND TargetId=@0 AND IsCurrent=1 AND Slug='banregler'", c.PageId));
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.PageAddress WHERE TargetKind='sitepage' AND TargetId=@0 AND IsCurrent=0 AND Slug='regler-for-banan'", c.PageId));
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-slug'", c.PageId));
+            Assert.True(SitePageWriter.SetSlug(f.Db, facts, c.PageId, Club, Owner, "regler-for-banan", Admin, Now).Ok);   // sidans egen gamla adress är ledig
+        }
+
+        [SqlFact]
+        public void Adressbyte_vägrar_reserverat_upptaget_och_en_annan_ägares_sida()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var a = NewPage(f.Db, facts, "Sida A"); var b = NewPage(f.Db, facts, "Sida B");
+            foreach (var bad in new[] { "kalender", "klubbar", "2027", "sida-a", "Fel Form", "" })
+                Assert.Equal(SiteWriteStatus.SlugTaken, SitePageWriter.SetSlug(f.Db, facts, b.PageId, Club, Owner, bad, Admin, Now).Status);
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.SetSlug(f.Db, facts, a.PageId, Club, OtherOwner, "kapad", Admin, Now).Status);
+            Assert.Equal("sida-b", f.Db.ExecuteScalar<string>("SELECT Slug FROM dbo.PageAddress WHERE TargetKind='sitepage' AND TargetId=@0 AND IsCurrent=1", b.PageId));
+        }
+
+        // ── Versioner ─────────────────────────────────────────────────────────────
+
+        private static int PublishWith(IDatabase db, Facts facts, int pageId, ref int rev, string canary)
+        {
+            var s = SitePageWriter.SaveDraft(db, facts, pageId, Club, Owner, rev, "Regler", TextBlock($"<p>{canary}</p>"), null, Admin, Now);
+            Assert.True(s.Ok, s.Message);
+            var p = SitePageWriter.Publish(db, facts, pageId, Club, Owner, s.Revision, Admin, Now);
+            Assert.True(p.Ok, p.Message);
+            rev = p.Revision;
+            return rev;
+        }
+
+        [SqlFact]
+        public void Versionshistoriken_har_publiceringar_och_återställningspunkter_utan_baslinje_och_utkast()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts); var rev = 1;
+            PublishWith(f.Db, facts, c.PageId, ref rev, "ETT"); PublishWith(f.Db, facts, c.PageId, ref rev, "TVA");
+            var s = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, rev, "Regler", TextBlock("<p>UTKAST</p>"), null, Admin, Now);   // pågående utkast
+            var list = SitePageStore.ListVersions(f.Db, c.PageId, Club, Owner);
+            Assert.Equal(2, list.Count);
+            Assert.All(list, v => Assert.Equal("Publicerad", v.Kind));
+            Assert.True(list[0].Id > list[1].Id);                                                    // senaste först
+            Assert.True(SitePageWriter.SaveCheckpoint(f.Db, c.PageId, Club, Owner, Admin, Now).Ok);
+            Assert.True(SitePageWriter.SaveCheckpoint(f.Db, c.PageId, Club, Owner, Admin, Now).Ok); // samma innehåll igen: ingen ny rad
+            var after = SitePageStore.ListVersions(f.Db, c.PageId, Club, Owner);
+            Assert.Equal(3, after.Count);
+            Assert.Equal("Återställningspunkt", after[0].Kind);
+            Assert.Equal(s.Revision, SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!.Revision);  // en punkt rör inte revisionen
+        }
+
+        [SqlFact]
+        public void Använd_den_här_versionen_blir_ett_nytt_utkast_och_rör_inte_det_publicerade()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts); var rev = 1;
+            PublishWith(f.Db, facts, c.PageId, ref rev, "GAMMAL"); PublishWith(f.Db, facts, c.PageId, ref rev, "NYARE");
+            var oldest = SitePageStore.ListVersions(f.Db, c.PageId, Club, Owner).Last();
+            var r = SitePageWriter.RestoreVersion(f.Db, facts, c.PageId, Club, Owner, oldest.Id, rev, Admin, Now);
+            Assert.True(r.Ok, r.Message);
+            Assert.Equal(rev + 1, r.Revision);
+            Assert.Contains("GAMMAL", SitePageStore.GetDraft(f.Db, c.PageId, Club, Owner)!.BlocksJson);
+            Assert.Contains("NYARE", SitePageStore.GetPublished(f.Db, c.PageId, Club, Owner)!.BlocksJson);   // publicerat orört
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-restore-version' AND ContentHash IS NOT NULL", c.PageId));
+        }
+
+        [SqlFact]
+        public void En_annan_sidas_version_eller_gammal_revision_kan_inte_användas()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var a = NewPage(f.Db, facts, "A"); var b = NewPage(f.Db, facts, "B"); var ra = 1; var rb = 1;
+            PublishWith(f.Db, facts, a.PageId, ref ra, "A-TEXT"); PublishWith(f.Db, facts, b.PageId, ref rb, "B-TEXT");
+            var bVersion = SitePageStore.ListVersions(f.Db, b.PageId, Club, Owner).First();
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.RestoreVersion(f.Db, facts, a.PageId, Club, Owner, bVersion.Id, ra, Admin, Now).Status);   // (id, pageId): inte en annan sidas version
+            var aVersion = SitePageStore.ListVersions(f.Db, a.PageId, Club, Owner).First();
+            Assert.Equal(SiteWriteStatus.Conflict, SitePageWriter.RestoreVersion(f.Db, facts, a.PageId, Club, Owner, aVersion.Id, ra - 1, Admin, Now).Status);
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.RestoreVersion(f.Db, facts, a.PageId, Club, OtherOwner, aVersion.Id, ra, Admin, Now).Status);
+        }
+
+        [SqlFact]
+        public void Baslinjen_det_tomma_startutkastet_kan_inte_väljas_som_version()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts); var rev = 1;
+            PublishWith(f.Db, facts, c.PageId, ref rev, "TEXT");
+            var baseline = f.Db.ExecuteScalar<int>("SELECT Id FROM dbo.SitePageVersion WHERE PageId = @0 AND IsBaseline = 1", c.PageId);
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.RestoreVersion(f.Db, facts, c.PageId, Club, Owner, baseline, rev, Admin, Now).Status);
+        }
+
+        [SqlFact]
+        public void En_gammal_version_som_blivit_öppnare_än_sidan_tillåter_kan_inte_tas_tillbaka()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts, vis: SiteVisibility.Klubbmedlemmar); var rev = 1;
+            PublishWith(f.Db, facts, c.PageId, ref rev, "MEDLEMSTEXT");
+            var v = SitePageStore.ListVersions(f.Db, c.PageId, Club, Owner).First();
+            f.Db.Execute("UPDATE dbo.SitePage SET Visibility = 3 WHERE Id = @0", c.PageId);          // sidan har sedan gjorts till Styrelse
+            Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.RestoreVersion(f.Db, facts, c.PageId, Club, Owner, v.Id, rev, Admin, Now).Status);
         }
 
         [SqlFact]

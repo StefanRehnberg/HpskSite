@@ -285,6 +285,79 @@ namespace HpskSite.Controllers
             return Map(r);
         }
 
+        /// <summary>Sidans tidigare versioner (publiceringar och återställningspunkter), senaste först, högst tio.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ")]
+        public async Task<IActionResult> Versions(string ownerType, int ownerId, int pageId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            if (SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId) == null) return Fail("Sidan finns inte.");
+            return Json(new
+            {
+                success = true,
+                versions = SitePageStore.ListVersions(scope.Database, pageId, g.OwnerType, g.OwnerId).Select(v => new { id = v.Id, kind = v.Kind, title = v.Title, saved = v.SavedDate, support = v.SavedAsSupport }),
+            });
+        }
+
+        /// <summary>"Använd den här versionen": kopierar den in som nytt utkast (aldrig en pekarflytt).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> RestoreVersion(string ownerType, int ownerId, int pageId, int versionId, int expectedRevision)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.RestoreVersion(scope.Database, _facts, pageId, g.OwnerType, g.OwnerId, versionId, expectedRevision, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>"Spara en återställningspunkt": en version att kunna gå tillbaka till, utan att något publiceras.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SaveCheckpoint(string ownerType, int ownerId, int pageId)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.SaveCheckpoint(scope.Database, pageId, g.OwnerType, g.OwnerId, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Byter sidans adress (under "Avancerat"). Den gamla adressen svarar 301 till den nya.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SetSlug(string ownerType, int ownerId, int pageId, string slug)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.SetSlug(scope.Database, _facts, pageId, g.OwnerType, g.OwnerId, slug ?? "", g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Json(new { success = r.Ok, slug = r.Slug, url = r.Ok ? g.OwnerUrl + r.Slug + "/" : null, message = r.Ok ? null : r.Message ?? "Adressen går inte att använda.", status = r.Status.ToString() });
+        }
+
         /// <summary>Visa sidan i menyn eller inte. En sida syns i menyn först när den är publicerad, och bara för den som får se den.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

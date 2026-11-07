@@ -159,6 +159,51 @@ namespace HpskSite.Services.SitePages
             return new SiteWriteResult(SiteWriteStatus.Ok, pageId, published.Revision);
         }
 
+        /// <summary>
+        /// "Använd den här versionen": versionens titel och innehåll kopieras in som NYTT utkast (aldrig en pekarflytt), och valideras om mot sidans
+        /// aktuella synlighet precis som vilken sparning som helst. Versionen måste höra till just den här sidan.
+        /// </summary>
+        public static SiteWriteResult RestoreVersion(IDatabase db, ISiteOwnerFacts facts, int pageId, string ownerType, int ownerId, int versionId,
+            int expectedRevision, SiteActor actor, DateTime now)
+        {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            var version = SitePageStore.GetVersion(db, versionId, pageId);   // (id, pageId): en annan sidas version hittas aldrig
+            if (version == null || version.IsBaseline) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            var r = SaveDraft(db, facts, pageId, ownerType, ownerId, expectedRevision, version.Title, version.BlocksJson, null, actor, now);   // spärren gäller även här: en gammal version med personnummer kan inte tas tillbaka tyst
+            if (r.Ok) Audit(db, ownerType, ownerId, actor, "page", pageId, "page-restore-version", SitePageStore.Hash(version.Title, version.BlocksJson), now);
+            return r;
+        }
+
+        /// <summary>"Spara en återställningspunkt" (loggas inte: den ändrar ingenting synligt).</summary>
+        public static SiteWriteResult SaveCheckpoint(IDatabase db, int pageId, string ownerType, int ownerId, SiteActor actor, DateTime now) =>
+            From(SitePageStore.SaveCheckpoint(db, pageId, ownerType, ownerId, actor.MemberId, actor.AsSupport, now));
+
+        /// <summary>
+        /// Byt sidans adress. <b>Sluggen ändras aldrig automatiskt</b> — bara här, på uttrycklig begäran. Den gamla adressen blir historik och
+        /// svarar 301 till den nya (findern, för en sida som var öppen för minst medlemmar). Sidans EGNA tidigare adresser räknas som lediga;
+        /// alla andra regler är de vanliga (<see cref="SitePageSlugRules"/>). Körs under ägarens lås så att två byten inte tar samma adress.
+        /// </summary>
+        public static SiteWriteResult SetSlug(IDatabase db, ISiteOwnerFacts facts, int pageId, string ownerType, int ownerId, string newSlug, SiteActor actor, DateTime now)
+        {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            newSlug = (newSlug ?? "").Trim();
+            if (!SitePageStore.LockOwner(db, ownerType, ownerId)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+
+            // Namnrymden utan sidans egna adresser (en adress sidan själv haft är ledig att gå tillbaka till).
+            var taken = db.Fetch<string>(
+                "SELECT Slug FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND NOT (TargetKind = @2 AND TargetId = @3)",
+                ownerType, ownerId, PageAddressKinds.SitePage, pageId);
+            var check = SitePageSlugRules.Check(newSlug, ownerType, taken, facts.ChildNodeSegments(ownerType, ownerId), facts.RegionClubSegments(ownerType, ownerId));
+            if (!check.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, pageId, page.Revision, Message: check.Reason);
+
+            var r = PageAddressService.SetCurrentFlat(db, PageAddressKinds.SitePage, pageId, new PageAddressOwner(ownerType, ownerId), newSlug);
+            if (!r.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, pageId, page.Revision, Message: r.Conflict);
+            if (r.Changed) Audit(db, ownerType, ownerId, actor, "page", pageId, "page-slug", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision, newSlug);
+        }
+
         /// <summary>Lägg en egen sida i menyn eller ta bort den därifrån (loggas). Sidan måste höra till ägaren.</summary>
         public static SiteWriteResult SetInMenu(IDatabase db, int pageId, string ownerType, int ownerId, bool inMenu, SiteActor actor, DateTime now)
         {

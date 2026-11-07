@@ -9,6 +9,7 @@ namespace HpskSite.Tests
     /// Klubbsidorna 2a: SQL-lagret för egna sidor mot en riktig SQL Server (<c>HPSK_TEST_SQL</c>, annars hoppas de över MED NAMN).
     /// Varje prov körs i en transaktion som rullas tillbaka; samtidighetsprovet använder två riktiga anslutningar och städar efter sig.
     /// </summary>
+    [Collection(SiteSqlCollection.Name)]
     public class SitePageStoreTests
     {
         private const string Club = "Club";

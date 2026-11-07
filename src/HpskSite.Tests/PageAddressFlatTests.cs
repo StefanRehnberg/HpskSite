@@ -7,6 +7,7 @@ namespace HpskSite.Tests
     /// Klubbsidorna F0-spik b: <c>SetCurrentFlat</c> (adress utan år) mot en riktig SQL Server. Körs när <c>HPSK_TEST_SQL</c> är
     /// satt, annars hoppas de över MED NAMN. Allt i en transaktion som rullas tillbaka.
     /// </summary>
+    [Collection(SiteSqlCollection.Name)]
     public class PageAddressFlatTests
     {
         private static readonly PageAddressOwner Club = new("Club", 990001);
