@@ -238,12 +238,24 @@ WHEN NOT MATCHED THEN INSERT (OwnerType, OwnerId, IsEnabled, TemplateVersion, En
             return n;
         }
 
+        /// <summary>Tar bort ALLT ägaren har i sidstrukturen (<see cref="SiteOwnerData.DeleteAll"/>) i en transaktion; saknas sidtabellerna (migreringen ej körd) tas bara brytarraden bort.</summary>
         protected virtual int DeleteRow(string ownerType, int ownerId)
         {
-            using var scope = _scopeProvider!.CreateScope();
-            var n = scope.Database.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
-            scope.Complete();
-            return n;
+            try
+            {
+                using var scope = _scopeProvider!.CreateScope();
+                var n = SiteOwnerData.DeleteAll(scope.Database, ownerType, ownerId);
+                scope.Complete();
+                return n;
+            }
+            catch (Exception ex) when (IsMissingTable(ex))
+            {
+                _logger.LogError("Sidtabellerna saknas — bara brytarraden för {OwnerType} {OwnerId} togs bort. Kör Migrations/create-site-pages-tables.sql.", ownerType, ownerId);
+                using var scope = _scopeProvider!.CreateScope();
+                var n = scope.Database.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
+                scope.Complete();
+                return n;
+            }
         }
 
         /// <summary>SQL-fel 208 = "Invalid object name": tabellen finns inte.</summary>
