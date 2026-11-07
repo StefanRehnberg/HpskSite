@@ -595,11 +595,12 @@ function loadClubQuickLinkDocuments() {
             if (data.success && data.data && data.data.length > 0) {
                 let html = '';
                 data.data.forEach(doc => {
-                    html += `<a href="/umbraco/surface/Document/DownloadDocument?id=${doc.id}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
-                        <i class="bi ${doc.icon} me-3 text-primary"></i>
+                    // Titel och filnamn är klubbadminens fria text: aldrig rått in i innerHTML.
+                    html += `<a href="/umbraco/surface/Document/DownloadDocument?id=${encodeURIComponent(doc.id)}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
+                        <i class="bi ${escapeHtml(String(doc.icon || ''))} me-3 text-primary"></i>
                         <div>
-                            <strong>${doc.title}</strong>
-                            <small class="d-block text-muted">${doc.fileName}</small>
+                            <strong>${escapeHtml(doc.title)}</strong>
+                            <small class="d-block text-muted">${escapeHtml(doc.fileName)}</small>
                         </div>
                     </a>`;
                 });

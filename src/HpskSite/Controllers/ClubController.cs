@@ -1392,7 +1392,8 @@ namespace HpskSite.Controllers
 
                 // Update description properties
                 clubContent.SetValue("description", description);
-                clubContent.SetValue("aboutClub", aboutClub);
+                // Rik text som visas för andra: saneras vid skrivning med samma vitlista som vid visning.
+                clubContent.SetValue("aboutClub", HpskSite.Extensions.RteHelper.SafeMarkup(aboutClub));
 
                 // Update Brevo API key (if property exists)
                 if (clubContent.HasProperty("brevoApiKey"))
@@ -1649,8 +1650,9 @@ namespace HpskSite.Controllers
                 }
 
                 regionContent.SetValue("welcomeTitle", welcomeTitle);
-                regionContent.SetValue("welcomeText", welcomeText);
-                regionContent.SetValue("aboutRegion", aboutRegion);
+                // Rik text som visas för andra: saneras vid skrivning med samma vitlista som vid visning.
+                regionContent.SetValue("welcomeText", HpskSite.Extensions.RteHelper.SafeMarkup(welcomeText));
+                regionContent.SetValue("aboutRegion", HpskSite.Extensions.RteHelper.SafeMarkup(aboutRegion));
                 regionContent.SetValue("contactPerson", contactPerson);
                 regionContent.SetValue("contactEmail", contactEmail);
                 regionContent.SetValue("contactPhone", contactPhone);

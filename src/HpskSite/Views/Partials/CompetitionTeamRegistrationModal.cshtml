@@ -191,7 +191,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const competitionId = @(ViewData["CompetitionId"]);
     const currentMemberClubId = @(ViewData["CurrentMemberClubId"] ?? 0);
-    const currentMemberClubName = '@Html.Raw(((string)(ViewData["CurrentMemberClubName"] ?? "")).Replace("'", "\\'"))';
+    const currentMemberClubName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize((string)(ViewData["CurrentMemberClubName"] ?? "")));
     const currentMemberId = @(ViewData["CurrentMemberId"] ?? 0);
     const regRole = '@(ViewData["RegRole"] ?? "member")';
     const regRegionCode = '@(ViewData["RegRegionCode"] ?? "")';

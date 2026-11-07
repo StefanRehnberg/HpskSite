@@ -10,7 +10,8 @@
 
     // Get club ID from content
     var clubId = Model?.Value<int>("clubId") ?? 0;
-    var welcomeMessage = Model?.Value<string>("welcomeMessage") ?? "";
+    // Saneras som all RTE-text innan den skrivs ut med Html.Raw (lagrad XSS annars).
+    var welcomeMessage = HpskSite.Extensions.RteHelper.SafeMarkup(Model?.Value<string>("welcomeMessage"));
     var logo = Model?.Value<IPublishedContent>("logo");
     var bannerImage = Model?.Value<IPublishedContent>("bannerImage");
 

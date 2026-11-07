@@ -629,7 +629,8 @@
                             <i class="bi bi-bag-check fs-4 me-3" style="color: @eventTypeColor;"></i>
                             <div>
                                 <small class="text-secondary d-block">Utrustning att ta med</small>
-                                <div class="mt-1">@Html.Raw(equipmentRequired.Replace("\n", "<br>"))</div>
+                                @* Fri text från klubbadmin: HTML-koda först, radbrytning sedan (annars lagrad XSS). *@
+                                <div class="mt-1">@Html.Raw(System.Net.WebUtility.HtmlEncode(equipmentRequired).Replace("\r", "").Replace("\n", "<br>"))</div>
                             </div>
                         </div>
                     }
@@ -837,9 +838,9 @@
 
 // Event data for calendar/share functionality
 const eventData = {
-    name: '@Html.Raw(eventName.Replace("'", "\\'"))',
-    description: '@Html.Raw(shortDescription.Replace("'", "\\'").Replace("\n", " ").Replace("\r", ""))',
-    venue: '@Html.Raw(venue.Replace("'", "\\'"))',
+    name: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(eventName)),
+    description: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(shortDescription.Replace("\n", " ").Replace("\r", ""))),
+    venue: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(venue)),
     hasDate: @(hasDate ? "true" : "false"),
     @if (hasDate)
     {
@@ -854,7 +855,7 @@ const eventData = {
         }
     }
     url: window.location.href,
-    clubName: '@Html.Raw(ownerName.Replace("'", "\\'"))'
+    clubName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(ownerName))
 };
 
 function addToCalendar() {
