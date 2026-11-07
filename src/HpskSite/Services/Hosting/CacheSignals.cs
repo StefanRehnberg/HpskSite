@@ -30,6 +30,8 @@ namespace HpskSite.Services.Hosting
         public const string KretsCalendar = "kretskalender";
         public const string PageAddresses = "page-addresses";
         public const string SeriesResults = "series-results";
+        /// <summary>Brytaren per klubb/krets för den nya sidstrukturen (<c>SiteOwnerService</c>, klubbsidorna steg 1).</summary>
+        public const string SiteOwners = "site-owners";
 
         /// <summary>Namn → lokal tömning (körs på de andra instanserna).</summary>
         public static readonly IReadOnlyDictionary<string, Action<IServiceProvider>> Invalidators =
@@ -41,6 +43,7 @@ namespace HpskSite.Services.Hosting
                 [KretsCalendar] = sp => sp.GetRequiredService<Umbraco.Cms.Core.Cache.AppCaches>().RuntimeCache.Clear(Kretsgranskning.KretsCalendarService.IndexCacheKey),
                 [PageAddresses] = sp => Addresses.PageAddressService.InvalidateLocal(sp.GetRequiredService<Umbraco.Cms.Core.Cache.AppCaches>()),
                 [SeriesResults] = sp => SeriesCalculationService.ClearLocal(sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()),
+                [SiteOwners] = sp => sp.GetRequiredService<SitePages.SiteOwnerService>().ClearLocal(),
             };
 
         private static CacheSignals? _current;

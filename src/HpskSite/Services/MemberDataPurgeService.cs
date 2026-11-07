@@ -185,6 +185,9 @@ namespace HpskSite.Services
             // (SetByMemberId är NULL-bar, CHECK tillåter NULL). ClearSql får inte nämna medlemskolumnen och inte vara tom.
             ("CompetitionRegistrationClassDecision", "SetByMemberId", "SetAt = SetAt"),
             ("ChampionshipDecisionLog",              "SetByMemberId", "SetAt = SetAt"),
+            // Klubbsidorna steg 1 (2026-11-07): vem som slog på den nya sidstrukturen för en klubb/krets är en aktör, inte ett
+            // ämne. Pekaren släpps (NULL-bar), raden och brytaren står kvar. ClearSql får inte vara tom eller nämna medlemskolumnen.
+            ("SiteOwner",                            "EnabledByMemberId", "UpdatedDate = UpdatedDate"),
         };
 
         /// <summary>
