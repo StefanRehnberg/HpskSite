@@ -144,7 +144,15 @@ namespace HpskSite.Services.SitePages
             try
             {
                 var enabled = LoadEnabled();
-                var editing = LoadEditing();
+                // Brytare 2 läses isolerat: ett fel där får aldrig göra brytare 1 AV (redan påslagna klubbar tappar inte sin nya struktur).
+                // Redigering faller i stället tillbaka på senast kända mängd, annars AV.
+                HashSet<string> editing;
+                try { editing = LoadEditing(); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "SiteOwner.EditingEnabled kunde inte läsas — {What}", previous != null ? "den senast kända mängden används" : "egen redigering är AV tills vidare");
+                    editing = previous?.Editing ?? new HashSet<string>(StringComparer.Ordinal);
+                }
                 if (_warnedMissing) { _warnedMissing = false; _logger.LogInformation("Tabellen SiteOwner finns nu."); }
                 return new Snapshot(enabled, editing, _now() + Ttl);
             }

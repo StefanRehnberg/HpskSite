@@ -156,6 +156,27 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Ett_fel_vid_läsning_av_brytare_2_gör_inte_brytare_1_AV()
+        {
+            var (svc, _) = Make(K(SiteTemplates.Club, 5));
+            svc.LoadEd = () => throw new InvalidOperationException("EditingEnabled går inte att läsa");
+            Assert.True(svc.IsEnabled(SiteTemplates.Club, 5));             // brytare 1 står kvar
+            Assert.False(svc.IsEditingEnabled(SiteTemplates.Club, 5));     // redigering AV utan känd mängd
+        }
+
+        [Fact]
+        public void Ett_senare_fel_vid_läsning_av_brytare_2_behåller_senast_kända_mängd()
+        {
+            var (svc, advance) = Make(K(SiteTemplates.Club, 5));
+            svc.LoadEd = () => new HashSet<string> { K(SiteTemplates.Club, 5) };
+            Assert.True(svc.IsEditingEnabled(SiteTemplates.Club, 5));
+            advance(SiteOwnerService.Ttl + TimeSpan.FromSeconds(1));
+            svc.LoadEd = () => throw new InvalidOperationException("tillfälligt fel");
+            Assert.True(svc.IsEnabled(SiteTemplates.Club, 5));
+            Assert.True(svc.IsEditingEnabled(SiteTemplates.Club, 5));      // senast kända mängd, inte tyst AV
+        }
+
+        [Fact]
         public void Att_slå_av_brytare_1_ger_AV_vid_nästa_läsning_och_PÅ_igen_utan_att_brytare_2_rörs()
         {
             var (svc, _) = Make(K(SiteTemplates.Club, 5));
