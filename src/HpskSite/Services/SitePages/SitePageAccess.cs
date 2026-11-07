@@ -71,6 +71,16 @@ namespace HpskSite.Services.SitePages
                 ? ownerId > 0 && await _auth.IsOwnClubAdmin(ownerId)
                 : !string.IsNullOrEmpty(regionCode) && await _auth.IsOwnRegionAdmin(regionCode);
 
+        /// <summary>
+        /// Får den inloggade ÖPPNA ett stödläge hos ägaren? Klubb: kretsens admin i klubbens krets och sajtadmin (<c>IsClubAdminForClub</c>). Krets: sajtadmin.
+        /// Ett stödläge är aldrig en rättighet att skriva: det är rätten att be om ett loggat, tidsbegränsat läge (<see cref="SiteSupport"/>). Ägarens egen admin
+        /// behöver det inte. Frågan ställs HÄR och inte i <c>SiteEditController</c>, vars spärrtest förbjuder de breda adminkontrollerna.
+        /// </summary>
+        public async Task<bool> IsSupportEligibleAsync(string ownerType, int ownerId) =>
+            ownerType == SiteTemplates.Club
+                ? ownerId > 0 && await _auth.IsClubAdminForClub(ownerId)
+                : await _auth.IsCurrentUserAdminAsync();
+
         /// <param name="regionCode">Kretsens kod (krets-ägare); behövs för kretsens admin.</param>
         public async Task<SiteViewer> ResolveAsync(string ownerType, int ownerId, string? regionCode)
         {
@@ -135,7 +145,8 @@ namespace HpskSite.Services.SitePages
                     if (req.OwnerType == SiteTemplates.Region && _ctx.TryGetUmbracoContext(out var huc) && huc.Content != null)
                         code = huc.Content.GetById(req.OwnerId)?.Value<string>("regionCode");
                     var own = req.OwnerType == SiteTemplates.Club ? await _auth.IsOwnClubAdmin(req.OwnerId) : await _auth.IsOwnRegionAdmin(code ?? "");
-                    if (!own) { context.Result = new NotFoundResult(); return false; }
+                    // Den som FÅR öppna ett stödläge (kretsadmin, sajtadmin) släpps in till ytan, som då visar stödlägesformuläret; skrivning prövas av kontrollern.
+                    if (!own && !await _viewers.IsSupportEligibleAsync(req.OwnerType, req.OwnerId)) { context.Result = new NotFoundResult(); return false; }
                     return true;
                 }
 

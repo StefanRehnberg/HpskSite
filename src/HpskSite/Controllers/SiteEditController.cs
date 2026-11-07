@@ -41,23 +41,29 @@ namespace HpskSite.Controllers
         private readonly IContentService _content;
         private readonly IMemberManager _members;
         private readonly IMemberService _memberService;
+        private readonly SiteViewerResolver _viewers;
+        private readonly ISiteSupportNotifier _notifier;
 
         public SiteEditController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, ISiteOwnerFacts facts, RateCounterService rate,
-            IContentService content, IMemberManager members, IMemberService memberService)
+            IContentService content, IMemberManager members, IMemberService memberService, SiteViewerResolver viewers, ISiteSupportNotifier notifier)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth; _scopes = scopes; _owners = owners; _facts = facts; _rate = rate;
-            _content = content; _members = members; _memberService = memberService;
+            _content = content; _members = members; _memberService = memberService; _viewers = viewers; _notifier = notifier;
         }
 
         /// <summary>Resultatet av ägarprövningen: ett felsvar, eller ägarens uppgifter och den som skriver.</summary>
-        private sealed record GateResult(IActionResult? Error, string OwnerType = "", int OwnerId = 0, string OwnerName = "", string OwnerUrl = "/", SiteActor? Actor = null);
+        private sealed record GateResult(IActionResult? Error, string OwnerType = "", int OwnerId = 0, string OwnerName = "", string OwnerUrl = "/", SiteActor? Actor = null,
+            SupportGrantRow? Grant = null, string? RegionCode = null);
+
+        /// <summary>Normal = ägarens egen admin ELLER öppet stödläge. OwnOnly = bara ägarens egen admin (t.ex. att godkänna villkoren). StartSupport = även den som FÅR öppna ett stödläge.</summary>
+        private enum GateMode { Normal, OwnOnly, StartSupport }
 
         private IActionResult Fail(string message, string? code = null) => Json(new { success = false, message, code });
 
-        private async Task<GateResult> Gate(string ownerType, int ownerId, bool write)
+        private async Task<GateResult> Gate(string ownerType, int ownerId, bool write, GateMode mode = GateMode.Normal)
         {
             if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region) return new GateResult(Fail("Okänd ägartyp."));
             if (ownerId <= 0) return new GateResult(Fail("Okänd förening."));
@@ -70,14 +76,26 @@ namespace HpskSite.Controllers
             // Brytare 2 av = ytan finns inte (inte ett beskrivande fel som avslöjar något).
             if (!_owners.IsEditingEnabled(ownerType, ownerId)) return new GateResult(Fail("Hemsidan är inte påslagen för den här föreningen.", "off"));
 
-            var allowed = ownerType == SiteTemplates.Club
+            var regionCode = node.GetValue<string>("regionCode");
+            var own = ownerType == SiteTemplates.Club
                 ? await _auth.IsOwnClubAdmin(ownerId)
-                : await _auth.IsOwnRegionAdmin(node.GetValue<string>("regionCode") ?? "");
-            if (!allowed) return new GateResult(Fail(NotAllowed, "denied"));
+                : await _auth.IsOwnRegionAdmin(regionCode ?? "");
 
             var cur = await _members.GetCurrentMemberAsync();
             var memberId = cur?.Email == null ? (int?)null : _memberService.GetByEmail(cur.Email)?.Id;
             if (memberId == null) return new GateResult(Fail(NotAllowed, "denied"));
+
+            // Ägarens egen admin skriver som sig själv. Alla andra måste ha ett ÖPPET stödläge (loggat, 60 min) — och bara de som FÅR öppna ett.
+            SupportGrantRow? grant = null;
+            if (!own)
+            {
+                if (mode == GateMode.OwnOnly) return new GateResult(Fail(NotAllowed, "denied"));
+                if (!await _viewers.IsSupportEligibleAsync(ownerType, ownerId)) return new GateResult(Fail(NotAllowed, "denied"));
+                using var gs = _scopes.CreateScope(autoComplete: true);
+                grant = SiteSupport.Active(gs.Database, memberId.Value, ownerType, ownerId, DateTime.Now);
+                if (grant == null && mode != GateMode.StartSupport)
+                    return new GateResult(Fail("Du är inte föreningens egen administratör. Öppna ett stödläge, med en anledning, för att ändra föreningens sidor.", "support"));
+            }
 
             if (write)
             {
@@ -86,7 +104,7 @@ namespace HpskSite.Controllers
                     return new GateResult(Fail("Villkoren för klubbens sidor är inte accepterade än.", "terms"));
             }
             var url = UmbracoContext.Content?.GetById(ownerId)?.Url() ?? "/";
-            return new GateResult(null, ownerType, ownerId, node.Name ?? "", url, new SiteActor(memberId));
+            return new GateResult(null, ownerType, ownerId, node.Name ?? "", url, new SiteActor(memberId, AsSupport: grant != null), grant, regionCode);
         }
 
         private bool Throttled(string key, int limit, TimeSpan window) => _rate.Increment(key, window) > limit;
@@ -132,7 +150,8 @@ namespace HpskSite.Controllers
             };
             return Json(new
             {
-                success = true, ownerName = g.OwnerName, ownerUrl = g.OwnerUrl, termsAccepted = accepted, termsVersion = SiteOwnerData.CurrentTermsVersion,
+                success = true, ownerName = g.OwnerName, ownerUrl = g.OwnerUrl, termsAccepted = accepted,
+                support = g.Grant == null ? null : new { reason = g.Grant.Reason, expires = g.Grant.ExpiresDate, minutes = SiteSupport.Minutes }, termsVersion = SiteOwnerData.CurrentTermsVersion,
                 maxPages = SitePageStore.MaxFreePagesPerOwner,
                 // Systemsidorna som ett länkblock får peka på (aldrig Admin, som saknar adress).
                 systemPages = SiteTemplates.For(g.OwnerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p => new { key = p.Key, label = p.Label }),
@@ -170,6 +189,64 @@ namespace HpskSite.Controllers
             public int AccessLevel { get; set; }
         }
 
+        /// <summary>
+        /// Öppnar ett stödläge (60 min) för den som FÅR göra det (kretsens admin, sajtadmin) men inte är föreningens egen admin. Kräver en tydlig anledning,
+        /// loggas i SiteAudit (ActedAsSupport) och föreningens egna administratörer får mejl. Ett misslyckat mejl hindrar inte stödläget (det är loggat ändå).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: den som får öppna stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> StartSupport(string ownerType, int ownerId, string reason)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.StartSupport);
+            if (g.Error != null) return g.Error;
+            if (!g.Actor!.AsSupport && g.Grant == null)
+            {
+                // Ägarens egen admin behöver inget stödläge.
+                var own = g.OwnerType == SiteTemplates.Club ? await _auth.IsOwnClubAdmin(g.OwnerId) : await _auth.IsOwnRegionAdmin(g.RegionCode ?? "");
+                if (own) return Fail("Du är föreningens egen administratör och behöver inget stödläge.");
+            }
+            if (Throttled($"sitesupport:{g.Actor!.MemberId}", 6, TimeSpan.FromHours(1))) return Fail("För många stödlägen på kort tid. Försök igen om en stund.", "rate");
+            var problem = SiteSupport.ReasonProblem(reason);
+            if (problem != null) return Fail(problem, "reason");
+
+            SupportGrantRow? grant;
+            var now = DateTime.Now;
+            using (var scope = _scopes.CreateScope())
+            {
+                SiteSupport.Start(scope.Database, g.Actor.MemberId!.Value, g.OwnerType, g.OwnerId, reason, now);
+                grant = SiteSupport.Active(scope.Database, g.Actor.MemberId.Value, g.OwnerType, g.OwnerId, now);
+                scope.Database.Execute(
+                    "INSERT INTO dbo.SiteAudit (OwnerType, OwnerId, ActorMemberId, ActedAsSupport, ObjectKind, ObjectId, Action, CreatedDate) VALUES (@0, @1, @2, 1, 'owner', @1, 'support-start', @3)",
+                    g.OwnerType, g.OwnerId, g.Actor.MemberId, now);
+                scope.Complete();
+            }
+            var cur = await _members.GetCurrentMemberAsync();
+            var notified = await _notifier.NotifyStartedAsync(g.OwnerType, g.OwnerId, g.OwnerName, g.RegionCode, cur?.Name ?? "En administratör", reason.Trim(), grant!.ExpiresDate);
+            return Json(new { success = true, expires = grant.ExpiresDate, minutes = SiteSupport.Minutes, notified });
+        }
+
+        /// <summary>Avslutar det egna stödläget i förtid.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> EndSupport(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            int ended;
+            using (var scope = _scopes.CreateScope())
+            {
+                ended = SiteSupport.End(scope.Database, g.Actor!.MemberId!.Value, g.OwnerType, g.OwnerId, DateTime.Now);
+                if (ended > 0)
+                    scope.Database.Execute(
+                        "INSERT INTO dbo.SiteAudit (OwnerType, OwnerId, ActorMemberId, ActedAsSupport, ObjectKind, ObjectId, Action, CreatedDate) VALUES (@0, @1, @2, 1, 'owner', @1, 'support-end', @3)",
+                        g.OwnerType, g.OwnerId, g.Actor.MemberId, DateTime.Now);
+                scope.Complete();
+            }
+            return Json(new { success = true, ended });
+        }
+
         /// <summary>Föreningens dokument att välja i ett dokumentblock: bara titel och nivå, aldrig filen. Bara ägarens egna.</summary>
         [HttpGet]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ")]
@@ -192,7 +269,7 @@ namespace HpskSite.Controllers
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ")]
         public async Task<IActionResult> AcceptTerms(string ownerType, int ownerId)
         {
-            var g = await Gate(ownerType, ownerId, write: false);
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.OwnOnly);
             if (g.Error != null) return g.Error;
             using (var scope = _scopes.CreateScope())
             {

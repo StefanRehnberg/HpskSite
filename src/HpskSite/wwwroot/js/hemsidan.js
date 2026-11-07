@@ -115,12 +115,40 @@
   function view(nodes) { clearEditors(); clearTimeout(S.timer); body.replaceChildren(...[].concat(nodes)); }
   const header = (sub) => h('div', { class: 'mb-3' },
     h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)),
-    h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null);
+    h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null, supportBanner());
+
+  // Stödläget: en person som inte är föreningens egen admin ändrar i ett loggat, tidsbegränsat läge. Det syns hela tiden, med ett sätt att avsluta.
+  function supportBanner() {
+    const sup = S.st && S.st.support;
+    if (!sup) return null;
+    const until = new Date(sup.expires);
+    return h('div', { class: 'alert alert-warning d-flex flex-wrap gap-2 align-items-center mt-2', role: 'status' },
+      h('span', { class: 'me-auto' }, h('strong', {}, 'Stödläge. '), 'Du ändrar ' + OWNER.name + 's sidor som stödperson. Allt loggas och föreningens administratörer meddelas. Slutar ' + pad(until.getHours()) + ':' + pad(until.getMinutes()) + '. Anledning: ' + sup.reason),
+      h('button', { class: 'btn btn-sm btn-outline-dark', onclick: async () => { await api('POST', 'EndSupport'); S.st = null; load(); } }, 'Avsluta stödläge'));
+  }
+
+  function renderSupportStart() {
+    const reason = h('textarea', { class: 'form-control', rows: '3', maxlength: '300', 'aria-label': 'Anledning' });
+    const msg = h('div');
+    const btn = h('button', { class: 'btn btn-primary', onclick: async () => {
+      btn.disabled = true;
+      const r = await api('POST', 'StartSupport', { reason: reason.value });
+      if (!r.success) { btn.disabled = false; msg.replaceChildren(alertBox('danger', r.message || 'Stödläget kunde inte öppnas.')); return; }
+      S.st = null; load();
+    } }, 'Öppna stödläge');
+    view([h('div', { class: 'mb-3' }, h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)), h('h1', { class: 'h3' }, 'Hemsidan')),
+      h('div', { class: 'hs-card p-3 p-md-4', style: 'max-width:46rem' },
+        h('h2', { class: 'h5' }, 'Du är inte ' + OWNER.name + 's egen administratör'),
+        h('p', {}, 'Du kan ändra föreningens sidor i ett stödläge. Det varar i 60 minuter, loggas, och föreningens egna administratörer får ett mejl med din anledning.'),
+        h('label', { class: 'form-label fw-semibold' }, 'Varför behöver du ändra föreningens sidor?'), reason,
+        h('div', { class: 'form-text mb-3' }, 'Minst tio tecken. Föreningens administratörer får läsa det du skriver.'), msg, btn)]);
+  }
   const alertBox = (cls, ...kids) => h('div', { class: 'alert alert-' + cls }, kids);
 
   async function load() {
     view(h('p', { class: 'text-muted' }, 'Laddar …'));
     const st = await api('GET', 'State');
+    if (!st.success && st.code === 'support') return renderSupportStart();
     if (!st.success) { view([header(), alertBox('warning', st.message || 'Hemsidan kan inte öppnas.')]); return; }
     S.st = st;
     if (!st.termsAccepted) return renderTerms();
@@ -404,7 +432,7 @@
       } }, 'Kasta ändringarna'),
       h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
 
-    view([bar, h('div', { id: 'hsBanner' }),
+    view([bar, supportBanner(), h('div', { id: 'hsBanner' }),
       h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser sidan?'), visSel, consequence,
         S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
