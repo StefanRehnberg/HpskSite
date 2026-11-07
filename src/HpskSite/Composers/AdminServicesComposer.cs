@@ -309,6 +309,7 @@ namespace HpskSite.Composers
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentDeletedNotification,
                 HpskSite.Services.SitePages.SiteOwnerCleanupHandler>();
             builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteOwnerSchemaGuardHostedService>();
+            builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteRetentionHostedService>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och
             // en klubb som tas bort ur egenskaperna ger Utträdd. Saving läser klubbarna FÖRE sparningen.
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavingNotification,
