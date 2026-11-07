@@ -201,6 +201,31 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Klubbsidorna steg 2 (K1): bara klubbens EGNA administratör (<c>ClubAdmin_{id}</c>) — varken sajtadministratör eller
+        /// kretsadministratör. <see cref="IsClubAdminForClub"/> släpper in båda, vilket är rätt för klubbens adminpanel men fel
+        /// för det klubben själv skriver på sin hemsida: där skriver andra bara i loggat stödläge (<c>SiteSupportGrant</c>).
+        /// </summary>
+        public async Task<bool> IsOwnClubAdmin(int clubId)
+        {
+            var currentMember = await CurrentMemberAsync();
+            if (currentMember == null) return false;
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return false;
+            return _memberService.GetAllRoles(currentMemberData.Id).Contains($"ClubAdmin_{clubId}");
+        }
+
+        /// <summary>Som <see cref="IsOwnClubAdmin"/> men för kretsen: bara kretsens egen administratör (<c>RegionalAdmin_{kod}</c>), inte sajtadministratör.</summary>
+        public async Task<bool> IsOwnRegionAdmin(string regionCode)
+        {
+            if (string.IsNullOrEmpty(regionCode)) return false;
+            var currentMember = await CurrentMemberAsync();
+            if (currentMember == null) return false;
+            var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (currentMemberData == null) return false;
+            return _memberService.GetAllRoles(currentMemberData.Id).Contains($"RegionalAdmin_{regionCode}");
+        }
+
+        /// <summary>
         /// True when this competition is REGION-hosted (no organising club — <c>clubId</c> unset, the
         /// region code on the competition's own <c>regionalFederation</c>) and the current user is a
         /// regional admin of that region. An SM is exactly this shape.
