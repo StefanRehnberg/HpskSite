@@ -5,6 +5,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
+@inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -53,6 +54,11 @@
     {
         isRegionalAdmin = await AuthorizationService.IsRegionalAdminForRegion(regionCode);
     }
+
+    // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
+    var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
+        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, false, false, isRegionalAdmin));
+    ViewBag.sitePageView = sp;
 }
 
 <!-- Hero Banner Section -->
@@ -142,8 +148,11 @@
 }
 
 <div class="tab-content" id="regionPageTabContent">
+    @* Klubbsidorna: med den nya sidstrukturen PÅ skrivs bara den här sidans panel ut (sp.ShowsPane); av = alla, som förut. *@
     <!-- Home Tab -->
-    <div class="tab-pane fade show active" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
+    @if (sp.ShowsPane("regionHome"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionHome")" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
         @* "Det här händer" feed, locked to this krets (no krets selector, no region nav) *@
         @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedRegionCode = regionCode, LockedRegionName = regionName })
         @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
@@ -157,9 +166,12 @@
             { "contactPhone", contactPhone }
         })
     </div>
+    }
 
     <!-- Om (About) Tab -->
-    <div class="tab-pane fade" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
+    @if (sp.ShowsPane("regionAbout"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionAbout")" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
         @if (!string.IsNullOrEmpty(aboutRegion))
         {
             <div class="card mb-4">
@@ -182,21 +194,30 @@
             @await Html.PartialAsync("RegionInstructorsPublicPanel")
         }
     </div>
+    }
 
     <!-- Competitions Tab (visible to all visitors) -->
-    <div class="tab-pane fade" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
+    @if (sp.ShowsPane("regionCompetitions"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionCompetitions")" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
         @await Html.PartialAsync("RegionCompetitionsList")
     </div>
+    }
 
     <!-- Kretskalendern (kretsgranskning fas 4) — öppen för alla, laddas när fliken visas -->
-    <div class="tab-pane fade" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
+    @if (sp.ShowsPane("regionCalendar"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionCalendar")" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
         @await Html.PartialAsync("_KretsCalendar", Model.Id)
     </div>
+    }
 
     @if (isLoggedIn)
     {
         <!-- Records (Hall of Fame) Tab -->
-        <div class="tab-pane fade" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
+        if (sp.ShowsPane("regionRecords"))
+        {
+        <div class="tab-pane fade @sp.PaneClass("regionRecords")" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
             @{
                 var regionRecVD = new ViewDataDictionary(ViewData);
                 regionRecVD["RecordsScopeType"] = "Region";
@@ -206,29 +227,36 @@
             }
             @await Html.PartialAsync("RecordsHallOfFame", null, regionRecVD)
         </div>
+        }
 
         <!-- Documents Tab -->
-        <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
+        if (sp.ShowsPane("regionDocuments"))
+        {
+        <div class="tab-pane fade @sp.PaneClass("regionDocuments")" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
             @{
                 ViewBag.DocumentOwnerType = 1;
                 ViewBag.DocumentOwnerId = Model.Id;
             }
             @await Html.PartialAsync("DocumentArchive")
         </div>
+        }
 
         <!-- Board Tab -->
-        <div class="tab-pane fade" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
+        if (sp.ShowsPane("regionBoard"))
+        {
+        <div class="tab-pane fade @sp.PaneClass("regionBoard")" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
             @{
                 ViewBag.regionContentId = Model.Id;
             }
             @await Html.PartialAsync("RegionalBoardPanel")
         </div>
+        }
     }
 
-    @if (isRegionalAdmin)
+    @if (isRegionalAdmin && sp.ShowsPane("regionAdmin"))
     {
         <!-- Administration Tab -->
-        <div class="tab-pane fade" id="regionAdmin" role="tabpanel" aria-labelledby="regionAdmin-tab">
+        <div class="tab-pane fade @sp.PaneClass("regionAdmin")" id="regionAdmin" role="tabpanel" aria-labelledby="regionAdmin-tab">
             @await Html.PartialAsync("RegionalAdminPanel")
         </div>
     }
@@ -277,6 +305,8 @@
 
     // Load upcoming events for the region
     function loadUpcomingEvents() {
+        // Med den nya sidstrukturen finns Hem-panelen bara på rotadressen: ingen container, ingen hämtning.
+        if (!document.getElementById('upcomingEventsContainer')) return;
         fetch('/umbraco/surface/Club/GetRegionEvents?regionId=' + regionId)
             .then(function(response) { return response.json(); })
             .then(function(data) {

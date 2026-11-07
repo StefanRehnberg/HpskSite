@@ -6,6 +6,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
+@inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -69,6 +70,11 @@
     ViewBag.bannerImage = bannerImage;
     ViewBag.isClubMember = isClubMember;
     ViewBag.isClubAdmin = isClubAdmin;
+
+    // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
+    var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, Model.Url(),
+        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, false, isClubAdmin));
+    ViewBag.sitePageView = sp;
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: club logo → region logo → site default
@@ -188,8 +194,11 @@ window.currentClubId = clubId;
             <!-- Tab Content -->
             <div class="tab-content mt-3" id="clubTabContent">
 
+                @* Klubbsidorna: med den nya sidstrukturen PÅ skrivs bara den här sidans panel ut (sp.ShowsPane); av = alla, som förut. *@
                 <!-- TIER 2: About Tab (All logged-in users) -->
-                <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
+                @if (sp.ShowsPane("clubHome"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubHome")" id="clubHome" role="tabpanel">
                     @* "Det här händer i {klubben}" — samma flöde som startsidan och kretssidan, låst till
                        klubbens egna tävlingar, händelser och träningar. Ersätter "Utvalda tävlingar" (C3 F3). *@
                     @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedClubId = clubId, LockedClubName = clubName })
@@ -297,9 +306,12 @@ window.currentClubId = clubId;
                         </div>
                     </div>
                 </div>
+                }
 
                 <!-- TIER 2: About Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubAbout" role="tabpanel">
+                @if (sp.ShowsPane("clubAbout"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubAbout")" id="clubAbout" role="tabpanel">
                     @if (!string.IsNullOrEmpty(welcomeMessage))
                     {
                         <div class="card mb-4">
@@ -318,9 +330,12 @@ window.currentClubId = clubId;
                         <div class="alert alert-info">Ingen information om klubben har lagts till ännu.</div>
                     }
                 </div>
+                }
 
                 <!-- TIER 2: Banor Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubRanges" role="tabpanel">
+                @if (sp.ShowsPane("clubRanges"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubRanges")" id="clubRanges" role="tabpanel">
                     @*
                         Klubbens banor (omgjord 2026-10-11): ett kort per bana med samma karta som tävlingssidan
                         (röd punkt, Vägbeskrivning), klubbens fasta tider och länkar till banans egen sida
@@ -383,19 +398,28 @@ window.currentClubId = clubId;
                     })();
                     </script>
                 </div>
+                }
 
                 <!-- TIER 2: Calendar Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
+                @if (sp.ShowsPane("clubCalendar"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubCalendar")" id="clubCalendar" role="tabpanel">
                     @await Html.PartialAsync("ClubCalendar")
                 </div>
+                }
 
                 <!-- TIER 2: Competitions Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubCompetitions" role="tabpanel">
+                @if (sp.ShowsPane("clubCompetitions"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubCompetitions")" id="clubCompetitions" role="tabpanel">
                     @await Html.PartialAsync("ClubCompetitionsList")
                 </div>
+                }
 
                 <!-- TIER 2: Members Directory (All logged-in users) -->
-                <div class="tab-pane fade" id="clubMembers" role="tabpanel">
+                @if (sp.ShowsPane("clubMembers"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubMembers")" id="clubMembers" role="tabpanel">
                     @await Html.PartialAsync("ClubInstructorsPublicPanel")
                     @{
                         var ligaVD = new ViewDataDictionary(ViewData);
@@ -404,9 +428,12 @@ window.currentClubId = clubId;
                     @await Html.PartialAsync("ClubGuldserieLeaderboard", null, ligaVD)
                     @await Html.PartialAsync("ClubMembersDirectory")
                 </div>
+                }
 
                 <!-- TIER 2: Records (All logged-in users) -->
-                <div class="tab-pane fade" id="clubRecords" role="tabpanel">
+                @if (sp.ShowsPane("clubRecords"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubRecords")" id="clubRecords" role="tabpanel">
                     @{
                         var clubRecVD = new ViewDataDictionary(ViewData);
                         clubRecVD["RecordsScopeType"] = "Club";
@@ -416,17 +443,21 @@ window.currentClubId = clubId;
                     }
                     @await Html.PartialAsync("RecordsHallOfFame", null, clubRecVD)
                 </div>
+                }
 
                 <!-- TIER 2: Documents Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubDocuments" role="tabpanel">
+                @if (sp.ShowsPane("clubDocuments"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubDocuments")" id="clubDocuments" role="tabpanel">
                     @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
                     @await Html.PartialAsync("DocumentArchive")
                 </div>
+                }
 
-                @if (isClubAdmin)
+                @if (isClubAdmin && sp.ShowsPane("clubAdmin"))
                 {
                     <!-- TIER 3: Admin Tab (Club admins only) -->
-                    <div class="tab-pane fade" id="clubAdmin" role="tabpanel">
+                    <div class="tab-pane fade @sp.PaneClass("clubAdmin")" id="clubAdmin" role="tabpanel">
                         @await Html.PartialAsync("ClubAdminPanel")
                     </div>
                 }
@@ -498,6 +529,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadUpcomingEvents() {
+    // Med den nya sidstrukturen finns Hem-panelen bara på rotadressen: ingen container, ingen hämtning.
+    if (!document.getElementById('upcomingEventsContainer')) return;
     // Fas B5: träningarna är inte längre händelser. GetClubEvents är klubbens HÄNDELSER (adminpanelen
     // redigerar dem därifrån), så träningarna hämtas ur GetUpcomingEvents (kind = 'training') och läggs
     // in i samma lista. Deras url är "#training-{id}" och öppnar träningspanelen.

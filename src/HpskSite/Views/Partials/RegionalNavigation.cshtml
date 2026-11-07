@@ -1,8 +1,56 @@
 @{
     var isRegionalAdmin = ViewBag.isRegionalAdmin as bool? ?? false;
     var isLoggedIn = ViewBag.isLoggedIn as bool? ?? false;
+    // Klubbsidorna steg 1: med den nya sidstrukturen PÅ är menyn mallens (riktiga länkar); av = dagens flikrad, oförändrad.
+    var sp = ViewBag.sitePageView as HpskSite.Services.SitePages.SitePageView;
 }
 
+@if (sp != null && sp.Enabled)
+{
+    @* Hem och Administration är Bootstrap-flikar på rotadressen; varje annan post är en länk med id "{panel}-tab"
+       (se ClubNavigation.cshtml). *@
+    <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
+        @foreach (var item in sp.Menu())
+        {
+            var icon = item.Page.Key switch
+            {
+                "home" => "bi-house-fill",
+                "about" => "bi-info-circle",
+                "competitions" => "bi-trophy",
+                "calendar" => "bi-calendar3",
+                "records" => "bi-award",
+                "documents" => "bi-archive",
+                "board" => "bi-people",
+                "admin" => "bi-shield-check",
+                _ => "bi-circle"
+            };
+            <li class="nav-item" role="presentation">
+                @if (item.IsTabButton)
+                {
+                    <button class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" data-bs-toggle="tab" data-bs-target="#@(item.PaneId)" type="button" role="tab" aria-controls="@(item.PaneId)" aria-selected="@(item.Current ? "true" : "false")">
+                        <i class="bi @icon me-2"></i>@item.Page.Label
+                    </button>
+                }
+                else
+                {
+                    <a class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)">
+                        <i class="bi @icon me-2"></i>@item.Page.Label
+                    </a>
+                }
+            </li>
+        }
+        @if (isRegionalAdmin)
+        {
+            <li class="nav-item ms-auto" role="presentation">
+                <button class="btn btn-sm btn-outline-primary align-self-center mt-1" onclick="TutorialHelper.open('tutorial-06')" title="Se instruktionsvideo för kretsadministratörer">
+                    <i class="bi bi-play-circle me-1"></i>Guide
+                </button>
+            </li>
+        }
+    </ul>
+}
+else
+{
 <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" id="regionHome-tab" data-bs-toggle="tab" data-bs-target="#regionHome" type="button" role="tab" aria-controls="regionHome" aria-selected="true">
@@ -56,3 +104,4 @@
         </li>
     }
 </ul>
+}

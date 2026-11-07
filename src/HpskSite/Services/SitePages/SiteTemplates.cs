@@ -134,6 +134,29 @@ namespace HpskSite.Services.SitePages
             new SitePageDef("admin", "", "Administration", 80, new[] { new SiteBlockDef("admin-panel", SiteVisibility.Dold) }, IsAdmin: true),
         });
 
+        /// <summary>
+        /// Flikpanelens id i dagens skal för en mallsida (<c>clubRanges</c>, <c>regionBoard</c> …). Panelerna och flik-id:n
+        /// (<c>{id}-tab</c>) är en del av kontraktet mot djuplänkar och adminpanelens skript och byts inte.
+        /// </summary>
+        public static string LegacyPaneId(string ownerType, string pageKey)
+        {
+            var prefix = ownerType == Region ? "region" : "club";
+            return pageKey switch
+            {
+                "home" => prefix + "Home",
+                "about" => prefix + "About",
+                "ranges" => "clubRanges",
+                "calendar" => prefix + "Calendar",
+                "competitions" => prefix + "Competitions",
+                "members" => "clubMembers",
+                "records" => prefix + "Records",
+                "documents" => prefix + "Documents",
+                "board" => "regionBoard",
+                "admin" => prefix + "Admin",
+                _ => throw new ArgumentOutOfRangeException(nameof(pageKey), pageKey, "Okänd sida"),
+            };
+        }
+
         public static SiteTemplate For(string ownerType) => ownerType switch
         {
             Club => ClubTemplate,

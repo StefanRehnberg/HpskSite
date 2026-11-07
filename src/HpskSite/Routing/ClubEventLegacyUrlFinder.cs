@@ -1,6 +1,7 @@
 using HpskSite.Controllers;
 using HpskSite.Services.Addresses;
 using HpskSite.Services.Events;
+using HpskSite.Services.SitePages;
 using HpskSite.Services.SiteSettings;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -83,6 +84,10 @@ namespace HpskSite.Routing
             builder.ContentFinders().Insert<ClubShortUrlContentFinder>(1);
             // Före Umbracos trädupplag: gamla /competitions/-adresser ger 301 till de nya.
             builder.ContentFinders().Insert<CompetitionTreeRedirectFinder>(2);
+            // Klubbens och kretsens sidor (klubbsidorna steg 1): /halland/klubb/banor/ när den nya strukturen är PÅ för ägaren.
+            // Efter ovanstående, så att gamla händelseadresser och klubbens långa form redan är omdirigerade.
+            builder.ContentFinders().Insert<SitePageContentFinder>(3);
+            builder.Services.AddScoped<SitePageViewFactory>();
         }
     }
 }
