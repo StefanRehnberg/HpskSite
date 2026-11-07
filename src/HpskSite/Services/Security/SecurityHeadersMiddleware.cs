@@ -43,6 +43,15 @@ namespace HpskSite.Services.Security
             SetDefault(h, "Permissions-Policy", "camera=(self), microphone=(), payment=(), usb=()");
             if (!isDevelopment && context.Request.IsHttps)
                 SetDefault(h, "Strict-Transport-Security", $"max-age={HstsSeconds}");
+
+            // Klubbsidornas undersidor (steg 1, luckan som steg 2-granskningen hittade): sidans synlighet beror på vem som
+            // frågar, så ett delat cacheminne eller en CDN får aldrig lagra svaret, och sökmotorer indexerar inte undersidor
+            // som klubben inte uttryckligen valt att publicera. Sätts alltid (inte bara när huvudet saknas).
+            if (context.Items.ContainsKey(HpskSite.Services.SitePages.SitePageRequest.ItemKey))
+            {
+                h["Cache-Control"] = "private, no-store";
+                h["X-Robots-Tag"] = "noindex";
+            }
         }
 
         private static void SetDefault(IHeaderDictionary h, string name, string value)
