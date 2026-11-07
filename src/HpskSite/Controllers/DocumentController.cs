@@ -22,6 +22,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly ClubRosterService _roster;
 
         public DocumentController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -33,14 +34,22 @@ namespace HpskSite.Controllers
             DocumentService documentService,
             AdminAuthorizationService authorizationService,
             IMemberManager memberManager,
-            IMemberService memberService)
+            IMemberService memberService,
+            ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _documentService = documentService;
             _authorizationService = authorizationService;
             _memberManager = memberManager;
             _memberService = memberService;
+            _roster = roster;
         }
+
+        /// <summary>
+        /// Är medlemmen en AKTIV medlem i klubben? Källan är <c>ClubMembership</c> (status annan än Utträdd/Avliden), aldrig de råa
+        /// egenskaperna <c>primaryClubId</c>/<c>memberClubIds</c>, som räknade en utträdd som medlem (klubbsidorna, Stefans beslut 2026-11-07).
+        /// </summary>
+        private bool IsActiveClubMember(int memberId, int clubId) => memberId > 0 && _roster.ActiveMemberIds(clubId).Contains(memberId);
 
         // ===== ADMIN: CATEGORIES =====
 
@@ -429,12 +438,7 @@ namespace HpskSite.Controllers
             if (document.AccessLevel == DocumentAccessLevel.ClubMembers)
             {
                 if (document.OwnerType == DocumentOwnerType.Club)
-                {
-                    var primaryClubId = member.GetValue("primaryClubId")?.ToString() ?? "";
-                    var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
-                    return primaryClubId == document.OwnerId.ToString() ||
-                           memberClubIds.Split(',').Select(s => s.Trim()).Contains(document.OwnerId.ToString());
-                }
+                    return IsActiveClubMember(member.Id, document.OwnerId);
                 // Region documents at ClubMembers level - allow any logged-in member
                 return true;
             }
@@ -465,13 +469,8 @@ namespace HpskSite.Controllers
             // Check club membership for club-owned documents
             if (ownerType == DocumentOwnerType.Club)
             {
-                var primaryClubId = member.GetValue("primaryClubId")?.ToString() ?? "";
-                var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
-                if (primaryClubId == ownerId.ToString() ||
-                    memberClubIds.Split(',').Select(s => s.Trim()).Contains(ownerId.ToString()))
-                {
+                if (IsActiveClubMember(member.Id, ownerId))
                     return DocumentAccessLevel.ClubMembers;
-                }
             }
             else
             {

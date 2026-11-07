@@ -7,6 +7,7 @@
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
+@inject HpskSite.Services.ClubRosterService ClubRoster
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -48,11 +49,9 @@
 
         if (member != null)
         {
-            // Check if member belongs to this club (primary or additional)
-            var primaryClubId = member.GetValue("primaryClubId")?.ToString();
-            var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
-            isClubMember = primaryClubId == clubId.ToString() ||
-                          memberClubIds.Split(',').Select(s => s.Trim()).Contains(clubId.ToString());
+            // Aktiv medlem = en aktiv rad i ClubMembership (status annan än Utträdd/Avliden), aldrig de råa
+            // egenskaperna, som räknade en utträdd som medlem (Stefans beslut 2026-11-07).
+            isClubMember = ClubRoster.ActiveMemberIds(clubId).Contains(member.Id);
         }
     }
 
