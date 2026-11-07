@@ -226,6 +226,35 @@ namespace HpskSite.Controllers
             return Json(new { success = true, expires = grant.ExpiresDate, minutes = SiteSupport.Minutes, notified });
         }
 
+        /// <summary>
+        /// Klubbens ändringslogg: vem gjorde vad och när (senaste 100). Bara ägarens EGEN admin — stödläget läser inte loggen, som också visar stödpersonens egna spår.
+        /// Namnet slås upp live; en borttagen medlem visas som "Borttagen medlem" (raden står kvar). Aldrig innehåll, bara åtgärd, sida och tid.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ")]
+        public async Task<IActionResult> Audit(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            List<SiteAuditRow> rows;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+                rows = SiteAuditLog.List(scope.Database, g.OwnerType, g.OwnerId, 100);
+            var names = new Dictionary<int, string>();
+            foreach (var id in rows.Where(r => r.ActorMemberId != null).Select(r => r.ActorMemberId!.Value).Distinct())
+                names[id] = _memberService.GetById(id)?.Name ?? "Borttagen medlem";
+            return Json(new
+            {
+                success = true,
+                rows = rows.Select(r => new
+                {
+                    when = r.CreatedDate,
+                    who = r.ActorMemberId == null ? "Borttagen medlem" : names[r.ActorMemberId.Value],
+                    support = r.ActedAsSupport,
+                    text = SiteAuditLog.Describe(r),
+                }),
+            });
+        }
+
         /// <summary>Avslutar det egna stödläget i förtid.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

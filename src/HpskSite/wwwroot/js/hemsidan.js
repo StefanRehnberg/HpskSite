@@ -211,8 +211,28 @@
       st.pages.length
         ? h('table', { class: 'table align-middle hs-list' }, h('thead', {}, h('tr', {}, h('th', {}, 'Sida'), h('th', {}, 'Vem ser den'), h('th', {}, 'Status'), h('th', {}))), h('tbody', {}, rows))
         : h('div', { class: 'hs-card p-4 text-center' }, h('p', { class: 'mb-2' }, 'Ni har inga egna sidor än.'), h('p', { class: 'text-muted mb-3' }, 'Skapa en sida för till exempel banregler, klubbens historia eller hitta hit.')),
-      h('p', { class: 'text-muted small mt-3' }, 'Klubbens vanliga sidor (Hem, Om klubben, Banor, Kalender m.fl.) hanteras som förut och finns kvar.')]);
+      h('p', { class: 'text-muted small mt-3' }, 'Klubbens vanliga sidor (Hem, Om klubben, Banor, Kalender m.fl.) hanteras som förut och finns kvar.'),
+      auditCard()]);
     renderBanner();
+  }
+
+  // "Vad som hänt": vem gjorde vad och när (senaste 100). Bara föreningens egna administratörer läser loggen, så den visas inte i stödläge.
+  function auditCard() {
+    if (S.st && S.st.support) return null;
+    const out = h('div', { class: 'mt-2' });
+    const fmt = s => new Date(s).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
+    const load = async () => {
+      out.replaceChildren(h('span', { class: 'text-muted' }, 'Laddar …'));
+      const r = await api('GET', 'Audit');
+      if (!r.success) { out.replaceChildren(alertBox('danger', r.message || 'Det gick inte att hämta loggen.')); return; }
+      if (!r.rows.length) { out.replaceChildren(h('p', { class: 'text-muted mb-0' }, 'Inget har hänt än.')); return; }
+      out.replaceChildren(h('div', { class: 'table-responsive' }, h('table', { class: 'table table-sm align-middle mb-0' }, h('tbody', {}, r.rows.map(x => h('tr', {},
+        h('td', { class: 'text-nowrap text-muted' }, fmt(x.when)),
+        h('td', {}, h('strong', {}, x.who), x.support ? h('span', { class: 'badge text-bg-warning ms-1' }, 'stödläge') : null, ' ' + x.text)))))));
+    };
+    const box = h('details', { class: 'hs-card p-3 mt-4' }, h('summary', { class: 'fw-semibold' }, 'Vad som hänt'), out);
+    box.addEventListener('toggle', () => { if (box.open && !box.dataset.loaded) { box.dataset.loaded = '1'; load(); } });
+    return box;
   }
 
   function renderBanner() {
