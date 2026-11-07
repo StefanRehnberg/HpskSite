@@ -18,6 +18,9 @@ namespace HpskSite.Tests
 
             public Fake(Func<DateTime> now) : base(NullLogger<SiteOwnerService>.Instance, now) { }
 
+            public List<(string Type, int Id)> Deletes = new();
+            protected override int DeleteRow(string ownerType, int ownerId) { Deletes.Add((ownerType, ownerId)); return 1; }
+
             protected override HashSet<string> LoadEnabled() { Loads++; return Load(); }
             protected override void WriteRow(string ownerType, int ownerId, bool enabled, int templateVersion, int? byMemberId)
                 => Writes.Add((ownerType, ownerId, enabled, templateVersion, byMemberId));
@@ -119,6 +122,35 @@ namespace HpskSite.Tests
             Assert.Equal((SiteTemplates.Club, 5, true, SiteTemplates.ClubTemplate.Version, (int?)99), svc.Writes[0]);
             Assert.True(svc.IsEnabled(SiteTemplates.Club, 5));  // cachen tömdes: nästa läsning ser den nya mängden
         }
+
+        [Fact]
+        public void Remove_tar_bort_raden_och_tömmer_cachen()
+        {
+            var (svc, _) = Make(SiteOwnerService.Key(SiteTemplates.Club, 5));
+            Assert.True(svc.IsEnabled(SiteTemplates.Club, 5));
+            svc.Load = () => new HashSet<string>();
+            Assert.Equal(1, svc.Remove(SiteTemplates.Club, 5));
+            Assert.Equal((SiteTemplates.Club, 5), Assert.Single(svc.Deletes));
+            Assert.False(svc.IsEnabled(SiteTemplates.Club, 5));
+        }
+
+        [Theory]
+        [InlineData("Competition", 5)]
+        [InlineData("Club", 0)]
+        public void Remove_vägrar_okänd_ägartyp_och_ogiltigt_id(string type, int id)
+        {
+            var (svc, _) = Make();
+            Assert.Throws<ArgumentOutOfRangeException>(() => svc.Remove(type, id));
+            Assert.Empty(svc.Deletes);
+        }
+
+        [Theory]
+        [InlineData("club", "Club")]
+        [InlineData("regionalPage", "Region")]
+        [InlineData("competition", null)]
+        [InlineData("clubsPage", null)]
+        public void Raderingen_städar_bara_klubbar_och_kretsar(string alias, string? expected)
+            => Assert.Equal(expected, SiteOwnerCleanupHandler.OwnerTypeOf(alias));
 
         [Theory]
         [InlineData("Competition", 5)]

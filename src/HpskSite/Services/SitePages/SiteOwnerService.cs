@@ -76,6 +76,23 @@ namespace HpskSite.Services.SitePages
                 ownerType, ownerId, enabled ? "PÅ" : "AV", byMemberId, version);
         }
 
+        /// <summary>
+        /// Tar bort ägarens rad när klubben eller kretsen raderas för gott (<c>SiteOwnerCleanupHandler</c>). En borttagen
+        /// rad är samma sak som AV, och ett återanvänt nod-id kan aldrig ärva en gammal brytare. Cachen töms och de andra
+        /// instanserna meddelas efter att raderingen är klar. Returnerar antalet borttagna rader.
+        /// </summary>
+        public int Remove(string ownerType, int ownerId)
+        {
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region)
+                throw new ArgumentOutOfRangeException(nameof(ownerType), ownerType, "Okänd ägartyp");
+            if (ownerId <= 0) throw new ArgumentOutOfRangeException(nameof(ownerId), ownerId, "Ogiltigt id");
+            var n = DeleteRow(ownerType, ownerId);
+            ClearLocal();
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.SiteOwners);
+            if (n > 0) _logger.LogWarning("Klubbsidorna: {OwnerType} {OwnerId} raderades, brytarraden borttagen", ownerType, ownerId);
+            return n;
+        }
+
         /// <summary>Alla rader, direkt ur databasen (sajtadmins kort). Ett fel kastas: kortet ska säga att det inte gick.</summary>
         public List<SiteOwnerRow> ListAll() => ReadAllRows();
 
@@ -152,6 +169,14 @@ WHEN NOT MATCHED THEN INSERT (OwnerType, OwnerId, IsEnabled, TemplateVersion, En
                     ownerType, ownerId, enabled, templateVersion, byMemberId);
                 scope.Complete();
             }
+        }
+
+        protected virtual int DeleteRow(string ownerType, int ownerId)
+        {
+            using var scope = _scopeProvider!.CreateScope();
+            var n = scope.Database.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
+            scope.Complete();
+            return n;
         }
 
         /// <summary>SQL-fel 208 = "Invalid object name": tabellen finns inte.</summary>

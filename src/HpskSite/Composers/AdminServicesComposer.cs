@@ -306,6 +306,8 @@ namespace HpskSite.Composers
             // Klubbsidorna steg 1: brytaren per klubb/krets för den nya sidstrukturen. Singleton (mängden av påslagna
             // ägare ligger i minnet); saknad tabell = AV för alla (dagens vy).
             builder.Services.AddSingleton<HpskSite.Services.SitePages.SiteOwnerService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentDeletedNotification,
+                HpskSite.Services.SitePages.SiteOwnerCleanupHandler>();
             builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteOwnerSchemaGuardHostedService>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och
             // en klubb som tas bort ur egenskaperna ger Utträdd. Saving läser klubbarna FÖRE sparningen.
