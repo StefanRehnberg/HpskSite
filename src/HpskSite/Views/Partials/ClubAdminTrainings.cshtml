@@ -743,7 +743,14 @@
         else if (act === 'copy-calendar' && t) {
             // Klubbens kalender är en egen flik på klubbsidan; dess kopieringsläge startar med den här träningen.
             if (typeof window.hpskCalendarCopyMode === 'function') window.hpskCalendarCopyMode(t.id, t.scheduleId || 0);
-            else msg('Kalendern finns inte på den här sidan.', 'warning');
+            else {
+                // Klubbsidorna: med den nya sidstrukturen är Kalender en egen adress (Admin ligger på roten). Länken i menyn
+                // ({panel}-tab är en riktig länk) tar oss dit, och kalendern startar kopieringsläget ur adressen.
+                var calLink = document.getElementById('clubCalendar-tab');
+                if (calLink && calLink.tagName === 'A' && calLink.href) {
+                    window.location.href = calLink.href + (calLink.href.indexOf('?') < 0 ? '?' : '&') + 'kopiera=' + encodeURIComponent(t.id) + '&schema=' + encodeURIComponent(t.scheduleId || 0);
+                } else msg('Kalendern finns inte på den här sidan.', 'warning');
+            }
         }
         else if (act === 'edit' && t) openTraining(t);
         else if (act === 'handover' && t) openHandover(t);
