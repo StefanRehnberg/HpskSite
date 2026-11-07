@@ -225,6 +225,77 @@ namespace HpskSite.Tests
             Assert.Equal(new[] { "A", "B" }, SitePageStore.List(f.Db, Club, Owner).Select(p => p.Title));
         }
 
+        // ── Menyn ─────────────────────────────────────────────────────────────
+
+        private static int PublishedPage(IDatabase db, string title, string slug, int owner = Owner, SiteVisibility vis = SiteVisibility.Klubbmedlemmar)
+        {
+            var c = SitePageStore.Create(db, Club, owner, title, vis, null, null, 7, false, Now);
+            var s = SitePageStore.SaveDraft(db, c.PageId, Club, owner, 1, title, Blocks1, null, 7, false, Now);
+            SitePageStore.Publish(db, c.PageId, Club, owner, s.Revision, 7, false, Now);
+            HpskSite.Services.Addresses.PageAddressService.SetCurrentFlat(db, HpskSite.Services.Addresses.PageAddressKinds.SitePage, c.PageId, new HpskSite.Services.Addresses.PageAddressOwner(Club, owner), slug);
+            return c.PageId;
+        }
+
+        [SqlFact]
+        public void Menyn_har_bara_publicerade_sidor_i_menyns_ordning_med_publicerad_titel()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var b = PublishedPage(f.Db, "Banregler", "banregler"); var a = PublishedPage(f.Db, "Hitta hit", "hitta-hit");
+            var draftOnly = SitePageStore.Create(f.Db, Club, Owner, "Utkast", SiteVisibility.Dold, null, null, 7, false, Now).PageId;
+            // Utkastet HAR en adress (så att bara "publicerad" kan hålla det ur menyn, inte en saknad adress).
+            HpskSite.Services.Addresses.PageAddressService.SetCurrentFlat(f.Db, HpskSite.Services.Addresses.PageAddressKinds.SitePage, draftOnly, new HpskSite.Services.Addresses.PageAddressOwner(Club, Owner), "utkast");
+            Assert.True(SitePageStore.SetInMenu(f.Db, b, Club, Owner, true, Now));
+            Assert.True(SitePageStore.SetInMenu(f.Db, a, Club, Owner, true, Now));
+            Assert.True(SitePageStore.SetInMenu(f.Db, draftOnly, Club, Owner, true, Now));
+            var menu = SitePageStore.MenuPages(f.Db, Club, Owner);
+            Assert.Equal(new[] { "Banregler", "Hitta hit" }, menu.Select(m => m.Title));      // i den ordning de lades dit; utkastet syns inte
+            Assert.Equal("banregler", menu[0].Slug);
+        }
+
+        [SqlFact]
+        public void En_sida_lagd_i_menyn_två_gånger_blir_en_rad_och_kan_tas_bort()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var p = PublishedPage(f.Db, "Regler", "regler");
+            SitePageStore.SetInMenu(f.Db, p, Club, Owner, true, Now); SitePageStore.SetInMenu(f.Db, p, Club, Owner, true, Now);
+            Assert.Equal(1, f.Db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteMenuItem WHERE PageId = @0", p));
+            SitePageStore.SetInMenu(f.Db, p, Club, Owner, false, Now);
+            Assert.Empty(SitePageStore.MenuPages(f.Db, Club, Owner));
+        }
+
+        [SqlFact]
+        public void En_raderad_sida_försvinner_ur_menyn_och_kommer_tillbaka_vid_ångra()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var p = PublishedPage(f.Db, "Regler", "regler");
+            SitePageStore.SetInMenu(f.Db, p, Club, Owner, true, Now);
+            var rev = SitePageStore.GetPage(f.Db, p, Club, Owner)!.Revision;
+            SitePageStore.SoftDelete(f.Db, p, Club, Owner, rev, 7, Now);
+            Assert.Empty(SitePageStore.MenuPages(f.Db, Club, Owner));
+            SitePageStore.Restore(f.Db, p, Club, Owner, rev + 1, 7, Now);
+            Assert.Single(SitePageStore.MenuPages(f.Db, Club, Owner));
+        }
+
+        [SqlFact]
+        public void Menyn_är_per_ägare_och_ett_sid_id_prövas_mot_radens_ägare()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var mine = PublishedPage(f.Db, "Min", "min");
+            Assert.False(SitePageStore.SetInMenu(f.Db, mine, Club, OtherOwner, true, Now));      // någon annans sida kan inte läggas i min meny
+            Assert.Empty(SitePageStore.MenuPages(f.Db, Club, OtherOwner));
+            Assert.False(SitePageStore.SetInMenu(f.Db, 2147000000, Club, Owner, true, Now));
+        }
+
+        [SqlFact]
+        public void Listan_säger_om_sidan_ligger_i_menyn()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var p = PublishedPage(f.Db, "Regler", "regler");
+            Assert.False(SitePageStore.ListFree(f.Db, Club, Owner).Single().InMenu);
+            SitePageStore.SetInMenu(f.Db, p, Club, Owner, true, Now);
+            Assert.True(SitePageStore.ListFree(f.Db, Club, Owner).Single().InMenu);
+        }
+
         [SqlFact]
         public void Pekarna_kan_inte_peka_på_en_annan_sidas_version()
         {

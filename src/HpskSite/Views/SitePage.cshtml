@@ -3,6 +3,7 @@
 @inject SitePageReader Reader
 @inject SiteBlockDataFactory BlockData
 @inject SiteViewerResolver Viewers
+@inject SitePageViewFactory SitePages
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @*
     Klubbens och kretsens EGNA sidor (klubbsidorna 2a). Modellen är ägarens nod (klubben eller kretsen); SitePageContentFinder har pekat ut
@@ -23,6 +24,7 @@
 
     var body = "";
     var title = "";
+    var showMenu = false;
     if (loaded != null && req != null && Model != null)
     {
         var regionCode = req.OwnerType == SiteTemplates.Region ? Model.Value<string>("regionCode") : null;
@@ -30,6 +32,14 @@
         var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model));
         body = SiteBlockRenderer.RenderAll(loaded.Value.Content.Blocks, loaded.Value.Page.VisibilityLevel, ctx);
         title = loaded.Value.Page.PublishedTitle ?? loaded.Value.Page.Title;
+        // Menyn: samma flikrad som ägarens övriga sidor, med den här sidan som aktuell (SitePageView känner igen en egen sida av begäran).
+        ViewBag.sitePageView = SitePages.For(req.OwnerType, req.OwnerId, Model.Url(), viewer);
+        ViewBag.clubId = req.OwnerId;
+        ViewBag.isClubAdmin = viewer.IsOwnerAdmin;
+        ViewBag.isRegionalAdmin = viewer.IsOwnerAdmin;
+        ViewBag.isLoggedIn = viewer.LoggedIn;
+        ViewBag.canEditSite = await Viewers.IsOwnAdminAsync(req.OwnerType, req.OwnerId, regionCode);
+        showMenu = true;
     }
     else
     {
@@ -43,6 +53,10 @@
 
 <div class="container my-4 site-page">
     <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    @if (showMenu)
+    {
+        @await Html.PartialAsync(req!.OwnerType == SiteTemplates.Club ? "ClubNavigation" : "RegionalNavigation")
+    }
     @if (loaded != null)
     {
         <h1 class="h2 mb-4">@title</h1>

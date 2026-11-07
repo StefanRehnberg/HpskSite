@@ -7,6 +7,8 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
 @inject HpskSite.Services.BoardRoleService BoardRoles
+@inject HpskSite.Services.SitePages.SiteViewerResolver SiteViewers
+@inject HpskSite.Services.SitePages.SiteOwnerService SiteOwners
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -69,6 +71,9 @@
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
         new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, false, isRegionBoard, isRegionalAdmin));
     ViewBag.sitePageView = sp;
+    // Hemsidan (egna sidor): länken syns bara för kretsens EGEN admin och bara när brytare 2 är PÅ.
+    ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
+        && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode);
 }
 
 <!-- Hero Banner Section -->

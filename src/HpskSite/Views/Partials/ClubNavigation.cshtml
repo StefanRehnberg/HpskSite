@@ -27,6 +27,7 @@
                 "records" => "bi-award",
                 "documents" => "bi-archive",
                 "admin" => "bi-gear-fill",
+                var k when k.StartsWith("page:") => "bi-file-earmark-text",
                 _ => "bi-circle"
             };
             <li class="nav-item" role="presentation">
@@ -46,6 +47,12 @@
                         }
                     </a>
                 }
+            </li>
+        }
+        @if (ViewBag.canEditSite as bool? ?? false)
+        {
+            <li class="nav-item ms-auto" role="presentation">
+                <a class="btn btn-sm btn-primary align-self-center mt-1" href="@(sp.OwnerUrl)hemsidan/" title="Skriv och ändra era egna sidor"><i class="bi bi-pencil-square me-1"></i>Hemsidan</a>
             </li>
         }
         @if (isClubAdmin)

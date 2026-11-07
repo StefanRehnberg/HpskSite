@@ -25,6 +25,9 @@ namespace HpskSite.Services.SitePages
             http != null && http.Items.TryGetValue(ItemKey, out var v) ? v as SitePageRequest : null;
     }
 
+    /// <summary>En egen sida i menyn: sidan, etiketten (publicerad titel), adressen, synligheten och ordningen.</summary>
+    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort);
+
     /// <summary>En post i den nya menyn.</summary>
     /// <param name="Page">Mallsidan.</param>
     /// <param name="PaneId">Flikpanelens id i dagens skal (<c>clubRanges</c> …); flik-id:t är <c>{PaneId}-tab</c>.</param>
@@ -48,32 +51,40 @@ namespace HpskSite.Services.SitePages
     {
         private readonly SiteTemplate? _template;
         private readonly SitePageDef? _page;
+        private readonly IReadOnlyList<SiteMenuPage> _extra;
+        private readonly int? _freePageId;
 
-        private SitePageView(bool enabled, SiteTemplate? template, SitePageDef? page, string ownerUrl, SiteViewer viewer)
+        private SitePageView(bool enabled, SiteTemplate? template, SitePageDef? page, string ownerUrl, SiteViewer viewer,
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null)
         {
             Enabled = enabled;
             _template = template;
             _page = page;
             OwnerUrl = ownerUrl;
             Viewer = viewer;
+            _extra = extra ?? Array.Empty<SiteMenuPage>();
+            _freePageId = freePageId;
         }
 
         public bool Enabled { get; }
         public string OwnerUrl { get; }
         public SiteViewer Viewer { get; }
         public string PageKey => _page?.Key ?? "home";
-        public bool IsRoot => !Enabled || _page == null || _page.IsHome;
+        public bool IsRoot => !Enabled || (_freePageId == null && (_page == null || _page.IsHome));
 
         /// <summary>Dagens vy: inget ändras.</summary>
         public static SitePageView Off(string ownerUrl = "/") => new(false, null, null, Normalize(ownerUrl), SiteViewer.Anonymous);
 
-        public static SitePageView On(string ownerType, string ownerUrl, string? pageKey, SiteViewer viewer)
+        /// <param name="extra">Ägarens egna sidor som ligger i menyn (steg 2); tom när ägaren inte har egen redigering PÅ.</param>
+        /// <param name="freePageId">Begäran gäller den här egna sidan (inte en systemsida): ingen systempost är då aktuell.</param>
+        public static SitePageView On(string ownerType, string ownerUrl, string? pageKey, SiteViewer viewer,
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null)
         {
             var template = SiteTemplates.For(ownerType);
             // En okänd nyckel (t.ex. en föråldrad Items-post) är Hem, aldrig en sida som inte finns.
             var page = (pageKey != null ? template.PageByKey(pageKey) : null) ?? template.Pages.First(p => p.IsHome);
             if (page.IsAdmin) page = template.Pages.First(p => p.IsHome); // Admin har ingen egen adress
-            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer);
+            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer, extra, freePageId);
         }
 
         /// <summary>Ska panelen <paramref name="paneId"/> skrivas ut? Av: alltid. På: bara den här sidans panel (och Admin på roten för ägarens admin).</summary>
@@ -95,11 +106,16 @@ namespace HpskSite.Services.SitePages
             return paneId == SiteTemplates.LegacyPaneId(_template.OwnerType, _page!.Key) ? "show active" : "";
         }
 
-        /// <summary>Menyn för tittaren. Tom när av (då ritar dagens flikrad).</summary>
+        /// <summary>
+        /// Menyn för tittaren. Tom när av (då ritar dagens flikrad). Mallens poster i mallens ordning, därefter ägarens egna sidor i menyns
+        /// ordning, Admin sist. En egen sida syns bara för den som får se den (sidans synlighet), och aldrig för en utloggad hos en ägare vars
+        /// meny kräver inloggning — ingen fri etikett läcker till anonyma (plan v3 B3).
+        /// </summary>
         public IReadOnlyList<SiteMenuEntry> Menu()
         {
             if (!Enabled) return Array.Empty<SiteMenuEntry>();
             var result = new List<SiteMenuEntry>();
+            SiteMenuEntry? admin = null;
             foreach (var p in _template!.MenuFor(Viewer))
             {
                 var pane = SiteTemplates.LegacyPaneId(_template.OwnerType, p.Key);
@@ -107,8 +123,17 @@ namespace HpskSite.Services.SitePages
                          : p.IsHome ? OwnerUrl
                          : OwnerUrl + p.Slug + "/";
                 var tabButton = IsRoot && (p.IsHome || p.IsAdmin);
-                result.Add(new SiteMenuEntry(p, pane, href, Current: p.Key == _page!.Key && !p.IsAdmin, tabButton));
+                var entry = new SiteMenuEntry(p, pane, href, Current: _freePageId == null && p.Key == _page!.Key && !p.IsAdmin, tabButton);
+                if (p.IsAdmin) admin = entry; else result.Add(entry);
             }
+            if (!(_template.MenuRequiresLogin && !Viewer.LoggedIn))
+                foreach (var e in _extra.OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+                {
+                    if (!SiteAccess.CanSee(e.Visibility, Viewer)) continue;
+                    var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
+                    result.Add(new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false));
+                }
+            if (admin != null) result.Add(admin);
             return result;
         }
 
@@ -124,11 +149,13 @@ namespace HpskSite.Services.SitePages
     {
         private readonly SiteOwnerService _owners;
         private readonly IHttpContextAccessor _http;
+        private readonly SitePageReader? _reader;
 
-        public SitePageViewFactory(SiteOwnerService owners, IHttpContextAccessor http)
+        public SitePageViewFactory(SiteOwnerService owners, IHttpContextAccessor http, SitePageReader? reader = null)
         {
             _owners = owners;
             _http = http;
+            _reader = reader;
         }
 
         public SitePageView For(string ownerType, int ownerId, string ownerUrl, SiteViewer viewer)
@@ -137,7 +164,16 @@ namespace HpskSite.Services.SitePages
             if (!_owners.IsEnabled(ownerType, ownerId)) return SitePageView.Off(ownerUrl);
             var req = SitePageRequest.Current(_http.HttpContext);
             var key = req != null && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageKey : null;
-            return SitePageView.On(ownerType, ownerUrl, key, viewer);
+            int? freeId = req is { IsFreePage: true } && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageId : null;
+            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId);
+        }
+
+        /// <summary>Ägarens egna sidor i menyn — bara när ägaren har egen redigering PÅ, och ett fel i läsningen ger en meny utan dem (aldrig ett trasigt flikfält).</summary>
+        private IReadOnlyList<SiteMenuPage> MenuPages(string ownerType, int ownerId)
+        {
+            if (_reader == null || !_owners.IsEditingEnabled(ownerType, ownerId)) return Array.Empty<SiteMenuPage>();
+            try { return _reader.MenuPages(ownerType, ownerId); }
+            catch { return Array.Empty<SiteMenuPage>(); }
         }
     }
 }

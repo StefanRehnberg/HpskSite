@@ -159,6 +159,14 @@ namespace HpskSite.Services.SitePages
             return new SiteWriteResult(SiteWriteStatus.Ok, pageId, published.Revision);
         }
 
+        /// <summary>Lägg en egen sida i menyn eller ta bort den därifrån (loggas). Sidan måste höra till ägaren.</summary>
+        public static SiteWriteResult SetInMenu(IDatabase db, int pageId, string ownerType, int ownerId, bool inMenu, SiteActor actor, DateTime now)
+        {
+            if (!SitePageStore.SetInMenu(db, pageId, ownerType, ownerId, inMenu, now)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            Audit(db, ownerType, ownerId, actor, "menu", pageId, inMenu ? "menu-add" : "menu-remove", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId);
+        }
+
         public static SiteWriteResult SoftDelete(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, SiteActor actor, DateTime now)
         {
             var r = SitePageStore.SoftDelete(db, pageId, ownerType, ownerId, expectedRevision, actor.MemberId, now);

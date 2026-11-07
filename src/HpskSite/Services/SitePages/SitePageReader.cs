@@ -38,6 +38,14 @@ namespace HpskSite.Services.SitePages
             return current == null ? null : new SiteAddressHit(page, row.IsCurrent, current);
         }
 
+        /// <summary>Ägarens egna sidor som ligger i menyn (publicerade, ej raderade). En SQL-fråga; körs bara när ägaren har egen redigering PÅ.</summary>
+        public IReadOnlyList<SiteMenuPage> MenuPages(string ownerType, int ownerId)
+        {
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            return SitePageStore.MenuPages(scope.Database, ownerType, ownerId)
+                .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder)).ToList();
+        }
+
         /// <summary>Sidans rad (för filtret efter inloggningen: synligheten läses färskt), eller null.</summary>
         public SitePageRow? Page(string ownerType, int ownerId, int pageId)
         {

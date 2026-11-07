@@ -9,6 +9,8 @@
 @inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
 @inject HpskSite.Services.ClubRosterService ClubRoster
 @inject HpskSite.Services.BoardRoleService BoardRoles
+@inject HpskSite.Services.SitePages.SiteViewerResolver SiteViewers
+@inject HpskSite.Services.SitePages.SiteOwnerService SiteOwners
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -78,6 +80,9 @@
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, Model.Url(),
         new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, isClubBoard, isClubAdmin));
     ViewBag.sitePageView = sp;
+    // Hemsidan (egna sidor): länken syns bara för klubbens EGEN admin och bara när brytare 2 är PÅ.
+    ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
+        && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, null);
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: club logo → region logo → site default

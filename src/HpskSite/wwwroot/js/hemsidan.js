@@ -408,9 +408,24 @@
       h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser sidan?'), visSel, consequence,
         S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
+      menuToggle(),
       blocksEl, addBlockBar()]);
     drawBlocks();
     paintStatus(); paintEditorBanner();
+  }
+
+  // "Visa sidan i menyn": sparas direkt (det är inte en del av texten) och gäller först när sidan är publicerad.
+  function menuToggle() {
+    const cb = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsInMenu', checked: S.page.inMenu });
+    cb.addEventListener('change', async () => {
+      cb.disabled = true;
+      const r = await api('POST', 'SetInMenu', { pageId: S.page.id, inMenu: cb.checked ? 'true' : 'false' });
+      cb.disabled = false;
+      if (!r.success) { cb.checked = !cb.checked; setBanner('danger', r.message || 'Det gick inte att ändra menyn.'); return; }
+      S.page.inMenu = cb.checked;
+    });
+    return h('div', { class: 'form-check mb-4' }, cb, h('label', { class: 'form-check-label', for: 'hsInMenu' }, 'Visa sidan i menyn'),
+      h('div', { class: 'form-text' }, 'Länken syns i menyn när sidan är publicerad, och bara för dem som får läsa sidan.'));
   }
 
   function addBlockBar() {

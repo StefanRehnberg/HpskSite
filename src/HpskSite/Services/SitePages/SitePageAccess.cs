@@ -62,6 +62,15 @@ namespace HpskSite.Services.SitePages
             _board = board;
         }
 
+        /// <summary>
+        /// Är den inloggade ägarens EGEN admin (<c>ClubAdmin_{id}</c> / <c>RegionalAdmin_{kod}</c>) — varken sajt- eller kretsadmin? Det är vem som
+        /// får redigera ägarens egna sidor (Hemsidan). EN plats för regeln: filtret, vyerna och kontrollern frågar samma sak.
+        /// </summary>
+        public async Task<bool> IsOwnAdminAsync(string ownerType, int ownerId, string? regionCode) =>
+            ownerType == SiteTemplates.Club
+                ? ownerId > 0 && await _auth.IsOwnClubAdmin(ownerId)
+                : !string.IsNullOrEmpty(regionCode) && await _auth.IsOwnRegionAdmin(regionCode);
+
         /// <param name="regionCode">Kretsens kod (krets-ägare); behövs för kretsens admin.</param>
         public async Task<SiteViewer> ResolveAsync(string ownerType, int ownerId, string? regionCode)
         {

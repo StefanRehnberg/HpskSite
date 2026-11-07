@@ -59,9 +59,20 @@ namespace HpskSite.Services.SitePages
         public DateTime UpdatedDate { get; set; }
         public DateTime? DeletedDate { get; set; }
         public string? Slug { get; set; }
+        public bool InMenu { get; set; }
 
         /// <summary>Det användaren ser: "Publicerad", "Publicerad, med osparade ändringar" eller "Utkast".</summary>
         public string Status => PublishedVersionId == null ? "Utkast" : DraftVersionId != null ? "Publicerad, med osparade ändringar" : "Publicerad";
+    }
+
+    /// <summary>En egen sida i ägarens meny (bara publicerade, ej raderade sidor med en aktuell adress).</summary>
+    public sealed class SiteMenuPageRow
+    {
+        public int PageId { get; set; }
+        public string Title { get; set; } = "";
+        public string Slug { get; set; } = "";
+        public byte Visibility { get; set; }
+        public int SortOrder { get; set; }
     }
 
     public enum SiteStoreOutcome
@@ -197,11 +208,50 @@ namespace HpskSite.Services.SitePages
         public static List<SitePageListItem> ListFree(IDatabase db, string ownerType, int ownerId, bool deleted = false) =>
             db.Fetch<SitePageListItem>(
                 @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate,
-                         (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug
+                         (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug,
+                         CASE WHEN EXISTS (SELECT 1 FROM dbo.SiteMenuItem m WHERE m.Kind = 1 AND m.PageId = p.Id AND m.IsRemoved = 0) THEN 1 ELSE 0 END AS InMenu
                   FROM dbo.SitePage p
                   WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NULL AND p.DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + @"
                   ORDER BY p.Title",
                 ownerType, ownerId);
+
+        /// <summary>
+        /// Ägarens egna sidor som ligger i menyn, i menyns ordning. Bara PUBLICERADE sidor utan raderingsdatum med en aktuell adress: en sida som
+        /// inte går att öppna ska inte synas som en länk. Etiketten är sidans publicerade titel (följer med ett namnbyte, ingen gammal kopia).
+        /// </summary>
+        public static List<SiteMenuPageRow> MenuPages(IDatabase db, string ownerType, int ownerId) =>
+            db.Fetch<SiteMenuPageRow>(
+                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, m.SortOrder AS SortOrder
+                  FROM dbo.SiteMenuItem m
+                  JOIN dbo.SitePage p ON p.Id = m.PageId AND p.OwnerType = m.OwnerType AND p.OwnerId = m.OwnerId
+                  JOIN dbo.PageAddress a ON a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1
+                  WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND m.IsRemoved = 0 AND p.DeletedDate IS NULL AND p.PublishedVersionId IS NOT NULL
+                  ORDER BY m.SortOrder, p.Id",
+                ownerType, ownerId);
+
+        /// <summary>
+        /// Lägger en egen sida i menyn eller tar bort den därifrån. Sidan måste höra till ägaren (id-lagen). Läggs sist; en sida som redan ligger
+        /// där rörs inte. Returnerar false om sidan inte finns hos ägaren. Menyn är bara en lista: sidans synlighet gäller alltid (Strictest).
+        /// </summary>
+        public static bool SetInMenu(IDatabase db, int pageId, string ownerType, int ownerId, bool inMenu, DateTime now)
+        {
+            var page = GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return false;
+            if (!inMenu)
+            {
+                db.Execute("DELETE FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2", ownerType, ownerId, pageId);
+                return true;
+            }
+            if (!LockOwner(db, ownerType, ownerId)) return false;
+            var exists = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2", ownerType, ownerId, pageId);
+            if (exists > 0) { db.Execute("UPDATE dbo.SiteMenuItem SET IsRemoved = 0, UpdatedDate = @3 WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2", ownerType, ownerId, pageId, now); return true; }
+            var sort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId) ?? 0;
+            var label = page.Title.Length > 80 ? page.Title[..80] : page.Title;
+            db.Execute(
+                @"INSERT INTO dbo.SiteMenuItem (OwnerType, OwnerId, Kind, PageId, Label, SortOrder, Visibility, CreatedDate, UpdatedDate)
+                  VALUES (@0, @1, 1, @2, @3, @4, @5, @6, @6)", ownerType, ownerId, pageId, label, sort + 10, page.Visibility, now);
+            return true;
+        }
 
         /// <summary>
         /// Autospar: skriver utkastet på plats. Oförändrat innehåll (samma hash och titel) räknas inte som en ändring: revisionen
