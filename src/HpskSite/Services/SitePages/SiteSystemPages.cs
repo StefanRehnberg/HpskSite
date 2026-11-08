@@ -1,0 +1,63 @@
+namespace HpskSite.Services.SitePages
+{
+    /// <summary>Var en vanlig sida (Hem, Om klubben …) står: som förut, ett utkast som ännu inte syns, eller en egen version.</summary>
+    public enum SystemPageMode { AsBefore, Draft, Converted }
+
+    /// <summary>
+    /// En vanlig sida så som Hemsidan visar den. <see cref="PageId"/>/<see cref="Revision"/> finns när ägaren har en rad för sidan (mallkopia), annars null.
+    /// <see cref="PendingChanges"/> = en omgjord sida med ändringar som inte är publicerade. <see cref="CanConvert"/> = knappen "Ändra den här sidan" får visas.
+    /// </summary>
+    public sealed record SystemPageState(string Key, string Label, SystemPageMode Mode, int? PageId, int? Revision, bool PendingChanges, bool CanConvert);
+
+    /// <summary>
+    /// Hemsidans vy över de vanliga sidorna (K5a): läget som ord-bar enum, ur sidans versioner — samma sanning som <see cref="SitePageStore.IsConverted"/> och
+    /// <see cref="SiteConvertedSource"/> (publicerad version i schema 2 = egen version; bara ett utkast i schema 2 = utkast). Ren kod.
+    /// </summary>
+    public static class SiteSystemPages
+    {
+        /// <summary>Läget ur schemat i den publicerade och i utkastversionen. En omgjord sida har aldrig ett utkast i schema 1 (skrivgrinden), så det ger "som förut".</summary>
+        public static SystemPageMode ModeOf(int? publishedSchema, int? draftSchema) =>
+            publishedSchema == SiteBlockSchema.ConvertedSchemaVersion ? SystemPageMode.Converted
+            : draftSchema == SiteBlockSchema.ConvertedSchemaVersion ? SystemPageMode.Draft
+            : SystemPageMode.AsBefore;
+
+        /// <summary>Läget som kod för klienten (permanent): asBefore, draft, converted.</summary>
+        public static string Code(SystemPageMode mode) => mode switch
+        {
+            SystemPageMode.Converted => "converted",
+            SystemPageMode.Draft => "draft",
+            _ => "asBefore",
+        };
+
+        /// <summary>Orden användaren ser för läget.</summary>
+        public static string Word(SystemPageMode mode) => mode switch
+        {
+            SystemPageMode.Converted => "Egen version",
+            SystemPageMode.Draft => "Utkast, syns inte än",
+            _ => "Som förut",
+        };
+
+        /// <summary>
+        /// Alla vanliga sidor (aldrig Admin) med sitt läge. <paramref name="canWrite"/> = ägarens EGEN admin (inte stödläge) och <paramref name="convertEnabled"/> = brytare 3:
+        /// bara då får "Ändra den här sidan" visas, och bara för en sida som inte redan är omgjord eller på väg att bli det. Servern prövar allt på nytt vid skrivning.
+        /// </summary>
+        public static IReadOnlyList<SystemPageState> Describe(string ownerType, IReadOnlyList<SitePageListItem> copies, bool convertEnabled, bool canWrite) =>
+            SiteTemplates.For(ownerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p =>
+            {
+                var copy = copies.FirstOrDefault(c => c.Slug == p.Key);   // ListTemplateCopies lägger mallnyckeln i Slug
+                var mode = copy == null ? SystemPageMode.AsBefore : ModeOf(copy.PublishedSchema, copy.DraftSchema);
+                var pending = mode == SystemPageMode.Converted && copy!.DraftSchema == SiteBlockSchema.ConvertedSchemaVersion;
+                var canConvert = canWrite && convertEnabled && mode == SystemPageMode.AsBefore && PanelCatalog.Standard(ownerType, p.Key, true).Count > 0;
+                return new SystemPageState(p.Key, p.Label, mode, copy?.Id, copy?.Revision, pending, canConvert);
+            }).ToList();
+
+        /// <summary>Panelerna ägaren får välja på en sida, för Hemsidans kort: namn, vad de visar, zon, om de är obligatoriska och om de visar personuppgifter.</summary>
+        public static IReadOnlyList<object> PanelsFor(string ownerType, string pageKey) =>
+            PanelCatalog.Selectable(ownerType, pageKey).Select(d => (object)new
+            {
+                key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), required = d.Required, personalData = d.PersonalData, hostedBy = d.HostedBy,
+            }).ToList();
+
+        public static string ZoneWord(PanelZone z) => z switch { PanelZone.Main => "main", PanelZone.Side => "side", _ => "full" };
+    }
+}

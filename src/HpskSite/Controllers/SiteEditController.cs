@@ -146,6 +146,9 @@ namespace HpskSite.Controllers
             using var scope = _scopes.CreateScope(autoComplete: true);
             var accepted = SiteOwnerData.TermsAccepted(scope.Database, g.OwnerType, g.OwnerId);
             var copies = SitePageStore.ListTemplateCopies(scope.Database, g.OwnerType, g.OwnerId);
+            var convertEnabled = SiteOwnerData.ConvertEnabled(scope.Database, g.OwnerType, g.OwnerId);
+            // Läget per vanlig sida (K5a). Bara ägarens EGEN admin kan göra om: stödläget får se men aldrig ändra (GateMode.OwnOnly).
+            var sysStates = SiteSystemPages.Describe(g.OwnerType, copies, convertEnabled, canWrite: g.Grant == null);
             object Row(SitePageListItem p) => new
             {
                 id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu, suspended = p.SuspendedDate != null,
@@ -157,7 +160,15 @@ namespace HpskSite.Controllers
                 support = g.Grant == null ? null : new { reason = g.Grant.Reason, expires = g.Grant.ExpiresDate, minutes = SiteSupport.Minutes }, termsVersion = SiteOwnerData.CurrentTermsVersion,
                 maxPages = SitePageStore.MaxFreePagesPerOwner,
                 // Systemsidorna som ett länkblock får peka på (aldrig Admin, som saknar adress).
-                systemPages = SiteTemplates.For(g.OwnerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p => new { key = p.Key, label = p.Label }),
+                // Varje vanlig sida bär sitt läge (mode: asBefore | draft | converted, word = orden användaren ser), sidans id/revision när den har en rad, och
+                // om "Ändra den här sidan" får visas. panels = de paneler ägaren får välja på sidan (för kortet och dialogerna).
+                convertEnabled,
+                systemPages = sysStates.Select(s => new
+                {
+                    key = s.Key, label = s.Label, mode = SiteSystemPages.Code(s.Mode), word = SiteSystemPages.Word(s.Mode),
+                    pageId = s.PageId, revision = s.Revision, pendingChanges = s.PendingChanges, canConvert = s.CanConvert,
+                    panels = SiteSystemPages.PanelsFor(g.OwnerType, s.Key),
+                }),
                 // Egen text före/efter systemsidorna: varje sida som kan ha det, hur öppen texten får vara, och ägarens kopia om den finns.
                 slots = SiteTemplates.For(g.OwnerType).Pages.Where(p => SiteTemplates.For(g.OwnerType).CanHaveSlots(p.Key)).OrderBy(p => p.Order).Select(p =>
                 {
@@ -362,11 +373,19 @@ namespace HpskSite.Controllers
                 version = page == null ? null
                     : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId) ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
             }
-            if (page == null || !page.IsFree || version == null) return Fail("Sidan finns inte.");
-            var content = SiteBlockSchema.Parse(version.BlocksJson, SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson), page.VisibilityLevel, SiteTemplates.For(g.OwnerType), page.TemplateKey);
+            if (page == null || version == null) return Fail("Sidan finns inte.");
+            var kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson);
+            // En vanlig sida som inte är omgjord har ingen förhandsvisning här: den ritas av sidans egna vyer.
+            if (kind == SiteContentKind.TemplateCopy) return Fail("Sidan finns inte.");
+            var content = SiteBlockSchema.Parse(version.BlocksJson, kind, page.VisibilityLevel, SiteTemplates.For(g.OwnerType), page.TemplateKey);
             if (!content.Ok) return Fail("Sidan kan inte visas ännu: " + content.Errors[0].Message);
 
             var node = UmbracoContext.Content?.GetById(g.OwnerId);
+            if (kind == SiteContentKind.ConvertedPage && page.TemplateKey != null)
+            {
+                var rc = SitePagePreview.BuildConverted(g.OwnerType, version.Title, page.TemplateKey, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
+                return Json(new { success = true, decision = rc.Decision.ToString(), notice = rc.Notice, document = rc.Document, persona = who.Key });
+            }
             var r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
             return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
         }

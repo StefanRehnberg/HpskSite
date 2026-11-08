@@ -63,6 +63,9 @@ namespace HpskSite.Services.SitePages
         public DateTime? SuspendedDate { get; set; }
         public string? Slug { get; set; }
         public bool InMenu { get; set; }
+        /// <summary>Schemat i den publicerade respektive utkastversionen (1 = vanlig, 2 = omgjord sida); null = ingen sådan version. Bara <see cref="SitePageStore.ListTemplateCopies"/> fyller dem.</summary>
+        public int? PublishedSchema { get; set; }
+        public int? DraftSchema { get; set; }
 
         /// <summary>Det användaren ser: "Publicerad", "Publicerad, med osparade ändringar" eller "Utkast".</summary>
         public string Status => SuspendedDate != null ? "Stoppad av pistol.nu" : PublishedVersionId == null ? "Utkast" : DraftVersionId != null ? "Publicerad, med osparade ändringar" : "Publicerad";
@@ -365,8 +368,12 @@ namespace HpskSite.Services.SitePages
         /// <summary>Alla ägarens mallkopior (för Hemsidans lista över systemsidor).</summary>
         public static List<SitePageListItem> ListTemplateCopies(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<SitePageListItem>(
-                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.TemplateKey AS Slug, 0 AS InMenu
-                  FROM dbo.SitePage p WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NOT NULL AND p.DeletedDate IS NULL ORDER BY p.Id", ownerType, ownerId);
+                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.TemplateKey AS Slug, 0 AS InMenu,
+                         pv.SchemaVersion AS PublishedSchema, dv.SchemaVersion AS DraftSchema
+                  FROM dbo.SitePage p
+                  LEFT JOIN dbo.SitePageVersion pv ON pv.Id = p.PublishedVersionId
+                  LEFT JOIN dbo.SitePageVersion dv ON dv.Id = p.DraftVersionId
+                  WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NOT NULL AND p.DeletedDate IS NULL ORDER BY p.Id", ownerType, ownerId);
 
         /// <summary>
         /// Autospar: skriver utkastet på plats. Oförändrat innehåll (samma hash och titel) räknas inte som en ändring: revisionen

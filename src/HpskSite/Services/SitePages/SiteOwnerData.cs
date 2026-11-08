@@ -25,6 +25,11 @@ namespace HpskSite.Services.SitePages
                 "SELECT COUNT(*) FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1 AND TermsAcceptedDate IS NOT NULL AND TermsVersion >= @2",
                 ownerType, ownerId, CurrentTermsVersion) == 1;
 
+        /// <summary>Brytare 3 (får ägaren göra om vanliga sidor?) läst färskt ur SQL. Saknad rad = false. Bara en visning: skrivlagret prövar den på nytt under ägarens lås.</summary>
+        public static bool ConvertEnabled(IDatabase db, string ownerType, int ownerId) =>
+            db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1 AND IsEnabled = 1 AND EditingEnabled = 1 AND ConvertEnabled = 1", ownerType, ownerId) == 1;
+
         /// <summary>Registrerar accepten (vem, när, vilken version). Returnerar false om ägaren saknar rad. En ny accept ersätter den gamla.</summary>
         public static bool AcceptTerms(IDatabase db, string ownerType, int ownerId, int memberId, DateTime now) =>
             db.Execute(

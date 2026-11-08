@@ -61,6 +61,39 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>
+        /// Förhandsvisning av en OMGJORD vanlig sida (K5a). Åtkomsten prövas mot mallen med sidan utbytt mot den omgjorda (samma regel som besökarna), blocken ritas genom
+        /// <see cref="SiteConvertedPages.Plan"/> — samma loop och samma <see cref="SiteBlockRenderer.PanelVisible"/> som den riktiga sidan. En panel är en delvy med
+        /// levande data och ritas inte här: den visas som ett kort med sitt namn och vad den visar, men bara för den tittare som får se den.
+        /// </summary>
+        public static PreviewResult BuildConverted(string ownerType, string title, string templateKey, SiteVisibility pageVisibility, SiteContentResult content,
+            PreviewPersona persona, ISiteBlockData data, string ownerUrl)
+        {
+            var converted = new ConvertedPage(templateKey, ConvertedState.Ok, pageVisibility, false, content);
+            var template = SiteConvertedPages.Apply(SiteTemplates.For(ownerType), new Dictionary<string, ConvertedPage> { [templateKey] = converted });
+            var def = template.PageByKey(templateKey) ?? throw new ArgumentException("Okänd sida: " + templateKey, nameof(templateKey));
+            var decision = SitePageAccessRules.Decide(template, def, persona.Viewer);
+            switch (decision)
+            {
+                case SitePageDecision.LoginRedirect:
+                    return new PreviewResult(decision, $"{persona.Label} skickas till inloggningen och kan sedan läsa sidan om hen får.", "");
+                case SitePageDecision.NotFound:
+                    return new PreviewResult(decision, $"{persona.Label} får beskedet att sidan inte finns. Ingen kan se att den finns.", "");
+            }
+            var plan = SiteConvertedPages.Plan(converted, new SiteRenderContext(persona.Viewer, ownerUrl, template, data));
+            var sb = new System.Text.StringBuilder();
+            foreach (var item in plan.Items)
+            {
+                if (item.PanelKey == null) { sb.Append(item.Html); continue; }
+                var d = PanelCatalog.Find(ownerType, item.PanelKey);
+                sb.Append("<div class=\"card mb-3\"><div class=\"card-body\"><div class=\"fw-semibold\">").Append(Encoder.Encode(d?.Name ?? item.PanelKey))
+                  .Append("</div><div class=\"text-muted small\">").Append(Encoder.Encode(d?.Description ?? "")).Append("</div></div></div>");
+            }
+            if (sb.Length == 0)
+                return new PreviewResult(decision, $"{persona.Label} kan öppna sidan men ser inget av innehållet: alla block är för någon annan.", Document(title, ""));
+            return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan. Rutor med automatiskt innehåll visas här bara med namn.", Document(title, sb.ToString()));
+        }
+
+        /// <summary>
         /// Ett komplett dokument för en <c>&lt;iframe sandbox srcdoc&gt;</c>. Titeln kodas; brödtexten är redan renderarens (kodad och sanerad). Bara bootstrap-stilen laddas utifrån;
         /// inga skript. Iframen har <c>sandbox=""</c>, så inget skript kan köras i den ändå.
         /// </summary>
