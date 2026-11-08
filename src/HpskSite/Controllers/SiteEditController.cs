@@ -394,6 +394,31 @@ namespace HpskSite.Controllers
             return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
         }
 
+        /// <summary>
+        /// "Så ser besökaren sidan" för en vanlig sida som INTE är omgjord: standardinnehållet ritas som en omgjord sida (en omgjord standardsida ser ut som standardsidan
+        /// för varje tittare — golden master), så beslutet och vilka paneler tittaren ser stämmer med den riktiga sidan. Ingen sidrad behövs och inget skrivs.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> PreviewStandard(string ownerType, int ownerId, string templateKey, string persona, [FromServices] SiteBlockDataFactory blockData)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            Response.Headers["Cache-Control"] = "private, no-store";
+            if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förhandsvisningar på kort tid.", "rate");
+            var who = SitePagePreview.Persona(g.OwnerType, persona);
+            if (who == null) return Fail("Okänd tittare.");
+            var def = SiteTemplates.For(g.OwnerType).PageByKey(templateKey ?? "");
+            if (def == null || def.IsAdmin || PanelCatalog.Standard(g.OwnerType, def.Key, true).Count == 0) return Fail("Den sidan går inte att förhandsvisa.");
+
+            var content = SiteConversion.Build(g.OwnerType, def.Key, null);
+            var node = UmbracoContext.Content?.GetById(g.OwnerId);
+            var r = SitePagePreview.BuildConverted(g.OwnerType, def.Label, def.Key, SiteConversion.PageVisibility(g.OwnerType, def.Key), content, who,
+                blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
+            return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
+        }
+
         /// <summary>Tittarna man kan förhandsvisa som, för den här ägarens typ.</summary>
         [HttpGet]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]

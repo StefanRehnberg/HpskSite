@@ -348,7 +348,7 @@
     view(shell('sys:' + key,
       pageHead(p.label, [modePill(p), ' ', intro], actions),
       h('div', { id: 'hsBanner' }),
-      panelsCard, p.mode === 'asBefore' ? slotCard(slot) : null));
+      panelsCard, p.mode === 'asBefore' ? standardPreviewCard(p) : null, p.mode === 'asBefore' ? slotCard(slot) : null));
     renderBanner();
   }
 
@@ -578,6 +578,9 @@
       h('a', { href: OWNER.url, target: '_blank', rel: 'noopener' }, 'Se den vanliga sidan')));
     else if (S.published && (S.dirty || S.hasUnpublished)) kids.push(h('div', { class: 'alert alert-info' }, 'Du har ändringar som inte är publicerade. Besökarna ser fortfarande den publicerade versionen.'));
     else if (!S.published) kids.push(h('div', { class: 'alert alert-secondary' }, 'Sidan är inte publicerad än. Ingen annan kan se den förrän du publicerar.'));
+    // En omgjord sida där varje block är för styrelsen eller högre: ingen annan ser något, och fliken försvinner för dem.
+    if (S.kind === 'converted' && S.blocks.length && S.blocks.every(b => b.visibility >= 3 && b.visibility <= 4))
+      kids.push(h('div', { class: 'alert alert-warning' }, 'Ingen utom styrelsen ser något på den här sidan.'));
     if (S.hint) kids.push(h('div', { class: 'alert alert-light border' }, S.hint));
     el.replaceChildren(...kids);
   }
@@ -724,10 +727,30 @@
         const r = await api('POST', 'Preview', { pageId: S.page.id, persona: sel.value });
         e.target.disabled = false;
         if (!r.success) { setBanner('danger', r.message || 'Förhandsvisningen gick inte att göra.'); return; }
-        const kids = [alertBox(r.decision === 'Serve' ? 'info' : 'warning', r.notice)];
-        if (r.document) kids.push(h('iframe', { sandbox: '', srcdoc: r.document, title: 'Förhandsvisning', style: 'width:100%;height:55vh;border:1px solid var(--bs-border-color);border-radius:.5rem;background:#fff' }));
-        modal('Se sidan som: ' + sel.options[sel.selectedIndex].text, kids, [{ label: 'Stäng', value: true, cls: 'btn-primary' }], true);
+        openPreviewModal(r, sel.options[sel.selectedIndex].text);
       } }, h('i', { class: 'bi bi-eye me-1' }), 'Förhandsvisa'));
+  }
+  function openPreviewModal(r, who) {
+    const kids = [alertBox(r.decision === 'Serve' ? 'info' : 'warning', r.notice)];
+    if (r.document) kids.push(h('iframe', { sandbox: '', srcdoc: r.document, title: 'Förhandsvisning', style: 'width:100%;height:55vh;border:1px solid var(--bs-border-color);border-radius:.5rem;background:#fff' }));
+    modal('Se sidan som: ' + who, kids, [{ label: 'Stäng', value: true, cls: 'btn-primary' }], true);
+  }
+  // "Så ser besökaren sidan" för en vanlig sida som inte är omgjord: servern ritar standardinnehållet för vald tittare (som den riktiga sidan).
+  function standardPreviewCard(p) {
+    const sel = h('select', { class: 'form-select w-auto', 'aria-label': 'Se som' });
+    const fill = () => sel.replaceChildren(...(S.personas || []).map(x => h('option', { value: x.key }, x.label)));
+    if (S.personas) fill(); else api('GET', 'PreviewPersonas').then(r => { S.personas = r.success ? r.personas : []; fill(); });
+    return h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-1' }, 'Så ser besökaren sidan'),
+      h('p', { class: 'text-muted mb-2' }, 'Välj en besökare och se vilka delar av sidan hen ser. Rutor som hämtas automatiskt visas bara med namn.'),
+      h('div', { class: 'd-flex flex-wrap gap-2 align-items-center' }, sel,
+        h('button', { class: 'btn btn-outline-secondary', onclick: async e => {
+          const btn = e.currentTarget;   // currentTarget är null efter en await
+          btn.disabled = true;
+          const r = await api('POST', 'PreviewStandard', { templateKey: p.key, persona: sel.value });
+          btn.disabled = false;
+          if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Förhandsvisningen gick inte att göra.' }; renderBanner(); return; }
+          openPreviewModal(r, sel.options[sel.selectedIndex].text);
+        } }, h('i', { class: 'bi bi-eye me-1' }), 'Förhandsvisa')));
   }
 
   // "Mer": återställningspunkt, tidigare versioner och adressbyte (avancerat). Inget av det publicerar något.

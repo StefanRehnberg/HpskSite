@@ -264,6 +264,25 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Förhandsvisningen_av_en_vanlig_sida_ger_samma_beslut_som_den_riktiga_sidan_för_varje_tittare()
+        {
+            var failures = new List<string>();
+            foreach (var owner in new[] { "Club", "Region" })
+            {
+                var template = SiteTemplates.For(owner);
+                foreach (var page in template.Pages.Where(p => !p.IsAdmin && PanelCatalog.Standard(owner, p.Key, true).Count > 0))
+                foreach (var persona in SitePagePreview.Personas(owner))
+                {
+                    var content = SiteConversion.Build(owner, page.Key, null);
+                    var preview = SitePagePreview.BuildConverted(owner, page.Label, page.Key, SiteConversion.PageVisibility(owner, page.Key), content, persona, new NoData(), "/x/");
+                    var real = SitePageAccessRules.Decide(template, page, persona.Viewer);   // den vanliga sidans egna beslut (mallen, ingen omvandling)
+                    if (preview.Decision != real) failures.Add($"{owner}/{page.Key}/{persona.Key}: förhandsvisning {preview.Decision}, riktig sida {real}");
+                }
+            }
+            Assert.True(failures.Count == 0, string.Join("\n", failures.Take(20)));
+        }
+
+        [Fact]
         public void En_panel_visas_som_kort_med_namn_bara_för_den_som_får_se_den_och_ritas_aldrig_med_levande_data()
         {
             var content = Converted("Club", "calendar", SiteVisibility.Alla,

@@ -81,6 +81,6 @@
   #hemsidan-app .hs-head > .dropdown { flex: 0 0 auto; }
 }
 
-/* K5c: panelkort pa en omgjord sida och grå rad for en borttagen panel. */
+/* K5c: panel cards on a converted page and a grey row for a removed panel. */
 #hemsidan-app .hs-panelcard .hs-block-head { background: var(--bs-body-bg); }
 #hemsidan-app .hs-removed { background: var(--bs-tertiary-bg); border-style: dashed; }
