@@ -158,7 +158,12 @@
   // Platserna adresseras med hash (#sidor, #sida=home, #redigera=12, #raderade, #logg, #ny) så att bakåtknappen och en delad länk fungerar.
   // Varje vy sätter sin hash tyst (setHash); bara en hash som användaren själv ändrar leder till route().
   function setHash(hash) { if (location.hash === hash) return; S.hashSilent = hash; location.hash = hash; }
-  async function go(hash) { if (S.dirty) await saveNow(); if (location.hash !== hash) setHash(hash); route(); }
+  // Lämnar man redigeraren läses läget om (publicerat, avbrutet), så att menyn och sidplatsen visar det som nu gäller.
+  async function leaveEditor() {
+    if (S.dirty) await saveNow();
+    if (/^#redigera=/.test(location.hash)) { const st = await api('GET', 'State'); if (st.success) S.st = st; }
+  }
+  async function go(hash) { await leaveEditor(); if (location.hash !== hash) setHash(hash); route(); }
   function route() {
     const hsh = location.hash || '#sidor';
     let m;
@@ -174,6 +179,7 @@
     S.hashSilent = null;
     if (!S.st || !S.st.termsAccepted) return;
     if (S.dirty) await saveNow();
+    const st = await api('GET', 'State'); if (st.success) S.st = st;   // bakåtknappen/en delad länk: läs om läget (publicerat, avbrutet) innan vyn ritas
     route();
   });
 
@@ -328,19 +334,52 @@
     if (!p) return renderList();
     setHash('#sida=' + key);
     const slot = (st.slots || []).find(x => x.key === key);
-    const intro = p.mode === 'asBefore' ? 'Den här sidan visas som den alltid har gjort. Innehållet hämtas automatiskt.'
+    const intro = p.mode === 'asBefore' ? 'Den här sidan visas som den alltid har gjort. Innehållet hämtas automatiskt.' + (p.canConvert ? ' Vill ni ändra hur sidan ser ut? Välj Åtgärder → Ändra den här sidan.' : '')
       : p.mode === 'draft' ? 'Det finns ett utkast till en egen version. Besökarna ser fortfarande den vanliga sidan.'
       : 'Sidan är er egen version.' + (p.pendingChanges ? ' Det finns ändringar som inte är publicerade.' : '');
+    const actions = p.mode === 'asBefore' ? [p.canConvert ? ['Ändra den här sidan', () => convertFlow(p)] : null]
+      : p.mode === 'draft' ? [['Fortsätt ändra utkastet', () => go('#redigera=' + p.pageId)], '-', ['Avbryt omvandlingen', () => cancelConversionFlow(p.key, p.pageId, p.revision, false)]]
+      : [['Ändra sidan', () => go('#redigera=' + p.pageId)], '-', ['Gå tillbaka till den vanliga sidan', () => revertFlow(p)]];
     const panelsCard = p.mode === 'asBefore' && p.panels.length
       ? h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-2' }, 'Det här visas på sidan'),
           p.panels.map(x => h('div', { class: 'hs-panelrow' }, h('div', {}, h('strong', {}, x.name), h('div', { class: 'text-muted small' }, x.description)),
             h('span', { class: 'text-muted small' }, 'Hämtas automatiskt'))))
       : null;
     view(shell('sys:' + key,
-      h('div', { class: 'hs-head' }, h('div', {}, h('h1', {}, p.label), h('div', { class: 'hs-sub' }, modePill(p), ' ', intro))),
+      pageHead(p.label, [modePill(p), ' ', intro], actions),
       h('div', { id: 'hsBanner' }),
       panelsCard, p.mode === 'asBefore' ? slotCard(slot) : null));
     renderBanner();
+  }
+
+  // ── Ändra den här sidan / Avbryt / Gå tillbaka ──────────────────────────────
+  async function afterChange(key, banner) {
+    const st = await api('GET', 'State'); if (st.success) S.st = st;
+    S.banner = banner;
+    go('#sida=' + key);
+  }
+  async function convertFlow(p) {
+    const ok = await confirmDialog('Ändra den här sidan?', 'Vi gör en kopia av hur "' + p.label + '" ser ut i dag. I kopian kan ni flytta och ta bort innehåll och lägga till eget. Besökarna ser inte kopian förrän ni publicerar den. Tills dess ser de er vanliga sida, och ni kan ångra när ni vill.', 'Ändra sidan', false);
+    if (!ok) return;
+    const r = await api('POST', 'ConvertPage', { templateKey: p.key });
+    if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Sidan kunde inte göras om.' }; renderSystemPage(p.key); return; }
+    const st = await api('GET', 'State'); if (st.success) S.st = st;
+    go('#redigera=' + r.pageId);
+  }
+  async function cancelConversionFlow(key, pageId, revision, fromEditor) {
+    const ok = await confirmDialog('Avbryta?', 'Utkastet kastas. Besökarna ser som förut den vanliga sidan, och den ändras inte.', 'Kasta utkastet', true);
+    if (!ok) return;
+    if (fromEditor) { clearTimeout(S.timer); S.dirty = false; }
+    const r = await api('POST', 'CancelConversion', { pageId, expectedRevision: revision });
+    if (!r.success) { setBanner('danger', r.message || 'Det gick inte att avbryta.'); return; }
+    afterChange(key, { cls: 'success', text: 'Utkastet är kastat. Sidan är som förut.' });
+  }
+  async function revertFlow(p) {
+    const ok = await confirmDialog('Gå tillbaka till den vanliga sidan?', 'Besökarna ser den vanliga sidan direkt. Det ni har ändrat på "' + p.label + '" försvinner från sajten. Ni kan göra om sidan igen, men då börjar ni från den vanliga sidan.', 'Gå tillbaka till den vanliga sidan', true);
+    if (!ok) return;
+    const r = await api('POST', 'RevertConversion', { pageId: p.pageId, expectedRevision: p.revision });
+    if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Det gick inte att gå tillbaka.' }; renderSystemPage(p.key); return; }
+    afterChange(p.key, { cls: 'success', text: 'Sidan är som förut. Besökarna ser den vanliga sidan.' });
   }
 
   // Egen text före/efter en vanlig sida: en mallkopia per sida. Sidan är exakt som förut utan den.
@@ -506,7 +545,8 @@
     const blocks = isSlots
       ? [...(parsed.slots.before || []).map(b => ({ ...b, pos: 'before' })), ...(parsed.slots.after || []).map(b => ({ ...b, pos: 'after' }))]
       : parsed.blocks;
-    Object.assign(S, { kind: r.kind || 'free', minVis: r.minVisibility || 0, templateKey: r.templateKey || null });
+    // En omgjord sida (schema 2) är en lista block där paneler (hämtas automatiskt) och egna block blandas; panelkatalogen kommer med svaret.
+    Object.assign(S, { kind: r.kind || 'free', minVis: r.minVisibility || 0, templateKey: r.templateKey || null, pageKey: r.pageKey || null, panelCat: r.panels || null, convertedLive: !!r.convertedLive });
     Object.assign(S, { page: r, blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
       dirty: false, editVersion: 0, banner: null, statusText: 'Sparat', statusErr: false });
     if (!S.docs) { const d = await api('GET', 'Documents'); S.docs = d.success ? d.documents : []; }
@@ -524,7 +564,9 @@
   function paintStatus() {
     const el = document.getElementById('hsStatus'); if (el) { el.textContent = S.statusText; el.className = 'hs-status' + (S.statusErr ? ' err' : ''); }
     const pub = document.getElementById('hsPublish'); if (pub) pub.disabled = S.saving || !(S.dirty || S.hasUnpublished);
-    const dis = document.getElementById('hsDiscard'); if (dis) dis.hidden = !(S.published && (S.dirty || S.hasUnpublished));
+    // En omvandling som inte är publicerad avbryts med "Avbryt omvandlingen" (inte "Kasta ändringarna", som skulle lämna sidan i ett halvt läge).
+    const dis = document.getElementById('hsDiscard'); if (dis) dis.hidden = !(S.published && (S.dirty || S.hasUnpublished)) || (S.kind === 'converted' && !S.convertedLive);
+    const cc = document.getElementById('hsCancelConv'); if (cc) cc.hidden = !(S.kind === 'converted' && !S.convertedLive);
   }
 
   function setBanner(cls, text, extra) { S.banner = { cls, text, extra }; paintEditorBanner(); }
@@ -532,6 +574,8 @@
     const el = document.getElementById('hsBanner'); if (!el) return;
     const kids = [];
     if (S.banner) kids.push(h('div', { class: 'alert alert-' + S.banner.cls + ' d-flex flex-wrap gap-2 align-items-center' }, h('span', { class: 'me-auto' }, S.banner.text), S.banner.extra || null));
+    else if (S.kind === 'converted' && !S.convertedLive) kids.push(h('div', { class: 'alert alert-secondary d-flex flex-wrap gap-2 align-items-center' }, h('span', { class: 'me-auto' }, 'Utkast. Besökarna ser fortfarande er vanliga sida.'),
+      h('a', { href: OWNER.url, target: '_blank', rel: 'noopener' }, 'Se den vanliga sidan')));
     else if (S.published && (S.dirty || S.hasUnpublished)) kids.push(h('div', { class: 'alert alert-info' }, 'Du har ändringar som inte är publicerade. Besökarna ser fortfarande den publicerade versionen.'));
     else if (!S.published) kids.push(h('div', { class: 'alert alert-secondary' }, 'Sidan är inte publicerad än. Ingen annan kan se den förrän du publicerar.'));
     if (S.hint) kids.push(h('div', { class: 'alert alert-light border' }, S.hint));
@@ -541,7 +585,7 @@
   function collectJson() {
     const plain = b => ({ id: b.id, type: b.type, visibility: b.visibility, data: b.data });
     if (S.kind === 'slots') return JSON.stringify({ schema: 1, slots: { before: S.blocks.filter(b => b.pos === 'before').map(plain), after: S.blocks.filter(b => b.pos === 'after').map(plain) } });
-    return JSON.stringify({ schema: 1, blocks: S.blocks.map(plain) });
+    return JSON.stringify({ schema: S.kind === 'converted' ? 2 : 1, blocks: S.blocks.map(plain) });
   }
 
   // Sparar utkastet. Returnerar true när servern tog emot det.
@@ -596,12 +640,22 @@
       if (go !== true) return false;
       S.altAck = true;
     }
+    // En omgjord sida: berätta vad besökarna förlorar innan det publiceras (de borttagna panelerna).
+    if (S.kind === 'converted') {
+      const gone = removedPanels();
+      if (gone.length) {
+        const sure = await modal('Publicera ändringarna?', [h('p', {}, 'Det här tas bort från sidan för besökarna:'), h('ul', {}, gone.map(c => h('li', {}, c.name))),
+          h('p', { class: 'text-muted mb-0' }, 'Ni kan lägga tillbaka dem när som helst.')], [{ label: 'Avbryt', value: false }, { label: 'Publicera', value: true, cls: 'btn-primary' }]);
+        if (sure !== true) return false;
+      }
+    }
     if (S.dirty && !await saveNow()) return false;
     S.saving = true; paintStatus();
-    const r = await api('POST', 'PublishPage', { pageId: S.page.id, expectedRevision: S.revision, allowPersonalNumber: S.ack.size > 0 ? 'true' : 'false' });
+    const r = await api('POST', 'PublishPage',{ pageId: S.page.id, expectedRevision: S.revision, allowPersonalNumber: S.ack.size > 0 ? 'true' : 'false' });
     S.saving = false;
     if (r.success) {
       S.revision = r.revision; S.published = true; S.hasUnpublished = false; S.dirty = false; S.statusText = 'Publicerat kl. ' + clock(); S.statusErr = false;
+      if (S.kind === 'converted') S.convertedLive = true;   // nu ser besökarna den egna versionen; den ångras med Gå tillbaka
       const url = S.page.url;
       setBanner('success', 'Sidan är publicerad.', url ? [h('a', { class: 'btn btn-sm btn-outline-success', href: url, target: '_blank', rel: 'noopener' }, 'Se sidan'),
         h('button', { class: 'btn btn-sm btn-outline-success', onclick: () => copyLink(url) }, 'Kopiera länk')] : null);
@@ -617,10 +671,10 @@
   }
 
   function renderEditor() {
-    const slots = S.kind === 'slots';
+    const slots = S.kind === 'slots', conv = S.kind === 'converted';
     const titleInp = h('input', { class: 'form-control form-control-lg', maxlength: '120', value: S.title, 'aria-label': 'Sidans rubrik' });
     titleInp.addEventListener('input', () => { S.title = titleInp.value; markDirty(); });
-    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => !slots || o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
+    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => (!slots && !conv) || o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
     visSel.addEventListener('change', async () => {
       const v = parseInt(visSel.value, 10);
       if (v === 0 && !await confirmPublic()) { visSel.value = S.visibility; return; }
@@ -630,8 +684,10 @@
     const blocksEl = h('div', { id: 'hsBlocks' });
 
     const bar = h('div', { class: 'hs-bar d-flex flex-wrap gap-2 align-items-center' },
-      h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : '#sidor'); load(); } }, h('i', { class: 'bi bi-arrow-left me-1' }), slots ? 'Tillbaka till sidan' : 'Sidor'),
+      h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : conv ? '#sida=' + S.pageKey : '#sidor'); load(); } },
+        h('i', { class: 'bi bi-arrow-left me-1' }), slots || conv ? 'Tillbaka till sidan' : 'Sidor'),
       h('span', { id: 'hsStatus', class: 'hs-status ms-auto' }, S.statusText),
+      h('button', { id: 'hsCancelConv', class: 'btn btn-outline-secondary', hidden: true, onclick: () => cancelConversionFlow(S.pageKey, S.page.id, S.revision, true) }, 'Avbryt omvandlingen'),
       h('button', { id: 'hsDiscard', class: 'btn btn-outline-secondary', hidden: true, onclick: async () => {
         if (!await confirmDialog('Kasta ändringarna?', 'Ändringarna sedan senaste publiceringen försvinner. Den publicerade sidan påverkas inte.', 'Kasta ändringarna', true)) return;
         clearTimeout(S.timer); S.dirty = false;
@@ -641,14 +697,17 @@
       } }, 'Kasta ändringarna'),
       h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
 
-    view(shell(slots ? 'sys:' + S.templateKey : 'sidor', bar, h('div', { id: 'hsBanner' }),
+    view(shell(slots ? 'sys:' + S.templateKey : conv ? 'sys:' + S.pageKey : 'sidor', bar, h('div', { id: 'hsBanner' }),
       slots
         ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Egen text på "' + S.title + '"'),
             h('p', { class: 'text-muted mb-0' }, 'Texten visas före och efter sidans vanliga innehåll. Sidans eget innehåll ändras inte.'))
-        : h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
+        : conv
+          ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Ändra sidan "' + S.title + '"'),
+              h('p', { class: 'text-muted mb-0' }, 'Här bestämmer ni hur sidan ser ut. Det som hämtas automatiskt visas som kort som ni kan flytta, och ta bort om det inte är obligatoriskt. Ni kan också lägga till eget innehåll. Ändringarna syns för besökarna först när ni publicerar.'))
+          : h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, slots ? 'Vem ser texten?' : 'Vem ser sidan?'), visSel, consequence,
-        !slots && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
-      slots ? null : menuToggle(), slots ? null : previewRow(),
+        !slots && !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
+      slots || conv ? null : menuToggle(), slots ? null : previewRow(),
       blocksEl, slots ? null : addBlockBar(), moreCard()));
     drawBlocks();
     paintStatus(); paintEditorBanner();
@@ -707,7 +766,7 @@
         } }, 'Spara en återställningspunkt'),
         h('h2', { class: 'h6 mt-4' }, 'Tidigare versioner'),
         h('button', { class: 'btn btn-outline-secondary', onclick: loadVersions }, 'Visa tidigare versioner'), versionsEl,
-        ...(S.kind === 'slots' ? [] : [h('h2', { class: 'h6 mt-4' }, 'Adress (avancerat)'),
+        ...(S.kind !== 'free' ? [] : [h('h2', { class: 'h6 mt-4' }, 'Adress (avancerat)'),
         h('p', { class: 'text-muted small' }, 'Adressen ändras aldrig av sig själv. Byter du den skickas den gamla vidare till den nya, så länkar som redan delats fortsätter fungera. Sidor som bara styrelsen eller administratörerna ser skickas inte vidare.'),
         h('div', { class: 'd-flex gap-2 flex-wrap' }, h('div', { class: 'flex-grow-1', style: 'min-width:14rem' }, slugInp),
           h('button', { class: 'btn btn-outline-danger', onclick: async e => {
@@ -779,9 +838,69 @@
       el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
       return;
     }
+    if (S.kind === 'converted') {
+      // En omgjord sida: paneler (kort med Åtgärder) och egna block i EN lista; borttagna paneler som grå rader med Lägg tillbaka.
+      const present = new Set(S.blocks.filter(b => b.type === 'panel').map(b => b.data.key));
+      const removed = removedPanels();
+      el.replaceChildren(...S.blocks.map((b, i) => b.type === 'panel' ? panelCard(b, i) : blockCard(b, i)),
+        ...removed.map(removedRow));
+      el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
+      return;
+    }
     el.replaceChildren(...(S.blocks.length ? S.blocks.map(blockCard) : [h('div', { class: 'hs-card p-4 text-center text-muted mb-3' }, 'Sidan har inget innehåll än. Lägg till ett block här under.')]));
     // CKEditor skapas först när elementen sitter i dokumentet.
     el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
+  }
+
+  // ── Omgjorda sidor: panelkort ────────────────────────────────────────────────
+  const ZONE_LABEL = { main: 'Huvudkolumnen', side: 'Sidokolumnen', full: 'Hela bredden' };
+  const catOf = key => (S.panelCat || []).find(c => c.key === key) || { key, name: key, description: '', zone: 'full', mustKeep: true, systemOnly: false, level: 0, personalData: false };
+  /** Panelerna som får finnas på sidan men inte ligger där nu (och som ägaren kan lägga tillbaka). */
+  function removedPanels() {
+    const present = new Set(S.blocks.filter(b => b.type === 'panel').map(b => b.data.key));
+    return (S.panelCat || []).filter(c => !c.systemOnly && !present.has(c.key));
+  }
+  function setZone(b, zone) { b.data.zone = zone; markDirty(); drawBlocks(); }
+  async function removePanel(b, i) {
+    const c = catOf(b.data.key);
+    if (!await confirmDialog('Ta bort "' + c.name + '"?', '"' + c.name + '" visas inte längre på sidan för besökarna när ni har publicerat. Ni kan lägga tillbaka den när ni vill, och när ni publicerar ser ni vad som har tagits bort.', 'Ta bort', true)) return;
+    S.blocks.splice(i, 1); markDirty(); drawBlocks();
+  }
+  function restorePanel(c) {
+    // Tillbaka på sin vanliga plats: före den första panel som ligger efter den i standardordningen, annars sist.
+    const order = (S.panelCat || []).map(x => x.key), mine = order.indexOf(c.key);
+    let at = S.blocks.findIndex(b => b.type === 'panel' && order.indexOf(b.data.key) > mine);
+    if (at < 0) at = S.blocks.length;
+    S.blocks.splice(at, 0, { id: newId(), type: 'panel', visibility: Math.max(c.level, S.visibility), data: { key: c.key, zone: c.zone } });
+    markDirty(); drawBlocks();
+  }
+  function removedRow(c) {
+    return h('div', { class: 'hs-card hs-removed p-2 px-3 mb-3 d-flex align-items-center gap-2 flex-wrap text-muted' },
+      h('span', { class: 'me-auto' }, c.name + ' är borttagen.'),
+      h('button', { class: 'btn btn-sm btn-outline-secondary', onclick: () => restorePanel(c) }, 'Lägg tillbaka'));
+  }
+  function panelCard(b, i) {
+    const c = catOf(b.data.key), isHome = S.pageKey === 'home';
+    // Aldrig öppnare än panelen är idag, än sidan, och aldrig "Alla" för personuppgifter (servern prövar samma sak).
+    const min = Math.max(c.level, S.visibility, c.personalData ? 1 : 0);
+    const levels = visOptions().filter(o => o.v >= min);
+    const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser ' + c.name },
+      levels.map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.t)));
+    visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); });
+    const menu = rowMenu([
+      ['Flytta upp', () => move(i, -1), { disabled: neighbour(i, -1) < 0 }],
+      ['Flytta ner', () => move(i, 1), { disabled: neighbour(i, 1) < 0 }],
+      isHome ? (b.data.zone === 'side' ? ['Flytta till huvudkolumnen', () => setZone(b, 'main')] : ['Flytta till sidokolumnen', () => setZone(b, 'side')]) : null,
+      c.mustKeep ? null : '-', c.mustKeep ? null : ['Ta bort', () => removePanel(b, i), { danger: true }]]);
+    return h('div', { class: 'hs-block hs-panelcard' },
+      h('div', { class: 'hs-block-head' },
+        h('span', { class: 'hs-type' }, h('i', { class: 'bi bi-grid-1x2 me-2', 'aria-hidden': 'true' }), c.name),
+        c.systemOnly ? h('span', { class: 'small text-muted' }, 'Visas bara för den som inte är inloggad')
+          : levels.length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : h('span', { class: 'small text-muted' }, 'Syns för ' + visLabel(b.visibility)),
+        menu),
+      h('div', { class: 'hs-block-body' },
+        h('div', {}, c.description || ''),
+        h('div', { class: 'text-muted small mt-1' }, 'Hämtas automatiskt vid varje besök.' + (isHome ? ' Plats: ' + (ZONE_LABEL[b.data.zone] || ZONE_LABEL.full) + '.' : '') + (c.mustKeep ? ' Kan flyttas men inte tas bort.' : ''))));
   }
 
   function initRte(node, block) {

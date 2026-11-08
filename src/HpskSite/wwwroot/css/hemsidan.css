@@ -80,3 +80,7 @@
   #hemsidan-app .hs-head > div:first-child { flex: 1 1 auto; min-width: 0; }
   #hemsidan-app .hs-head > .dropdown { flex: 0 0 auto; }
 }
+
+/* K5c: panelkort pa en omgjord sida och grå rad for en borttagen panel. */
+#hemsidan-app .hs-panelcard .hs-block-head { background: var(--bs-body-bg); }
+#hemsidan-app .hs-removed { background: var(--bs-tertiary-bg); border-style: dashed; }
