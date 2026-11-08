@@ -198,6 +198,7 @@ namespace HpskSite.Controllers
                     // Tom = ej bekräftad; dialogen föreslår då en nivå (_CompetitionLevelField).
                     competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(content.CompetitionLevel),
                     isAwardingStandardMedals = content.IsAwardingStandardMedals,
+                    isAwardingHonoraryAward = content.IsAwardingHonoraryAward,
                     allowSelfReporting = content.AllowSelfReporting,
                     isExternal = content.IsExternal,
                     externalUrl = content.ExternalUrl ?? "",

@@ -855,6 +855,7 @@ namespace HpskSite.Controllers
                     allowDualCClass = competition.AllowDualCClassRegistration,
                     addToMenu = competition.AddToMenu,
                     isAwardingStandardMedals = competition.IsAwardingStandardMedals,
+                    isAwardingHonoraryAward = competition.IsAwardingHonoraryAward,
                     isClubOnly = competition.IsClubOnly,
                     maxParticipants = competition.MaxParticipants,
                     registrationFee = competition.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m,
@@ -875,7 +876,8 @@ namespace HpskSite.Controllers
                     competitionScope = competition.CompetitionScope ?? "",
                     seriesId = seriesId,
                     clubId = competition.ClubId,
-                    regionalFederation = competition.RegionalFederation ?? ""
+                    regionalFederation = competition.RegionalFederation ?? "",
+                    faltskytteSelfServiceResults = competition.FaltskytteSelfServiceResults
                 };
 
                 return Ok(new
