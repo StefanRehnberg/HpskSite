@@ -73,16 +73,31 @@ namespace HpskSite.Services.SitePages
             return sb.ToString();
         }
 
+        /// <summary>Blockets verkliga nivå: striktast av blockets och sidans, personblock aldrig Alla. EN beräkning för alla block, även paneler.</summary>
+        private static SiteVisibility Effective(SiteBlock block, SiteVisibility pageVisibility, SiteRenderContext ctx)
+        {
+            var effective = SiteAccess.Strictest(block.Visibility, pageVisibility);
+            if (SiteBlockSchema.IsPersonalBlock(block.Type, ctx.Template.OwnerType, block.Data))
+                effective = SiteAccess.CapPersonal(effective);
+            return effective;
+        }
+
+        /// <summary>
+        /// Får tittaren se panelblocket? Vyn som ritar en omvandlad sida frågar HIT före varje panel (aldrig en egen prövning), så panelerna följer
+        /// samma regler och samma läcktest som övriga block. Ett block som inte är en panel ger false.
+        /// </summary>
+        public static bool PanelVisible(SiteBlock block, SiteVisibility pageVisibility, SiteRenderContext ctx) =>
+            block.Type == "panel" && SiteAccess.CanSee(Effective(block, pageVisibility, ctx), ctx.Viewer);
+
         /// <summary>Renderar ett block, eller tom sträng när tittaren inte får se det.</summary>
         public static string Render(SiteBlock block, SiteVisibility pageVisibility, SiteRenderContext ctx)
         {
-            var effective = SiteAccess.Strictest(block.Visibility, pageVisibility);
-            if (SiteBlockSchema.Types.TryGetValue(block.Type, out var type) && type.Personal)
-                effective = SiteAccess.CapPersonal(effective);
+            var effective = Effective(block, pageVisibility, ctx);
             if (!SiteAccess.CanSee(effective, ctx.Viewer)) return "";
 
             return block.Type switch
             {
+                "panel" => "",   // en panel är en delvy: vyn ritar den (efter PanelVisible), den här rena koden skriver aldrig ut den
                 "text" => Text(block),
                 "heading" => Heading(block),
                 "links" => Links(block),

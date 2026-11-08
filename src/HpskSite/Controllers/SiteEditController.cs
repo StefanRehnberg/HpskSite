@@ -362,7 +362,7 @@ namespace HpskSite.Controllers
                     : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId) ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
             }
             if (page == null || !page.IsFree || version == null) return Fail("Sidan finns inte.");
-            var content = SiteBlockSchema.Parse(version.BlocksJson, SiteContentKind.FreePage, page.VisibilityLevel, SiteTemplates.For(g.OwnerType));
+            var content = SiteBlockSchema.Parse(version.BlocksJson, SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson), page.VisibilityLevel, SiteTemplates.For(g.OwnerType), page.TemplateKey);
             if (!content.Ok) return Fail("Sidan kan inte visas ännu: " + content.Errors[0].Message);
 
             var node = UmbracoContext.Content?.GetById(g.OwnerId);

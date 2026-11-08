@@ -247,7 +247,51 @@ namespace HpskSite.Tests
         public void Motorn_känner_till_alla_blocktyper_så_att_en_ny_typ_inte_kan_glömmas()
         {
             var registered = SiteBlockSchema.Types.Keys.OrderBy(k => k).ToList();
-            Assert.Equal(Types.Concat(RegionTypes).OrderBy(t => t).ToList(), registered);                         // en ny blocktyp måste läggas in i motorn (och få ett orakel) innan bygget går grönt
+            Assert.Equal(Types.Concat(RegionTypes).Append("panel").OrderBy(t => t).ToList(), registered);         // en ny blocktyp måste läggas in i motorn (och få ett orakel) innan bygget går grönt
+        }
+
+        // ── Panelblock (schema 2, konvertera-planen K1) ───────────────────────────
+        /// <summary>Paneler som visar personuppgifter, handskrivet (inte ur registret): medlemskatalog, instruktörer, Guldserien, kretsens styrelse.</summary>
+        private static readonly string[] PersonalPanelsClub = { "instructors", "guldserie", "member-directory" };
+        private static readonly string[] PersonalPanelsRegion = { "region-instructors", "board" };
+
+        [Fact]
+        public void Registrets_personpaneler_är_exakt_de_handskrivna_så_att_en_ny_personpanel_måste_få_ett_orakel()
+        {
+            Assert.Equal(PersonalPanelsClub.OrderBy(x => x), PanelCatalog.Club.Where(d => d.PersonalData).Select(d => d.Key).OrderBy(x => x));
+            Assert.Equal(PersonalPanelsRegion.OrderBy(x => x), PanelCatalog.Region.Where(d => d.PersonalData).Select(d => d.Key).OrderBy(x => x));
+        }
+
+        [Fact]
+        public void Varje_panel_syns_om_och_bara_om_oraklet_säger_att_tittaren_får_se_den_och_personpaneler_aldrig_för_Alla()
+        {
+            var failures = new List<string>();
+            var combos = 0;
+            foreach (var template in new[] { SiteTemplates.ClubTemplate, SiteTemplates.RegionTemplate })
+            foreach (var def in PanelCatalog.For(template.OwnerType))
+            foreach (var persona in Viewers)
+            foreach (var pageVis in Enumerable.Range(0, 5))
+            foreach (var blockVis in def.System ? new[] { 5 } : Enumerable.Range(0, 5).ToArray())
+            {
+                combos++;
+                var personal = (template.OwnerType == SiteTemplates.Club ? PersonalPanelsClub : PersonalPanelsRegion).Contains(def.Key);
+                bool want;
+                if (blockVis == 5) want = !persona.Viewer.LoggedIn;                           // systemrutan: bara den som inte är inloggad
+                else
+                {
+                    var level = Strict(blockVis, pageVis);
+                    if (personal && level == 0) level = 1;
+                    want = Oracle(level, persona.Viewer);
+                }
+                var block = new SiteBlock("abcd1", "panel", (SiteVisibility)blockVis, new JsonObject { ["key"] = def.Key, ["zone"] = "full" });
+                var ctx = new SiteRenderContext(persona.Viewer, "/x/", template, new Data());
+                if (SiteBlockRenderer.PanelVisible(block, (SiteVisibility)pageVis, ctx) != want)
+                    failures.Add($"{template.OwnerType}/{def.Key}: {persona.Name} / sida {pageVis} / block {blockVis}: väntade {want}");
+                if (SiteBlockRenderer.Render(block, (SiteVisibility)pageVis, ctx).Length != 0)
+                    failures.Add($"den rena renderaren skrev ut panelen {def.Key}");
+            }
+            Assert.True(combos > 800, "motorn ska ha genererat hundratals panelkombinationer: " + combos);
+            Assert.True(failures.Count == 0, $"{failures.Count} av {combos} fel:\n" + string.Join("\n", failures.Distinct().Take(25)));
         }
     }
 }

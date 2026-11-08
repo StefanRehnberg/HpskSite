@@ -173,9 +173,10 @@ namespace HpskSite.Services.SitePages
             bool isBaseline, bool isPublish, int? byMemberId, bool asSupport, DateTime now) =>
             db.ExecuteScalar<int>(
                 @"INSERT INTO dbo.SitePageVersion (PageId, OwnerType, OwnerId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedByMemberId, SavedAsSupport, SavedDate)
-                  VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @7, @8, @9, @10, @11);
+                  VALUES (@0, @1, @2, @3, @4, @5, @12, @6, @7, @8, @9, @10, @11);
                   SELECT CAST(SCOPE_IDENTITY() AS int)",
-                pageId, ownerType, ownerId, revision, title, blocksJson, Hash(title, blocksJson), isBaseline, isPublish, byMemberId, asSupport, now);
+                pageId, ownerType, ownerId, revision, title, blocksJson, Hash(title, blocksJson), isBaseline, isPublish, byMemberId, asSupport, now,
+                SiteBlockSchema.SchemaNumberOf(blocksJson));   // kolumnen följer innehållet (schema 2 = omvandlad sida)
 
         public static SitePageRow? GetPage(IDatabase db, int pageId, string ownerType, int ownerId, bool includeDeleted = false) =>
             db.FirstOrDefault<SitePageRow>(

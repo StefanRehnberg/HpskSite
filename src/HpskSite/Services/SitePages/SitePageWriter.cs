@@ -276,8 +276,8 @@ namespace HpskSite.Services.SitePages
         private static SiteWriteResult? Validate(IDatabase db, ISiteOwnerFacts facts, SitePageRow page, string ownerType, int ownerId,
             string title, string blocksJson, SiteVisibility vis, bool allowPersonalNumber, out SiteContentResult? content)
         {
-            var kind = page.IsFree ? SiteContentKind.FreePage : SiteContentKind.TemplateCopy;
-            content = SiteBlockSchema.Parse(blocksJson, kind, vis, SiteTemplates.For(ownerType));
+            var kind = SiteBlockSchema.KindOf(page.IsFree, blocksJson);
+            content = SiteBlockSchema.Parse(blocksJson, kind, vis, SiteTemplates.For(ownerType), page.TemplateKey);
             if (!content.Ok)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision, Errors: content.Errors, Message: content.Errors[0].Message);
 
@@ -312,7 +312,7 @@ namespace HpskSite.Services.SitePages
             void Add(SitePageVersionRow? v)
             {
                 if (v == null) return;
-                var c = SiteBlockSchema.Parse(v.BlocksJson, page.IsFree ? SiteContentKind.FreePage : SiteContentKind.TemplateCopy, vis, SiteTemplates.For(ownerType));
+                var c = SiteBlockSchema.Parse(v.BlocksJson, SiteBlockSchema.KindOf(page.IsFree, v.BlocksJson), vis, SiteTemplates.For(ownerType), page.TemplateKey);
                 if (c.Ok) foreach (var r in SiteBlockSchema.ExtractRefs(c)) refs.Add(r);
             }
             if (includeDraft) Add(SitePageStore.GetDraft(db, page.Id, ownerType, ownerId));

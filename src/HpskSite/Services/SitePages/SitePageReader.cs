@@ -64,6 +64,8 @@ namespace HpskSite.Services.SitePages
             if (page == null || page.PublishedVersionId == null || page.SuspendedDate != null) return null;
             var version = SitePageStore.GetPublished(scope.Database, page.Id, ownerType, ownerId);
             if (version == null) return null;
+            // En omvandlad sida (schema 2) har inga platser före/efter: den ritas ur sina block, så här blir det aldrig "slots".
+            if (SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) != SiteContentKind.TemplateCopy) return null;
             var content = SiteBlockSchema.Parse(version.BlocksJson, SiteContentKind.TemplateCopy, page.VisibilityLevel, SiteTemplates.For(ownerType));
             return content.Ok ? (page.VisibilityLevel, content) : null;
         }
@@ -77,7 +79,7 @@ namespace HpskSite.Services.SitePages
             var version = SitePageStore.GetPublished(scope.Database, pageId, ownerType, ownerId);
             if (version == null) return null;
             var content = SiteBlockSchema.Parse(version.BlocksJson,
-                page.IsFree ? SiteContentKind.FreePage : SiteContentKind.TemplateCopy, page.VisibilityLevel, SiteTemplates.For(ownerType));
+                SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson), page.VisibilityLevel, SiteTemplates.For(ownerType), page.TemplateKey);
             return content.Ok ? (page, content) : null;
         }
     }
