@@ -42,6 +42,7 @@ namespace HpskSite.Services.SitePages
             db.Execute("UPDATE dbo.SitePage SET PublishedVersionId = NULL, DraftVersionId = NULL WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             db.Execute("DELETE FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             db.Execute("DELETE FROM dbo.SiteSupportGrant WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
+            SiteFiles.DeleteAllForOwner(db, ownerType, ownerId);   // filerna i lagringen tas bort av SiteOwnerCleanupHandler
             return db.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
         }
     }

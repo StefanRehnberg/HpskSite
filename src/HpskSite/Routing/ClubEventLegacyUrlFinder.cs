@@ -96,6 +96,7 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<ISiteOwnerFacts, SiteOwnerFacts>();
             builder.Services.AddScoped<ISiteSupportNotifier, SiteSupportNotifier>();
             builder.Services.AddScoped<SiteSlotRenderer>();
+            builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }

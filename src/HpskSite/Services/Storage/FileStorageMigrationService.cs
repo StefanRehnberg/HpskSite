@@ -49,7 +49,7 @@ namespace HpskSite.Services.Storage
         public IReadOnlyList<string> Areas => new[]
         {
             FileStoreAreas.StandardMedalProofs, FileStoreAreas.RangeDocuments, FileStoreAreas.PrepDocuments,
-            FileStoreAreas.LedgerAttachments, FileStoreAreas.Utbildning, FileStoreAreas.AiChatIndex,
+            FileStoreAreas.LedgerAttachments, FileStoreAreas.Utbildning, FileStoreAreas.AiChatIndex, FileStoreAreas.SitePageImages,
             _documents.StoragePath,
         }.Concat(FileStoreAreas.PublicAreas).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 

@@ -52,6 +52,11 @@ namespace HpskSite.Services.SitePages
 
         private static readonly Regex IdRx = new("^[a-z0-9]{4,12}$", RegexOptions.Compiled);
         private static readonly Regex DocRefRx = new(@"^doc:[1-9]\d{0,8}$", RegexOptions.Compiled);
+        private static readonly Regex FileRefRx = new(@"^file:[1-9]\d{0,8}$", RegexOptions.Compiled);
+
+        /// <summary>Bildblockets fil-id (<c>file:12</c> → 12), eller null om blocket inte är ett giltigt bildblock.</summary>
+        public static int? FileIdOf(SiteBlock b) =>
+            b.Type == "image" && b.Data["ref"] is JsonValue v && v.TryGetValue<string>(out var r) && FileRefRx.IsMatch(r) ? int.Parse(r["file:".Length..]) : null;
 
         public sealed record BlockType(string Name, bool Personal, bool AllowedInSlot, IReadOnlySet<string> Fields);
 
@@ -64,6 +69,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("contact", Personal: true, false, Set("title")),   // klubbens kontaktperson: personuppgift, aldrig Alla
             new BlockType("events", false, false, Set("title", "count")),
             new BlockType("pagelink", false, false, Set("key", "label")),
+            new BlockType("image", false, false, Set("ref", "alt", "decorative", "caption")),
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         private static IReadOnlySet<string> Set(params string[] f) => new HashSet<string>(f, StringComparer.Ordinal);
@@ -266,6 +272,21 @@ namespace HpskSite.Services.SitePages
                     o["count"] = count;
                     break;
                 }
+                case "image":
+                {
+                    var r = Str(d["ref"]);
+                    if (r == null || !FileRefRx.IsMatch(r)) { errors.Add(new($"{p}.ref", "Välj en bild.")); break; }
+                    // Beskrivningen får vara tom i ett utkast (autosparningen) — editorn varnar vid publicering. "Bara dekoration" = ingen beskrivning behövs.
+                    var alt = Short(d["alt"], $"{p}.alt", 200, required: false, errors);
+                    var caption = Short(d["caption"], $"{p}.caption", 200, required: false, errors);
+                    bool? decorative = d["decorative"] == null ? false : (d["decorative"] is JsonValue dv && dv.TryGetValue<bool>(out var dflag) ? dflag : null);
+                    if (decorative == null) { errors.Add(new($"{p}.decorative", "Bara dekoration är ja eller nej.")); break; }
+                    o["ref"] = r;
+                    if (alt != null && decorative == false) o["alt"] = alt;
+                    if (caption != null) o["caption"] = caption;
+                    o["decorative"] = decorative.Value;
+                    break;
+                }
                 case "pagelink":
                 {
                     var key = Str(d["key"]);
@@ -313,6 +334,8 @@ namespace HpskSite.Services.SitePages
             foreach (var b in content.AllBlocks.Where(b => b.Type == "documents"))
                 foreach (var r in b.Data["refs"]!.AsArray())
                     refs.Add(("doc", int.Parse(r!.GetValue<string>()["doc:".Length..])));
+            foreach (var b in content.AllBlocks.Where(b => b.Type == "image"))
+                if (FileIdOf(b) is int fid) refs.Add(("file", fid));
             return refs.OrderBy(r => r.Item1).ThenBy(r => r.Item2).ToList();
         }
 

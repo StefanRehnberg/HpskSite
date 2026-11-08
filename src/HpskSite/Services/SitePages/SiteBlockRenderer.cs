@@ -23,6 +23,9 @@ namespace HpskSite.Services.SitePages
         IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids);
         IReadOnlyList<SiteEventInfo> UpcomingEvents(int count);
         SiteContactInfo? Contact();
+
+        /// <summary>Bilderna bland <paramref name="ids"/> som hör till ägaren och inte är raderade. Standard: inga (en implementation utan bilder visar inga bildblock).</summary>
+        IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids) => Array.Empty<SiteImageInfo>();
     }
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
@@ -65,6 +68,7 @@ namespace HpskSite.Services.SitePages
                 "documents" => Documents(block, effective, ctx),
                 "events" => Events(block, ctx),
                 "contact" => Contact(block, ctx),
+                "image" => Image(block, ctx),
                 _ => "",   // okänd typ renderas aldrig (BlockRegistry avvisar den redan vid läsning)
             };
         }
@@ -135,6 +139,21 @@ namespace HpskSite.Services.SitePages
                 sb.Append($"<a class=\"list-group-item list-group-item-action\" href=\"/umbraco/surface/Document/DownloadDocument?id={d.Id}\" rel=\"noopener\">{E(d.Title)}" +
                           (string.IsNullOrWhiteSpace(d.Description) ? "" : $"<div class=\"small text-muted\">{E(d.Description)}</div>") + "</a>");
             return Section(b.Id, sb.Append("</div>").ToString());
+        }
+
+        private static string Image(SiteBlock b, SiteRenderContext ctx)
+        {
+            var id = SiteBlockSchema.FileIdOf(b);
+            if (id == null) return "";
+            var info = ctx.Data.Images(new[] { id.Value }).FirstOrDefault(i => i.Id == id.Value);
+            if (info == null) return "";   // en bild som inte hör till ägaren (eller är raderad) visas aldrig
+            var decorative = b.Data["decorative"]?.GetValue<bool>() == true;
+            var alt = decorative ? "" : b.Data["alt"]?.GetValue<string>() ?? "";
+            var caption = b.Data["caption"]?.GetValue<string>();
+            var img = $"<img class=\"img-fluid rounded\" src=\"{E(SiteImages.UrlFor(info.Id))}\" width=\"{info.Width}\" height=\"{info.Height}\" alt=\"{E(alt)}\"" +
+                      (decorative ? " role=\"presentation\"" : "") + " loading=\"lazy\" decoding=\"async\" style=\"height:auto\">";
+            var cap = string.IsNullOrWhiteSpace(caption) ? "" : $"<figcaption class=\"small text-muted mt-1\">{E(caption)}</figcaption>";
+            return Section(b.Id, $"<figure class=\"site-image mb-0\">{img}{cap}</figure>");
         }
 
         private static string Events(SiteBlock b, SiteRenderContext ctx)

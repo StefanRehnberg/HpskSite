@@ -69,6 +69,7 @@ namespace HpskSite.Services.SitePages
                     case "heading": yield return b.Data["text"]?.GetValue<string>(); break;
                     case "documents": case "contact": case "events": yield return b.Data["title"]?.GetValue<string>(); break;
                     case "pagelink": yield return b.Data["label"]?.GetValue<string>(); break;
+                    case "image": yield return b.Data["alt"]?.GetValue<string>(); yield return b.Data["caption"]?.GetValue<string>(); break;
                     case "links":
                         foreach (var it in b.Data["items"]!.AsArray()) yield return it!["label"]?.GetValue<string>();
                         break;
@@ -286,6 +287,13 @@ namespace HpskSite.Services.SitePages
                 return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision,
                     Errors: new[] { new SiteContentError("refs", "Ett valt dokument finns inte hos den här föreningen.") },
                     Message: "Ett valt dokument finns inte hos den här föreningen.");
+
+            // Refererade bilder likaså: ett fil-id utifrån är aldrig betrott (en annan förenings bild, en raderad bild).
+            var foreignFiles = SiteBlockSchema.ExtractRefs(content).Where(r => r.Kind == "file" && !SiteFiles.BelongsTo(db, r.Id, ownerType, ownerId)).ToList();
+            if (foreignFiles.Count > 0)
+                return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision,
+                    Errors: new[] { new SiteContentError("refs", "En vald bild finns inte längre hos den här föreningen. Välj en annan bild.") },
+                    Message: "En vald bild finns inte längre hos den här föreningen. Välj en annan bild.");
 
             if (!allowPersonalNumber)
             {

@@ -53,6 +53,7 @@ namespace HpskSite.Tests
             public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids) => Docs;
             public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count) => new[] { new SiteEventInfo("KANARIE-EVENT-X", new DateTime(2027, 5, 1, 18, 0, 0), "Banan", "/x/") };
             public SiteContactInfo? Contact() => new("KANARIE-KONTAKT-X", "kanarie@example.se", "0701234567");
+            public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids) => new[] { new SiteImageInfo(5, 40, 30) };   // en bild som ägaren har; märket ligger i beskrivningen
         }
 
         /// <summary>Ett block av varje typ med ett unikt märke i det som skrivs ut. Märket för dokument ligger i dokumentens titlar (per nivå).</summary>
@@ -67,12 +68,13 @@ namespace HpskSite.Tests
                 "contact" => new JsonObject { ["title"] = canary },
                 "events" => new JsonObject { ["title"] = canary, ["count"] = 3 },
                 "pagelink" => new JsonObject { ["key"] = "records", ["label"] = canary },
+                "image" => new JsonObject { ["ref"] = "file:5", ["alt"] = canary, ["decorative"] = false },
                 _ => new JsonObject(),
             };
             return new SiteBlock("abcd1", type, (SiteVisibility)vis, data);
         }
 
-        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink" };
+        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image" };
         private static bool IsPersonal(string type) => type == "contact";
 
         [Fact]

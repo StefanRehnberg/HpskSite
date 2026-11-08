@@ -20,6 +20,8 @@ namespace HpskSite.Services.Storage
         public const string Utbildning = "utbildning";
         /// <summary>AI-chattens vektorcache (härledd, går att bygga om).</summary>
         public const string AiChatIndex = "AiChatIndex";
+        /// <summary>Bilderna på klubbens och kretsens egna sidor (klubbsidorna 2c). Privat: serveras bara genom SiteFileController, som prövar åtkomsten per anrop.</summary>
+        public const string SitePageImages = "site-files";
         // Dokumentarkivets område är konfigurerbart (DocumentArchive:StoragePath, standard "documents").
 
         // ── Publika bilder (wwwroot/images) — adresserna /images/{område}/… är lagrade i databasen ──

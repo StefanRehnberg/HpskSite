@@ -92,8 +92,11 @@ namespace HpskSite.Services.SitePages
         private readonly IClubEventStore _events;
         private readonly PageAddressUrls _urls;
 
-        public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls)
+        private readonly IScopeProvider _scopes;
+
+        public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes)
         {
+            _scopes = scopes;
             _documents = documents;
             _events = events;
             _urls = urls;
@@ -146,6 +149,12 @@ namespace HpskSite.Services.SitePages
                     .Select(e => new SiteEventInfo(e.DisplayName, e.StartsAt!.Value, string.IsNullOrWhiteSpace(e.Venue) ? null : e.Venue,
                         _f._urls.UrlFor(PageAddressKinds.Event, e.Id) ?? ""))
                     .ToList();
+            }
+
+            public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids)
+            {
+                using var scope = _f._scopes.CreateScope(autoComplete: true);
+                return SiteFiles.Info(scope.Database, ids, _ownerType, _ownerId);   // alltid denna ägares bilder
             }
 
             public SiteContactInfo? Contact() => _node == null ? null : new SiteContactInfo(

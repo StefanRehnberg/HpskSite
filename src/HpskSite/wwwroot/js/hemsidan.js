@@ -78,6 +78,7 @@
     { type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill' },
     { type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event' },
     { type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right' },
+    { type: 'image', label: 'Bild', icon: 'bi-image' },
   ];
   const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
   const minVisFor = type => Math.max(S.visibility, type === 'contact' ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
@@ -455,6 +456,14 @@
   }
 
   async function publishNow() {
+    const noAlt = S.blocks.filter(b => b.type === 'image' && b.data.decorative !== true && !String(b.data.alt || '').trim()).length;
+    if (noAlt > 0 && !S.altAck) {
+      const go = await modal('Bilder utan beskrivning', [h('p', {}, noAlt === 1 ? 'En bild på sidan saknar beskrivning.' : noAlt + ' bilder på sidan saknar beskrivning.'),
+        h('p', { class: 'text-muted mb-0' }, 'Den som använder skärmläsare får då inte veta vad bilden visar. Är bilden bara dekoration kan du kryssa i det på bilden.')],
+        [{ label: 'Beskriv bilderna', value: false, cls: 'btn-primary' }, { label: 'Publicera ändå', value: true, cls: 'btn-outline-secondary' }]);
+      if (go !== true) return false;
+      S.altAck = true;
+    }
     if (S.dirty && !await saveNow()) return false;
     S.saving = true; paintStatus();
     const r = await api('POST', 'PublishPage', { pageId: S.page.id, expectedRevision: S.revision, allowPersonalNumber: S.ack.size > 0 ? 'true' : 'false' });
@@ -601,7 +610,14 @@
       h('div', { class: 'd-flex flex-wrap gap-2' }, BLOCK_TYPES.map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t.type) }, h('i', { class: 'bi ' + t.icon + ' me-1' }), t.label))));
   }
 
-  function addBlock(type, pos) {
+  async function addBlock(type, pos) {
+    if (type === 'image') {   // en bild utan vald fil kan inte sparas: välj först, lägg till sedan
+      const f = await pickImage();
+      if (!f) return;
+      S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data: { ref: 'file:' + f.id, alt: '', decorative: false, caption: '' } });
+      S.hint = 'Beskriv bilden med några ord, så att den som inte ser bilden förstår vad den visar.';
+      markDirty(); drawBlocks(); paintEditorBanner(); return;
+    }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
       : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
@@ -666,7 +682,12 @@
     return h('div', { class: 'hs-block', dataset: undefined }, head, h('div', { class: 'hs-block-body' }, blockBody(b)));
   }
 
-  function field(label, input, help) { return h('div', { class: 'mb-2' }, h('label', { class: 'form-label small fw-semibold mb-1' }, label), input, help ? h('div', { class: 'form-text' }, help) : null); }
+  // Etiketten kopplas till fältet (for/id), så att en skärmläsare säger vad fältet är och ett klick på etiketten går till fältet.
+  let fieldSeq = 0;
+  function field(label, input, help) {
+    if (input && input.nodeType === 1 && /^(INPUT|SELECT|TEXTAREA)$/.test(input.tagName) && !input.id) input.id = 'hsf' + (++fieldSeq);
+    return h('div', { class: 'mb-2' }, h('label', { class: 'form-label small fw-semibold mb-1', for: input && input.nodeType === 1 ? input.id : null }, label), input, help ? h('div', { class: 'form-text' }, help) : null);
+  }
   function bind(inp, obj, key, conv) { inp.addEventListener('input', () => { obj[key] = conv ? conv(inp.value) : inp.value; markDirty(); }); return inp; }
 
   function blockBody(b) {
@@ -684,8 +705,100 @@
           'Visar de närmaste kommande händelserna i kalendern.')];
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
+      case 'image': return imageEditor(b);
       default: return h('p', { class: 'text-danger' }, 'Okänt block.');
     }
+  }
+
+  // ── Bilder (2c) ────────────────────────────────────────────────────────────
+  const imgUrl = ref => '/umbraco/surface/SiteFile/Image?id=' + parseInt(String(ref).replace('file:', ''), 10);
+  const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+
+  function imageEditor(b) {
+    const d = b.data;
+    const altInp = bind(h('input', { class: 'form-control', maxlength: '200', value: d.alt || '', placeholder: 'Till exempel: Skyttar på 25-metersbanan under årsmötet', disabled: d.decorative === true }), d, 'alt');
+    const deco = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsDeco' + b.id, checked: d.decorative === true });
+    deco.addEventListener('change', () => { d.decorative = deco.checked; altInp.disabled = deco.checked; markDirty(); });
+    const img = h('img', { class: 'hs-imgprev mb-2', src: imgUrl(d.ref), alt: d.alt || '' });
+    img.addEventListener('error', () => img.replaceWith(h('p', { class: 'text-danger' }, 'Bilden finns inte längre. Välj en annan bild.')));
+    return [img,
+      h('div', { class: 'mb-2' }, h('button', { class: 'btn btn-sm btn-outline-secondary', onclick: async () => {
+        const f = await pickImage(d.ref); if (!f) return;
+        d.ref = 'file:' + f.id; markDirty(); drawBlocks();
+      } }, 'Byt bild')),
+      field('Beskriv bilden', altInp, 'Läses upp för den som inte ser bilden. Skriv vad bilden visar, inte "bild på…".'),
+      h('div', { class: 'form-check mb-2' }, deco, h('label', { class: 'form-check-label', for: 'hsDeco' + b.id }, 'Bara dekoration, ingen beskrivning behövs')),
+      field('Bildtext (valfri)', bind(h('input', { class: 'form-control', maxlength: '200', value: d.caption || '' }), d, 'caption'))];
+  }
+
+  async function loadFiles() {
+    const r = await api('GET', 'Files');
+    S.files = r.success ? r : { files: [], count: 0, bytes: 0, maxBytes: 0, maxFiles: 0, failed: r.message || 'Det gick inte att hämta bilderna.' };
+    return S.files;
+  }
+
+  async function uploadImage(file) {
+    const fd = new FormData();
+    fd.append('upload', file);
+    fd.append('ownerType', OWNER.type); fd.append('ownerId', String(OWNER.id)); fd.append('__RequestVerificationToken', token());
+    try {
+      const r = await fetch('/umbraco/surface/SiteEdit/UploadImage', { method: 'POST', credentials: 'same-origin', headers: { 'RequestVerificationToken': token() }, body: fd });
+      if (r.status === 413) return { success: false, message: 'Bilden är för stor (högst 20 MB).' };
+      return await r.json();
+    } catch { return { success: false, message: 'Det gick inte att nå servern. Kontrollera uppkopplingen och försök igen.' }; }
+  }
+
+  // Bildväljaren: ladda upp en ny bild eller välj en av föreningens. Svarar med den valda filen, eller null.
+  function pickImage(currentRef) {
+    return new Promise(async resolve => {
+      await loadFiles();
+      let chosen = null, done = false;
+      const msg = h('div'), info = h('p', { class: 'small text-muted mb-2' }), grid = h('div', { class: 'hs-imggrid' });
+      const useBtn = h('button', { type: 'button', class: 'btn btn-primary', disabled: true }, 'Använd bilden');
+      const fileInp = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', class: 'd-none', 'aria-label': 'Välj en bild att ladda upp' });
+      const upBtn = h('button', { type: 'button', class: 'btn btn-outline-primary', onclick: () => fileInp.click() }, h('i', { class: 'bi bi-upload me-1' }), 'Ladda upp en bild');
+      const show = (cls, text) => msg.replaceChildren(text ? h('div', { class: 'alert alert-' + cls + ' py-2' }, text) : '');
+
+      const paint = () => {
+        const fs = S.files.files || [];
+        info.textContent = S.files.failed ? '' : fs.length + ' bilder, ' + fmtSize(S.files.bytes || 0) + ' av ' + fmtSize(S.files.maxBytes || 0) + ' används.';
+        if (S.files.failed) show('danger', S.files.failed);
+        grid.replaceChildren(...(fs.length ? fs.map(f => h('div', { class: 'hs-imgtile' + (chosen && chosen.id === f.id ? ' sel' : '') },
+          h('button', { type: 'button', class: 'hs-imgpick', 'aria-pressed': chosen && chosen.id === f.id ? 'true' : 'false', 'aria-label': 'Välj ' + f.name, onclick: () => { chosen = f; useBtn.disabled = false; paint(); } },
+            h('img', { src: f.url, alt: '', loading: 'lazy' }), h('span', { class: 'hs-imgname d-block', title: f.name }, f.name)),
+          h('span', { class: 'small text-muted' }, f.usedBy > 0 ? 'Används på ' + f.usedBy + (f.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte'),
+          f.usedBy === 0 ? h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', onclick: async () => {
+            const r = await api('POST', 'DeleteFile', { fileId: f.id });
+            if (!r.success) { show('danger', r.message || 'Det gick inte att ta bort bilden.'); return; }
+            if (chosen && chosen.id === f.id) { chosen = null; useBtn.disabled = true; }
+            await loadFiles(); show('', ''); paint();
+          } }, 'Ta bort') : null))
+          : [h('p', { class: 'text-muted' }, 'Ni har inga bilder än. Ladda upp den första.')]));
+      };
+      fileInp.addEventListener('change', async () => {
+        const f = fileInp.files[0]; fileInp.value = ''; if (!f) return;
+        upBtn.disabled = true; show('info', 'Laddar upp …');
+        const r = await uploadImage(f);
+        upBtn.disabled = false;
+        if (!r.success) { show('danger', r.message || 'Det gick inte att ladda upp bilden.'); return; }
+        show('success', 'Bilden är uppladdad.');
+        await loadFiles(); chosen = (S.files.files || []).find(x => x.id === r.id) || null; useBtn.disabled = !chosen; paint();
+      });
+
+      const el = h('div', { class: 'modal fade', tabindex: '-1' },
+        h('div', { class: 'modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable' }, h('div', { class: 'modal-content' },
+          h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, 'Välj bild'), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+          h('div', { class: 'modal-body' },
+            h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.'),
+            h('div', { class: 'mb-3' }, upBtn, fileInp), msg, info, grid),
+          h('div', { class: 'modal-footer' }, h('button', { type: 'button', class: 'btn btn-secondary', 'data-bs-dismiss': 'modal' }, 'Avbryt'), useBtn))));
+      document.body.append(el);
+      const bsm = new bootstrap.Modal(el);
+      useBtn.addEventListener('click', () => { done = true; bsm.hide(); resolve(chosen); });
+      el.addEventListener('hidden.bs.modal', () => { el.remove(); if (!done) resolve(null); });
+      if (currentRef) chosen = (S.files.files || []).find(x => 'file:' + x.id === currentRef) || null;
+      useBtn.disabled = !chosen; paint(); bsm.show();
+    });
   }
 
   function linksEditor(b) {

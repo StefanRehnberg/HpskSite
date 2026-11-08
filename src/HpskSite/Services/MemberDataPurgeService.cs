@@ -195,6 +195,7 @@ namespace HpskSite.Services
             ("SitePageVersion",                      "SavedByMemberId",   "SavedDate = SavedDate"),
             ("SiteAudit",                            "ActorMemberId",     "CreatedDate = CreatedDate"),
             ("SiteSupportGrant",                     "MemberId",          "CreatedDate = CreatedDate"),
+            ("SiteFile",                             "UploadedByMemberId", "UploadedDate = UploadedDate"),   // bilden står kvar, uppladdaren släpps
         };
 
         /// <summary>

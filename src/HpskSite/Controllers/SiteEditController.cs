@@ -196,6 +196,103 @@ namespace HpskSite.Controllers
             });
         }
 
+        // ── Bilder (2c) ──────────────────────────────────────────────────────
+
+        public const int UploadsPerHour = 40;
+
+        /// <summary>Ägarens bilder (med var de används) och kvoten.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> Files(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var (count, bytes) = SiteFiles.Usage(scope.Database, g.OwnerType, g.OwnerId);
+            return Json(new
+            {
+                success = true,
+                files = SiteFiles.List(scope.Database, g.OwnerType, g.OwnerId).Select(f => new
+                {
+                    id = f.Id, name = f.FileName, size = f.Size, width = f.Width, height = f.Height, uploaded = f.UploadedDate, usedBy = f.UsedBy,
+                    url = SiteImages.UrlFor(f.Id),
+                }),
+                count, bytes, maxBytes = SiteImages.QuotaBytesPerOwner, maxFiles = SiteImages.MaxFilesPerOwner,
+            });
+        }
+
+        /// <summary>Laddar upp en bild. Bilden avkodas och skrivs om (metadata bort, förminskas), lagras privat och får en rad; kvoten prövas under lås.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [RequestSizeLimit(25 * 1024 * 1024)]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> UploadImage(string ownerType, int ownerId, IFormFile? upload, [FromServices] HpskSite.Services.Storage.IFileStore store)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitefile-up:{g.OwnerType}:{g.OwnerId}", UploadsPerHour, TimeSpan.FromHours(1))) return Fail("För många uppladdningar på kort tid. Försök igen om en stund.", "rate");
+            if (upload == null || upload.Length == 0) return Fail("Ingen fil vald.");
+
+            SiteImageResult? img; SiteImageFailure failure;
+            await using (var input = upload.OpenReadStream())
+                (img, failure) = await SiteImages.ProcessAsync(input, upload.FileName, upload.Length);
+            if (img == null) return Fail(SiteImages.Message(failure));
+
+            var stored = Guid.NewGuid().ToString("N");
+            var fileName = stored + SiteImages.ExtensionFor(img.ContentType);
+            // Filen före raden: en rad utan fil syns som ett fel, en fil utan rad är bara skräp som kan städas.
+            await using (var ms = new MemoryStream(img.Bytes))
+                await store.SaveAsync(SiteImages.Area, fileName, ms);
+
+            SiteFileStatus status; int fileId;
+            var now = DateTime.Now;
+            using (var scope = _scopes.CreateScope())
+            {
+                status = SiteFiles.Insert(scope.Database, g.OwnerType, g.OwnerId, SiteImages.DisplayName(upload.FileName), stored, img, g.Actor!.MemberId, now, out fileId);
+                if (status == SiteFileStatus.Ok)
+                {
+                    scope.Database.Execute(
+                        @"INSERT INTO dbo.SiteAudit (OwnerType, OwnerId, ActorMemberId, ActedAsSupport, ObjectKind, ObjectId, Action, ContentHash, CreatedDate)
+                          VALUES (@0, @1, @2, @3, N'file', @4, N'file-upload', CONVERT(BINARY(32), @5), @6)",
+                        g.OwnerType, g.OwnerId, g.Actor.MemberId, g.Actor.AsSupport, fileId, img.Hash, now);
+                    scope.Complete();
+                }
+            }
+            if (status != SiteFileStatus.Ok)
+            {
+                await store.DeleteAsync(SiteImages.Area, fileName);
+                return status switch
+                {
+                    SiteFileStatus.QuotaFull => Fail($"Utrymmet för bilder är fullt ({SiteImages.QuotaBytesPerOwner / 1024 / 1024} MB). Ta bort bilder som inte används.", "quota"),
+                    SiteFileStatus.TooMany => Fail($"Ni har nått taket på {SiteImages.MaxFilesPerOwner} bilder. Ta bort bilder som inte används.", "quota"),
+                    _ => Fail("Föreningen finns inte."),
+                };
+            }
+            return Json(new { success = true, id = fileId, @ref = $"file:{fileId}", name = SiteImages.DisplayName(upload.FileName), width = img.Width, height = img.Height, size = img.Bytes.Length, url = SiteImages.UrlFor(fileId) });
+        }
+
+        /// <summary>Tar bort en bild som ingen sida använder. En bild i bruk vägras och säger vilka sidor som använder den.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> DeleteFile(string ownerType, int ownerId, int fileId, [FromServices] HpskSite.Services.Storage.IFileStore store)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}", WritesPerMinute, TimeSpan.FromMinutes(1))) return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteFileStatus status; SiteFileRow? row;
+            using (var scope = _scopes.CreateScope())
+            {
+                status = SiteFiles.Delete(scope.Database, fileId, g.OwnerType, g.OwnerId, g.Actor!, DateTime.Now, out row);
+                if (status == SiteFileStatus.Ok) scope.Complete();
+            }
+            if (status == SiteFileStatus.NotFound) return Fail("Bilden finns inte.");
+            if (status == SiteFileStatus.InUse) return Fail("Bilden används på en sida. Ta bort den från sidan först.", "inuse");
+            try { await store.DeleteAsync(SiteImages.Area, row!.StoredFile); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Bildfilen {0} kunde inte tas bort ur lagringen: {1}", row!.StoredFile, ex.Message); }   // raden är raderad: bilden serveras inte längre
+            return Json(new { success = true });
+        }
+
         private sealed class DocRow
         {
             public int Id { get; set; }
