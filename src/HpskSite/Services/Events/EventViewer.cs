@@ -106,7 +106,8 @@ namespace HpskSite.Services.Events
                             var code = _content.GetById(ownerId)?.GetValue<string>("regionCode");
                             var admin = siteAdmin || (!string.IsNullOrEmpty(code) && roles.Contains($"RegionalAdmin_{code}"));
                             var isBoard = memberId > 0 && _board.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, ownerId, memberId);
-                            v = new SiteViewer(true, false, isBoard, admin);
+                            var isRegionMember = memberId > 0 && _roster.IsActiveInRegion(memberId, ownerId);   // kretsmedlem (2d): samma regel som sidmotorn
+                            v = new SiteViewer(true, isRegionMember, isBoard, admin);
                         }
                     }
                     catch (Exception ex)

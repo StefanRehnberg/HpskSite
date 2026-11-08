@@ -157,7 +157,7 @@ namespace HpskSite.Services.Kretsgranskning
         /// tävlingar, godkända ansökningar och kretsens händelser — utan krockar: en skytt har ingen
         /// nytta av "samma gren samma dag i grannkretsen", och en preliminär ansökan är inget löfte.
         /// </param>
-        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin, bool planning = true)
+        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin, bool planning, HpskSite.Services.SitePages.SiteViewer viewer)
         {
             var idx = GetIndex();
             var region = idx.Regions.GetValueOrDefault(regionId);
@@ -232,10 +232,10 @@ namespace HpskSite.Services.Kretsgranskning
             }
 
             // Kretsens egna händelser (möten, utbildningar).
-            // Indexet delas och byggs för alla, så händelsens synlighet prövas här: kretsens admin ser allt, övriga bara Alla och Inloggade (kretskalendern
-            // är ett planeringsverktyg för inloggade; Klubbmedlemmar/Styrelse/Dold visas aldrig för en som inte är admin).
+            // Indexet delas och byggs för alla, så händelsens synlighet prövas här: tittarens nivå avgör (SiteAccess.CanSee): utloggad ser bara Alla,
+            // inloggad även Inloggade, kretsmedlem även Medlemmar, kretsstyrelsen även Styrelse och admin allt.
             foreach (var e in idx.Events.Where(e => e.RegionId == regionId
-                && (viewerIsAdmin || e.ReadVisibility <= HpskSite.Services.SitePages.SiteVisibility.Inloggade)))
+                && HpskSite.Services.SitePages.SiteAccess.CanSee(e.ReadVisibility, viewer)))
             {
                 var end = (e.EndDate ?? e.Date).Date;
                 if (end < from.Date || e.Date.Date > to.Date) continue;

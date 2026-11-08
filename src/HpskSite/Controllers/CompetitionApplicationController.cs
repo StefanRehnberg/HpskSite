@@ -716,7 +716,12 @@ namespace HpskSite.Controllers
             if ((tt - f).TotalDays > 400) tt = f.AddDays(400);   // en sida ska inte kunna be om hela historiken
 
             var viewerIsAdmin = planning || await ViewerIsAdminAsync();
-            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin, planning);
+            // Kretsens händelser prövas mot tittarens riktiga nivå (inloggad, kretsmedlem, kretsstyrelse, admin): en händelse på nivån Inloggade syns inte för en utloggad.
+            var viewerMember = await CurrentMemberAsync();
+            var siteViewer = viewerMember == null ? HpskSite.Services.SitePages.SiteViewer.Anonymous
+                : new HpskSite.Services.SitePages.SiteViewer(true, HttpContext.RequestServices.GetRequiredService<ClubRosterService>().IsActiveInRegion(viewerMember.Id, regionId),
+                    _roles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, regionId, viewerMember.Id), viewerIsAdmin);
+            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin, planning, siteViewer);
 
             // Kan besökaren ansöka här? Klubbarna i kretsen där hen är admin, och kretsen själv. Bara i planeringen.
             var applyClubs = new List<object>();

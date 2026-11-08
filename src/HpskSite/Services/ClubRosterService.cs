@@ -79,6 +79,22 @@ namespace HpskSite.Services
             return result;
         }
 
+        /// <summary>
+        /// Är medlemmen aktiv i minst en av kretsens klubbar (kretsmedlem, klubbsidorna 2d)? EN plats för regeln: sidmotorn, händelselästarna och
+        /// kretskalendern frågar samma sak. Klubbarna är nodbarnen till kretsens klubbsida (<c>clubsPage</c>), som kretssidans eget klubbantal.
+        /// </summary>
+        public bool IsActiveInRegion(int memberId, int regionId)
+        {
+            if (memberId <= 0 || regionId <= 0) return false;
+            using var db = _databaseFactory.CreateDatabase();
+            return db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM ClubMembership cm
+                   JOIN umbracoNode club ON club.id = cm.ClubId AND club.trashed = 0
+                   JOIN umbracoNode hub ON hub.id = club.parentID
+                  WHERE cm.MemberId = @0 AND hub.parentID = @1 AND cm.MembershipStatus NOT IN (@2, @3)",
+                memberId, regionId, "Utträdd", "Avliden") > 0;
+        }
+
         /// <summary>Bara medlems-id:na — för frågor som går vidare till andra tabeller.</summary>
         public List<int> ActiveMemberIds(int clubId)
         {
