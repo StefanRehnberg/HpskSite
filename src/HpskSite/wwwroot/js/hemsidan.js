@@ -401,6 +401,9 @@
 
   function markDirty() {
     S.dirty = true; S.editVersion++; S.statusText = 'Inte sparat'; S.statusErr = false; paintStatus();
+    // "Sidan är publicerad." får inte stå kvar när man ändrar igen: då visas i stället att ändringarna inte är publicerade (uppgiftsprovet: en nybörjare tror annars att "Sparat" betyder att det syns).
+    if (S.banner && S.banner.cls === 'success') S.banner = null;
+    paintEditorBanner();
     clearTimeout(S.timer); S.timer = setTimeout(() => saveNow(), SAVE_IDLE_MS);
   }
   function paintStatus() {
