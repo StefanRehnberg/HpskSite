@@ -70,6 +70,46 @@ namespace HpskSite.Services.SitePages
             return content.Ok ? (page.VisibilityLevel, content) : null;
         }
 
+        public sealed class ConvertedRow
+        {
+            public string TemplateKey { get; set; } = "";
+            public byte Visibility { get; set; }
+            public DateTime? SuspendedDate { get; set; }
+            public string BlocksJson { get; set; } = "";
+        }
+
+        /// <summary>
+        /// Ägarens omvandlade systemsidor (publicerad version i schema 2), per mallnyckel. EN SQL-fråga; synligheten läses färskt, ingen cache.
+        /// En rad som inte går att tolka blir <see cref="ConvertedState.Broken"/> (felkort), aldrig tyst standardsidan.
+        /// </summary>
+        public IReadOnlyDictionary<string, ConvertedPage> ConvertedPages(string ownerType, int ownerId)
+        {
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var rows = scope.Database.Fetch<ConvertedRow>(
+                @"SELECT p.TemplateKey, p.Visibility, p.SuspendedDate, v.BlocksJson
+                  FROM dbo.SitePage p JOIN dbo.SitePageVersion v ON v.Id = p.PublishedVersionId AND v.PageId = p.Id
+                  WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NOT NULL AND p.DeletedDate IS NULL AND v.SchemaVersion = @2",
+                ownerType, ownerId, SiteBlockSchema.ConvertedSchemaVersion);
+            var template = SiteTemplates.For(ownerType);
+            var result = new Dictionary<string, ConvertedPage>();
+            foreach (var r in rows)
+            {
+                if (template.PageByKey(r.TemplateKey) is not { IsAdmin: false }) continue;
+                var vis = (SiteVisibility)r.Visibility;
+                SiteContentResult? content = null;
+                try
+                {
+                    if (SiteBlockSchema.KindOf(false, r.BlocksJson) == SiteContentKind.ConvertedPage)
+                        content = SiteBlockSchema.Parse(r.BlocksJson, SiteContentKind.ConvertedPage, vis, template, r.TemplateKey);
+                }
+                catch { content = null; }
+                result[r.TemplateKey] = content is { Ok: true }
+                    ? new ConvertedPage(r.TemplateKey, ConvertedState.Ok, vis, r.SuspendedDate != null, content)
+                    : new ConvertedPage(r.TemplateKey, ConvertedState.Broken, vis, r.SuspendedDate != null, null);
+            }
+            return result;
+        }
+
         /// <summary>Det publicerade innehållet, tolkat mot sidans AKTUELLA synlighet (en lagrad rad är inte betrodd). Null om det saknas eller är ogiltigt.</summary>
         public (SitePageRow Page, SiteContentResult Content)? LoadPublished(string ownerType, int ownerId, int pageId)
         {

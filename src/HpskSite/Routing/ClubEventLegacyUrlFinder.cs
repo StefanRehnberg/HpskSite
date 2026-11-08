@@ -96,6 +96,9 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<ISiteOwnerFacts, SiteOwnerFacts>();
             builder.Services.AddScoped<ISiteSupportNotifier, SiteSupportNotifier>();
             builder.Services.AddScoped<SiteSlotRenderer>();
+            // Omvandlade sidor (konvertera-planen K3/K4): läses en gång per begäran och delas av menyn, åtkomstfiltret och ritningen.
+            builder.Services.AddScoped<SiteConvertedSource>();
+            builder.Services.AddScoped<SiteConvertedRenderer>();
             builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }

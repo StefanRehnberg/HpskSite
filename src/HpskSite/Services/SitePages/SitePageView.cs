@@ -78,9 +78,10 @@ namespace HpskSite.Services.SitePages
         /// <param name="extra">Ägarens egna sidor som ligger i menyn (steg 2); tom när ägaren inte har egen redigering PÅ.</param>
         /// <param name="freePageId">Begäran gäller den här egna sidan (inte en systemsida): ingen systempost är då aktuell.</param>
         public static SitePageView On(string ownerType, string ownerUrl, string? pageKey, SiteViewer viewer,
-            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null)
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, SiteTemplate? template = null)
         {
-            var template = SiteTemplates.For(ownerType);
+            // template: mallen med ägarens omvandlade sidor utbytta (SiteConvertedPages.Apply); utan den är det den vanliga mallen.
+            template ??= SiteTemplates.For(ownerType);
             // En okänd nyckel (t.ex. en föråldrad Items-post) är Hem, aldrig en sida som inte finns.
             var page = (pageKey != null ? template.PageByKey(pageKey) : null) ?? template.Pages.First(p => p.IsHome);
             if (page.IsAdmin) page = template.Pages.First(p => p.IsHome); // Admin har ingen egen adress
@@ -150,9 +151,11 @@ namespace HpskSite.Services.SitePages
         private readonly SiteOwnerService _owners;
         private readonly IHttpContextAccessor _http;
         private readonly SitePageReader? _reader;
+        private readonly SiteConvertedSource? _converted;
 
-        public SitePageViewFactory(SiteOwnerService owners, IHttpContextAccessor http, SitePageReader? reader = null)
+        public SitePageViewFactory(SiteOwnerService owners, IHttpContextAccessor http, SitePageReader? reader = null, SiteConvertedSource? converted = null)
         {
+            _converted = converted;
             _owners = owners;
             _http = http;
             _reader = reader;
@@ -165,7 +168,7 @@ namespace HpskSite.Services.SitePages
             var req = SitePageRequest.Current(_http.HttpContext);
             var key = req != null && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageKey : null;
             int? freeId = req is { IsFreePage: true } && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageId : null;
-            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId);
+            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId, _converted?.Template(ownerType, ownerId));
         }
 
         /// <summary>Ägarens egna sidor i menyn — bara när ägaren har egen redigering PÅ, och ett fel i läsningen ger en meny utan dem (aldrig ett trasigt flikfält).</summary>

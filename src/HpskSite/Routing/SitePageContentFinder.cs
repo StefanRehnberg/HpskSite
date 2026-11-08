@@ -96,7 +96,12 @@ namespace HpskSite.Routing
                 // publika, så en omdirigering avslöjar ingenting. Vyn visar ändå bara den publika startsidan för en utloggad.
                 if (!await IsLoggedInAsync(http))
                 {
-                    switch (SitePageAccessRules.Decide(SiteTemplates.For(ownerType), page, SiteViewer.Anonymous))
+                    // Samma mall som filtret efter inloggningen: ägarens omvandlade sidor (bara när brytare 2 är PÅ) prövas mot sina egna block.
+                    var template = SiteTemplates.For(ownerType);
+                    if (_owners.IsEditingEnabled(ownerType, owner.Id))
+                        template = SiteConvertedPages.Apply(template, _reader.ConvertedPages(ownerType, owner.Id));
+                    page = template.PageByKey(page.Key) ?? page;
+                    switch (SitePageAccessRules.Decide(template, page, SiteViewer.Anonymous))
                     {
                         case SitePageDecision.LoginRedirect:
                             request.SetRedirect(LoginUrl(request));

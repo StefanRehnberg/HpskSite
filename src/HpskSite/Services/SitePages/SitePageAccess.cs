@@ -120,9 +120,12 @@ namespace HpskSite.Services.SitePages
 
         private readonly AdminAuthorizationService _auth;
 
+        private readonly SiteConvertedSource _converted;
+
         public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, SitePageReader reader, AdminAuthorizationService auth,
-            ILogger<SitePageAccessFilter> logger)
+            ILogger<SitePageAccessFilter> logger, SiteConvertedSource converted)
         {
+            _converted = converted;
             _viewers = viewers;
             _ctx = ctx;
             _reader = reader;
@@ -154,7 +157,8 @@ namespace HpskSite.Services.SitePages
                     return true;
                 }
 
-                var template = SiteTemplates.For(req.OwnerType);
+                // Mallen med ägarens omvandlade sidor utbytta: en omvandlad sida syns för den som får se minst ett av DESS block.
+                var template = _converted.Template(req.OwnerType, req.OwnerId);
                 SitePageDef? page;
                 if (req.IsFreePage)
                 {
