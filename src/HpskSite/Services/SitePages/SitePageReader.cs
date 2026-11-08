@@ -93,9 +93,17 @@ namespace HpskSite.Services.SitePages
         private readonly PageAddressUrls _urls;
 
         private readonly IScopeProvider _scopes;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
-        public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes)
+        public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes,
+            HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.ICompetitionSeriesStore series,
+            HpskSite.Services.Competitions.CompetitionLinks links)
         {
+            _competitions = competitions;
+            _series = series;
+            _links = links;
             _scopes = scopes;
             _documents = documents;
             _events = events;
@@ -142,10 +150,10 @@ namespace HpskSite.Services.SitePages
 
             public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count, string? eventType)
             {
-                if (_ownerType != SiteTemplates.Club) return Array.Empty<SiteEventInfo>();
+                var evOwner = _ownerType == SiteTemplates.Club ? ClubEventRecord.OwnerClub : ClubEventRecord.OwnerRegion;   // även kretsens kalender (2d)
                 var now = DateTime.Now;
                 return _f._events.ListForOwner(_ownerId, HpskSite.Services.Events.EventViewer.ForOwner(_viewer))
-                    .Where(e => e.StartsAt.HasValue && e.StartsAt.Value >= now && e.OwnerType == ClubEventRecord.OwnerClub && e.OwnerId == _ownerId
+                    .Where(e => e.StartsAt.HasValue && e.StartsAt.Value >= now && e.OwnerType == evOwner && e.OwnerId == _ownerId
                                 && (eventType == null || e.EventType == eventType))
                     .OrderBy(e => e.StartsAt)
                     .Take(count)
@@ -169,6 +177,54 @@ namespace HpskSite.Services.SitePages
             {
                 using var scope = _f._scopes.CreateScope(autoComplete: true);
                 return SiteFiles.Info(scope.Database, ids, _ownerType, _ownerId);   // alltid denna ägares bilder
+            }
+
+            // ── Kretsens block (2d). Alla frågor gäller DENNA krets (nod + regionCode ur begäran), aldrig ett id ur blocket.
+            private bool IsRegion => _ownerType == SiteTemplates.Region && _node != null;
+            private string RegionCode => _node?.Value<string>("regionCode") ?? "";
+
+            public IReadOnlyList<SiteRegionClub> RegionClubs() => IsRegion ? SiteRegion.Clubs(_node) : Array.Empty<SiteRegionClub>();
+
+            public IReadOnlyList<SiteRangeInfo> RegionRanges()
+            {
+                if (!IsRegion) return Array.Empty<SiteRangeInfo>();
+                var clubIds = SiteRegion.Clubs(_node).Select(c => c.Id).ToList();
+                if (clubIds.Count == 0) return Array.Empty<SiteRangeInfo>();
+                using var scope = _f._scopes.CreateScope(autoComplete: true);
+                // Begränsade banor (militära/diskreta) tas aldrig med: kretsens sida är inte den plats där de avslöjas.
+                return scope.Database.Fetch<RangeRow>(
+                        "SELECT r.Id, r.Name, r.City FROM ShootingRange r WHERE r.LocationSensitivity <> @0 AND r.Id IN (SELECT RangeId FROM ClubRangeLink WHERE ClubId IN (@1)) ORDER BY r.Name",
+                        RangeConstants.SensRestricted, clubIds)
+                    .Select(r => new SiteRangeInfo(r.Id, r.Name, r.City, $"/skjutbana/{r.Id}")).ToList();
+            }
+
+            private sealed class RangeRow { public int Id { get; set; } public string Name { get; set; } = ""; public string? City { get; set; } }
+
+            private IEnumerable<HpskSite.Models.Competitions.CompetitionSeriesInfo> OwnSeries() =>
+                _f._series.List().Where(s => s.IsPublished && s.IsVisible && s.ClubId <= 0
+                    && string.Equals(s.RegionalFederation ?? "", RegionCode, StringComparison.OrdinalIgnoreCase));
+
+            public IReadOnlyList<SiteSeriesInfo> RegionSeries(int count)
+            {
+                if (!IsRegion || RegionCode.Length == 0) return Array.Empty<SiteSeriesInfo>();
+                return OwnSeries()
+                    .OrderByDescending(s => s.SeriesStartDate ?? DateTime.MinValue).ThenBy(s => s.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                    .Select(s => new SiteSeriesInfo(s.DisplayName, _f._links.SeriesUrl(s.Id), s.SeriesStartDate, s.SeriesEndDate))
+                    .Where(s => s.Url.Length > 0)   // en serie utan adress kan inte länkas: visas inte
+                    .Take(count).ToList();
+            }
+
+            public SiteRegionStats? RegionStats()
+            {
+                if (!IsRegion || RegionCode.Length == 0) return null;
+                var clubs = SiteRegion.Clubs(_node);
+                var clubIds = clubs.Select(c => c.Id).ToHashSet();
+                var today = DateTime.Today;
+                // Samma urval som kretsens tävlingslista: kretsens egna, samt klubbarnas som inte är klubbinterna.
+                var upcoming = _f._competitions.List().Count(c => c.IsVisible && c.CompetitionDate >= today &&
+                    ((c.ClubId <= 0 && string.Equals(c.RegionalFederation ?? "", RegionCode, StringComparison.OrdinalIgnoreCase))
+                     || (c.ClubId > 0 && clubIds.Contains(c.ClubId) && !c.IsClubOnly)));
+                return new SiteRegionStats(clubs.Count, RegionRanges().Count, OwnSeries().Count(), upcoming);
             }
 
             public SiteContactInfo? Contact() => _node == null ? null : new SiteContactInfo(

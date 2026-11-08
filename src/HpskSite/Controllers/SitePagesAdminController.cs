@@ -104,13 +104,12 @@ WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, ownerId) == 1;
 
         /// <summary>
         /// Brytare 2 (egen redigering) per ägare. Kräver brytare 1 PÅ. <b>Hård grind (plan v2 §7):</b> en klubb måste ha godkänt personuppgiftsbiträdesavtalet
-        /// (DPA, aktuell version) innan egen redigering slås på; en krets kräver att sajtadmin uttryckligen bekräftar att PUB-/ansvarsavtal finns
-        /// (<paramref name="confirmAgreement"/>) tills kretsens avtal är byggt. Att slå av kräver ingen grind. Loggas av <see cref="SiteOwnerService"/>.
+        /// (DPA, aktuell version) innan egen redigering slås på; en krets har ingen avtalsgrind (Stefan 2026-11-08: inget PUB-/ansvarsavtal för krets). Att slå av kräver ingen grind. Loggas av <see cref="SiteOwnerService"/>.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
-        public async Task<IActionResult> SetEditing(string ownerType, int ownerId, bool enabled, bool confirmAgreement = false)
+        public async Task<IActionResult> SetEditing(string ownerType, int ownerId, bool enabled)
         {
             if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
             if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region) return Json(new { success = false, message = "Okänd ägartyp." });
@@ -134,8 +133,6 @@ WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, ownerId);
                     if (!dpa.Accepted)
                         return Json(new { success = false, code = "dpa", message = "Klubben har inte godkänt personuppgiftsbiträdesavtalet (version " + dpa.CurrentVersion + "). Egen redigering kan inte slås på före det." });
                 }
-                else if (!confirmAgreement)
-                    return Json(new { success = false, code = "agreement", message = "Bekräfta att kretsen har ett ansvarsavtal innan egen redigering slås på." });
             }
 
             var cur = await _memberManager.GetCurrentMemberAsync();

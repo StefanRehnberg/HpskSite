@@ -51,10 +51,12 @@ namespace HpskSite.Services.SitePages
         private readonly AdminAuthorizationService _auth;
         private readonly ClubRosterService _roster;
         private readonly BoardRoleService _board;
+        private readonly IUmbracoContextAccessor _ctx;
 
         public SiteViewerResolver(Umbraco.Cms.Core.Security.IMemberManager members, Umbraco.Cms.Core.Services.IMemberService memberService,
-            AdminAuthorizationService auth, ClubRosterService roster, BoardRoleService board)
+            AdminAuthorizationService auth, ClubRosterService roster, BoardRoleService board, IUmbracoContextAccessor ctx)
         {
+            _ctx = ctx;
             _members = members;
             _memberService = memberService;
             _auth = auth;
@@ -97,7 +99,14 @@ namespace HpskSite.Services.SitePages
             }
             var regionAdmin = !string.IsNullOrEmpty(regionCode) && await _auth.IsRegionalAdminForRegion(regionCode);
             var regionBoard = member != null && ownerId > 0 && _board.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, ownerId, member.Id);
-            return new SiteViewer(true, false, regionBoard, regionAdmin);
+            // Kretsmedlem (2d) = aktiv medlem (ClubMembership) i minst en av kretsens klubbar; "Klubbmedlemmar" på en krets betyder det.
+            var regionMember = false;
+            if (member != null && ownerId > 0 && _ctx.TryGetUmbracoContext(out var uc) && uc.Content?.GetById(ownerId) is { } regionNode)
+            {
+                var clubIds = SiteRegion.Clubs(regionNode).Select(c => c.Id).ToList();
+                regionMember = clubIds.Count > 0 && _roster.ActiveInClubs(clubIds).Any(e => e.MemberId == member.Id);
+            }
+            return new SiteViewer(true, regionMember, regionBoard, regionAdmin);
         }
     }
 

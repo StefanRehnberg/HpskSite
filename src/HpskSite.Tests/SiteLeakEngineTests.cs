@@ -55,6 +55,10 @@ namespace HpskSite.Tests
             public SiteContactInfo? Contact() => new("KANARIE-KONTAKT-X", "kanarie@example.se", "0701234567");
             public IReadOnlyList<SiteNewsInfo> News(int count) => new[] { new SiteNewsInfo("KANARIE-NYHET-X", new DateTime(2027, 4, 1), "/x/") };
             public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids) => new[] { new SiteImageInfo(5, 40, 30) };   // en bild som ägaren har; märket ligger i beskrivningen
+            public IReadOnlyList<SiteRegionClub> RegionClubs() => new[] { new SiteRegionClub(1, "KANARIE-KLUBB-X", "/halland/x/") };
+            public IReadOnlyList<SiteRangeInfo> RegionRanges() => new[] { new SiteRangeInfo(1, "KANARIE-BANA-X", "Ort", "/skjutbana/1") };
+            public IReadOnlyList<SiteSeriesInfo> RegionSeries(int count) => new[] { new SiteSeriesInfo("KANARIE-SERIE-X", "/serie/", null, null) };
+            public SiteRegionStats? RegionStats() => new(7777, 2, 3, 4);
         }
 
         /// <summary>Ett block av varje typ med ett unikt märke i det som skrivs ut. Märket för dokument ligger i dokumentens titlar (per nivå).</summary>
@@ -77,6 +81,7 @@ namespace HpskSite.Tests
         }
 
         private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image", "news" };
+        private static readonly string[] RegionTypes = { "region-clubs", "region-ranges", "region-series", "region-stats" };
         private static bool IsPersonal(string type) => type == "contact";
 
         [Fact]
@@ -121,6 +126,37 @@ namespace HpskSite.Tests
             }
             Assert.True(combos > 1500, "motorn ska ha genererat tusentals kombinationer: " + combos);
             Assert.True(failures.Count == 0, $"{failures.Count} av {combos} kombinationer fel:\n" + string.Join("\n", failures.Take(25)));
+        }
+
+        [Fact]
+        public void Kretsens_block_visar_sitt_märke_om_och_bara_om_oraklet_säger_ja_och_aldrig_på_en_klubbs_sida()
+        {
+            var failures = new List<string>();
+            var combos = 0;
+            foreach (var persona in Viewers)
+            foreach (var pageVis in Enumerable.Range(0, 5))
+            foreach (var type in RegionTypes)
+            foreach (var blockVis in Enumerable.Range(0, 5))
+            {
+                combos++;
+                var marker = type switch { "region-clubs" => "KANARIE-KLUBB-X", "region-ranges" => "KANARIE-BANA-X", "region-series" => "KANARIE-SERIE-X", _ => "7777" };
+                var block = new SiteBlock("abcd1", type, (SiteVisibility)blockVis, new JsonObject { ["title"] = "T", ["count"] = 5 });
+                var visible = Oracle(Strict(blockVis, pageVis), persona.Viewer);
+                var onRegion = SiteBlockRenderer.Render(block, (SiteVisibility)pageVis, new SiteRenderContext(persona.Viewer, "/halland/", SiteTemplates.RegionTemplate, new Data()));
+                if (visible != onRegion.Contains(marker)) failures.Add($"{(onRegion.Contains(marker) ? "LÄCKA" : "SAKNAS")}: {persona.Name} / sida {pageVis} / {type} block {blockVis}");
+                if (!visible && onRegion.Length != 0) failures.Add($"TOM SAKNAS: {persona.Name} / {type}");
+                var onClub = SiteBlockRenderer.Render(block, (SiteVisibility)pageVis, new SiteRenderContext(persona.Viewer, "/halland/x/", SiteTemplates.ClubTemplate, new Data()));
+                if (onClub.Length != 0) failures.Add($"KRETSBLOCK PÅ KLUBBSIDA: {persona.Name} / {type}");
+            }
+            // schemat: kretsens block finns bara på en krets
+            foreach (var type in RegionTypes)
+            {
+                var json = "{\"schema\":1,\"blocks\":[{\"id\":\"abcd1\",\"type\":\"" + type + "\",\"visibility\":1,\"data\":{}}]}";
+                if (SiteBlockSchema.Parse(json, SiteContentKind.FreePage, SiteVisibility.Alla, SiteTemplates.ClubTemplate).Ok) failures.Add("schemat släppte " + type + " på en klubb");
+                if (!SiteBlockSchema.Parse(json, SiteContentKind.FreePage, SiteVisibility.Alla, SiteTemplates.RegionTemplate).Ok) failures.Add("schemat vägrade " + type + " på en krets");
+            }
+            Assert.True(combos > 500);
+            Assert.True(failures.Count == 0, $"{failures.Count} av {combos} fel:\n" + string.Join("\n", failures.Distinct().Take(25)));
         }
 
         // ── Åtkomstbeslutet ───────────────────────────────────────────────────────
@@ -211,7 +247,7 @@ namespace HpskSite.Tests
         public void Motorn_känner_till_alla_blocktyper_så_att_en_ny_typ_inte_kan_glömmas()
         {
             var registered = SiteBlockSchema.Types.Keys.OrderBy(k => k).ToList();
-            Assert.Equal(Types.OrderBy(t => t).ToList(), registered);                         // en ny blocktyp måste läggas in i motorn (och få ett orakel) innan bygget går grönt
+            Assert.Equal(Types.Concat(RegionTypes).OrderBy(t => t).ToList(), registered);                         // en ny blocktyp måste läggas in i motorn (och få ett orakel) innan bygget går grönt
         }
     }
 }

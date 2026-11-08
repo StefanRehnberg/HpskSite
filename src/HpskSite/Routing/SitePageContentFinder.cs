@@ -66,7 +66,7 @@ namespace HpskSite.Routing
                 if (SiteTemplates.ClubTemplate.PageBySlug(last) == null && SiteTemplates.RegionTemplate.PageBySlug(last) == null)
                 {
                     if (string.Equals(last, HemsidanSlug, StringComparison.OrdinalIgnoreCase)) return TryFindHemsidan(request, seg);
-                    return seg.Length >= 3 && IsSlugShaped(last) && await TryFindFreePageAsync(request, seg);
+                    return seg.Length >= 2 && IsSlugShaped(last) && await TryFindFreePageAsync(request, seg);
                 }
 
                 if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;

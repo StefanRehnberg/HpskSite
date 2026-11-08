@@ -27,7 +27,7 @@ namespace HpskSite.Tests
         public void Klubben_har_fyra_fasta_tittare_kretsen_tre_och_ingen_är_admin()
         {
             Assert.Equal(new[] { "anon", "logged", "member", "board" }, SitePagePreview.Personas(SiteTemplates.Club).Select(p => p.Key));
-            Assert.Equal(new[] { "anon", "logged", "board" }, SitePagePreview.Personas(SiteTemplates.Region).Select(p => p.Key));   // kretsens medlemssynlighet kommer med 2d
+            Assert.Equal(new[] { "anon", "logged", "member", "board" }, SitePagePreview.Personas(SiteTemplates.Region).Select(p => p.Key));   // kretsmedlem (2d)
             foreach (var t in new[] { SiteTemplates.Club, SiteTemplates.Region })
                 Assert.All(SitePagePreview.Personas(t), p => Assert.False(p.Viewer.IsOwnerAdmin, "adminens egen roll får aldrig färga bilden: " + p.Key));
         }
@@ -36,7 +36,7 @@ namespace HpskSite.Tests
         public void En_okänd_tittare_ger_null()
         {
             Assert.Null(SitePagePreview.Persona(SiteTemplates.Club, "admin"));
-            Assert.Null(SitePagePreview.Persona(SiteTemplates.Region, "member"));
+            Assert.Null(SitePagePreview.Persona(SiteTemplates.Region, "admin"));
             Assert.Null(SitePagePreview.Persona(SiteTemplates.Club, null));
         }
 

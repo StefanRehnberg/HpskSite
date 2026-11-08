@@ -54,21 +54,22 @@
     }
   }
 
+  const IS_REGION = OWNER.type === 'Region';
   const VIS = [
     { v: 0, t: 'Alla', s: 'Alla, även den som inte är inloggad' },
     { v: 1, t: 'Inloggade', s: 'Alla som är inloggade på pistol.nu' },
-    { v: 2, t: 'Medlemmar', s: 'Bara aktiva medlemmar i klubben' },
-    { v: 3, t: 'Styrelsen', s: 'Bara styrelsen' },
-    { v: 4, t: 'Administratörer', s: 'Bara klubbens administratörer' },
+    IS_REGION ? { v: 2, t: 'Medlemmar i kretsens klubbar', s: 'Bara aktiva medlemmar i en klubb i kretsen' } : { v: 2, t: 'Medlemmar', s: 'Bara aktiva medlemmar i klubben' },
+    IS_REGION ? { v: 3, t: 'Kretsstyrelsen', s: 'Bara kretsstyrelsen' } : { v: 3, t: 'Styrelsen', s: 'Bara styrelsen' },
+    IS_REGION ? { v: 4, t: 'Kretsadministratörer', s: 'Bara kretsens administratörer' } : { v: 4, t: 'Administratörer', s: 'Bara klubbens administratörer' },
   ];
-  const visOptions = () => VIS.filter(o => !(OWNER.type === 'Region' && o.v === 2));   // kretsens medlemssynlighet kommer med kretsstegen (2d)
+  const visOptions = () => VIS;
   const visLabel = v => (VIS.find(o => o.v === v) || VIS[4]).t;
   const CONSEQUENCE = {
     0: 'Sidan kan hittas och läsas av vem som helst på internet. Skriv inga personuppgifter.',
     1: 'Den som har ett konto på pistol.nu kan läsa sidan.',
-    2: 'Bara medlemmar i klubben kan läsa sidan. Andra som öppnar länken ser ingenting.',
-    3: 'Bara styrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.',
-    4: 'Bara klubbens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.',
+    2: IS_REGION ? 'Bara aktiva medlemmar i en av kretsens klubbar kan läsa sidan. Andra som öppnar länken ser ingenting.' : 'Bara medlemmar i klubben kan läsa sidan. Andra som öppnar länken ser ingenting.',
+    3: IS_REGION ? 'Bara kretsstyrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara styrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.',
+    4: IS_REGION ? 'Bara kretsens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara klubbens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.',
   };
   const BLOCK_TYPES = [
     { type: 'text', label: 'Text', icon: 'bi-text-paragraph' },
@@ -80,7 +81,12 @@
     { type: 'news', label: 'Nyheter', icon: 'bi-newspaper' },
     { type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right' },
     { type: 'image', label: 'Bild', icon: 'bi-image' },
-  ];
+    // Kretsens egna block (2d): läses live ur kretsens data, lagrar inget i sidan.
+    { type: 'region-clubs', label: 'Klubbar i kretsen', icon: 'bi-people', region: true },
+    { type: 'region-ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', region: true },
+    { type: 'region-series', label: 'Serier', icon: 'bi-trophy', region: true },
+    { type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true },
+  ].filter(t => !t.region || IS_REGION);
   const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
   const minVisFor = type => Math.max(S.visibility, type === 'contact' ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
   const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
@@ -313,6 +319,7 @@
         ['docs', 'Sida med dokument', 'Text och dokument som medlemmarna kan ladda ned, till exempel blanketter.'],
         ['contact', 'Hitta hit & kontakt', 'Text om hur man hittar, och föreningens kontaktuppgifter.'],
         ['meetings', 'Möten och kallelser', 'Kommande möten från kalendern, och plats för kallelser och protokoll.'],
+        ...(IS_REGION ? [['overview', 'Klubbar, banor och serier', 'Kretsens klubbar, skjutbanor och serier i en lista, hämtade ur kretsens data.']] : []),
         ['empty', 'Tom sida', 'Börja helt utan innehåll.'],
       ];
       content = tpls.map(([k, t, s]) => h('label', { class: 'hs-choice ' + (w.template === k ? 'active' : '') },
@@ -348,6 +355,10 @@
     if (tpl === 'empty') return [];
     if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, 1), data: { title: 'Kontakt' } }];
     if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }];
+    if (tpl === 'overview') return [text(),
+      { id: newId(), type: 'region-clubs', visibility: vis, data: { title: 'Klubbar i kretsen' } },
+      { id: newId(), type: 'region-ranges', visibility: vis, data: { title: 'Skjutbanor' } },
+      { id: newId(), type: 'region-series', visibility: vis, data: { title: 'Serier', count: 10 } }];
     return [text()];
   }
 
@@ -622,7 +633,8 @@
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' } : { title: 'Kontakt' };
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
   }
@@ -713,6 +725,13 @@
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
       case 'image': return imageEditor(b);
+      case 'region-clubs': case 'region-ranges': case 'region-stats': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        h('p', { class: 'text-muted small mb-0' }, b.type === 'region-clubs' ? 'Listar kretsens klubbar med länk till deras sidor. Listan hämtas vid varje besök.'
+          : b.type === 'region-ranges' ? 'Listar skjutbanorna som kretsens klubbar använder (namn och ort). Banor som är markerade som begränsade visas aldrig här.'
+          : 'Visar antal klubbar, skjutbanor, serier och kommande tävlingar i kretsen. Siffrorna hämtas vid varje besök.')];
+      case 'region-series': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        field('Så många serier', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 5, 8, 10, 15, 20].map(n => h('option', { value: n, selected: n === (d.count || 10) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
+          'Visar kretsens egna serier, de senaste först.')];
       default: return h('p', { class: 'text-danger' }, 'Okänt block.');
     }
   }

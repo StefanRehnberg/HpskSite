@@ -58,7 +58,7 @@ namespace HpskSite.Services.SitePages
         public static int? FileIdOf(SiteBlock b) =>
             b.Type == "image" && b.Data["ref"] is JsonValue v && v.TryGetValue<string>(out var r) && FileRefRx.IsMatch(r) ? int.Parse(r["file:".Length..]) : null;
 
-        public sealed record BlockType(string Name, bool Personal, bool AllowedInSlot, IReadOnlySet<string> Fields);
+        public sealed record BlockType(string Name, bool Personal, bool AllowedInSlot, IReadOnlySet<string> Fields, bool RegionOnly = false);
 
         public static readonly IReadOnlyDictionary<string, BlockType> Types = new[]
         {
@@ -70,6 +70,10 @@ namespace HpskSite.Services.SitePages
             new BlockType("events", false, false, Set("title", "count", "type")),
             new BlockType("pagelink", false, false, Set("key", "label")),
             new BlockType("image", false, false, Set("ref", "alt", "decorative", "caption")),
+            new BlockType("region-clubs", false, false, Set("title"), RegionOnly: true),   // kretsens klubbar (live): namn och länk
+            new BlockType("region-ranges", false, false, Set("title"), RegionOnly: true),   // skjutbanor kretsens klubbar använder (live, ur ClubRangeLink; begränsade banor utelämnas)
+            new BlockType("region-series", false, false, Set("title", "count"), RegionOnly: true),   // kretsens egna serier (live)
+            new BlockType("region-stats", false, false, Set("title"), RegionOnly: true),   // kretsens siffror: klubbar, banor, serier, kommande tävlingar
             new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
@@ -167,6 +171,8 @@ namespace HpskSite.Services.SitePages
             BlockType? type = null;
             if (typeName == null || !Types.TryGetValue(typeName, out type))
                 errors.Add(new($"{p}.type", $"Okänd blocktyp \"{typeName}\"."));
+            else if (type.RegionOnly && template.OwnerType != SiteTemplates.Region)
+                errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" finns bara på kretsens sidor."));
             else if (slot && !type.AllowedInSlot)
                 errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" får inte ligga före eller efter en systemsida."));
 
@@ -285,6 +291,23 @@ namespace HpskSite.Services.SitePages
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
                     if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet nyheter är 1 till 10."));
+                    if (title != null) o["title"] = title;
+                    o["count"] = count;
+                    break;
+                }
+                case "region-clubs":
+                case "region-ranges":
+                case "region-stats":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    if (title != null) o["title"] = title;
+                    break;
+                }
+                case "region-series":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    var count = d["count"] == null ? 10 : Int(d["count"]) ?? -1;
+                    if (count < 1 || count > 20) errors.Add(new($"{p}.count", "Antalet serier är 1 till 20."));
                     if (title != null) o["title"] = title;
                     o["count"] = count;
                     break;

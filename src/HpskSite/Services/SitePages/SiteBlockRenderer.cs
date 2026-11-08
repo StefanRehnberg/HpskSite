@@ -36,6 +36,18 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Ägarens senaste publicerade nyheter som tittaren får se (händelsens egen läsnivå prövas i lagringen). Standard: inga.</summary>
         IReadOnlyList<SiteNewsInfo> News(int count) => Array.Empty<SiteNewsInfo>();
+
+        /// <summary>Kretsens klubbar (bara för en kretsägare). Standard: inga.</summary>
+        IReadOnlyList<SiteRegionClub> RegionClubs() => Array.Empty<SiteRegionClub>();
+
+        /// <summary>Skjutbanor kretsens klubbar använder; begränsade banor ingår aldrig. Standard: inga.</summary>
+        IReadOnlyList<SiteRangeInfo> RegionRanges() => Array.Empty<SiteRangeInfo>();
+
+        /// <summary>Kretsens egna serier. Standard: inga.</summary>
+        IReadOnlyList<SiteSeriesInfo> RegionSeries(int count) => Array.Empty<SiteSeriesInfo>();
+
+        /// <summary>Kretsens siffror, eller null utanför en krets.</summary>
+        SiteRegionStats? RegionStats() => null;
     }
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
@@ -80,6 +92,10 @@ namespace HpskSite.Services.SitePages
                 "contact" => Contact(block, ctx),
                 "image" => Image(block, ctx),
                 "news" => News(block, ctx),
+                "region-clubs" => RegionClubs(block, ctx),
+                "region-ranges" => RegionRanges(block, ctx),
+                "region-series" => RegionSeries(block, ctx),
+                "region-stats" => RegionStats(block, ctx),
                 _ => "",   // okänd typ renderas aldrig (BlockRegistry avvisar den redan vid läsning)
             };
         }
@@ -182,6 +198,56 @@ namespace HpskSite.Services.SitePages
                 sb.Append($"<li class=\"mb-2\"><span class=\"text-muted me-2\">{E(n.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))}</span>{href}</li>");
             }
             return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        // Kretsens block: bara på en kretsägare (klubbens mall avvisar dem vid skrivning, och renderingen prövar OCKSÅ: en lagrad rad är inte betrodd).
+        private static string RegionList(SiteBlock b, string defaultTitle, IEnumerable<string> itemsHtml)
+        {
+            var items = itemsHtml.ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder($"<h3>{E(string.IsNullOrWhiteSpace(title) ? defaultTitle : title)}</h3><ul class=\"list-unstyled mb-0\">");
+            foreach (var i in items) sb.Append("<li class=\"mb-1\">").Append(i).Append("</li>");
+            return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        private static string LinkOrText(string name, string url) =>
+            SiteHtmlSanitizer.IsAllowedLink(url) ? $"<a href=\"{E(url)}\">{E(name)}</a>" : E(name);
+
+        private static string RegionClubs(SiteBlock b, SiteRenderContext ctx) =>
+            ctx.Template.OwnerType != SiteTemplates.Region ? "" :
+            RegionList(b, "Klubbar i kretsen", ctx.Data.RegionClubs().Select(c => LinkOrText(c.Name, c.Url)));
+
+        private static string RegionRanges(SiteBlock b, SiteRenderContext ctx) =>
+            ctx.Template.OwnerType != SiteTemplates.Region ? "" :
+            RegionList(b, "Skjutbanor", ctx.Data.RegionRanges().Select(r =>
+                LinkOrText(r.Name, r.Url) + (string.IsNullOrWhiteSpace(r.City) ? "" : $" <span class=\"text-muted\">{E(r.City)}</span>")));
+
+        private static string RegionSeries(SiteBlock b, SiteRenderContext ctx)
+        {
+            if (ctx.Template.OwnerType != SiteTemplates.Region) return "";
+            var count = Math.Clamp(b.Data["count"]?.GetValue<int>() ?? 10, 1, 20);
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            return RegionList(b, "Serier", ctx.Data.RegionSeries(count).Take(count).Select(s =>
+                LinkOrText(s.Name, s.Url) + (s.Start == null ? "" : $" <span class=\"text-muted\">{E(s.Start.Value.ToString("d MMM yyyy", sv))}" +
+                    (s.End == null ? "" : $" – {E(s.End.Value.ToString("d MMM yyyy", sv))}") + "</span>")));
+        }
+
+        private static string RegionStats(SiteBlock b, SiteRenderContext ctx)
+        {
+            if (ctx.Template.OwnerType != SiteTemplates.Region) return "";
+            var s = ctx.Data.RegionStats();
+            if (s == null) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<div class=\"row row-cols-2 row-cols-md-4 g-3 text-center\">");
+            void Card(int n, string label) => sb.Append($"<div class=\"col\"><div class=\"border rounded p-3\"><div class=\"h3 mb-0\">{n}</div><div class=\"small text-muted\">{E(label)}</div></div></div>");
+            Card(s.Clubs, "Klubbar");
+            Card(s.Ranges, "Skjutbanor");
+            Card(s.Series, "Serier");
+            Card(s.UpcomingCompetitions, "Kommande tävlingar");
+            return Section(b.Id, sb.Append("</div>").ToString());
         }
 
         private static string Events(SiteBlock b, SiteRenderContext ctx)

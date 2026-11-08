@@ -69,7 +69,7 @@
 
     // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
-        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, false, isRegionBoard, isRegionalAdmin));
+        await SiteViewers.ResolveAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode));   // kretsmedlem (2d) räknas ut på EN plats
     ViewBag.sitePageView = sp;
     // Kretsens egen text före/efter systemsidorna (slots): bara när egen redigering är PÅ (annars ritas ingenting).
     ViewBag.slotCtx = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)

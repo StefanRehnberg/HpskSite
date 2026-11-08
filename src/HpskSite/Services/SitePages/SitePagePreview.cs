@@ -16,12 +16,13 @@ namespace HpskSite.Services.SitePages
     /// </summary>
     public static class SitePagePreview
     {
-        /// <summary>Personerna för ägartypen. Kretsens medlemssynlighet finns inte i steg 2 (kommer med 2d), så kretsen har Utloggad, Inloggad och Kretsstyrelse.</summary>
+        /// <summary>Personerna för ägartypen. Kretsen har även "Medlem i en klubb i kretsen" (2d).</summary>
         public static IReadOnlyList<PreviewPersona> Personas(string ownerType) => ownerType == SiteTemplates.Region
             ? new[]
             {
                 new PreviewPersona("anon", "Utloggad besökare", SiteViewer.Anonymous),
-                new PreviewPersona("logged", "Inloggad", new SiteViewer(true, false, false, false)),
+                new PreviewPersona("logged", "Inloggad, inte medlem i någon klubb i kretsen", new SiteViewer(true, false, false, false)),
+                new PreviewPersona("member", "Medlem i en klubb i kretsen", new SiteViewer(true, true, false, false)),
                 new PreviewPersona("board", "Kretsstyrelse", new SiteViewer(true, false, true, false)),
             }
             : new[]
