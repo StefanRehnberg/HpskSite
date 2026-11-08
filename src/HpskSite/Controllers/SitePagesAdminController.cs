@@ -198,6 +198,14 @@ ORDER BY ct.alias, n.[text]");
                 };
             }).ToList();
 
+            // Adoptionsmått (2e): hur många av dem som slagit på egen redigering som faktiskt publicerat en egen sida (fri sida, ej raderad). Bara räkning, inga namn.
+            int editingOwners = all.Count(o => o.editing), publishingOwners;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+                publishingOwners = scope.Database.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM (SELECT DISTINCT p.OwnerType, p.OwnerId FROM dbo.SitePage p
+  JOIN dbo.SiteOwner o ON o.OwnerType = p.OwnerType AND o.OwnerId = p.OwnerId AND o.IsEnabled = 1 AND o.EditingEnabled = 1
+  WHERE p.TemplateKey IS NULL AND p.PublishedVersionId IS NOT NULL AND p.DeletedDate IS NULL) x");
+
             IEnumerable<dynamic> filtered = all;
             if (!string.IsNullOrWhiteSpace(type)) filtered = filtered.Where(o => string.Equals((string)o.type, type, StringComparison.OrdinalIgnoreCase));
             if (onlyOn) filtered = filtered.Where(o => (bool)o.enabled);
@@ -220,6 +228,8 @@ ORDER BY ct.alias, n.[text]");
                     clubsOn = all.Count(o => o.type == SiteTemplates.Club && o.enabled),
                     regions = all.Count(o => o.type == SiteTemplates.Region),
                     regionsOn = all.Count(o => o.type == SiteTemplates.Region && o.enabled),
+                    editingOwners,
+                    publishingOwners,
                 },
                 total = list.Count,
                 shown = Math.Min(list.Count, take),

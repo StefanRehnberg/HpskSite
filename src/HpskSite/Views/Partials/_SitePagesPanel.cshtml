@@ -51,6 +51,8 @@
     function render(d) {
         var c = d.counts;
         count.textContent = 'Klubbar på: ' + c.clubsOn + ' av ' + c.clubs + ' · Kretsar på: ' + c.regionsOn + ' av ' + c.regions
+            + ' · Egen redigering på: ' + c.editingOwners + ', har publicerat en egen sida: ' + c.publishingOwners
+            + (c.editingOwners > 0 ? ' (' + Math.round(100 * c.publishingOwners / c.editingOwners) + ' %, målet är 50 %)' : '')
             + ' · visar ' + d.shown + ' av ' + d.total + ' · mallversion klubb ' + d.clubTemplateVersion + ', krets ' + d.regionTemplateVersion;
         if (!d.owners.length) { out.innerHTML = '<div class="text-body-secondary py-2">Inga träffar.</div>'; return; }
         var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th>Typ</th><th>Krets</th><th>Läge</th><th>Egen redigering</th><th class="text-end">Åtgärd</th></tr></thead><tbody>';
