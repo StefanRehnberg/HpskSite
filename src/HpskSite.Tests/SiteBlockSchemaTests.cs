@@ -61,7 +61,7 @@ namespace HpskSite.Tests
         public void Okänd_blocktyp_avvisas_även_embed_och_nyheter_som_inte_finns_än()
         {
             AssertRejected(ParseFree(Free(B("abcd1", "embed", 2, "{\"provider\":\"youtube\",\"id\":\"x\"}"))), "type");
-            AssertRejected(ParseFree(Free(B("abcd1", "news", 2, "{}"))), "type");
+            AssertRejected(ParseFree(Free(B("abcd1", "feed", 2, "{}"))), "type");
             AssertRejected(ParseFree(Free(B("abcd1", "gallery", 2, "{}"))), "type");
             AssertRejected(ParseFree(Free(B("abcd1", "script", 2, "{}"))), "type");
         }

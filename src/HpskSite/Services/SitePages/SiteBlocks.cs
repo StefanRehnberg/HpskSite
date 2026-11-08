@@ -70,6 +70,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("events", false, false, Set("title", "count")),
             new BlockType("pagelink", false, false, Set("key", "label")),
             new BlockType("image", false, false, Set("ref", "alt", "decorative", "caption")),
+            new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         private static IReadOnlySet<string> Set(params string[] f) => new HashSet<string>(f, StringComparer.Ordinal);
@@ -268,6 +269,15 @@ namespace HpskSite.Services.SitePages
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
                     if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet händelser är 1 till 10."));
+                    if (title != null) o["title"] = title;
+                    o["count"] = count;
+                    break;
+                }
+                case "news":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
+                    if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet nyheter är 1 till 10."));
                     if (title != null) o["title"] = title;
                     o["count"] = count;
                     break;

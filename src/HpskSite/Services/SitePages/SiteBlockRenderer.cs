@@ -11,6 +11,9 @@ namespace HpskSite.Services.SitePages
     /// <summary>En händelse i händelseblocket.</summary>
     public sealed record SiteEventInfo(string Title, DateTime Start, string? Location, string Url);
 
+    /// <summary>En nyhet i nyhetsblocket (publicerad, synlig för tittaren). <see cref="Date"/> är nyhetens datum, annars skapad.</summary>
+    public sealed record SiteNewsInfo(string Title, DateTime Date, string Url);
+
     /// <summary>Klubbens kontaktuppgifter (läses live, lagras aldrig i blocket).</summary>
     public sealed record SiteContactInfo(string? Person, string? Email, string? Phone);
 
@@ -26,6 +29,9 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Bilderna bland <paramref name="ids"/> som hör till ägaren och inte är raderade. Standard: inga (en implementation utan bilder visar inga bildblock).</summary>
         IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids) => Array.Empty<SiteImageInfo>();
+
+        /// <summary>Ägarens senaste publicerade nyheter som tittaren får se (händelsens egen läsnivå prövas i lagringen). Standard: inga.</summary>
+        IReadOnlyList<SiteNewsInfo> News(int count) => Array.Empty<SiteNewsInfo>();
     }
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
@@ -69,6 +75,7 @@ namespace HpskSite.Services.SitePages
                 "events" => Events(block, ctx),
                 "contact" => Contact(block, ctx),
                 "image" => Image(block, ctx),
+                "news" => News(block, ctx),
                 _ => "",   // okänd typ renderas aldrig (BlockRegistry avvisar den redan vid läsning)
             };
         }
@@ -154,6 +161,23 @@ namespace HpskSite.Services.SitePages
                       (decorative ? " role=\"presentation\"" : "") + " loading=\"lazy\" decoding=\"async\" style=\"height:auto\">";
             var cap = string.IsNullOrWhiteSpace(caption) ? "" : $"<figcaption class=\"small text-muted mt-1\">{E(caption)}</figcaption>";
             return Section(b.Id, $"<figure class=\"site-image mb-0\">{img}{cap}</figure>");
+        }
+
+        private static string News(SiteBlock b, SiteRenderContext ctx)
+        {
+            var count = Math.Clamp(b.Data["count"]?.GetValue<int>() ?? 5, 1, 10);
+            var items = ctx.Data.News(count).Take(count).ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<ul class=\"list-unstyled\">");
+            foreach (var n in items)
+            {
+                var href = SiteHtmlSanitizer.IsAllowedLink(n.Url) ? $"<a href=\"{E(n.Url)}\">{E(n.Title)}</a>" : E(n.Title);
+                sb.Append($"<li class=\"mb-2\"><span class=\"text-muted me-2\">{E(n.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))}</span>{href}</li>");
+            }
+            return Section(b.Id, sb.Append("</ul>").ToString());
         }
 
         private static string Events(SiteBlock b, SiteRenderContext ctx)

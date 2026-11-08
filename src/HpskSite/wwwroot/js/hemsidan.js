@@ -77,6 +77,7 @@
     { type: 'documents', label: 'Dokument', icon: 'bi-file-earmark-text' },
     { type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill' },
     { type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event' },
+    { type: 'news', label: 'Nyheter', icon: 'bi-newspaper' },
     { type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right' },
     { type: 'image', label: 'Bild', icon: 'bi-image' },
   ];
@@ -619,7 +620,7 @@
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' } : { title: 'Kontakt' };
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
   }
@@ -640,7 +641,7 @@
         return h('section', { class: 'mb-4', dataset: undefined },
           h('h2', { class: 'h5' }, title), h('p', { class: 'text-muted small' }, help),
           ...(items.length ? items.map(([b, i]) => blockCard(b, i)) : [h('div', { class: 'hs-card p-3 text-center text-muted mb-3' }, 'Ingen text här än.')]),
-          h('div', { class: 'd-flex flex-wrap gap-2' }, ['text', 'links'].map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t, pos) }, h('i', { class: 'bi ' + typeInfo(t).icon + ' me-1' }), typeInfo(t).label))));
+          h('div', { class: 'd-flex flex-wrap gap-2' }, ['text', 'links', 'news'].map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t, pos) }, h('i', { class: 'bi ' + typeInfo(t).icon + ' me-1' }), typeInfo(t).label))));
       };
       el.replaceChildren(group('before', 'Före sidans innehåll', 'Visas överst på sidan.'), group('after', 'Efter sidans innehåll', 'Visas längst ner på sidan.'));
       el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
@@ -700,6 +701,9 @@
       case 'documents': return documentsEditor(b);
       case 'contact': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, 'Visar föreningens kontaktuppgifter. De hämtas vid varje besök och visas aldrig för den som inte är inloggad.')];
+      case 'news': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        field('Så många nyheter', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
+          'Visar de senaste nyheterna ni publicerat som händelsetypen Nyhet. Varje nyhet har sin egen nivå (vem som får läsa den); den som inte får läsa en nyhet ser den inte i listan.')];
       case 'events': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många händelser', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           'Visar de närmaste kommande händelserna i kalendern.')];

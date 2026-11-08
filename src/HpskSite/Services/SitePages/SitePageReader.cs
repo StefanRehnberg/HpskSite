@@ -151,6 +151,17 @@ namespace HpskSite.Services.SitePages
                     .ToList();
             }
 
+            public IReadOnlyList<SiteNewsInfo> News(int count)
+            {
+                var type = _ownerType == SiteTemplates.Club ? ClubEventRecord.OwnerClub : ClubEventRecord.OwnerRegion;
+                return _f._events.ListForOwner(_ownerId, HpskSite.Services.Events.EventViewer.ForOwner(_viewer))   // läsnivån prövas i lagringen, per händelse
+                    .Where(e => e.EventType == "Nyhet" && e.IsActive && e.OwnerType == type && e.OwnerId == _ownerId)
+                    .OrderByDescending(e => e.StartsAt ?? e.CreatedDate)
+                    .Take(count)
+                    .Select(e => new SiteNewsInfo(e.DisplayName, e.StartsAt ?? e.CreatedDate, _f._urls.UrlFor(PageAddressKinds.Event, e.Id) ?? ""))
+                    .ToList();
+            }
+
             public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids)
             {
                 using var scope = _f._scopes.CreateScope(autoComplete: true);
