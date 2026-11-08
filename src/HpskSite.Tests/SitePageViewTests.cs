@@ -78,7 +78,7 @@ namespace HpskSite.Tests
         {
             var v = SitePageView.On(SiteTemplates.Club, Url, "home", Anon);
             Assert.Equal(new[] { "clubHome" }, Shown(v, ClubPanes));
-            Assert.Empty(v.Menu()); // dagens utloggade klubbsida har ingen meny
+            Assert.Equal("home", v.Menu().Single(e => !e.Locked).Page.Key); // Besökarens vy: Hem öppen, övriga sidor med hänglås (ingen sidas innehåll visas)
         }
 
         [Theory]
@@ -139,10 +139,11 @@ namespace HpskSite.Tests
             { "regionHome", "regionAbout", "regionCompetitions", "regionCalendar", "regionRecords", "regionDocuments", "regionBoard", "regionAdmin" };
 
         [Fact]
-        public void Kretsen_utloggad_har_fyra_publika_sidor_och_ser_inte_Rekord()
+        public void Kretsen_utloggad_har_fyra_publika_sidor_och_ser_Rekord_Dokument_och_Styrelsen_bara_låsta()
         {
             var home = SitePageView.On(SiteTemplates.Region, "/halland/", "home", Anon);
-            Assert.Equal(4, home.Menu().Count);
+            Assert.Equal(4, home.Menu().Count(e => !e.Locked));
+            Assert.Equal(new[] { "records", "documents", "board" }, home.Menu().Where(e => e.Locked).Select(e => e.Page.Key).OrderBy(k => new[] { "records", "documents", "board" }.ToList().IndexOf(k)));
             Assert.Equal(new[] { "regionHome" }, Shown(home, RegionPanes));
             Assert.Equal(new[] { "regionAbout" }, Shown(SitePageView.On(SiteTemplates.Region, "/halland/", "about", Anon), RegionPanes));
             Assert.Empty(Shown(SitePageView.On(SiteTemplates.Region, "/halland/", "records", Anon), RegionPanes));

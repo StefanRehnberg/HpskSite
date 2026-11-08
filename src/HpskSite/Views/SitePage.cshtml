@@ -15,6 +15,8 @@
     Layout = "Master.cshtml";
 
     var req = SitePageRequest.Current(Context);
+    // Besökarens vy: en LÅST sida (finns i menyn med hänglås, men tittaren får inte se den) visar en ruta, aldrig sidans titel eller innehåll.
+    var lockedNeeds = SitePageRequest.LockedNeedsMembership(Context);
     (SitePageRow Page, SiteContentResult Content)? loaded = null;
     var ownerName = Model?.Value<string>("clubName") ?? Model?.Value<string>("regionName") ?? Model?.Name ?? "";
     if (req != null && req.IsFreePage && Model != null)
@@ -32,6 +34,7 @@
         var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model, viewer));
         body = SiteBlockRenderer.RenderAll(loaded.Value.Content.Blocks, loaded.Value.Page.VisibilityLevel, ctx);
         title = loaded.Value.Page.PublishedTitle ?? loaded.Value.Page.Title;
+        if (lockedNeeds != null) { title = ""; body = ""; }
         // Menyn: samma flikrad som ägarens övriga sidor, med den här sidan som aktuell (SitePageView känner igen en egen sida av begäran).
         ViewBag.sitePageView = SitePages.For(req.OwnerType, req.OwnerId, Model.Url(), viewer);
         ViewBag.clubId = req.OwnerId;
@@ -40,6 +43,11 @@
         ViewBag.isLoggedIn = viewer.LoggedIn;
         ViewBag.canEditSite = await Viewers.IsOwnAdminAsync(req.OwnerType, req.OwnerId, regionCode);
         showMenu = true;
+        if (req.OwnerType == SiteTemplates.Club)
+        {
+            var regionPage = Model.Parent?.Parent;   // klubb → klubbsida → krets
+            if (regionPage?.ContentType.Alias == "regionalPage") { ViewBag.regionUrl = regionPage.Url(); ViewBag.regionLabel = "Kretsens hemsida"; }
+        }
     }
     else
     {
@@ -55,9 +63,16 @@
     <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
     @if (showMenu)
     {
+        @Html.Raw("<div class=\"hpsk-sidelayout\">")
         @await Html.PartialAsync(req!.OwnerType == SiteTemplates.Club ? "ClubNavigation" : "RegionalNavigation")
+        @Html.Raw("<div class=\"hpsk-sidebody\">")
     }
-    @if (loaded != null)
+    @if (loaded != null && lockedNeeds != null)
+    {
+        @await Html.PartialAsync("_SiteLocked", (req!.OwnerType, ownerName, lockedNeeds.Value, ViewBag.isLoggedIn as bool? ?? false,
+            "/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
+    }
+    else if (loaded != null)
     {
         <h1 class="h2 mb-4">@title</h1>
         @Html.Raw(body) @* Allt i body är kodat av SiteBlockRenderer; textblockets HTML är sanerad (SiteHtmlSanitizer). *@
@@ -66,5 +81,9 @@
     {
         <h1 class="h2">Sidan finns inte</h1>
         <p class="text-muted">Den här sidan finns inte eller har tagits bort.</p>
+    }
+    @if (showMenu)
+    {
+        @Html.Raw("</div></div>")
     }
 </div>

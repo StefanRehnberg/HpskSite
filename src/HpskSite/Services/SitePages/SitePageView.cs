@@ -23,6 +23,16 @@ namespace HpskSite.Services.SitePages
 
         public static SitePageRequest? Current(HttpContext? http) =>
             http != null && http.Items.TryGetValue(ItemKey, out var v) ? v as SitePageRequest : null;
+
+        /// <summary>Nyckeln i <c>HttpContext.Items</c> för "den här sidan är låst för tittaren" (värdet är om den kräver medlemskap). Sätts av findern och filtret, läses av vyerna.</summary>
+        public const string LockedItemKey = "Hpsk.SitePageLocked";
+
+        /// <summary>Märk begäran som låst. <paramref name="needsMembership"/>: sidan kräver medlemskap (annars räcker inloggning).</summary>
+        public static void MarkLocked(HttpContext http, bool needsMembership) => http.Items[LockedItemKey] = needsMembership;
+
+        /// <summary>Är den här begäran en låst sida för tittaren? Null = nej; annars om sidan kräver medlemskap.</summary>
+        public static bool? LockedNeedsMembership(HttpContext? http) =>
+            http != null && http.Items.TryGetValue(LockedItemKey, out var v) && v is bool b ? b : null;
     }
 
     /// <summary>En egen sida i menyn: sidan, etiketten (publicerad titel), adressen, synligheten och ordningen.</summary>
@@ -34,7 +44,35 @@ namespace HpskSite.Services.SitePages
     /// <param name="Href">Adressen. Admin pekar på rotadressens <c>#{PaneId}</c>.</param>
     /// <param name="Current">Den här sidan.</param>
     /// <param name="IsTabButton">En Bootstrap-flik på rotadressen (Hem och Admin växlar där utan omladdning); annars en länk.</param>
-    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton);
+    /// <param name="Locked">Sidan finns men tittaren får inte se den (en vanlig medlem skulle): raden visas med hänglås och leder till en ruta, aldrig till sidans innehåll.</param>
+    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false);
+
+    /// <summary>Vad vänstermenyn (<c>_SiteSideMenu</c>) ritas ur: posterna, ägarens adress, om Hemsidan-knappen och Guide ska visas och en eventuell extern länk längst ned.</summary>
+    /// <param name="ListId">Menylistans id (<c>clubPageTabs</c>/<c>regionPageTabs</c>): dagens skript och djuplänkar slår upp flikarna i den.</param>
+    /// <param name="Tutorial">Guidefilmens id för administratören (tom = ingen Guide-knapp).</param>
+    /// <param name="ExternalLabel">Etiketten på en extern länk längst ned i menyn ("Kretsens hemsida"), eller null.</param>
+    public sealed record SiteSideMenuModel(string ListId, string OwnerType, IReadOnlyList<SiteMenuEntry> Items, string OwnerUrl, bool CanEditSite, bool IsAdmin,
+        string Tutorial, string? ExternalLabel = null, string? ExternalUrl = null);
+
+    /// <summary>Ikonen för en menypost (Bootstrap Icons): samma som flikraden hade.</summary>
+    public static class SiteMenuIcons
+    {
+        public static string For(string ownerType, string pageKey) => pageKey switch
+        {
+            "home" => "bi-house-fill",
+            "about" => "bi-info-circle",
+            "ranges" => "bi-geo-alt",
+            "calendar" => ownerType == SiteTemplates.Region ? "bi-calendar3" : "bi-calendar-event",
+            "competitions" => "bi-trophy",
+            "members" => "bi-people-fill",
+            "records" => "bi-award",
+            "documents" => "bi-archive",
+            "board" => "bi-people",
+            "admin" => ownerType == SiteTemplates.Region ? "bi-shield-check" : "bi-gear-fill",
+            var k when k.StartsWith("page:", StringComparison.Ordinal) => "bi-file-earmark-text",
+            _ => "bi-circle",
+        };
+    }
 
     /// <summary>
     /// Allt vyn behöver veta om den nya sidstrukturen för EN klubb eller krets (klubbsidorna plan v4, 2.6).
@@ -117,23 +155,31 @@ namespace HpskSite.Services.SitePages
             if (!Enabled) return Array.Empty<SiteMenuEntry>();
             var result = new List<SiteMenuEntry>();
             SiteMenuEntry? admin = null;
-            foreach (var p in _template!.MenuFor(Viewer))
+            // Besökarens vy: sidor tittaren får se, och (med hänglås) sidor en vanlig medlem skulle få se. Styrelse- och Dold-sidor syns aldrig för den som inte har rätt.
+            foreach (var p in _template!.Pages.OrderBy(x => x.Order))
             {
+                var visible = _template.PageVisible(p, Viewer);
+                var locked = !visible && SitePageAccessRules.IsLockedFor(_template, p, Viewer);
+                if (!visible && !locked) continue;
                 var pane = SiteTemplates.LegacyPaneId(_template.OwnerType, p.Key);
                 var href = p.IsAdmin ? OwnerUrl + "#" + pane
                          : p.IsHome ? OwnerUrl
                          : OwnerUrl + p.Slug + "/";
-                var tabButton = IsRoot && (p.IsHome || p.IsAdmin);
-                var entry = new SiteMenuEntry(p, pane, href, Current: _freePageId == null && p.Key == _page!.Key && !p.IsAdmin, tabButton);
+                // Hem och Admin är flikar på rotadressen. En utloggad hos en KLUBB har ingen flikpanel att växla till (startsidan ritas utan flikar): Hem är då en vanlig länk.
+                var tabButton = IsRoot && (Viewer.LoggedIn || _template.OwnerType == SiteTemplates.Region) && !locked && (p.IsHome || p.IsAdmin);
+                var entry = new SiteMenuEntry(p, pane, href, Current: _freePageId == null && p.Key == _page!.Key && !p.IsAdmin, tabButton, locked);
                 if (p.IsAdmin) admin = entry; else result.Add(entry);
             }
-            if (!(_template.MenuRequiresLogin && !Viewer.LoggedIn))
-                foreach (var e in _extra.OrderBy(x => x.Sort).ThenBy(x => x.PageId))
-                {
-                    if (!SiteAccess.CanSee(e.Visibility, Viewer)) continue;
-                    var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
-                    result.Add(new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false));
-                }
+            foreach (var e in _extra.OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+            {
+                var visible = SiteAccess.CanSee(e.Visibility, Viewer);
+                // En egen sidas etikett visas aldrig för en utloggad (ingen fri text läcker till anonyma, plan v3 B3); en inloggad som inte är medlem ser en låst medlemssida.
+                var locked = !visible && Viewer.LoggedIn && e.Visibility == SiteVisibility.Klubbmedlemmar;
+                if (!visible && !locked) continue;
+                if (visible && _template.MenuRequiresLogin && !Viewer.LoggedIn) continue;
+                var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
+                result.Add(new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked));
+            }
             if (admin != null) result.Add(admin);
             return result;
         }

@@ -41,6 +41,11 @@ namespace HpskSite.Services.SitePages
         /// Bygger förhandsvisningen. <paramref name="content"/> är redan tolkat mot sidans synlighet. Utloggad på en stängd sida: inloggning eller "finns inte" precis som
         /// besökaren; synlig sida: dokumentet, eller (om inget block syns) ett besked om det.
         /// </summary>
+        /// <summary>Vad en tittare får när sidan är låst: sidan finns i menyn med ett hänglås och visar en ruta i stället för innehållet.</summary>
+        private static string LockedNotice(PreviewPersona persona) => persona.Viewer.LoggedIn
+            ? $"{persona.Label} ser sidan i menyn med ett hänglås och får beskedet att sidan är för medlemmar."
+            : $"{persona.Label} ser sidan i menyn med ett hänglås och får en ruta med Logga in i stället för innehållet.";
+
         public static PreviewResult Build(string ownerType, string title, SiteVisibility pageVisibility, SiteContentResult content, PreviewPersona persona, ISiteBlockData data, string ownerUrl)
         {
             var template = SiteTemplates.For(ownerType);
@@ -48,8 +53,8 @@ namespace HpskSite.Services.SitePages
             var decision = SitePageAccessRules.Decide(template, def, persona.Viewer);
             switch (decision)
             {
-                case SitePageDecision.LoginRedirect:
-                    return new PreviewResult(decision, $"{persona.Label} skickas till inloggningen och kan sedan läsa sidan om hen får.", "");
+                case SitePageDecision.Locked:
+                    return new PreviewResult(decision, LockedNotice(persona), "");
                 case SitePageDecision.NotFound:
                     return new PreviewResult(decision, $"{persona.Label} får beskedet att sidan inte finns. Ingen kan se att den finns.", "");
             }
@@ -74,8 +79,8 @@ namespace HpskSite.Services.SitePages
             var decision = SitePageAccessRules.Decide(template, def, persona.Viewer);
             switch (decision)
             {
-                case SitePageDecision.LoginRedirect:
-                    return new PreviewResult(decision, $"{persona.Label} skickas till inloggningen och kan sedan läsa sidan om hen får.", "");
+                case SitePageDecision.Locked:
+                    return new PreviewResult(decision, LockedNotice(persona), "");
                 case SitePageDecision.NotFound:
                     return new PreviewResult(decision, $"{persona.Label} får beskedet att sidan inte finns. Ingen kan se att den finns.", "");
             }

@@ -34,15 +34,26 @@ namespace HpskSite.Tests
         [Fact]
         public void En_egen_sida_syns_bara_för_den_som_får_se_den()
         {
-            Assert.DoesNotContain(Club(Logged).Menu(), e => e.Page.Key == "page:11");   // medlemssida: inloggad icke-medlem ser den inte i menyn
-            Assert.Contains(Club(Member).Menu(), e => e.Page.Key == "page:11");
-            Assert.Contains(Club(Logged).Menu(), e => e.Page.Key == "page:10");         // Alla-sidan syns för alla inloggade
-            Assert.Contains(Club(new SiteViewer(true, true, true, false)).Menu(), e => e.Page.Key == "page:12");   // styrelsen ser sin sida
+            var loggedMenu = Club(Logged).Menu();
+            Assert.True(loggedMenu.Single(e => e.Page.Key == "page:11").Locked);        // medlemssida: en inloggad icke-medlem ser den med hänglås, inte innehållet
+            Assert.False(Club(Member).Menu().Single(e => e.Page.Key == "page:11").Locked);
+            Assert.False(loggedMenu.Single(e => e.Page.Key == "page:10").Locked);       // Alla-sidan syns för alla inloggade
+            Assert.DoesNotContain(loggedMenu, e => e.Page.Key == "page:12");            // styrelsens sida finns inte i menyn för den som inte är styrelse, inte ens låst
+            Assert.DoesNotContain(Club(Member).Menu(), e => e.Page.Key == "page:12");
+            Assert.Contains(Club(new SiteViewer(true, true, true, false)).Menu(), e => e.Page.Key == "page:12" && !e.Locked);   // styrelsen ser sin sida
         }
 
         [Fact]
-        public void Klubbens_utloggade_har_ingen_meny_alls_så_ingen_etikett_läcker()
-            => Assert.Empty(Club(Anon).Menu());
+        public void Klubbens_utloggade_ser_Hem_och_låsta_systemsidor_men_aldrig_en_egen_etikett()
+        {
+            var menu = Club(Anon).Menu();
+            Assert.DoesNotContain(menu, e => e.Page.Key.StartsWith("page:"));                      // ingen fri text läcker till anonyma (plan v3 B3)
+            Assert.DoesNotContain(menu, e => e.Page.IsAdmin);
+            Assert.Equal("home", menu.Single(e => !e.Locked).Page.Key);                            // Hem är den enda öppna
+            Assert.False(menu.Single(e => e.Page.Key == "home").IsTabButton);                      // en utloggad har ingen flikpanel: Hem är en länk
+            Assert.All(menu.Where(e => e.Page.Key != "home"), e => Assert.True(e.Locked, e.Page.Key));
+            Assert.Equal(SiteTemplates.ClubTemplate.Pages.Count(p => !p.IsAdmin), menu.Count);    // alla vanliga sidor finns, de flesta med hänglås
+        }
 
         [Fact]
         public void Kretsens_utloggade_ser_bara_Alla_sidor()

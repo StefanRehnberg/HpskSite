@@ -254,8 +254,7 @@ namespace HpskSite.Tests
                 var r = SitePagePreview.BuildConverted("Club", "Rekord", "records", (SiteVisibility)pageVis, content, persona, new NoData(), "/k/");
                 var ok = Oracle(blockVis, persona.Viewer);          // sidan visas för den som får se minst ett block, blocket för den som får se det
                 var want = ok ? SitePageDecision.Serve
-                    : persona.Viewer.LoggedIn ? SitePageDecision.NotFound
-                    : blockVis is 1 or 2 ? SitePageDecision.LoginRedirect : SitePageDecision.NotFound;
+                    : blockVis is 1 or 2 ? SitePageDecision.Locked : SitePageDecision.NotFound;
                 if (r.Decision != want) failures.Add($"beslut {persona.Key}/sida {pageVis}/block {blockVis}: {r.Decision} (väntade {want})");
                 if (r.Document.Contains(canary) != ok) failures.Add($"{(ok ? "SAKNAS" : "LÄCKA")}: {persona.Key}/sida {pageVis}/block {blockVis}");
                 if (r.Decision != SitePageDecision.Serve && r.Document.Length != 0) failures.Add($"dokument trots {r.Decision}: {persona.Key}");

@@ -103,9 +103,12 @@ namespace HpskSite.Routing
                     page = template.PageByKey(page.Key) ?? page;
                     switch (SitePageAccessRules.Decide(template, page, SiteViewer.Anonymous))
                     {
-                        case SitePageDecision.LoginRedirect:
-                            request.SetRedirect(LoginUrl(request));
-                            return true;
+                        case SitePageDecision.Locked:
+                            // En låst medlemssida visas med menyn kvar och en ruta med Logga in (ägarens vy), inte en omdirigering.
+                            SitePageRequest.MarkLocked(http, SitePageAccessRules.NeedsMembership(template, page));
+                            http.Response.Headers["Cache-Control"] = "private, no-store";
+                            http.Response.Headers["X-Robots-Tag"] = "noindex";
+                            break;
                         case SitePageDecision.NotFound:
                             return false;
                     }
@@ -190,7 +193,11 @@ namespace HpskSite.Routing
                     new[] { new SiteBlockDef("page", hit.Page.VisibilityLevel) });
                 switch (SitePageAccessRules.Decide(SiteTemplates.For(ownerType), def, SiteViewer.Anonymous))
                 {
-                    case SitePageDecision.LoginRedirect: request.SetRedirect(LoginUrl(request)); return true;
+                    case SitePageDecision.Locked:
+                        SitePageRequest.MarkLocked(http, SitePageAccessRules.NeedsMembership(SiteTemplates.For(ownerType), def));
+                        http.Response.Headers["Cache-Control"] = "private, no-store";
+                        http.Response.Headers["X-Robots-Tag"] = "noindex";
+                        break;
                     case SitePageDecision.NotFound: return false;
                 }
             }

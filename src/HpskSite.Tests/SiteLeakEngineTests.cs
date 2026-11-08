@@ -171,8 +171,7 @@ namespace HpskSite.Tests
                 var got = SitePageAccessRules.Decide(SiteTemplates.ClubTemplate, page, persona.Viewer);
                 SitePageDecision want;
                 if (Oracle(pageVis, persona.Viewer)) want = SitePageDecision.Serve;
-                else if (persona.Viewer.LoggedIn) want = SitePageDecision.NotFound;
-                else want = pageVis is 1 or 2 ? SitePageDecision.LoginRedirect : SitePageDecision.NotFound;   // Styrelse/Dold: 404 åt alla utan rätt, även utloggade
+                else want = pageVis is 1 or 2 ? SitePageDecision.Locked : SitePageDecision.NotFound;   // Inloggade/Klubbmedlemmar: en låst sida (hänglås + ruta); Styrelse/Dold: 404 åt alla utan rätt
                 if (got != want) failures.Add($"{persona.Name} / sida {pageVis}: fick {got}, väntade {want}");
             }
             Assert.True(failures.Count == 0, string.Join("\n", failures));
@@ -189,11 +188,26 @@ namespace HpskSite.Tests
             {
                 var extra = new[] { new SiteMenuPage(7, $"MENYETIKETT-{pageVis}", "etikett", (SiteVisibility)pageVis, 10) };
                 var menu = SitePageView.On(template, "/halland/x/", "home", persona.Viewer, extra).Menu();
-                var shown = menu.Any(e => e.Page.Label == $"MENYETIKETT-{pageVis}");
-                var clubMenuNeedsLogin = template == SiteTemplates.Club;                  // klubbens meny finns bara för inloggade (kretsens publika sidor syns utloggade)
-                var should = Oracle(pageVis, persona.Viewer) && !(clubMenuNeedsLogin && !persona.Viewer.LoggedIn);
-                if (should != shown) failures.Add($"{(shown ? "LÄCKA" : "SAKNAS")}: {template}, {persona.Name}, sida {pageVis}");
-                if (!persona.Viewer.LoggedIn && clubMenuNeedsLogin && menu.Count != 0) failures.Add($"utloggad ser en klubbmeny ({menu.Count} poster): {persona.Name}");
+                var entry = menu.FirstOrDefault(e => e.Page.Label == $"MENYETIKETT-{pageVis}");
+                var open = entry != null && !entry.Locked;
+                var locked = entry is { Locked: true };
+                var clubMenuNeedsLogin = template == SiteTemplates.Club;                  // klubbens egna sidor visas aldrig för utloggade (kretsens publika sidor syns utloggade)
+                var shouldOpen = Oracle(pageVis, persona.Viewer) && !(clubMenuNeedsLogin && !persona.Viewer.LoggedIn);
+                // En låst egen sida (hänglås) visas bara för en INLOGGAD som inte får se en medlemssida: aldrig för utloggade, aldrig en Styrelse-/Dold-sida.
+                var shouldLock = !Oracle(pageVis, persona.Viewer) && persona.Viewer.LoggedIn && pageVis == 2;
+                if (shouldOpen != open) failures.Add($"{(open ? "LÄCKA" : "SAKNAS")}: {template}, {persona.Name}, sida {pageVis}");
+                if (shouldLock != locked) failures.Add($"{(locked ? "LÄCKA (hänglås)" : "SAKNAS (hänglås)")}: {template}, {persona.Name}, sida {pageVis}");
+                if (!persona.Viewer.LoggedIn && clubMenuNeedsLogin && menu.Any(e => e.Page.Key.StartsWith("page:"))) failures.Add($"utloggad ser en egen etikett i klubbmenyn: {persona.Name}");
+                // Systemsidorna: en post är öppen eller låst, och en sida som ger 404 för tittaren finns aldrig i menyn.
+                var tpl = SiteTemplates.For(template);
+                foreach (var p in tpl.Pages)
+                {
+                    var e = menu.FirstOrDefault(x => x.Page.Key == p.Key);
+                    var decision = p.IsAdmin ? (tpl.PageVisible(p, persona.Viewer) ? SitePageDecision.Serve : SitePageDecision.NotFound) : SitePageAccessRules.Decide(tpl, p, persona.Viewer);
+                    if (decision == SitePageDecision.NotFound && e != null) failures.Add($"DOLD SIDA I MENYN: {template}/{p.Key}, {persona.Name}");
+                    if (decision == SitePageDecision.Serve && (e == null || e.Locked)) failures.Add($"ÖPPEN SIDA SAKNAS/LÅST: {template}/{p.Key}, {persona.Name}");
+                    if (decision == SitePageDecision.Locked && (e == null || !e.Locked)) failures.Add($"LÅST SIDA SAKNAS: {template}/{p.Key}, {persona.Name}");
+                }
             }
             Assert.True(failures.Count == 0, string.Join("\n", failures));
         }

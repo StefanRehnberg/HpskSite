@@ -7,63 +7,9 @@
 
 @if (sp != null && sp.Enabled)
 {
-    @* Hem och Admin är Bootstrap-flikar på rotadressen (de växlar utan omladdning, med dagens flik-id:n och hashtolkare);
-       varje annan post är en länk. Alla har id "{panel}-tab" och data-bs-target, så att dagens skript och djuplänkar
-       (getElementById('clubCalendar-tab').click(), #clubCompetitions m.fl.) leder rätt: ett klick på en länk navigerar. *@
-    var menuItems = sp.Menu().ToList();
-    var currentLabel = (menuItems.FirstOrDefault(i => i.Current) ?? menuItems.FirstOrDefault())?.Page.Label ?? "";
-    await Html.RenderPartialAsync("_SiteMenuToggle", ("clubPageTabs", currentLabel));
-    <ul class="nav nav-tabs collapse d-md-flex" id="clubPageTabs" role="tablist">
-        @foreach (var item in menuItems)
-        {
-            var icon = item.Page.Key switch
-            {
-                "home" => "bi-house-fill",
-                "about" => "bi-info-circle",
-                "ranges" => "bi-geo-alt",
-                "calendar" => "bi-calendar-event",
-                "competitions" => "bi-trophy",
-                "members" => "bi-people-fill",
-                "records" => "bi-award",
-                "documents" => "bi-archive",
-                "admin" => "bi-gear-fill",
-                var k when k.StartsWith("page:") => "bi-file-earmark-text",
-                _ => "bi-circle"
-            };
-            <li class="nav-item" role="presentation">
-                @if (item.IsTabButton)
-                {
-                    <button class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" data-bs-toggle="tab" data-bs-target="#@(item.PaneId)" type="button" role="tab" aria-controls="@(item.PaneId)" aria-selected="@(item.Current ? "true" : "false")">
-                        <i class="bi @icon me-2"></i>@item.Page.Label
-                    </button>
-                }
-                else
-                {
-                    <a class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)">
-                        <i class="bi @icon me-2"></i>@item.Page.Label
-                        @if (item.Page.Key == "members")
-                        {
-                            <span id="prospectBadge" class="badge bg-warning text-dark ms-2" style="display: none;"></span>
-                        }
-                    </a>
-                }
-            </li>
-        }
-        @if (ViewBag.canEditSite as bool? ?? false)
-        {
-            <li class="nav-item ms-auto" role="presentation">
-                <a class="btn btn-sm btn-primary align-self-center mt-1" href="@(sp.OwnerUrl)hemsidan/" title="Skriv och ändra era egna sidor"><i class="bi bi-pencil-square me-1"></i>Hemsidan</a>
-            </li>
-        }
-        @if (isClubAdmin)
-        {
-            <li class="nav-item ms-auto" role="presentation">
-                <button class="btn btn-sm btn-outline-primary align-self-center mt-1" onclick="TutorialHelper.open('tutorial-07')" title="Se instruktionsvideo för klubbadministratörer">
-                    <i class="bi bi-play-circle me-1"></i>Guide
-                </button>
-            </li>
-        }
-    </ul>
+    @* Besökarens vy: ägarens sidor som en VÄNSTERMENY (se _SiteSideMenu). Samma flik-id:n, hashtolkare och djuplänkar som förut; låsta sidor visas med hänglås. *@
+    await Html.RenderPartialAsync("_SiteSideMenu", new HpskSite.Services.SitePages.SiteSideMenuModel("clubPageTabs", HpskSite.Services.SitePages.SiteTemplates.Club,
+        sp.Menu().ToList(), sp.OwnerUrl, ViewBag.canEditSite as bool? ?? false, isClubAdmin, "tutorial-07", ViewBag.regionLabel as string, ViewBag.regionUrl as string));
 }
 else
 {

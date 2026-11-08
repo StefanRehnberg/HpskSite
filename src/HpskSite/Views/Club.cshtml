@@ -98,6 +98,9 @@
         regionPage = null;
     }
     var regionLogo = regionPage?.Value<IPublishedContent>("logo");
+    // Besökarens vy: en extern länk längst ned i vänstermenyn till kretsens hemsida.
+    ViewBag.regionUrl = regionPage?.Url();
+    ViewBag.regionLabel = "Kretsens hemsida";
     var siteDefaultLogo = "/images/HPSK_Logo.png";
 
     ViewBag.OgTitle = clubName;
@@ -115,6 +118,7 @@ const isLoggedIn = @isLoggedIn.ToString().ToLower();
 window.currentClubId = clubId;
 </script>
 
+@{ var lockedNeeds = HpskSite.Services.SitePages.SitePageRequest.LockedNeedsMembership(Context); }
 <div class="club-page container-fluid">
     <!-- Club Header with Logo and Banner -->
     @await Html.PartialAsync("ClubHeader")
@@ -122,15 +126,39 @@ window.currentClubId = clubId;
     @if (!isLoggedIn)
     {
         <!-- TIER 1: PUBLIC VIEW (Om-text, kontakt, publika dokument, inloggningsruta) — ritas av panelregistret -->
-        <div class="container-fluid mt-4">
-            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
+        <div class="container-fluid mt-4@(sp.Enabled ? " hpsk-sidelayout" : "")">
+            @if (sp.Enabled)
+            {
+                @await Html.PartialAsync("ClubNavigation")
+                @Html.Raw("<div class=\"hpsk-sidebody\">")
+            }
+            @if (lockedNeeds != null)
+            {
+                @await Html.PartialAsync("_SiteLocked", ("Club", clubName, lockedNeeds.Value, false, loginUrl.TrimEnd('/') + "/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
+            }
+            else
+            {
+                @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
+            }
+            @if (sp.Enabled)
+            {
+                @Html.Raw("</div>")
+            }
         </div>
     }
     else
     {
         <!-- TIER 2 & 3: MEMBER/ADMIN VIEW - With tabs and role-based functionality -->
-        <div class="container-fluid mt-4">
+        <div class="container-fluid mt-4@(sp.Enabled ? " hpsk-sidelayout" : "")">
             @await Html.PartialAsync("ClubNavigation")
+            @if (sp.Enabled)
+            {
+                @Html.Raw("<div class=\"hpsk-sidebody\">")
+            }
+            @if (lockedNeeds != null)
+            {
+                @await Html.PartialAsync("_SiteLocked", ("Club", clubName, lockedNeeds.Value, true, loginUrl))
+            }
 
             <!-- Tab Content -->
             <div class="tab-content mt-3" id="clubTabContent">
@@ -224,6 +252,10 @@ window.currentClubId = clubId;
                     </div>
                 }
             </div>
+            @if (sp.Enabled)
+            {
+                @Html.Raw("</div>")
+            }
         </div>
     }
 </div>

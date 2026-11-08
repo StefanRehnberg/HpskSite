@@ -57,8 +57,7 @@ namespace HpskSite.Tests
                 var pageOk = Oracle(pageVis, persona.Viewer);
                 var blockOk = pageOk && Oracle(blockVis, persona.Viewer);
                 SitePageDecision want = pageOk ? SitePageDecision.Serve
-                    : persona.Viewer.LoggedIn ? SitePageDecision.NotFound
-                    : pageVis is 1 or 2 ? SitePageDecision.LoginRedirect : SitePageDecision.NotFound;
+                    : pageVis is 1 or 2 ? SitePageDecision.Locked : SitePageDecision.NotFound;
                 if (r.Decision != want) failures.Add($"beslut {type}/{persona.Key}/sida {pageVis}: {r.Decision} (väntade {want})");
                 var shows = r.Document.Contains(canary);
                 if (shows != blockOk) failures.Add($"{(shows ? "LÄCKA" : "SAKNAS")}: {type}/{persona.Key}/sida {pageVis}/block {blockVis}");

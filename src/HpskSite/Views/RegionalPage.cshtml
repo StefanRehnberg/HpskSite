@@ -136,8 +136,18 @@
     var regionId = @Model.Id;
 </script>
 
+@{ var lockedNeeds = HpskSite.Services.SitePages.SitePageRequest.LockedNeedsMembership(Context); }
+@* Besökarens vy: med den nya sidstrukturen PÅ ligger menyn till vänster och innehållet till höger (se _SiteSideMenu). *@
+@if (sp.Enabled)
+{
+    @Html.Raw("<div class=\"hpsk-sidelayout\">")
+}
 <!-- Tab Navigation (visible to all visitors) -->
 @await Html.PartialAsync("RegionalNavigation")
+@if (sp.Enabled)
+{
+    @Html.Raw("<div class=\"hpsk-sidebody\">")
+}
 
 @if (isRegionalAdmin)
 {
@@ -166,6 +176,11 @@
        varje rad "Redigeringsfunktion kunde inte hittas", eftersom dispatchen bara fanns
        inbakad i AdminCompetitionsList. *@
     @await Html.PartialAsync("_CompetitionEditDispatch")
+}
+
+@if (lockedNeeds != null)
+{
+    @await Html.PartialAsync("_SiteLocked", ("Region", regionName, lockedNeeds.Value, isLoggedIn, "/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
 }
 
 <div class="tab-content" id="regionPageTabContent">
@@ -252,6 +267,10 @@
         </div>
     }
 </div>
+@if (sp.Enabled)
+{
+    @Html.Raw("</div></div>")
+}
 
 <script>
 (function() {

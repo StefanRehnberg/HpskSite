@@ -11,31 +11,42 @@ namespace HpskSite.Services.SitePages
     {
         /// <summary>Visa sidan.</summary>
         Serve,
-        /// <summary>Utloggad besökare på en sida som inte är öppen: skicka till inloggning.</summary>
-        LoginRedirect,
-        /// <summary>Inloggad utan rätt: sidan finns inte (avslöjar inte att Styrelse- eller Dold-sidor finns).</summary>
+        /// <summary>
+        /// Sidan finns och en vanlig medlem får se den, men inte den här tittaren (utloggad, eller inloggad utan medlemskap): ägarens vy visas med menyn kvar och en
+        /// vänlig ruta i stället för innehållet ("Den här sidan är för klubbens medlemmar. Logga in …"). Status 200, aldrig sidans titel eller innehåll.
+        /// </summary>
+        Locked,
+        /// <summary>Sidan finns inte för den här tittaren (avslöjar inte att Styrelse- eller Dold-sidor finns).</summary>
         NotFound,
     }
 
     /// <summary>
     /// Beslutet per begäran (klubbsidorna F0-spik a, plan v2 §4). Ren funktion, testad utan databas.
     ///
-    /// <para><b>Åtkomstbesked:</b> en sida som är öppen för vilken inloggad medlem/klubbmedlem som helst (Inloggade, Klubbmedlemmar) skickar
-    /// en utloggad till inloggning (v3 B3: att sidan finns avslöjas medvetet, delade länkar ska fungera efter inloggning). En sida som BARA
-    /// styrelsen eller admin ser (Styrelse, Dold) ger <b>404 åt alla</b> som inte har rätt, även utloggade — annars skulle en
-    /// inloggningsomdirigering på just den adressen avslöja att en dold sida finns. Inloggad utan rätt → 404.</para>
+    /// <para><b>Åtkomstbesked (Besökarens vy):</b> en sida som en vanlig medlem får se (Inloggade, Klubbmedlemmar) men inte den här tittaren ger
+    /// <see cref="SitePageDecision.Locked"/>: sidan finns i menyn med ett hänglås och visar en vänlig ruta (v3 B3: att sidan finns avslöjas medvetet, delade
+    /// länkar ska fungera efter inloggning). En sida som BARA styrelsen eller admin ser (Styrelse, Dold) ger <b>404 åt alla</b> som inte har rätt, även
+    /// utloggade och inloggade — annars skulle hänglåset avslöja att en dold sida finns.</para>
     /// </summary>
     public static class SitePageAccessRules
     {
-        /// <summary>En vanlig inloggad klubbmedlem (inte styrelse, inte admin): avgör om en utloggad ska få en inloggning att gå till.</summary>
+        /// <summary>En vanlig inloggad klubbmedlem (inte styrelse, inte admin): avgör om en sida är en låst medlemssida eller en dold sida.</summary>
         private static readonly SiteViewer PlainMember = new(true, true, false, false);
+        /// <summary>Inloggad men inte medlem: avgör om en låst sida kräver medlemskap eller bara inloggning.</summary>
+        private static readonly SiteViewer LoggedInNonMember = new(true, false, false, false);
 
         public static SitePageDecision Decide(SiteTemplate template, SitePageDef page, SiteViewer viewer)
         {
             if (template.PageVisible(page, viewer)) return SitePageDecision.Serve;
-            if (viewer.LoggedIn) return SitePageDecision.NotFound;
-            return template.PageVisible(page, PlainMember) ? SitePageDecision.LoginRedirect : SitePageDecision.NotFound;
+            return template.PageVisible(page, PlainMember) ? SitePageDecision.Locked : SitePageDecision.NotFound;
         }
+
+        /// <summary>Är sidan låst för <paramref name="viewer"/> och syns därför i menyn med hänglås? (Samma fråga som <see cref="Decide"/>.)</summary>
+        public static bool IsLockedFor(SiteTemplate template, SitePageDef page, SiteViewer viewer) =>
+            !page.IsAdmin && Decide(template, page, viewer) == SitePageDecision.Locked;
+
+        /// <summary>Kräver den låsta sidan medlemskap (annars räcker inloggning)? Styr texten i rutan: "är för medlemmar" respektive "kräver inloggning".</summary>
+        public static bool NeedsMembership(SiteTemplate template, SitePageDef page) => !template.PageVisible(page, LoggedInNonMember);
     }
 
     /// <summary>
@@ -180,10 +191,12 @@ namespace HpskSite.Services.SitePages
                 {
                     case SitePageDecision.Serve:
                         return true;
-                    case SitePageDecision.LoginRedirect:
-                        var back = http.Request.Path.Value!.TrimEnd('/') + "/";
-                        context.Result = new RedirectResult("/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(back));
-                        return false;
+                    case SitePageDecision.Locked:
+                        // Vyn visar ägarens meny och en vänlig ruta i stället för sidan (ingen titel, inget innehåll); status 200, aldrig cachad eller indexerad.
+                        SitePageRequest.MarkLocked(http, SitePageAccessRules.NeedsMembership(template, page));
+                        http.Response.Headers["Cache-Control"] = "private, no-store";
+                        http.Response.Headers["X-Robots-Tag"] = "noindex";
+                        return true;
                     default:
                         context.Result = new NotFoundResult();
                         return false;
