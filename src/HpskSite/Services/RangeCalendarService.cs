@@ -232,7 +232,7 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
         /// Allt som händer på banan i [from, to], äldst först. En källa som fallerar loggas och hoppas
         /// över — en kalender utan tävlingarna är fortfarande användbar, en tom sida är det inte.
         /// </summary>
-        public List<RangeCalendarItem> Build(int rangeId, DateTime from, DateTime to)
+        public List<RangeCalendarItem> Build(int rangeId, DateTime from, DateTime to, HpskSite.Services.Events.EventViewer viewer)
         {
             from = from.Date; to = to.Date;
             var items = new List<RangeCalendarItem>();
@@ -249,7 +249,7 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             Try("träningarna", () => items.AddRange(Trainings(rangeId, from, to)));
             Try("de fasta tiderna", () => items.AddRange(Allocations(rangeId, from, to)));
             Try("de externa bokningarna", () => items.AddRange(External(rangeId, from, to)));
-            Try("händelserna", () => items.AddRange(Events(rangeId, from, to)));
+            Try("händelserna", () => items.AddRange(Events(rangeId, from, to, viewer)));
             Try("tävlingarna", () => items.AddRange(Competitions(rangeId, from, to)));
 
             foreach (var i in items)
@@ -355,7 +355,11 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             }
         }
 
-        private List<RangeCalendarItem> Events(int rangeId, DateTime from, DateTime to)
+        /// <summary>
+        /// Händelserna på banan. En händelse tittaren inte får se (<see cref="HpskSite.Models.Events.ClubEventRecord.ReadVisibility"/>) tas INTE bort:
+        /// då hade banan sett ledig ut. Den visas som "Upptaget" med klubben som står för den, utan namn, länk eller källa (<c>SourceId</c> 0).
+        /// </summary>
+        private List<RangeCalendarItem> Events(int rangeId, DateTime from, DateTime to, HpskSite.Services.Events.EventViewer viewer)
         {
             var result = new List<RangeCalendarItem>();
             List<ClubEventRange> links;
@@ -370,7 +374,7 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             // ingen publicerad clubSimpleEvent-nod, och kalendern och banans QR-närvaro hade tyst
             // tappat varje händelse. Alla i EN läsning — förut en fråga per länk, och länkarna växer
             // med varje händelse banan någonsin haft (genomgången 2026-10-13, B).
-            var byId = _events.GetMany(links.Select(l => l.EventId).ToList()).ToDictionary(e => e.Id);
+            var byId = _events.GetMany(links.Select(l => l.EventId).ToList(), HpskSite.Services.Events.EventViewer.System).ToDictionary(e => e.Id);
             foreach (var link in links)
             {
                 // Opublicerad, borttagen eller avstängd händelse syns inte — i kalendern som överallt annars.
@@ -380,21 +384,22 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
                 var end = ClubEvents.RealDate(ev.EndsAt);
 
                 var (clubId, owner) = OwnerOf(ev, content);
+                var seen = viewer.CanSee(ev);
                 var startTime = start.Value.TimeOfDay == TimeSpan.Zero ? null : RangeCalendarRules.Hhmm(start.Value.TimeOfDay);
                 foreach (var day in Days(start.Value.Date, end?.Date, from, to))
                 {
                     result.Add(new RangeCalendarItem
                     {
                         Kind = RangeCalendarKind.Event,
-                        SourceId = ev.Id,
-                        Title = string.IsNullOrWhiteSpace(ev.DisplayName) ? "Händelse" : ev.DisplayName,
+                        SourceId = seen ? ev.Id : 0,
+                        Title = !seen ? "Upptaget" : string.IsNullOrWhiteSpace(ev.DisplayName) ? "Händelse" : ev.DisplayName,
                         ClubId = clubId,
                         OwnerName = owner,
                         Date = Ymd(day),
                         // Klockslaget hör till första dagen; följande dagar av en flerdagars händelse saknar det.
                         Start = day == start.Value.Date ? startTime : null,
                         SectionId = link.RangeSectionId,
-                        Url = ev.Url
+                        Url = seen ? ev.Url : null
                     });
                 }
             }
@@ -517,10 +522,10 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
         /// <paramref name="excludeKind"/>/<paramref name="excludeId"/> = posten själv (vid redigering).
         /// </summary>
         public List<DayItem> Day(int rangeId, int? sectionId, DateTime date, string? start, string? end,
-            string? excludeKind, int excludeId, int ownClubId)
+            string? excludeKind, int excludeId, int ownClubId, HpskSite.Services.Events.EventViewer viewer)
         {
             var result = new List<DayItem>();
-            foreach (var i in Build(rangeId, date, date))
+            foreach (var i in Build(rangeId, date, date, viewer))
             {
                 if (i.IsCancelled) continue;
                 if (excludeId > 0 && string.Equals(i.Kind, excludeKind, StringComparison.OrdinalIgnoreCase) && i.SourceId == excludeId)

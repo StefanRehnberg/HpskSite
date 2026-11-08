@@ -41,7 +41,7 @@ namespace HpskSite.Services.SitePages
             if (loaded == null) return "";
             var blocks = position == "before" ? loaded.Value.Content.Before : loaded.Value.Content.After;
             if (blocks.Count == 0) return "";
-            var rctx = new SiteRenderContext(ctx.Viewer, ctx.OwnerUrl, SiteTemplates.For(ctx.OwnerType), _data.For(ctx.OwnerType, ctx.OwnerId, ctx.OwnerNode));
+            var rctx = new SiteRenderContext(ctx.Viewer, ctx.OwnerUrl, SiteTemplates.For(ctx.OwnerType), _data.For(ctx.OwnerType, ctx.OwnerId, ctx.OwnerNode, ctx.Viewer));
             return SiteBlockRenderer.RenderAll(blocks, loaded.Value.Vis, rctx);
         }
     }

@@ -218,7 +218,7 @@ namespace HpskSite.Controllers
 
             if (clubNode != null)
             {
-                var clubEvents = _events.ListForOwner(clubNode.Id)
+                var clubEvents = _events.ListForOwner(clubNode.Id, HpskSite.Services.Events.EventViewer.System)
                     .Select(e => new
                     {
                         eventType = string.IsNullOrEmpty(e.EventType) ? "Annat" : e.EventType,

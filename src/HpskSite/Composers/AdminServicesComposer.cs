@@ -195,6 +195,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Events.NodeClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SqlClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SwitchingClubEventStore>();
+            builder.Services.AddScoped<HpskSite.Services.Events.EventViewerFactory>();
             // Tävling → händelse (arrangörens händelsesida kopplas till tävlingarna den beskriver).
             builder.Services.AddScoped<HpskSite.Services.Events.CompetitionEventLinkService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,

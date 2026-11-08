@@ -85,7 +85,7 @@ namespace HpskSite.Services.Firearms
             try
             {
                 // Via händelselagringen (sajtstrukturen fas 2a).
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e is null) return (false, false);
 
                 var has = _events.Support.LanevapenOffered;

@@ -240,7 +240,7 @@ namespace HpskSite.Controllers
                     var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
 
                     // Klubbens händelser — genom lagringen (fas 2a), bara publicerade.
-                    var simpleEvents = _events.ListForOwner(clubId);
+                    var simpleEvents = _events.ListForOwner(clubId, await EventViewerAsync());
 
                     foreach (var evt in simpleEvents)
                     {
@@ -423,7 +423,7 @@ namespace HpskSite.Controllers
                     && clubForRegion.Parent?.Parent is IPublishedContent regionNode
                     && regionNode.ContentType.Alias == "regionalPage")
                 {
-                    foreach (var evt in _events.ListForOwner(regionNode.Id))
+                    foreach (var evt in _events.ListForOwner(regionNode.Id, await EventViewerAsync()))
                     {
                         var eventDate = evt.StartsAt;
                         if (!eventDate.HasValue || eventDate.Value.Date < startDate.Date || eventDate.Value.Date > endDate.Date)
@@ -543,7 +543,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null, string readVisibility = "")
         {
             try
             {
@@ -592,7 +592,7 @@ namespace HpskSite.Controllers
                     IsPublished = true
                 };
                 var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber, readVisibility);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE sparningen, så händelsen aldrig blir till. Ett halvsparat
@@ -687,7 +687,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Källhändelsens id saknas." });
                 }
 
-                var source = _events.Get(sourceEventId);
+                var source = _events.Get(sourceEventId, HpskSite.Services.Events.EventViewer.System);
                 if (source == null)
                 {
                     return Ok(new { success = false, message = "Källhändelsen hittades inte." });
@@ -832,6 +832,8 @@ namespace HpskSite.Controllers
                 // väljaren, och nästa sparning skickar tillbaka standard — alltså
                 // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
                 // lanevapenOffered gick i, rapporterad av Luleå PK.
+                readVisibility = (int)evt.ReadVisibility,
+                readVisibilitySupported = support.ReadVisibility,
                 eventAudience = HpskSite.Models.EventAudience.Normalise(evt.Audience),
                 audiencePropertyExists = support.Audience,
                 // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
@@ -853,11 +855,15 @@ namespace HpskSite.Controllers
             };
         }
 
+        /// <summary>Tittaren för den här begäran (händelsernas synlighet prövas mot den, i lagringen).</summary>
+        private Task<HpskSite.Services.Events.EventViewer> EventViewerAsync()
+            => HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync();
+
         /// <summary>
         /// Get club events (children of club node) for management/editing
         /// </summary>
         [HttpGet]
-        public IActionResult GetClubEvents(int clubId)
+        public async Task<IActionResult> GetClubEvents(int clubId)
         {
             try
             {
@@ -878,7 +884,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Klubbens händelser genom lagringen (fas 2a) — bara publicerade, som förut.
-                    var allEvents = _events.ListForOwner(clubId)
+                    var allEvents = _events.ListForOwner(clubId, await EventViewerAsync())
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
@@ -1036,7 +1042,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null, string readVisibility = "")
         {
             try
             {
@@ -1045,7 +1051,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID and name are required" });
                 }
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -1064,7 +1070,7 @@ namespace HpskSite.Controllers
                 ApplyEventFormFields(e, eventName, eventType, description, venue, contactPerson,
                     contactEmail, contactPhone, pageName);
                 var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(e, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber, readVisibility);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE sparningen — det som ligger publicerat är orört.
@@ -1106,7 +1112,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID is required" });
                 }
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -1941,7 +1947,7 @@ namespace HpskSite.Controllers
         /// Get region events (the region's events, read through IClubEventStore)
         /// </summary>
         [HttpGet]
-        public IActionResult GetRegionEvents(int regionId)
+        public async Task<IActionResult> GetRegionEvents(int regionId)
         {
             try
             {
@@ -1961,7 +1967,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Kretsens händelser genom lagringen (fas 2a) — bara publicerade, som förut.
-                    var allEvents = _events.ListForOwner(regionId)
+                    var allEvents = _events.ListForOwner(regionId, await EventViewerAsync())
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
@@ -1995,7 +2001,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null, string readVisibility = "")
         {
             try
             {
@@ -2035,7 +2041,7 @@ namespace HpskSite.Controllers
                 ApplyEventFormFields(newEvent, eventName, eventType, description, venue, contactPerson,
                     contactEmail, contactPhone, pageName);
                 var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber, readVisibility);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE sparningen, så händelsen aldrig blir till. Ett halvsparat
@@ -2085,7 +2091,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null, string readVisibility = "")
         {
             try
             {
@@ -2097,7 +2103,7 @@ namespace HpskSite.Controllers
                 var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
                 if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2118,7 +2124,7 @@ namespace HpskSite.Controllers
                 ApplyEventFormFields(e, eventName, eventType, description, venue, contactPerson,
                     contactEmail, contactPhone, pageName);
                 var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(e, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber, readVisibility);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE sparningen — det som ligger publicerat är orört.
@@ -2160,7 +2166,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID is required" });
                 }
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2214,7 +2220,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2273,6 +2279,8 @@ namespace HpskSite.Controllers
                         lanevapenOffered = support.LanevapenOffered && e.LanevapenOffered,
                         lanevapenPropertyExists = support.LanevapenOffered,
                         // ⚠️ Se kommentaren i EventEditListRow — samma fälla, samma skäl.
+                        readVisibility = (int)e.ReadVisibility,
+                        readVisibilitySupported = support.ReadVisibility,
                         eventAudience = HpskSite.Models.EventAudience.Normalise(e.Audience),
                         audiencePropertyExists = support.Audience,
                         eventSwishNumber = support.Swish ? e.SwishNumber : "",
@@ -2304,7 +2312,7 @@ namespace HpskSite.Controllers
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
             bool isMandatory = false, int maxParticipants = 0,
             bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null, string readVisibility = "")
         {
             try
             {
@@ -2316,7 +2324,7 @@ namespace HpskSite.Controllers
                 var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
                 if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
-                var e = _events.Get(eventId);
+                var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2359,7 +2367,7 @@ namespace HpskSite.Controllers
                 // den tysta glidningen ClubEventInput.ApplyRegistrationFields finns för att förhindra.
                 var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(
                     e, registrationRequired, maxParticipants, isMandatory, registrationUrl,
-                    lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
+                    lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber, readVisibility);
 
                 if (regFieldError != null)
                 {
@@ -2400,7 +2408,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventRecord = _events.Get(eventId);
+                var eventRecord = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2472,7 +2480,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventRecord = _events.Get(eventId);
+                var eventRecord = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2513,7 +2521,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventRecord = _events.Get(eventId);
+                var eventRecord = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
@@ -2554,7 +2562,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventRecord = _events.Get(eventId);
+                var eventRecord = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
                 if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });

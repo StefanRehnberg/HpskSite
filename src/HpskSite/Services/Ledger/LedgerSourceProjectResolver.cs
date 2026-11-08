@@ -65,7 +65,7 @@ namespace HpskSite.Services.Ledger
             {
                 // Händelser via händelselagringen (sajtstrukturen fas 2a); tävlingar är fortfarande noder.
                 var isEvent = kind == LedgerProjectSource.Event;
-                var ev = isEvent ? _events.Get(id) : null;
+                var ev = isEvent ? _events.Get(id, HpskSite.Services.Events.EventViewer.System) : null;
                 var competition = isEvent ? null : _competitions.GetSaved(id);
 
                 // ⚠️ En RADERAD tävling har fortfarande pengar — det vanliga fallet är en betalning

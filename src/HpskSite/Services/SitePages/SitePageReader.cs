@@ -99,8 +99,8 @@ namespace HpskSite.Services.SitePages
             _urls = urls;
         }
 
-        public ISiteBlockData For(string ownerType, int ownerId, IPublishedContent? ownerNode) =>
-            new Data(this, ownerType, ownerId, ownerNode);
+        public ISiteBlockData For(string ownerType, int ownerId, IPublishedContent? ownerNode, SiteViewer viewer) =>
+            new Data(this, ownerType, ownerId, ownerNode, viewer);
 
         /// <summary>Dokumentarkivets nivå som synlighet: Publik = Alla, Inloggade, Klubbmedlemmar, Klubbadministratörer = Dold.</summary>
         internal static SiteVisibility VisibilityOf(int accessLevel) => accessLevel switch
@@ -117,9 +117,10 @@ namespace HpskSite.Services.SitePages
             private readonly string _ownerType;
             private readonly int _ownerId;
             private readonly IPublishedContent? _node;
+            private readonly SiteViewer _viewer;
 
-            public Data(SiteBlockDataFactory f, string ownerType, int ownerId, IPublishedContent? node)
-            { _f = f; _ownerType = ownerType; _ownerId = ownerId; _node = node; }
+            public Data(SiteBlockDataFactory f, string ownerType, int ownerId, IPublishedContent? node, SiteViewer viewer)
+            { _f = f; _ownerType = ownerType; _ownerId = ownerId; _node = node; _viewer = viewer; }
 
             public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids)
             {
@@ -138,7 +139,7 @@ namespace HpskSite.Services.SitePages
             {
                 if (_ownerType != SiteTemplates.Club) return Array.Empty<SiteEventInfo>();
                 var now = DateTime.Now;
-                return _f._events.ListForOwner(_ownerId)
+                return _f._events.ListForOwner(_ownerId, HpskSite.Services.Events.EventViewer.ForOwner(_viewer))
                     .Where(e => e.StartsAt.HasValue && e.StartsAt.Value >= now && e.OwnerType == ClubEventRecord.OwnerClub && e.OwnerId == _ownerId)
                     .OrderBy(e => e.StartsAt)
                     .Take(count)

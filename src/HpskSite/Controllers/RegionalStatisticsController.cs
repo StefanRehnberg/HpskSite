@@ -246,7 +246,7 @@ namespace HpskSite.Controllers
             var recentTrainings = _trainings.DatesByClub(ninetyDaysAgo);
             foreach (var club in clubNodes)
             {
-                var hasRecentEvent = _events.ListForOwner(club.Id)
+                var hasRecentEvent = _events.ListForOwner(club.Id, HpskSite.Services.Events.EventViewer.System)
                     .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= ninetyDaysAgo)
                     // Fas B5: en träning räknas också — annars ser en klubb som bara har träningar
                     // ut att sakna verksamhet.

@@ -148,7 +148,7 @@ namespace HpskSite.Services
         {
             if (eventId <= 0) return null;
             // Via händelselagringen (sajtstrukturen fas 2a) — posten bär ägaren som (typ, id).
-            var e = _events.Get(eventId);
+            var e = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System);
             if (e == null) return null;
             var support = _events.Support;
 
@@ -169,7 +169,8 @@ namespace HpskSite.Services
                 OwnerId = owner?.OwnerId ?? 0,
                 OwnerName = owner?.Name ?? "",
                 IsClubOwned = owner?.IsClub == true,
-                IsRegionOwned = owner?.IsRegion == true
+                IsRegionOwned = owner?.IsRegion == true,
+                ReadVisibility = e.ReadVisibility
             };
 
             // Both are operator-added properties. A missing property must degrade to "off" rather
@@ -274,6 +275,8 @@ namespace HpskSite.Services
         /// </summary>
         public bool IsEligible(ClubEventContext ctx, IMember? member)
         {
+            // Synligheten går före anmälningsnivån: den som inte får SE händelsen får inte heller anmäla sig till den.
+            if (!SeesEvent(ctx, member)) return false;
             if (ctx.Audience == EventAudience.Open) return true;
             if (member == null) return false;
             if (ctx.Audience == EventAudience.AllMembers) return true;
@@ -281,6 +284,24 @@ namespace HpskSite.Services
             // klubbmedlemskap (en nybörjare på kurs är ofta inte medlem än). Beslut 2026-10-02.
             if (ctx.IsTraining && CourseRoleForTraining(member.Id, ctx.EventId) != null) return true;
             return IsEligible(GetEligibleClubIds(ctx), member);
+        }
+
+        /// <summary>
+        /// Får den här personen SE händelsen (<see cref="ClubEventContext.ReadVisibility"/>)? Alla: ja. Inloggade: varje medlem. Klubbmedlemmar: medlem i ägaren
+        /// (klubben, eller en klubb i kretsen för en kretshändelse). Styrelse: styrelsen i ägaren. Dold (och okänt värde): ingen kan anmäla sig själv —
+        /// den som arrangerar anmäler vid behov. En träning (ingen ReadVisibility) är alltid Alla här.
+        /// </summary>
+        public bool SeesEvent(ClubEventContext ctx, IMember? member)
+        {
+            var vis = ctx.ReadVisibility;
+            if (vis == HpskSite.Services.SitePages.SiteVisibility.Alla) return true;
+            if (member == null) return false;
+            if (vis == HpskSite.Services.SitePages.SiteVisibility.Inloggade) return true;
+            if (vis == HpskSite.Services.SitePages.SiteVisibility.Klubbmedlemmar)
+                return IsEligible(GetClubIdsFor(ctx, ctx.IsRegionOwned ? EventAudience.Region : EventAudience.Club), member);
+            if (vis == HpskSite.Services.SitePages.SiteVisibility.Styrelse)
+                return ctx.OwnerId > 0 && _boardRoles.IsBoardMemberOf(ctx.IsRegionOwned ? HpskSite.Models.DocumentOwnerType.Region : HpskSite.Models.DocumentOwnerType.Club, ctx.OwnerId, member.Id);
+            return false;
         }
 
         /// <summary>
@@ -1142,6 +1163,9 @@ ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
     {
         /// <summary>The OCCASION id — a node id for an event, a ClubTraining id for a training.</summary>
         public int EventId { get; set; }
+
+        /// <summary>Vem som får SE händelsen (<see cref="ClubEventRecord.ReadVisibility"/>). En träning är alltid Alla.</summary>
+        public HpskSite.Services.SitePages.SiteVisibility ReadVisibility { get; set; } = HpskSite.Services.SitePages.SiteVisibility.Alla;
 
         /// <summary><see cref="ClubEvents.OccasionEvent"/> or <see cref="ClubEvents.OccasionTraining"/> (fas B2).</summary>
         public string OccasionKind { get; set; } = ClubEvents.OccasionEvent;

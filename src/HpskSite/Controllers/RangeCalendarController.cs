@@ -55,7 +55,8 @@ namespace HpskSite.Controllers
             if (range == null) return NotFound();
             try
             {
-                var items = _calendar.Build(rangeId, DateTime.Today.AddMonths(-6), DateTime.Today.AddYears(1));
+                // Kalenderfilen hämtas med en signerad länk, utan inloggning: som utloggad, så en händelse med synlighet över Alla blir "Upptaget".
+                var items = _calendar.Build(rangeId, DateTime.Today.AddMonths(-6), DateTime.Today.AddYears(1), HpskSite.Services.Events.EventViewer.Anonymous);
                 var ics = _calendar.BuildIcs(rangeId, range.Name, items, $"{Request.PublicBase()}");
                 return File(Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
             }

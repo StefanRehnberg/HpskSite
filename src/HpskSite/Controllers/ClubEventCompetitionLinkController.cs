@@ -40,7 +40,7 @@ namespace HpskSite.Controllers
 
         private async Task<(HpskSite.Models.Events.ClubEventRecord? Event, string? Error)> EventForAdminAsync(int eventId)
         {
-            var ev = eventId > 0 ? _events.Get(eventId) : null;
+            var ev = eventId > 0 ? _events.Get(eventId, HpskSite.Services.Events.EventViewer.System) : null;
             if (ev == null) return (null, "Händelsen hittades inte.");
             if (!await _owners.CanManageAsync(_owners.ForEventRecord(ev))) return (null, "Du har inte behörighet att ändra händelsen.");
             return (ev, null);

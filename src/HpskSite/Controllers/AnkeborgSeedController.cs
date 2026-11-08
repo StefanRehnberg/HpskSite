@@ -629,7 +629,7 @@ VALUES
             // ── Händelser ────────────────────────────────────────────────────────────
             // Genom händelselagringen (sajtstrukturen fas 2a). Nyckeln är sidnamnet, som förut.
             var existingEvents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var existing in _events.ListForOwner(club.Id, publishedOnly: false))
+            foreach (var existing in _events.ListForOwner(club.Id, HpskSite.Services.Events.EventViewer.System, publishedOnly: false))
                 existingEvents.TryAdd(existing.PageName ?? "", existing.Id);
 
             // ⚠️ Städdagen ligger i DÅTID med ett taget upprop. Aktivitetssammanställningen

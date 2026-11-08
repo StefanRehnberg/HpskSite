@@ -673,7 +673,7 @@ namespace HpskSite.Controllers
 
                     // Klubbarnas publicerade händelser i EN läsning (förut ListForOwner per klubb, två gånger).
                     // Allt nedan räknar bara händelser från förrförra årets början, så äldre behövs inte.
-                    var eventsByOwner = _events.ListPublishedBetween(new DateTime(now.Year - 2, 1, 1), new DateTime(now.Year + 50, 1, 1))
+                    var eventsByOwner = _events.ListPublishedBetween(new DateTime(now.Year - 2, 1, 1), new DateTime(now.Year + 50, 1, 1), HpskSite.Services.Events.EventViewer.System)
                         .GroupBy(e => e.OwnerId)
                         .ToDictionary(g => g.Key, g => g.ToList());
                     List<HpskSite.Models.Events.ClubEventRecord> EventsOf(int clubId) =>

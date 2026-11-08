@@ -202,7 +202,7 @@ namespace HpskSite.Services.Ledger
             {
                 try
                 {
-                    var ev = _events.Get(sourceId.Value);
+                    var ev = _events.Get(sourceId.Value, HpskSite.Services.Events.EventViewer.System);
                     if (ev is not null && !string.IsNullOrWhiteSpace(ev.DisplayName))
                         return ev.IsPublished ? ev.DisplayName : $"{ev.DisplayName} (opublicerad)";
                 }

@@ -28,7 +28,7 @@
         return;
     }
     var ev = routed
-             ?? Events.Get(Model.Id)
+             ?? Events.Get(Model.Id, HpskSite.Services.Events.EventViewer.System)   // node mode: a node event cannot carry ReadVisibility (all open); table mode arrives as routed (checked in ServeEvent)
              ?? new HpskSite.Models.Events.ClubEventRecord { Id = Model.Id, PageName = Model.Name ?? "" };
     var eventId = ev.Id;
     var eventName = ev.DisplayName;

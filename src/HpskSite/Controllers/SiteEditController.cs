@@ -269,7 +269,7 @@ namespace HpskSite.Controllers
             if (!content.Ok) return Fail("Sidan kan inte visas ännu: " + content.Errors[0].Message);
 
             var node = UmbracoContext.Content?.GetById(g.OwnerId);
-            var r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node), g.OwnerUrl);
+            var r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
             return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
         }
 

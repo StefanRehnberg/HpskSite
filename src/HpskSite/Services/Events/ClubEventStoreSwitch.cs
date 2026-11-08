@@ -58,22 +58,30 @@ namespace HpskSite.Services.Events
             try { _feed.ClearCache(); } catch { /* en cache som inte går att tömma får aldrig fälla sparningen */ }
         }
 
-        private IClubEventStore Current => ClubEventStoreSettings.UsesTable(_settings) ? _sql : _node;
+        private IClubEventBackend Current => ClubEventStoreSettings.UsesTable(_settings) ? _sql : _node;
         private bool Frozen => _settings.Get(ClubEventStoreSettings.WriteFreezeKey, "0") == "1";
 
         public ClubEventFieldSupport Support => Current.Support;
-        public ClubEventRecord? Get(int id)
+        // ── Läsning: EN prövning av synligheten, här (EventViewer.CanSee) ─────────────────────────────────────────
+        public ClubEventRecord? Get(int id, EventViewer viewer)
         {
+            ArgumentNullException.ThrowIfNull(viewer);
             var r = Current.Get(id);
             // C3-planen F6: en uppslagning som inte gav något räknas (och loggas strypt i tabelläget).
             if (r == null) HpskSite.Services.Ops.OpsSignals.StoreMiss(_logger, "händelse", id,
                 ClubEventStoreSettings.UsesTable(_settings) ? "table" : "node");
-            return r;
+            return r != null && viewer.CanSee(r) ? r : null;
         }
-        public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids) => Current.GetMany(ids);
-        public IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, bool publishedOnly = true) => Current.ListForOwner(ownerId, publishedOnly);
-        public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to) => Current.ListPublishedBetween(from, to);
-        public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType) => Current.ListAllForOwnerType(ownerType);
+        public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids, EventViewer viewer) => Visible(Current.GetMany(ids), viewer);
+        public IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, EventViewer viewer, bool publishedOnly = true) => Visible(Current.ListForOwner(ownerId, publishedOnly), viewer);
+        public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to, EventViewer viewer) => Visible(Current.ListPublishedBetween(from, to), viewer);
+        public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType, EventViewer viewer) => Visible(Current.ListAllForOwnerType(ownerType), viewer);
+
+        private static IReadOnlyList<ClubEventRecord> Visible(IReadOnlyList<ClubEventRecord> all, EventViewer viewer)
+        {
+            ArgumentNullException.ThrowIfNull(viewer);
+            return viewer.IsSystem ? all : all.Where(viewer.CanSee).ToList();
+        }
 
         public async Task<(int Id, string? Error)> SaveAsync(ClubEventRecord record)
         {

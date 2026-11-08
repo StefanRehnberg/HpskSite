@@ -29,7 +29,7 @@
     {
         var regionCode = req.OwnerType == SiteTemplates.Region ? Model.Value<string>("regionCode") : null;
         var viewer = await Viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
-        var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model));
+        var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model, viewer));
         body = SiteBlockRenderer.RenderAll(loaded.Value.Content.Blocks, loaded.Value.Page.VisibilityLevel, ctx);
         title = loaded.Value.Page.PublishedTitle ?? loaded.Value.Page.Title;
         // Menyn: samma flikrad som ägarens övriga sidor, med den här sidan som aktuell (SitePageView känner igen en egen sida av begäran).

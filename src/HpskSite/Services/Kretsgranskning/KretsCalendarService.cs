@@ -67,7 +67,7 @@ namespace HpskSite.Services.Kretsgranskning
         private record CompRow(int Id, string Name, DateTime Date, DateTime? EndDate, string Discipline, string Level,
             string Scope, int ClubId, string RegionCode, bool IsClubOnly, string Url, string Venue);
 
-        private record EventRow(int RegionId, int Id, string Name, DateTime Date, DateTime? EndDate, string Venue, string Url);
+        private record EventRow(int RegionId, int Id, string Name, DateTime Date, DateTime? EndDate, string Venue, string Url, HpskSite.Services.SitePages.SiteVisibility ReadVisibility);
 
         private class Index
         {
@@ -232,7 +232,10 @@ namespace HpskSite.Services.Kretsgranskning
             }
 
             // Kretsens egna händelser (möten, utbildningar).
-            foreach (var e in idx.Events.Where(e => e.RegionId == regionId))
+            // Indexet delas och byggs för alla, så händelsens synlighet prövas här: kretsens admin ser allt, övriga bara Alla och Inloggade (kretskalendern
+            // är ett planeringsverktyg för inloggade; Klubbmedlemmar/Styrelse/Dold visas aldrig för en som inte är admin).
+            foreach (var e in idx.Events.Where(e => e.RegionId == regionId
+                && (viewerIsAdmin || e.ReadVisibility <= HpskSite.Services.SitePages.SiteVisibility.Inloggade)))
             {
                 var end = (e.EndDate ?? e.Date).Date;
                 if (end < from.Date || e.Date.Date > to.Date) continue;
@@ -323,11 +326,11 @@ namespace HpskSite.Services.Kretsgranskning
                         idx.ClubName[club.Id] = club.Value<string>("clubName") ?? club.Name ?? "";
                     }
                     // Kretsens egna händelser genom händelselagringen (sajtstrukturen fas 2a).
-                    foreach (var ev in _events.ListForOwner(r.Id))
+                    foreach (var ev in _events.ListForOwner(r.Id, HpskSite.Services.Events.EventViewer.System))
                     {
                         if (ev.StartsAt is not { } d) continue;
                         idx.Events.Add(new EventRow(r.Id, ev.Id, ev.DisplayName,
-                            d, ev.EndsAt, ev.Venue, ev.Url));
+                            d, ev.EndsAt, ev.Venue, ev.Url, ev.ReadVisibility));
                     }
                 }
 

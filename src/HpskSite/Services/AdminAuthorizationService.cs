@@ -407,7 +407,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Gets the regional federation code for a club
         /// </summary>
-        private string GetClubRegionCode(int clubId)
+        public string GetClubRegionCode(int clubId)
         {
             try
             {

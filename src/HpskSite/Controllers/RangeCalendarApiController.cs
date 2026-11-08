@@ -164,7 +164,7 @@ namespace HpskSite.Controllers
                 range = new { id = range.Id, name = range.Name, city = range.City, municipality = range.Municipality },
                 sections = sections.Select(s => new { id = s.Id, label = s.Label }),
                 from = f.ToString("yyyy-MM-dd"), to = t.ToString("yyyy-MM-dd"),
-                items = _calendar.Build(rangeId, f, t),
+                items = _calendar.Build(rangeId, f, t, await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync()),
                 canManage,
                 myClubIds = myClubs,
                 clubsOnRange,
@@ -184,7 +184,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Inloggning krävs." });
             var day = ParseDay(date);
             if (rangeId <= 0 || day == null) return Json(new { success = true, items = Array.Empty<object>() });
-            var items = _calendar.Day(rangeId, sectionId, day.Value, Clean(start), Clean(end), excludeKind, excludeId, clubId)
+            var items = _calendar.Day(rangeId, sectionId, day.Value, Clean(start), Clean(end), excludeKind, excludeId, clubId, await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync())
                 .Select(d => new
                 {
                     kind = d.Item.Kind, title = d.Item.Title, ownerName = d.Item.OwnerName, clubId = d.Item.ClubId,

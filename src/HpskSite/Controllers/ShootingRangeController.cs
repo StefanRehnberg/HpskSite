@@ -1546,7 +1546,7 @@ namespace HpskSite.Controllers
             var result = new List<RangeOngoingActivity>();
             var now = DateTime.Now;
             var member = _memberService.GetById(memberId);
-            foreach (var i in RangeCalendarRules.OngoingForCheckIn(_calendar.Build(rangeId, now, now), now))
+            foreach (var i in RangeCalendarRules.OngoingForCheckIn(_calendar.Build(rangeId, now, now, await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync()), now))
             {
                 var kind = i.Kind == RangeCalendarKind.Training ? ClubEvents.OccasionTraining : ClubEvents.OccasionEvent;
                 var ctx = _participation.GetContext(i.SourceId, kind);
