@@ -138,16 +138,19 @@ namespace HpskSite.Services.SitePages
                 return result;
             }
 
-            public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count)
+            public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count) => UpcomingEvents(count, null);
+
+            public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count, string? eventType)
             {
                 if (_ownerType != SiteTemplates.Club) return Array.Empty<SiteEventInfo>();
                 var now = DateTime.Now;
                 return _f._events.ListForOwner(_ownerId, HpskSite.Services.Events.EventViewer.ForOwner(_viewer))
-                    .Where(e => e.StartsAt.HasValue && e.StartsAt.Value >= now && e.OwnerType == ClubEventRecord.OwnerClub && e.OwnerId == _ownerId)
+                    .Where(e => e.StartsAt.HasValue && e.StartsAt.Value >= now && e.OwnerType == ClubEventRecord.OwnerClub && e.OwnerId == _ownerId
+                                && (eventType == null || e.EventType == eventType))
                     .OrderBy(e => e.StartsAt)
                     .Take(count)
                     .Select(e => new SiteEventInfo(e.DisplayName, e.StartsAt!.Value, string.IsNullOrWhiteSpace(e.Venue) ? null : e.Venue,
-                        _f._urls.UrlFor(PageAddressKinds.Event, e.Id) ?? ""))
+                        _f._urls.UrlFor(PageAddressKinds.Event, e.Id) ?? "", e.EventType))
                     .ToList();
             }
 

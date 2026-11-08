@@ -9,7 +9,7 @@ namespace HpskSite.Services.SitePages
     public sealed record SiteDocumentInfo(int Id, string Title, string? Description, long FileSize, SiteVisibility Visibility);
 
     /// <summary>En händelse i händelseblocket.</summary>
-    public sealed record SiteEventInfo(string Title, DateTime Start, string? Location, string Url);
+    public sealed record SiteEventInfo(string Title, DateTime Start, string? Location, string Url, string? Type = null);
 
     /// <summary>En nyhet i nyhetsblocket (publicerad, synlig för tittaren). <see cref="Date"/> är nyhetens datum, annars skapad.</summary>
     public sealed record SiteNewsInfo(string Title, DateTime Date, string Url);
@@ -25,6 +25,10 @@ namespace HpskSite.Services.SitePages
     {
         IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids);
         IReadOnlyList<SiteEventInfo> UpcomingEvents(int count);
+
+        /// <summary>Kommande händelser, valfritt bara av en typ. Standard: hämtar fler och gallrar (en implementation som kan filtrera i lagringen bör göra det).</summary>
+        IReadOnlyList<SiteEventInfo> UpcomingEvents(int count, string? eventType) =>
+            eventType == null ? UpcomingEvents(count) : UpcomingEvents(200).Where(e => e.Type == eventType).Take(count).ToList();
         SiteContactInfo? Contact();
 
         /// <summary>Bilderna bland <paramref name="ids"/> som hör till ägaren och inte är raderade. Standard: inga (en implementation utan bilder visar inga bildblock).</summary>
@@ -183,7 +187,8 @@ namespace HpskSite.Services.SitePages
         private static string Events(SiteBlock b, SiteRenderContext ctx)
         {
             var count = Math.Clamp(b.Data["count"]?.GetValue<int>() ?? 5, 1, 10);
-            var events = ctx.Data.UpcomingEvents(count).Take(count).ToList();
+            var evType = b.Data["type"]?.GetValue<string>();
+            var events = ctx.Data.UpcomingEvents(count, evType).Where(e => evType == null || e.Type == evType).Take(count).ToList();   // filtret prövas även här: en implementation som ignorerar typen kan inte släppa igenom fel händelser
             if (events.Count == 0) return "";
             var title = b.Data["title"]?.GetValue<string>();
             var sb = new StringBuilder();

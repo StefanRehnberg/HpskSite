@@ -312,6 +312,7 @@
         ['text', 'Textsida', 'En sida där du skriver fri text. Passar det mesta.'],
         ['docs', 'Sida med dokument', 'Text och dokument som medlemmarna kan ladda ned, till exempel blanketter.'],
         ['contact', 'Hitta hit & kontakt', 'Text om hur man hittar, och föreningens kontaktuppgifter.'],
+        ['meetings', 'Möten och kallelser', 'Kommande möten från kalendern, och plats för kallelser och protokoll.'],
         ['empty', 'Tom sida', 'Börja helt utan innehåll.'],
       ];
       content = tpls.map(([k, t, s]) => h('label', { class: 'hs-choice ' + (w.template === k ? 'active' : '') },
@@ -327,7 +328,7 @@
         if (!create.success) { err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return; }
         // Mallens startinnehåll sparas som första utkast, därefter öppnas redigeraren.
         const blocks = templateBlocks(w.template, w.visibility);
-        S.hint = w.template === 'docs' ? 'Lägg till dokumenten med knappen "Dokument" här under.' : null;
+        S.hint = w.template === 'docs' ? 'Lägg till dokumenten med knappen "Dokument" här under.' : w.template === 'meetings' ? 'Mötena hämtas ur kalendern (händelser av typen Möte). Lägg till kallelser och protokoll med knappen "Dokument" här under.' : null;
         if (blocks.length) {
           const save = await api('POST', 'SavePage', { pageId: create.pageId, expectedRevision: create.revision, title: w.title.trim(), blocksJson: JSON.stringify({ schema: 1, blocks }), visibility: w.visibility });
           if (!save.success) { err.replaceChildren(alertBox('danger', save.message || 'Sidan skapades men mallen kunde inte läggas in.')); }
@@ -346,6 +347,7 @@
     const text = () => ({ id: newId(), type: 'text', visibility: vis, data: { html: '' } });
     if (tpl === 'empty') return [];
     if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, 1), data: { title: 'Kontakt' } }];
+    if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }];
     return [text()];
   }
 
@@ -706,7 +708,8 @@
           'Visar de senaste nyheterna ni publicerat som händelsetypen Nyhet. Varje nyhet har sin egen nivå (vem som får läsa den); den som inte får läsa en nyhet ser den inte i listan.')];
       case 'events': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många händelser', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
-          'Visar de närmaste kommande händelserna i kalendern.')];
+          'Visar de närmaste kommande händelserna i kalendern.'),
+        field('Vilka händelser?', bind(h('select', { class: 'form-select w-auto' }, h('option', { value: '', selected: !d.type ? true : null }, 'Alla händelser'), h('option', { value: 'Möte', selected: d.type === 'Möte' ? true : null }, 'Bara möten')), d, 'type', v => v || undefined))];
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
       case 'image': return imageEditor(b);

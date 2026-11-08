@@ -67,11 +67,14 @@ namespace HpskSite.Services.SitePages
             new BlockType("links", false, true, Set("items")),
             new BlockType("documents", false, false, Set("title", "refs")),
             new BlockType("contact", Personal: true, false, Set("title")),   // klubbens kontaktperson: personuppgift, aldrig Alla
-            new BlockType("events", false, false, Set("title", "count")),
+            new BlockType("events", false, false, Set("title", "count", "type")),
             new BlockType("pagelink", false, false, Set("key", "label")),
             new BlockType("image", false, false, Set("ref", "alt", "decorative", "caption")),
             new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        /// <summary>Händelsetyper ett händelseblock får filtrera på (klubbens vanliga typer; tävlingar har egna sidor).</summary>
+        public static readonly IReadOnlySet<string> EventTypes = new HashSet<string>(StringComparer.Ordinal) { "Möte", "Städning", "Socialt", "Nyhet" };
 
         private static IReadOnlySet<string> Set(params string[] f) => new HashSet<string>(f, StringComparer.Ordinal);
 
@@ -269,7 +272,11 @@ namespace HpskSite.Services.SitePages
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
                     if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet händelser är 1 till 10."));
+                    // Valfri filtrering på händelsetyp ("Möte"): mallen "Möten och kallelser" visar bara möten. Fri text vore en ny inmatning att validera, så typen väljs ur en fast lista.
+                    var evType = Str(d["type"]);
+                    if (d["type"] != null && (evType == null || !EventTypes.Contains(evType))) errors.Add(new($"{p}.type", "Okänd händelsetyp."));
                     if (title != null) o["title"] = title;
+                    if (evType != null) o["type"] = evType;
                     o["count"] = count;
                     break;
                 }
