@@ -1371,84 +1371,6 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Arrangörens två inställningar för mästerskapet i en fält-/MagnumFälttävling: <b>vilka som deltar</b> (alla, bara egna, egna + angränsande
-        /// kretsar) och <b>vilka vapengrupper som avgör mästerskapet</b> (inga valda = alla). Styr förslagen "skjuter utanför mästerskapet" och
-        /// var det finns en mästerskapsplacering alls. Vägras efter publicering: en ändring av vapengrupper hade tyst ändrat en publicerad
-        /// lista vid nästa omräkning (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet). Prövas av arrangörens behörighet.
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("HasCompetitionOrganiserAccessAsync(tävlingen): arrangörens behörighet, som SetOutOfCompetition")]
-        public async Task<IActionResult> SetChampionshipSettings([FromBody] SetChampionshipSettingsRequest request)
-        {
-            try
-            {
-                if (request == null || request.CompetitionId <= 0)
-                    return Json(new { success = false, message = "Ogiltig begäran." });
-
-                var competition = _competitions.GetSaved(request.CompetitionId);
-                if (competition == null)
-                    return Json(new { success = false, message = "Tävling hittades inte." });
-
-                if (!await _authService.HasCompetitionOrganiserAccessAsync(request.CompetitionId))
-                    return Json(new { success = false, message = "Du har inte behörighet." });
-
-                var rule = HpskSite.CompetitionTypes.Common.ChampionshipRule.For(competition);
-                if (!rule.OutOfCompetitionApplies)
-                    return Json(new { success = false, message = "Inställningarna gäller bara mästerskap i fält och MagnumFält." });
-                switch (_outOfCompetitionLock.Reason(competition))
-                {
-                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.ResultsPublished:
-                        return Json(new
-                        {
-                            success = false,
-                            message = HpskSite.CompetitionTypes.Common.OutOfCompetitionLock.IsPrecisionFamily(competition.TypeId)
-                                ? "Resultatlistan är publicerad. Avpublicera den först på Resultat-fliken, ändra, och publicera igen."
-                                : "Resultatlistan är publicerad. Avpublicera den först, eller rätta enskilda skyttar med \"Rätta mästerskapet\"."
-                        });
-                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.FinalsBuilt:
-                        return Json(new { success = false, message = "Finalstartlistan är redan byggd. Vilka som deltar och vilka vapengrupper som avgör mästerskapet kan inte ändras nu. Bygg om finalstartlistan först." });
-                    case HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason.QualifyingFrozen:
-                        return Json(new { success = false, message = "En kvalgrupp är låst inför finalen. Lås upp gruppen först, så att finalisterna räknas om efter ändringen." });
-                }
-
-                // Vilka deltar: bara de former tävlingens nivå har förslag för (SM har aldrig förslag, grannkretsar bara för kretsmästerskap).
-                var asked = (request.Participants ?? "").Trim().ToLowerInvariant();
-                var participants = HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.Normalize(asked);   // null = alla
-                if (asked.Length > 0 && asked != HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.All && participants == null)
-                    return Json(new { success = false, message = "Okänt val för \"Vilka deltar\"." });
-                if (participants != null && rule.Kind == HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Sm)
-                    return Json(new { success = false, message = "I ett svenskt mästerskap deltar alla; där finns inga automatiska förslag." });
-                if (participants == HpskSite.CompetitionTypes.Common.ChampionshipParticipantsSetting.OwnPlusNeighbours
-                    && rule.Kind != HpskSite.CompetitionTypes.Common.ChampionshipScopeKind.Krets)
-                    return Json(new { success = false, message = "Angränsande kretsar kan bara väljas för kretsmästerskap." });
-
-                // Vapengrupper: bara kända koder; inga valda = alla.
-                var wanted = (request.WeaponGroups ?? Array.Empty<string>()).Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
-                if (wanted.Count > 0 && HpskSite.CompetitionTypes.Common.PrecisionFamilyResultReader.SupportedTypes.Contains(competition.TypeId ?? "", StringComparer.OrdinalIgnoreCase))
-                    return Json(new { success = false, message = "Vapengrupper kan inte väljas för den här grenen — mästerskapet gäller alla vapengrupper." });
-                var groups = HpskSite.CompetitionTypes.Common.ChampionshipWeaponGroups.Canonicalize(string.Join(",", wanted));
-                if (wanted.Count > 0 && groups == null)
-                    return Json(new { success = false, message = "Okänd vapengrupp." });
-
-                var saved = _competitions.Update(request.CompetitionId, null, c =>
-                {
-                    c.ChampionshipParticipants = participants;
-                    c.ChampionshipWeaponGroups = groups;
-                });
-                if (saved.PublishProblem != null)
-                    return Json(new { success = false, message = saved.PublishProblem });
-
-                return Json(new { success = true, participants = participants ?? "all", weaponGroups = groups == null ? new string[0] : groups.Split(',') });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "SetChampionshipSettings failed for competition {CompetitionId}", request?.CompetitionId);
-                return Json(new { success = false, message = "Ett fel uppstod." });
-            }
-        }
-
-        /// <summary>
         /// Toggle the at-the-desk attendance state on a registration (item #9). The flag
         /// lives on the registration document so it persists across page reloads and is
         /// visible to anyone reading the registrations table — no SQL migration needed.
@@ -3109,18 +3031,6 @@ namespace HpskSite.Controllers
             public int ToMemberId { get; set; }
         }
 
-        /// <summary>
-        /// Request model for the at-the-desk check-in toggle (item #9).
-        /// </summary>
-        public class SetChampionshipSettingsRequest
-        {
-            public int CompetitionId { get; set; }
-            /// <summary>"all" (alla deltar), "own" (egen krets/landsdel/klubb) eller "own+neighbours" (kretsmästerskap: egen + angränsande).</summary>
-            public string? Participants { get; set; }
-            /// <summary>Vapengruppskoder som avgör mästerskapet ("A", "C", "R" …). Tom lista = alla grupper.</summary>
-            public string[]? WeaponGroups { get; set; }
-        }
-
         public class SetOutOfCompetitionRequest
         {
             public int RegistrationId { get; set; }
@@ -3130,6 +3040,9 @@ namespace HpskSite.Controllers
             public bool? Value { get; set; }
         }
 
+        /// <summary>
+        /// Request model for the at-the-desk check-in toggle (item #9).
+        /// </summary>
         public class SetCheckedInRequest
         {
             public int RegistrationId { get; set; }

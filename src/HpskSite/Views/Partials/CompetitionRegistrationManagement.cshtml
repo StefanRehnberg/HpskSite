@@ -352,19 +352,7 @@
             #regFilterCard:not(.reg-show-more) .reg-more-filter { display: none; }
         }
     </style>
-    @* Mästerskap: vilka deltar? Bara för ett mästerskap i fält/MagnumFält (servern avgör, svaret bär "championship"). Två val: vilka som
-       deltar (styr förslagen om vem som skjuter utanför) och vilka vapengrupper som avgör mästerskapet. Låst när listan är publicerad. *@
-    <div class="card mb-3 d-none" id="regChampCard">
-        <div class="card-body">
-            <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
-                <div>
-                    <h6 class="mb-1"><i class="bi bi-trophy me-1"></i>Mästerskap: vilka deltar?</h6>
-                    <p class="small text-muted mb-0" id="regChampSummary"></p>
-                </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="regChampEditBtn" title="Vilka som deltar och vilka vapengrupper som avgör mästerskapet ställer du in i Redigera tävling, under Mästerskap.">Ändra i Redigera tävling</button>
-            </div>
-        </div>
-    </div>
+    @* Vilka som deltar i mästerskapet och vilka vapengrupper som avgör det ställs in i Redigera tävling (under Mästerskap), inte här. *@
     @* "N föreslås utanför mästerskapet" — bara när tävlingen använder beteendet och något förslag väntar på beslut.
        Förslaget blir ett beslut när resultatlistan publiceras; därför försvinner bannern av sig själv efteråt. *@
     <div class="alert alert-warning d-none align-items-center flex-wrap gap-2 mb-3" id="regOocBanner" role="status">
@@ -1746,7 +1734,6 @@ function loadCompetitionRegistrations() {
             populateCompetitionClubFilter();
             populateShootingClassFilter();
             updatePaymentSummary();
-            renderChampionshipCard(data.championship);
             updateOocBanner();
             filterCompetitionRegistrations();
         } else {
@@ -3048,65 +3035,6 @@ function oocStateOf(reg) {
         outside: rows.some(sc => sc.outOfCompetitionEffective === true)
     };
 }
-
-// ── Mästerskap: vilka deltar? (kortet överst) ─────────────────────────────────────────────────
-// Servern avgör om kortet visas (championship != null = fält-/MagnumFältmästerskap) och vilka val nivån har. Låst när listan är publicerad.
-let champState = null;
-
-function champParticipantOptions(c) {
-    const own = { Krets: 'Bara kretsens egna klubbar', Landsdel: 'Bara landsdelens egna klubbar', Klubb: 'Bara klubbens egna medlemmar' }[c.kind];
-    const opts = [['all', 'Alla deltar']];
-    if (own) opts.push(['own', own]);
-    if (c.kind === 'Krets') opts.push(['own+neighbours', 'Kretsen och angränsande kretsar']);
-    return opts;
-}
-
-// Låst = listan är publicerad, finalstartlistan byggd eller en kvalgrupp låst (servern skickar lockReason; gamla svar har bara official).
-function champLocked(c) {
-    return !!c.official || (!!c.lockReason && c.lockReason !== 'None');
-}
-
-function champSummary(c) {
-    const opt = champParticipantOptions(c).find(o => o[0] === c.participants);
-    const who = c.participants === 'all'
-        ? 'Alla deltar. Ingen markeras automatiskt: du markerar en enskild skytt som utanför i Redigera anmälan.'
-        : (opt ? opt[1] : c.participants) + ' deltar. Skyttar som tävlar för en klubb utanför föreslås som utanför mästerskapet.';
-    const groups = (c.weaponGroups && c.weaponGroups.length)
-        ? 'Mästerskap i vapengrupp ' + c.weaponGroups.join(', ') + '; övriga grupper skjuts som en vanlig tävling.'
-        : 'Alla vapengrupper avgör mästerskapet.';
-    // Varför kortet är låst: publicerad lista (fält: avpublicera eller Rätta; precisionsfamiljen: avpublicera), byggd finalstartlista eller låst kvalgrupp.
-    const locked = c.lockReason === 'FinalsBuilt'
-        ? ' Finalstartlistan är byggd, så inställningarna är låsta (bygg om finalstartlistan först).'
-        : c.lockReason === 'QualifyingFrozen'
-            ? ' En kvalgrupp är låst inför finalen, så inställningarna är låsta (lås upp gruppen först).'
-            : c.official
-                ? (c.canCorrect === false
-                    ? ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först).'
-                    : ' Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet).')
-                : '';
-    // Grenar utan vapengruppsval (precisionsfamiljen) nämner inte vapengrupperna alls: mästerskapet gäller alla.
-    const hasGroupChoice = (c.knownGroups || []).length > 0 || (c.weaponGroups || []).length > 0;
-    return who + ' ' + (hasGroupChoice ? groups : '') + locked;
-}
-
-// Inställningarna ändras i Redigera tävling (under Mästerskap), inte här: kortet visar bara läget och öppnar den dialogen.
-function champOpenEditor() {
-    const id = $('.competition-registration-management').data('competition-id');
-    if (typeof window.openEditCompetitionModal === 'function') window.openEditCompetitionModal(id, false, '');
-}
-
-function renderChampionshipCard(c) {
-    const card = document.getElementById('regChampCard');
-    if (!card) return;
-    champState = c || null;
-    card.classList.toggle('d-none', !c);
-    if (!c) return;
-    document.getElementById('regChampSummary').textContent = champSummary(c);
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('regChampEditBtn')?.addEventListener('click', champOpenEditor);
-});
 
 function updateOocBanner() {
     const banner = document.getElementById('regOocBanner');

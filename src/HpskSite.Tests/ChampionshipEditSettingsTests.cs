@@ -213,12 +213,29 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Kortet_i_Anmalningar_ar_en_sammanfattning_utan_eget_formular()
+        public void Anmalningar_har_inget_masterskapskort_och_ingen_egen_skrivvag()
         {
-            var card = Code("Views/Partials/CompetitionRegistrationManagement.cshtml");
-            Assert.DoesNotContain("regChampForm", card);
-            Assert.DoesNotContain("SetChampionshipSettings", card);
-            Assert.Contains("champOpenEditor", card);
+            // Stefan 2026-11-08: inställningen bor i Redigera tävling och ingen annanstans. Kortet, dess JS och dess serverdata är borta.
+            var page = Code("Views/Partials/CompetitionRegistrationManagement.cshtml");
+            foreach (var gone in new[] { "regChampCard", "regChampForm", "regChampSummary", "regChampEditBtn", "renderChampionshipCard", "champOpenEditor", "SetChampionshipSettings" })
+                Assert.DoesNotContain(gone, page);
+
+            Assert.DoesNotContain("SetChampionshipSettings", Code("Controllers/RegistrationAdminController.cs"));
+            // Anmälningslistan lämnar inte längre ut mästerskapets läge och låsberäkningen (bara kortet läste dem).
+            var competitionController = Code("Controllers/CompetitionController.cs");
+            Assert.DoesNotContain("championship = oocRule", competitionController);
+            Assert.DoesNotContain("oocLock", competitionController);
+        }
+
+        [Fact]
+        public void Redigera_tavling_ar_enda_platsen_dar_installningen_skrivs()
+        {
+            // Skrivvägen är fältpåsen (championshipParticipants/championshipWeaponGroups) genom SaveCompetition, prövad av ChampionshipEditSettings.Refusal.
+            var skrivare = Directory.EnumerateFiles(Path.Combine(Root(), "Controllers"), "*.cs", SearchOption.AllDirectories)
+                .Where(f => File.ReadAllText(f).Contains("c.ChampionshipParticipants ="))
+                .Select(Path.GetFileName)
+                .ToList();
+            Assert.Empty(skrivare);
         }
     }
 }
