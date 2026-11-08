@@ -316,6 +316,32 @@ namespace HpskSite.Tests
         }
 
         [SqlFact]
+        public void Schema_2_går_inte_att_skriva_med_en_vanlig_sparning_på_en_sida_som_inte_är_omvandlad_men_sparas_med_schemanummer_2_när_den_är_det()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts();
+            var c = SitePageWriter.CreateTemplateCopy(f.Db, Club, Owner, "calendar", SiteVisibility.Klubbmedlemmar, Admin, Now);
+            Assert.True(c.Ok, c.Message);
+            const string converted = "{\"schema\":2,\"blocks\":[{\"id\":\"abcd1\",\"type\":\"panel\",\"visibility\":2,\"data\":{\"key\":\"calendar\"}}]}";
+            var refused = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "Kalender", converted, null, Admin, Now);
+            Assert.Equal(SiteWriteStatus.Invalid, refused.Status);                                  // grinden: en vanlig sparning omvandlar inte
+            Assert.Equal(0, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePageVersion WHERE PageId=@0 AND SchemaVersion=2", c.PageId));
+
+            // Som K2:s omvandling kommer att göra det: en schema-2-version finns. Därefter går redigering och publicering.
+            f.Db.Execute(@"INSERT INTO dbo.SitePageVersion (PageId, OwnerType, OwnerId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedAsSupport, SavedDate)
+                           VALUES (@0, 'Club', @1, 0, N'Kalender', @2, 2, 0x00, 0, 0, 0, @3)", c.PageId, Owner, converted, Now);
+            var s = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "Kalender", converted, null, Admin, Now);
+            Assert.True(s.Ok, s.Message);
+            Assert.Equal(2, Scalar(f.Db, "SELECT TOP 1 SchemaVersion FROM dbo.SitePageVersion WHERE PageId=@0 ORDER BY Id DESC", c.PageId));   // kolumnen följer innehållet
+            var p = SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, s.Revision, Admin, Now);
+            Assert.True(p.Ok, p.Message);
+            var page = SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!;
+            var pub = SitePageStore.GetPublished(f.Db, c.PageId, Club, Owner)!;
+            Assert.Equal(SiteContentKind.ConvertedPage, SiteBlockSchema.KindOf(page.IsFree, pub.BlocksJson));
+            Assert.True(SiteBlockSchema.Parse(pub.BlocksJson, SiteContentKind.ConvertedPage, page.VisibilityLevel, SiteTemplates.ClubTemplate, page.TemplateKey).Ok);
+        }
+
+        [SqlFact]
         public void En_slot_kan_inte_göras_öppnare_än_systemsidan_vid_sparning()
         {
             using var f = new SiteSqlFixture(); SeedOwners(f.Db);

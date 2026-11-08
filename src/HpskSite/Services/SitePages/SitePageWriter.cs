@@ -277,6 +277,11 @@ namespace HpskSite.Services.SitePages
             string title, string blocksJson, SiteVisibility vis, bool allowPersonalNumber, out SiteContentResult? content)
         {
             var kind = SiteBlockSchema.KindOf(page.IsFree, blocksJson);
+            content = null;
+            // En vanlig sparning omvandlar aldrig en sida: schema 2 får bara skrivas på en sida som redan har en omvandlad version.
+            if (kind == SiteContentKind.ConvertedPage && !SitePageStore.HasConvertedVersion(db, page.Id))
+                return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision,
+                    Errors: new[] { new SiteContentError("schema", "Sidan har inte gjorts om.") }, Message: "Sidan har inte gjorts om.");
             content = SiteBlockSchema.Parse(blocksJson, kind, vis, SiteTemplates.For(ownerType), page.TemplateKey);
             if (!content.Ok)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision, Errors: content.Errors, Message: content.Errors[0].Message);

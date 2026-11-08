@@ -46,6 +46,10 @@ namespace HpskSite.Tests
             var slots = "{\"schema\":1,\"slots\":{\"before\":[" + Panel("abcd1", "calendar", 2) + "],\"after\":[]}}";
             Assert.False(SiteBlockSchema.Parse(slots, SiteContentKind.TemplateCopy, SiteVisibility.Klubbmedlemmar, Club, "calendar").Ok);
             Assert.False(SiteBlockSchema.Parse(Page(2, Panel("abcd1", "calendar", 2)), SiteContentKind.FreePage, SiteVisibility.Klubbmedlemmar, Club).Ok);   // schema 2 på en fri sida
+            // Även med en giltig sidnyckel och rätt schemanummer: typen själv är bara för omvandlade sidor (inte bara en bieffekt av andra regler).
+            var forced = SiteBlockSchema.Parse(Page(1, Panel("abcd1", "calendar", 2)), SiteContentKind.FreePage, SiteVisibility.Klubbmedlemmar, Club, "calendar");
+            Assert.False(forced.Ok);
+            Assert.Contains(forced.Errors, e => e.Message.Contains("omvandlad"));
         }
 
         [Fact]

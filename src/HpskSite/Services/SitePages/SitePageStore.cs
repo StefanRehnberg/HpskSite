@@ -183,6 +183,10 @@ namespace HpskSite.Services.SitePages
                 $"SELECT {PageColumns} FROM dbo.SitePage WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2" + (includeDeleted ? "" : " AND DeletedDate IS NULL"),
                 pageId, ownerType, ownerId);
 
+        /// <summary>Har sidan någon version i schema 2 (är den omvandlad)? Vanlig sparning får bara skriva schema 2 på en sida som redan är det; själva omvandlingen går bara genom sin egen grind (K2).</summary>
+        public static bool HasConvertedVersion(IDatabase db, int pageId) =>
+            db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SitePageVersion WHERE PageId = @0 AND SchemaVersion = @1", pageId, SiteBlockSchema.ConvertedSchemaVersion) > 0;
+
         public static SitePageVersionRow? GetVersion(IDatabase db, int versionId, int pageId) =>
             db.FirstOrDefault<SitePageVersionRow>($"SELECT {VersionColumns} FROM dbo.SitePageVersion WHERE Id = @0 AND PageId = @1", versionId, pageId);
 
