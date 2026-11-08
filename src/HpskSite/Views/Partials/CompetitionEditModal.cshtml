@@ -636,6 +636,23 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling på vilken tävlingsnivå som helst. Avgör hur standardmedaljer beräknas.</small>
                     </div>
 
+                    @* Mästerskapets inställningar: vilka som deltar och (fält) vilka vapengrupper som avgör mästerskapet. Visas bara när grenen använder
+                       "Utanför mästerskapet" och omfattningen ovan är ett mästerskap (hpskChampionshipRefresh). Utan name-attribut: insamlingen
+                       sker i hpskChampionshipCollect så att ett dolt eller låst avsnitt aldrig skickas. *@
+                    <div class="mb-3 d-none" id="edit_championshipSection">
+                        <div class="border rounded p-3">
+                            <label for="edit_championshipParticipants" class="form-label fw-semibold">Vilka deltar i mästerskapet?</label>
+                            <select class="form-select" id="edit_championshipParticipants"></select>
+                            <small class="form-text text-muted d-block" id="edit_championshipParticipantsHelp"></small>
+                            <fieldset class="mt-3 d-none" id="edit_championshipGroupsFieldset">
+                                <legend class="form-label fw-semibold fs-6">Vapengrupper som avgör mästerskapet</legend>
+                                <div id="edit_championshipGroups"></div>
+                                <small class="form-text text-muted d-block">Inga valda = alla vapengrupper avgör mästerskapet. Övriga grupper skjuts som en vanlig tävling: placering och standardmedalj, men ingen mästare.</small>
+                            </fieldset>
+                            <div class="alert alert-secondary py-2 px-3 small mt-3 mb-0 d-none" id="edit_championshipLockNote" role="status"></div>
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
@@ -1249,6 +1266,7 @@ window.populateEditModal = function(competition) {
 
     // Competition scope dropdown
     setFieldValue('edit_competitionScope', competition.competitionScope || '');
+    hpskChampionshipPopulate(competition.championship, competition.id);
     setFieldValue('edit_subCompetitionName', competition.subCompetitionName || '');
 
     // Series dropdown - store value in dataset for loadSeries() to apply
@@ -1470,6 +1488,16 @@ function saveCompetition() {
     // strictly turning off in this flow).
     var ssEl = document.getElementById('edit_faltskytteSelfServiceResults');
     if (ssEl) fields.faltskytteSelfServiceResults = ssEl.checked;
+
+    // Mästerskapets inställningar: bara en befintlig tävling, och bara när avsnittet visas och inte är låst (annars utelämnas de och
+    // sparningen rör dem inte). En kopia får förvalen.
+    if ((parseInt(document.getElementById('edit_competitionId').value, 10) || 0) !== 0) {
+        const champ = hpskChampionshipCollect();
+        if (champ) {
+            fields.championshipParticipants = champ.participants;
+            fields.championshipWeaponGroups = champ.groups;
+        }
+    }
 
     // seriesId plockas ut av den delade insamlingen. För en BEFINTLIG tävling hanteras
     // den via Move efter sparning; för en NY (kopiera/skapa) skickas den till
@@ -2458,4 +2486,107 @@ window.hpskEditOpenClassPicker = function () {
         };
     }
 })();
+</script>
+<script>
+// Mästerskapets inställningar: vilka deltar, vapengrupper.
+// Visas när grenen använder "Utanför mästerskapet" (servern: championship.available) OCH omfattningen ovan är ett mästerskap. Omfattningen
+// kan bytas i samma dialog, så avsnittet ritas om vid varje byte. Låst (publicerad lista, byggd final, låst kvalgrupp) visas det men går inte
+// att ändra; då skickas inget. Servern prövar detsamma vid sparning (ChampionshipEditSettings.Refusal).
+const HPSK_CHAMP_KINDS = @Html.Raw(Json.Serialize(new Dictionary<string, string>
+{
+    [HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.SvensktMasterskap] = "Sm",
+    [HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Landsdelsmasterskap] = "Landsdel",
+    [HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Kretsmasterskap] = "Krets",
+    [HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Klubbmasterskap] = "Klubb"
+}));
+let hpskChampState = null;
+
+function hpskChampionshipKind() {
+    const v = (document.getElementById('edit_competitionScope')?.value || '').trim();
+    return HPSK_CHAMP_KINDS[v] || '';
+}
+
+function hpskChampionshipLocked() {
+    const isNew = (parseInt(document.getElementById('edit_competitionId')?.value, 10) || 0) === 0;
+    return !!hpskChampState && !isNew && !!hpskChampState.lockReason && hpskChampState.lockReason !== 'None';
+}
+
+function hpskChampionshipPopulate(champ) {
+    hpskChampState = champ ? {
+        available: !!champ.available,
+        participants: champ.participants || 'all',
+        weaponGroups: Array.isArray(champ.weaponGroups) ? champ.weaponGroups.slice() : [],
+        offeredGroups: Array.isArray(champ.offeredGroups) ? champ.offeredGroups.slice() : [],
+        lockReason: champ.lockReason || 'None',
+        isPrecisionFamily: !!champ.isPrecisionFamily
+    } : null;
+    hpskChampionshipRender();
+}
+
+function hpskChampionshipLockText() {
+    const st = hpskChampState;
+    switch (st.lockReason) {
+        case 'FinalsBuilt': return 'Finalstartlistan är byggd, så inställningarna är låsta (bygg om finalstartlistan först).';
+        case 'QualifyingFrozen': return 'En kvalgrupp är låst inför finalen, så inställningarna är låsta (lås upp gruppen först).';
+        case 'ResultsPublished':
+            return st.isPrecisionFamily
+                ? 'Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först).'
+                : 'Resultatlistan är publicerad, så inställningarna är låsta (avpublicera först, eller rätta enskilda skyttar med Rätta mästerskapet).';
+        default: return '';
+    }
+}
+
+function hpskChampionshipRender() {
+    const section = document.getElementById('edit_championshipSection');
+    if (!section) return;
+    const st = hpskChampState;
+    const kind = hpskChampionshipKind();
+    const show = !!st && st.available && kind !== '';
+    section.classList.toggle('d-none', !show);
+    if (!show) return;
+
+    const locked = hpskChampionshipLocked();
+    const sel = document.getElementById('edit_championshipParticipants');
+    const labelOwn = { Krets: 'Bara kretsens egna klubbar', Landsdel: 'Bara landsdelens egna klubbar', Klubb: 'Bara klubbens egna medlemmar' }[kind];
+    const opts = [['all', 'Alla deltar']];
+    if (labelOwn) opts.push(['own', labelOwn]);
+    if (kind === 'Krets') opts.push(['own+neighbours', 'Kretsen och angränsande kretsar']);
+    if (!opts.some(o => o[0] === st.participants)) st.participants = 'all';
+    sel.innerHTML = opts.map(o => `<option value="${o[0]}"${o[0] === st.participants ? ' selected' : ''}>${o[1]}</option>`).join('');
+    sel.disabled = locked || kind === 'Sm';
+    sel.onchange = () => { st.participants = sel.value; };
+    document.getElementById('edit_championshipParticipantsHelp').textContent = kind === 'Sm'
+        ? 'I ett svenskt mästerskap deltar alla; där finns inga automatiska förslag.'
+        : 'Styr förslagen. Den som tävlar för en klubb utanför föreslås som utanför mästerskapet, och du kan alltid ändra enskilda skyttar i Redigera anmälan.';
+
+    const fs = document.getElementById('edit_championshipGroupsFieldset');
+    const box = document.getElementById('edit_championshipGroups');
+    fs.classList.toggle('d-none', st.offeredGroups.length === 0);
+    box.innerHTML = st.offeredGroups.map(g => {
+        const id = 'edit_champG_' + g.replace(/[^A-Za-z0-9]/g, '_');
+        const safe = g.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        return `<div class="form-check"><input class="form-check-input edit-champ-group" type="checkbox" id="${id}" value="${safe}"${st.weaponGroups.includes(g) ? ' checked' : ''}${locked ? ' disabled' : ''}>` +
+               `<label class="form-check-label" for="${id}">${safe}</label></div>`;
+    }).join('');
+    box.querySelectorAll('.edit-champ-group').forEach(cb => cb.addEventListener('change', () => {
+        st.weaponGroups = Array.from(box.querySelectorAll('.edit-champ-group:checked')).map(x => x.value);
+    }));
+
+    const note = document.getElementById('edit_championshipLockNote');
+    note.textContent = locked ? hpskChampionshipLockText() : '';
+    note.classList.toggle('d-none', !locked);
+}
+
+// Det som skickas med sparningen, eller null när avsnittet inte visas eller är låst (då utelämnas fälten helt).
+function hpskChampionshipCollect() {
+    const st = hpskChampState;
+    const kind = hpskChampionshipKind();
+    if (!st || !st.available || kind === '' || hpskChampionshipLocked()) return null;
+    return {
+        participants: kind === 'Sm' ? 'all' : st.participants,
+        groups: st.offeredGroups.length === 0 ? '' : st.weaponGroups.filter(g => st.offeredGroups.includes(g)).join(',')
+    };
+}
+
+document.getElementById('edit_competitionScope')?.addEventListener('change', hpskChampionshipRender);
 </script>

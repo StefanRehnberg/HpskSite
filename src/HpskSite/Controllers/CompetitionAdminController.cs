@@ -856,6 +856,11 @@ namespace HpskSite.Controllers
                     addToMenu = competition.AddToMenu,
                     isAwardingStandardMedals = competition.IsAwardingStandardMedals,
                     isAwardingHonoraryAward = competition.IsAwardingHonoraryAward,
+                    // Mästerskapets inställningar (vilka deltar, vapengrupper) för Redigera tävling.
+                    championship = HpskSite.CompetitionTypes.Common.ChampionshipEditSettings.ForEditor(competition,
+                        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                            .GetRequiredService<HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader>(HttpContext.RequestServices)
+                            .Reason(competition)),
                     isClubOnly = competition.IsClubOnly,
                     maxParticipants = competition.MaxParticipants,
                     registrationFee = competition.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m,

@@ -115,6 +115,12 @@ namespace HpskSite.CompetitionTypes.Common
         public bool OutOfCompetitionApplies => IsChampionship && IsEnabledDiscipline(_discipline);
 
         /// <summary>
+        /// Använder tävlingens GREN beteendet (sajtinställningen <c>OutOfCompetition:Disciplines</c>), oavsett om omfattningen är ett mästerskap?
+        /// Redigera tävling frågar så, eftersom arrangören kan byta omfattning i samma dialog och inställningarna då ska dyka upp.
+        /// </summary>
+        public bool DisciplineEnabled => IsEnabledDiscipline(_discipline);
+
+        /// <summary>
         /// Avgör tävlingen mästerskapet i den här vapengruppen ("A", "C", "R" … — <see cref="ChampionshipCategory.WeaponGroupFor"/>)?
         /// Sant när beteendet inte gäller eller ingen lista är satt (alla grupper), annars bara för listade grupper. Grupper där det är
         /// falskt skjuts som en vanlig tävling: placering och standardmedaljer, men ingen mästare och ingen mästerskapsmedalj.

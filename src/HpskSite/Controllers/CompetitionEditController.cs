@@ -199,6 +199,8 @@ namespace HpskSite.Controllers
                     competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(content.CompetitionLevel),
                     isAwardingStandardMedals = content.IsAwardingStandardMedals,
                     isAwardingHonoraryAward = content.IsAwardingHonoraryAward,
+                    // Mästerskapets inställningar (vilka deltar, vapengrupper) för Redigera tävling.
+                    championship = HpskSite.CompetitionTypes.Common.ChampionshipEditSettings.ForEditor(content, OutOfCompetitionLockOf(content)),
                     allowSelfReporting = content.AllowSelfReporting,
                     isExternal = content.IsExternal,
                     externalUrl = content.ExternalUrl ?? "",
@@ -395,6 +397,18 @@ namespace HpskSite.Controllers
                     ReadFieldOrContentAsInt(request.Fields, "numberOfFinalSeries", content));
                 if (finalsRefusal != null)
                     return Ok(new { success = false, message = finalsRefusal });
+
+                // Mästerskapets inställningar (vilka deltar, vapengrupper): bara när de skickas OCH ändras prövas spärren (publicerad lista,
+                // byggd final, låst kvalgrupp) och reglerna för nivån. Lagren läses först när det behövs.
+                if (request.Fields != null
+                    && (request.Fields.ContainsKey(HpskSite.CompetitionTypes.Common.ChampionshipEditSettings.ParticipantsKey)
+                        || request.Fields.ContainsKey(HpskSite.CompetitionTypes.Common.ChampionshipEditSettings.WeaponGroupsKey)))
+                {
+                    var championshipRefusal = HpskSite.CompetitionTypes.Common.ChampionshipEditSettings.Refusal(
+                        content, request.Fields, OutOfCompetitionLockOf(content));
+                    if (championshipRefusal != null)
+                        return Ok(new { success = false, message = championshipRefusal });
+                }
 
                 // Banan (rangeId) sparas med resten genom fältpåsen (C3-planen S5b) — förut en egen
                 // sparning före grenvalet. Bara när fältet skickas, som förut.
@@ -601,6 +615,12 @@ namespace HpskSite.Controllers
 
             return "";
         }
+
+        /// <summary>Varför mästerskapets inställningar är låsta för tävlingen (None = inte låsta). Läser bara.</summary>
+        private HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReason OutOfCompetitionLockOf(HpskSite.Models.Competitions.CompetitionInfo competition) =>
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<HpskSite.CompetitionTypes.Common.OutOfCompetitionLockReader>(HttpContext.RequestServices)
+                .Reason(competition);
 
         /// <summary>
         /// Route edit request to appropriate competition type service.
