@@ -401,6 +401,19 @@ namespace HpskSite.Services.SitePages
             if (!content.Ok)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision, Errors: content.Errors, Message: content.Errors[0].Message);
 
+            // En omgjord sida får aldrig tappa en obligatorisk panel (motioner, kalender, tävlingar, dokument, kretsens styrelse, inloggningsrutan …): den kan flyttas, inte tas bort.
+            if (kind == SiteContentKind.ConvertedPage && page.TemplateKey != null)
+            {
+                var present = content.Blocks.Where(b => b.Type == "panel").Select(b => SiteBlockSchema.PanelKeyOf(b.Data)).ToHashSet();
+                var missing = SiteConversion.MustKeep(ownerType, page.TemplateKey).Where(d => !present.Contains(d.Key)).ToList();
+                if (missing.Count > 0)
+                {
+                    var msg = missing.Count == 1 ? $"\"{missing[0].Name}\" kan flyttas men inte tas bort från sidan."
+                        : "Följande kan flyttas men inte tas bort från sidan: " + string.Join(", ", missing.Select(d => "\"" + d.Name + "\"")) + ".";
+                    return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision, Errors: new[] { new SiteContentError("panel", msg) }, Message: msg);
+                }
+            }
+
             // Refererade dokument måste tillhöra RADENS ägare (id utifrån är aldrig betrott).
             var foreign = SiteBlockSchema.ExtractRefs(content).Where(r => r.Kind == "doc" && !facts.DocumentBelongsTo(r.Id, ownerType, ownerId)).ToList();
             if (foreign.Count > 0)

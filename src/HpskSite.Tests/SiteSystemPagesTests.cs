@@ -129,6 +129,107 @@ namespace HpskSite.Tests
             Assert.Equal(new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklinks", "quicklink-docs" }, keys);
         }
 
+        // ── Servern håller i reglerna (K5c) ──────────────────────────────────────
+
+        private static string PanelOnly(string key, int vis, string zone = "full") =>
+            "{\"schema\":2,\"blocks\":[{\"id\":\"pnl01\",\"type\":\"panel\",\"visibility\":" + vis + ",\"data\":{\"key\":\"" + key + "\",\"zone\":\"" + zone + "\"}}]}";
+
+        [Fact]
+        public void En_panel_kan_aldrig_sparas_öppnare_än_mallens_nivå_men_gärna_slutnare_för_varje_panel_på_varje_sida()
+        {
+            var failures = new List<string>();
+            foreach (var owner in new[] { "Club", "Region" })
+            {
+                var template = SiteTemplates.For(owner);
+                foreach (var page in template.Pages.Where(p => !p.IsAdmin))
+                foreach (var def in PanelCatalog.For(owner).Where(d => PanelCatalog.AllowedOn(owner, page.Key, d.Key) && !template.IsLoggedOutOnly(page.Key, d.Key)))
+                {
+                    var floor = (int)SiteConversion.PanelVisibility(owner, page.Key, def.Key);
+                    for (var level = 0; level <= 4; level++)
+                    {
+                        var r = SiteBlockSchema.Parse(PanelOnly(def.Key, level), SiteContentKind.ConvertedPage, SiteVisibility.Alla, template, page.Key);
+                        var tooOpen = r.Errors.Any(e => e.Message.Contains("öppnare än den är idag"));
+                        if (level < floor && !tooOpen) failures.Add($"{owner}/{page.Key}/{def.Key}: nivå {level} (golv {floor}) släpptes igenom");
+                        if (level >= floor && tooOpen) failures.Add($"{owner}/{page.Key}/{def.Key}: nivå {level} (golv {floor}) vägrades trots att den inte är öppnare");
+                    }
+                }
+            }
+            Assert.True(failures.Count == 0, string.Join("\n", failures.Take(20)));
+        }
+
+        [Fact]
+        public void Obligatoriska_paneler_är_de_som_planen_pekar_ut_och_ingen_annan()
+        {
+            string[] Keys(string o, string p) => SiteConversion.MustKeep(o, p).Select(d => d.Key).ToArray();
+            Assert.Contains("motions", Keys("Club", "home"));
+            Assert.Contains("login-prompt", Keys("Club", "home"));                      // utloggad klubbsida: inloggningsrutan
+            Assert.Contains("quicklink-docs", Keys("Club", "home"));
+            Assert.Contains("calendar", Keys("Club", "calendar"));
+            Assert.Contains("competitions", Keys("Club", "competitions"));
+            Assert.Contains("member-directory", Keys("Club", "members"));
+            Assert.Contains("document-archive", Keys("Club", "documents"));
+            Assert.Contains("board", Keys("Region", "board"));
+            Assert.Empty(Keys("Club", "records"));                                       // rekord, banor och Om klubben får tas bort helt
+            Assert.Empty(Keys("Club", "ranges"));
+            foreach (var o in new[] { "Club", "Region" })
+                foreach (var p in SiteTemplates.For(o).Pages.Where(x => !x.IsAdmin))
+                    Assert.All(SiteConversion.MustKeep(o, p.Key), d => Assert.True(PanelCatalog.AllowedOn(o, p.Key, d.Key), $"{o}/{p.Key}/{d.Key}"));
+        }
+
+        [Fact]
+        public void Katalogen_för_en_omgjord_sida_bär_reglerna_per_panel()
+        {
+            var cat = SiteSystemPages.CatalogFor("Club", "home").Select(o => System.Text.Json.JsonSerializer.SerializeToElement(o)).ToList();
+            var byKey = cat.ToDictionary(e => e.GetProperty("key").GetString()!);
+            Assert.True(byKey["login-prompt"].GetProperty("systemOnly").GetBoolean());   // syns men kan inte ändras eller läggas till
+            Assert.True(byKey["motions"].GetProperty("mustKeep").GetBoolean());
+            Assert.False(byKey["whats-happening"].GetProperty("mustKeep").GetBoolean());
+            Assert.All(cat, e => Assert.Equal((int)SiteConversion.PanelVisibility("Club", "home", e.GetProperty("key").GetString()!), e.GetProperty("level").GetInt32()));
+            // Alla paneler en omgjord sida kan ha ingår (även de klubben inte kan välja), annars kan editorn inte rita dem.
+            var standard = SiteConversion.Panels("Club", "home").Select(p => p.Key);
+            Assert.All(standard, k => Assert.True(byKey.ContainsKey(k), k));
+        }
+
+        [SqlFact]
+        public void Sparning_av_en_omgjord_sida_vägrar_att_tappa_en_obligatorisk_panel_eller_öppna_en_panel()
+        {
+            const int owner = 990004;
+            using var f = new SiteSqlFixture();
+            f.Db.Execute("INSERT INTO dbo.SiteOwner (OwnerType, OwnerId, IsEnabled, EditingEnabled, ConvertEnabled) VALUES ('Club', @0, 1, 1, 1)", owner);
+            var now = new DateTime(2026, 11, 8, 12, 0, 0);
+            var actor = new SiteActor(7);
+            var facts = new Facts();
+
+            var cal = SitePageWriter.ConvertTemplatePage(f.Db, facts, "Club", owner, "calendar", actor, now);
+            Assert.True(cal.Ok, cal.Message);
+            var calRow = SitePageStore.GetPage(f.Db, cal.PageId, "Club", owner)!;
+            var noCal = SitePageWriter.SaveDraft(f.Db, facts, cal.PageId, "Club", owner, calRow.Revision, calRow.Title, "{\"schema\":2,\"blocks\":[]}", null, actor, now);
+            Assert.Equal(SiteWriteStatus.Invalid, noCal.Status);
+            Assert.Contains("Kalender", noCal.Message);                                   // namnger vad som saknas
+            Assert.Contains("kan flyttas men inte tas bort", noCal.Message);
+            var keepCal = SitePageWriter.SaveDraft(f.Db, facts, cal.PageId, "Club", owner, calRow.Revision, calRow.Title, PanelOnly("calendar", (int)SiteConversion.PanelVisibility("Club", "calendar", "calendar")), null, actor, now);
+            Assert.True(keepCal.Ok, keepCal.Message);
+
+            // En panel som inte är obligatorisk får tas bort helt.
+            var rec = SitePageWriter.ConvertTemplatePage(f.Db, facts, "Club", owner, "records", actor, now);
+            var recRow = SitePageStore.GetPage(f.Db, rec.PageId, "Club", owner)!;
+            Assert.True(SitePageWriter.SaveDraft(f.Db, facts, rec.PageId, "Club", owner, recRow.Revision, recRow.Title, "{\"schema\":2,\"blocks\":[]}", null, actor, now).Ok);
+
+            // Aldrig öppnare än mallens nivå. Hem är öppen för alla (Om-texten), men Motioner är inte det: den får inte öppnas bara för att sidan är öppen.
+            var floor = (int)SiteConversion.PanelVisibility("Club", "home", "motions");
+            Assert.True(floor > 0);
+            var home = SitePageWriter.ConvertTemplatePage(f.Db, facts, "Club", owner, "home", actor, now);
+            Assert.True(home.Ok, home.Message);
+            var homeRow = SitePageStore.GetPage(f.Db, home.PageId, "Club", owner)!;
+            var json = System.Text.Json.Nodes.JsonNode.Parse(SitePageStore.GetDraft(f.Db, home.PageId, "Club", owner)!.BlocksJson)!;
+            foreach (var b in json["blocks"]!.AsArray()) if (b!["data"]?["key"]?.GetValue<string>() == "motions") b["visibility"] = 0;
+            var open = SitePageWriter.SaveDraft(f.Db, facts, home.PageId, "Club", owner, homeRow.Revision, homeRow.Title, json.ToJsonString(), null, actor, now);
+            Assert.Equal(SiteWriteStatus.Invalid, open.Status);
+            Assert.Contains("öppnare än den är idag", open.Message);
+            foreach (var b in json["blocks"]!.AsArray()) if (b!["data"]?["key"]?.GetValue<string>() == "motions") b["visibility"] = floor;
+            Assert.True(SitePageWriter.SaveDraft(f.Db, facts, home.PageId, "Club", owner, homeRow.Revision, homeRow.Title, json.ToJsonString(), null, actor, now).Ok);   // på mallens egen nivå går det bra
+        }
+
         // ── Förhandsvisning av en omgjord sida ───────────────────────────────────
 
         private static SiteContentResult Converted(string owner, string page, SiteVisibility pageVis, string blocksJson)

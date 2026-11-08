@@ -256,6 +256,13 @@ namespace HpskSite.Services.SitePages
                         errors.Add(new($"{p}.visibility", "Ett block kan inte vara öppnare än sidan."));
                     if (personal && visibility == SiteVisibility.Alla)
                         errors.Add(new($"{p}.visibility", "Ett block med personuppgifter kan inte vara öppet för alla."));
+                    // En panel visar data som klubben redan har valt hur öppen den är (mallen): ägaren kan göra den slutnare, aldrig öppnare än förut.
+                    if (panelDef != null && pageKey != null && !outOnly)
+                    {
+                        var floor = SiteConversion.PanelVisibility(template.OwnerType, pageKey, panelDef.Key);
+                        if (SiteAccess.Strictest(visibility, floor) != visibility)
+                            errors.Add(new($"{p}.visibility", $"\"{panelDef.Name}\" kan inte vara öppnare än den är idag."));
+                    }
                 }
             }
 

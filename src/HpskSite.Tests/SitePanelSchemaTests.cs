@@ -77,7 +77,10 @@ namespace HpskSite.Tests
         {
             Assert.False(Converted(Page(2, Panel("abcd1", "member-directory", 0)), "members", SiteVisibility.Alla).Ok);
             Assert.True(Converted(Page(2, Panel("abcd1", "member-directory", 1)), "members", SiteVisibility.Alla).Ok);
-            Assert.True(Converted(Page(2, Panel("abcd1", "calendar", 0)), "calendar", SiteVisibility.Alla).Ok);               // kalendern är inte en personpanel
+            // Kalendern är inte en personpanel (den tas inte ner av personuppgiftstaket), men den får aldrig vara öppnare än mallens nivå (K5c).
+            var calendarFloor = (int)SiteConversion.PanelVisibility("Club", "calendar", "calendar");
+            Assert.True(Converted(Page(2, Panel("abcd1", "calendar", calendarFloor)), "calendar", SiteVisibility.Alla).Ok);
+            Assert.False(calendarFloor > 0 && Converted(Page(2, Panel("abcd1", "calendar", 0)), "calendar", SiteVisibility.Alla).Ok);
             Assert.False(Converted(Page(2, Panel("abcd1", "board", 0)), "board", SiteVisibility.Alla, Region).Ok);
         }
 

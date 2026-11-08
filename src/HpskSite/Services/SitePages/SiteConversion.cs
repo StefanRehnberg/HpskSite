@@ -36,6 +36,17 @@ namespace HpskSite.Services.SitePages
             return result;
         }
 
+        /// <summary>
+        /// Panelerna som en omvandlad sida måste behålla (kan flyttas, aldrig tas bort): de obligatoriska och de som mallen bestämt är bara för utloggade.
+        /// Samma urval som <see cref="Panels"/> tar med utöver inloggads standardlista. Prövas vid varje sparning och publicering.
+        /// </summary>
+        public static IReadOnlyList<PanelDef> MustKeep(string ownerType, string pageKey)
+        {
+            var template = SiteTemplates.For(ownerType);
+            return Panels(ownerType, pageKey).Select(p => PanelCatalog.Find(ownerType, p.Key))
+                .Where(d => d != null && (d.Required || template.IsLoggedOutOnly(pageKey, d.Key))).Select(d => d!).ToList();
+        }
+
         /// <summary>Panelens lagrade synlighet: mallens (efter taket för personuppgifter) för sidan. Okänd = Dold (fail-closed).</summary>
         public static SiteVisibility PanelVisibility(string ownerType, string pageKey, string panelKey)
         {

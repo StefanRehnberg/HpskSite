@@ -60,6 +60,25 @@ namespace HpskSite.Services.SitePages
                 key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), required = d.Required, personalData = d.PersonalData, hostedBy = d.HostedBy,
             }).ToList();
 
+        /// <summary>
+        /// ALLA paneler som får finnas på en omgjord sida (editorn behöver namn och regler även för dem klubben inte kan välja, som inloggningsrutan): namn, vad de visar,
+        /// förvald zon, om de måste behållas (<c>mustKeep</c>: kan flyttas, aldrig tas bort), om de bara är för utloggade (<c>systemOnly</c>: syns, men kan inte ändras eller
+        /// läggas till), personuppgifter, och <c>level</c> = den nivå panelen har idag. Ägaren kan göra en panel slutnare än så, aldrig öppnare.
+        /// </summary>
+        public static IReadOnlyList<object> CatalogFor(string ownerType, string pageKey)
+        {
+            var template = SiteTemplates.For(ownerType);
+            var must = SiteConversion.MustKeep(ownerType, pageKey).Select(d => d.Key).ToHashSet();
+            var order = SiteConversion.Panels(ownerType, pageKey).Select(p => p.Key).ToList();
+            return PanelCatalog.For(ownerType).Where(d => PanelCatalog.AllowedOn(ownerType, pageKey, d.Key))
+                .OrderBy(d => { var i = order.IndexOf(d.Key); return i < 0 ? int.MaxValue : i; })
+                .Select(d => (object)new
+                {
+                    key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), mustKeep = must.Contains(d.Key), systemOnly = template.IsLoggedOutOnly(pageKey, d.Key),
+                    personalData = d.PersonalData, hostedBy = d.HostedBy, level = (int)SiteConversion.PanelVisibility(ownerType, pageKey, d.Key),
+                }).ToList();
+        }
+
         /// <summary>De valbara panelerna i den ordning sidan visar dem (standardlistan för inloggad, sedan de som bara en annan lista ritar); resten sist.</summary>
         public static IReadOnlyList<PanelDef> InPageOrder(string ownerType, string pageKey)
         {

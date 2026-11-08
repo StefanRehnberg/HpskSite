@@ -205,6 +205,10 @@ namespace HpskSite.Controllers
                 minVisibility = page.IsFree ? 0 : (int)SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value, inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
                 url = slug == null ? null : g.OwnerUrl + slug + "/", hasUnpublishedChanges = page.HasUnpublishedChanges, published = page.PublishedVersionId != null,
                 blocksJson = version.BlocksJson, savedDate = version.SavedDate,
+                // En omgjord sida: alla paneler som får finnas på den (namn, regler, nivå), och om omvandlingen redan är publicerad (då ångras den med Lägg tillbaka, annars med Avbryt).
+                panels = !page.IsFree && page.TemplateKey != null ? SiteSystemPages.CatalogFor(g.OwnerType, page.TemplateKey) : null,
+                pageKey = page.TemplateKey,
+                convertedLive = !page.IsFree && SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId)?.SchemaVersion == SiteBlockSchema.ConvertedSchemaVersion,
             });
         }
 
