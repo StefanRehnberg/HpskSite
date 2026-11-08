@@ -85,6 +85,17 @@ namespace HpskSite.Tests
             Assert.Equal(SystemPageMode.AsBefore, d["about"].Mode);                                  // utan rad
         }
 
+        [Fact]
+        public void Vem_ser_sidan_är_mallens_öppnaste_nivå_och_för_en_omgjord_sida_dess_egen()
+        {
+            var t = SiteTemplates.For("Club");
+            var copy = Copy("records", 2, null, id: 31); copy.Visibility = (byte)SiteVisibility.Styrelse;
+            var d = SiteSystemPages.Describe("Club", new List<SitePageListItem> { copy }, true, true).ToDictionary(s => s.Key);
+            Assert.Equal((int)SiteVisibility.Styrelse, d["records"].Level);                              // omgjord: sidans egen nivå
+            Assert.Equal((int)t.MostOpenLevel("home")!.Value, d["home"].Level);                           // annars mallens öppnaste
+            Assert.All(d.Values.Where(s => s.Key != "records"), s => Assert.Equal((int)t.MostOpenLevel(s.Key)!.Value, s.Level));
+        }
+
         // ── Panelerna ägaren får välja ───────────────────────────────────────────
 
         [Theory]
@@ -95,7 +106,8 @@ namespace HpskSite.Tests
             foreach (var page in SiteTemplates.For(owner).Pages.Where(p => !p.IsAdmin))
             {
                 var got = SiteSystemPages.PanelsFor(owner, page.Key).Select(o => System.Text.Json.JsonSerializer.SerializeToElement(o)).ToList();
-                var want = PanelCatalog.Selectable(owner, page.Key);
+                var want = SiteSystemPages.InPageOrder(owner, page.Key);
+                Assert.Equal(PanelCatalog.Selectable(owner, page.Key).Select(d => d.Key).OrderBy(k => k), want.Select(d => d.Key).OrderBy(k => k));   // samma mängd som registrets valbara
                 Assert.Equal(want.Select(d => d.Key), got.Select(e => e.GetProperty("key").GetString()));
                 foreach (var (d, e) in want.Zip(got))
                 {
@@ -107,6 +119,14 @@ namespace HpskSite.Tests
             }
             // Inloggningsrutan är mallens egen (bara för utloggade) och får aldrig erbjudas som val.
             Assert.DoesNotContain(SiteSystemPages.PanelsFor("Club", "home").Select(o => System.Text.Json.JsonSerializer.SerializeToElement(o).GetProperty("key").GetString()), k => k == "login-prompt");
+        }
+
+        [Fact]
+        public void Panelerna_står_i_den_ordning_sidan_visar_dem()
+        {
+            // Klubbens Hem för en inloggad: Det här händer, Kommande händelser, Motioner, Kontakt, Snabblänkar — sedan det bara utloggad-listan ritar (Dokument med snabblänk).
+            var keys = SiteSystemPages.InPageOrder("Club", "home").Select(d => d.Key).ToList();
+            Assert.Equal(new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklinks", "quicklink-docs" }, keys);
         }
 
         // ── Förhandsvisning av en omgjord sida ───────────────────────────────────

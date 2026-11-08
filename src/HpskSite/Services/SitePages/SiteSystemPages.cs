@@ -7,7 +7,7 @@ namespace HpskSite.Services.SitePages
     /// En vanlig sida så som Hemsidan visar den. <see cref="PageId"/>/<see cref="Revision"/> finns när ägaren har en rad för sidan (mallkopia), annars null.
     /// <see cref="PendingChanges"/> = en omgjord sida med ändringar som inte är publicerade. <see cref="CanConvert"/> = knappen "Ändra den här sidan" får visas.
     /// </summary>
-    public sealed record SystemPageState(string Key, string Label, SystemPageMode Mode, int? PageId, int? Revision, bool PendingChanges, bool CanConvert);
+    public sealed record SystemPageState(string Key, string Label, SystemPageMode Mode, int? PageId, int? Revision, bool PendingChanges, bool CanConvert, int Level = 0);
 
     /// <summary>
     /// Hemsidans vy över de vanliga sidorna (K5a): läget som ord-bar enum, ur sidans versioner — samma sanning som <see cref="SitePageStore.IsConverted"/> och
@@ -48,15 +48,24 @@ namespace HpskSite.Services.SitePages
                 var mode = copy == null ? SystemPageMode.AsBefore : ModeOf(copy.PublishedSchema, copy.DraftSchema);
                 var pending = mode == SystemPageMode.Converted && copy!.DraftSchema == SiteBlockSchema.ConvertedSchemaVersion;
                 var canConvert = canWrite && convertEnabled && mode == SystemPageMode.AsBefore && PanelCatalog.Standard(ownerType, p.Key, true).Count > 0;
-                return new SystemPageState(p.Key, p.Label, mode, copy?.Id, copy?.Revision, pending, canConvert);
+                // Vem ser sidan: en omgjord sidas egen nivå; annars mallens öppnaste nivå (den som öppnast får se något av sidan).
+                var level = mode == SystemPageMode.Converted ? copy!.Visibility : (int)(SiteTemplates.For(ownerType).MostOpenLevel(p.Key) ?? SiteVisibility.Alla);
+                return new SystemPageState(p.Key, p.Label, mode, copy?.Id, copy?.Revision, pending, canConvert, level);
             }).ToList();
 
         /// <summary>Panelerna ägaren får välja på en sida, för Hemsidans kort: namn, vad de visar, zon, om de är obligatoriska och om de visar personuppgifter.</summary>
         public static IReadOnlyList<object> PanelsFor(string ownerType, string pageKey) =>
-            PanelCatalog.Selectable(ownerType, pageKey).Select(d => (object)new
+            InPageOrder(ownerType, pageKey).Select(d => (object)new
             {
                 key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), required = d.Required, personalData = d.PersonalData, hostedBy = d.HostedBy,
             }).ToList();
+
+        /// <summary>De valbara panelerna i den ordning sidan visar dem (standardlistan för inloggad, sedan de som bara en annan lista ritar); resten sist.</summary>
+        public static IReadOnlyList<PanelDef> InPageOrder(string ownerType, string pageKey)
+        {
+            var order = PanelCatalog.Standard(ownerType, pageKey, true).Concat(PanelCatalog.Standard(ownerType, pageKey, false)).Select(p => p.Key).Distinct().ToList();
+            return PanelCatalog.Selectable(ownerType, pageKey).OrderBy(d => { var i = order.IndexOf(d.Key); return i < 0 ? int.MaxValue : i; }).ToList();
+        }
 
         public static string ZoneWord(PanelZone z) => z switch { PanelZone.Main => "main", PanelZone.Side => "side", _ => "full" };
     }

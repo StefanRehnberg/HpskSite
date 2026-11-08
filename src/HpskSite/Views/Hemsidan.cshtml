@@ -24,7 +24,7 @@
     };
 }
 
-<div class="container my-4" id="hemsidan-app"
+<div class="hs-page container-fluid py-4" id="hemsidan-app"
      data-owner-type="@ownerType" data-owner-id="@req?.OwnerId" data-owner-name="@ownerName" data-owner-url="@Model?.Url()">
     @Html.AntiForgeryToken()
     <noscript><div class="alert alert-warning">Hemsidan behöver JavaScript för att fungera.</div></noscript>
@@ -32,6 +32,6 @@
     <script type="application/json" id="hsTerms">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(terms))</script>
 </div>
 
-<link rel="stylesheet" href="/css/hemsidan.css?v=2" />
+<link rel="stylesheet" href="/css/hemsidan.css?v=3" />
 <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
-<script src="/js/hemsidan.js?v=15"></script>
+<script src="/js/hemsidan.js?v=16"></script>

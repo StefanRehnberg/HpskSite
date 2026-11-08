@@ -154,6 +154,76 @@
   }
   const alertBox = (cls, ...kids) => h('div', { class: 'alert alert-' + cls }, kids);
 
+  // ── Skalet (förslag 3, Ekonomins skal): vänstermeny med en plats per flik, en kolumn till höger ──────────
+  // Platserna adresseras med hash (#sidor, #sida=home, #redigera=12, #raderade, #logg, #ny) så att bakåtknappen och en delad länk fungerar.
+  // Varje vy sätter sin hash tyst (setHash); bara en hash som användaren själv ändrar leder till route().
+  function setHash(hash) { if (location.hash === hash) return; S.hashSilent = hash; location.hash = hash; }
+  async function go(hash) { if (S.dirty) await saveNow(); if (location.hash !== hash) setHash(hash); route(); }
+  function route() {
+    const hsh = location.hash || '#sidor';
+    let m;
+    if ((m = /^#sida=([\w-]+)$/.exec(hsh))) return renderSystemPage(m[1]);
+    if ((m = /^#redigera=(\d+)$/.exec(hsh))) return openEditor(parseInt(m[1], 10));
+    if (hsh === '#raderade') return renderTrash();
+    if (hsh === '#logg') return renderAudit();
+    if (hsh === '#ny') return renderNew();
+    return renderList();
+  }
+  window.addEventListener('hashchange', async () => {
+    if (S.hashSilent === location.hash) { S.hashSilent = null; return; }
+    S.hashSilent = null;
+    if (!S.st || !S.st.termsAccepted) return;
+    if (S.dirty) await saveNow();
+    route();
+  });
+
+  const MODE_CLASS = { asBefore: 'off', draft: 'wait', converted: 'ok' };
+  const modePill = p => h('span', { class: 'hs-state ' + (MODE_CLASS[p.mode] || 'off') }, p.word);
+
+  function rail(active) {
+    const st = S.st, sys = st.systemPages || [];
+    const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
+      onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
+    const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Egen version') : null;
+    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
+    return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
+      h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
+      h('div', { class: 'hs-org' }, 'Hemsidan'),
+      h('div', { class: 'hs-role' }, (st.support ? 'Stödläge' : IS_REGION ? 'Kretsadmin' : 'Klubbadmin') + ' · ' + OWNER.name),
+      h('button', { type: 'button', class: 'hs-railtoggle', 'aria-expanded': 'false', 'aria-controls': 'hsRailNav',
+        onclick: e => { const r = e.currentTarget.closest('.hs-rail'); const o = r.classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); } },
+        h('span', {}, 'Meny · ' + here), h('i', { class: 'bi bi-list', 'aria-hidden': 'true' })),
+      h('div', { class: 'hs-railnav', id: 'hsRailNav' },
+        nav('sidor', 'Sidor', '#sidor'),
+        h('div', { class: 'hs-railh' }, IS_REGION ? 'Kretsens vanliga sidor' : 'Klubbens vanliga sidor'),
+        sys.map(p => nav('sys:' + p.key, p.label, '#sida=' + p.key, pill(p))),
+        st.trash.length || !st.support ? h('div', { class: 'hs-railh' }, 'Mer') : null,
+        st.trash.length ? nav('raderade', 'Raderade sidor', '#raderade', h('span', { class: 'hs-pill' }, st.trash.length)) : null,
+        st.support ? null : nav('logg', 'Vad som hänt', '#logg')));
+  }
+  /** Skalet runt en vy: rälsen till vänster, innehållet (och stödlägesbanderollen) till höger. */
+  function shell(active, ...nodes) {
+    return h('div', { class: 'hs-shell' }, rail(active), h('div', { class: 'hs-main' }, supportBanner(), nodes));
+  }
+  /** Rubrik med blå Åtgärder uppe till höger (adminlistans form, som Träningar). */
+  function pageHead(title, sub, menuItems) {
+    return h('div', { class: 'hs-head' }, h('div', {}, h('h1', {}, title), sub ? h('div', { class: 'hs-sub' }, sub) : null),
+      menuItems && menuItems.filter(Boolean).length ? h('div', { class: 'dropdown' },
+        h('button', { class: 'btn btn-primary shadow dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
+        menuList(menuItems)) : null);
+  }
+  /** Menyrader: [text, fn, { href?, danger?, disabled? }]; '-' = avdelare; null hoppas över. */
+  function menuList(items) {
+    return h('ul', { class: 'dropdown-menu dropdown-menu-end' }, items.filter(Boolean).map(it => it === '-' ? h('li', {}, h('hr', { class: 'dropdown-divider' }))
+      : h('li', {}, h('a', { class: 'dropdown-item' + (it[2] && it[2].danger ? ' text-danger' : '') + (it[2] && it[2].disabled ? ' disabled' : ''), href: (it[2] && it[2].href) || '#',
+        target: it[2] && it[2].href ? '_blank' : null, rel: it[2] && it[2].href ? 'noopener' : null,
+        onclick: e => { if (it[2] && it[2].href) return; e.preventDefault(); if (!(it[2] && it[2].disabled)) it[1](); } }, it[0]))));
+  }
+  /** Grå Åtgärder per rad (menyn är fixed-positionerad så att den inte klipps i tabellen). */
+  const rowMenu = items => h('div', { class: 'dropdown' },
+    h('button', { class: 'btn btn-sm btn-outline-secondary dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
+    menuList(items));
+
   async function load() {
     view(h('p', { class: 'text-muted' }, 'Laddar …'));
     const st = await api('GET', 'State');
@@ -161,7 +231,7 @@
     if (!st.success) { view([header(), alertBox('warning', st.message || 'Hemsidan kan inte öppnas.')]); return; }
     S.st = st;
     if (!st.termsAccepted) return renderTerms();
-    renderList();
+    route();
   }
 
   function renderTerms() {
@@ -200,49 +270,87 @@
   }
   function flash(text) { S.banner = { cls: 'success', text }; const b = document.getElementById('hsBanner'); if (b) renderBanner(); }
 
+  // Översikten (förslag 3): EN tabell över alla sidor — klubbens vanliga sidor och de egna — med läget som ord. Åtgärder är blå uppe till höger, radmenyn grå.
   function renderList() {
-    const st = S.st;
-    const rows = st.pages.map(p => h('tr', {},
-      h('td', {}, h('a', { href: '#', class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); openEditor(p.id); } }, p.title)),
-      h('td', {}, visBadge(p.visibility)), h('td', {}, statusBadge(p)),
-      h('td', { class: 'text-end' }, h('div', { class: 'dropdown' },
-        h('button', { class: 'btn btn-sm btn-outline-secondary dropdown-toggle', 'data-bs-toggle': 'dropdown', type: 'button' }, 'Åtgärder'),
-        h('ul', { class: 'dropdown-menu dropdown-menu-end' },
-          h('li', {}, h('a', { class: 'dropdown-item', href: '#', onclick: e => { e.preventDefault(); openEditor(p.id); } }, 'Ändra')),
-          p.status !== 'Utkast' && p.url ? h('li', {}, h('a', { class: 'dropdown-item', href: p.url, target: '_blank', rel: 'noopener' }, 'Se sidan')) : null,
-          p.status !== 'Utkast' && p.url ? h('li', {}, h('a', { class: 'dropdown-item', href: '#', onclick: e => { e.preventDefault(); S.visibility = p.visibility; copyLink(p.url); } }, 'Kopiera länk')) : null,
-          h('li', {}, h('hr', { class: 'dropdown-divider' })),
-          h('li', {}, h('a', { class: 'dropdown-item text-danger', href: '#', onclick: async e => {
-            e.preventDefault();
-            if (!await confirmDialog('Radera sidan?', 'Sidan "' + p.title + '" tas bort från sajten. Ni kan ångra det i 30 dagar.', 'Radera', true)) return;
-            const r = await api('POST', 'DeletePage', { pageId: p.id, expectedRevision: p.revision });
-            if (!r.success) { S.banner = { cls: 'danger', text: r.message }; } else S.banner = { cls: 'success', text: 'Sidan är raderad. Du kan ångra under "Raderade sidor".' };
-            await reloadState();
-          } }, 'Radera')))))));
-    view([header('Egna sidor för ' + OWNER.name), h('div', { id: 'hsBanner' }),
-      h('div', { class: 'd-flex flex-wrap gap-2 mb-3 align-items-center' },
-        h('button', { class: 'btn btn-primary', disabled: st.pages.length >= st.maxPages, onclick: () => renderNew() }, h('i', { class: 'bi bi-plus-lg me-1' }), 'Ny sida'),
-        st.trash.length ? h('button', { class: 'btn btn-link', onclick: renderTrash }, 'Raderade sidor (' + st.trash.length + ')') : null,
-        h('span', { class: 'text-muted small ms-auto' }, st.pages.length + ' av högst ' + st.maxPages + ' sidor')),
-      st.pages.length
-        ? h('table', { class: 'table align-middle hs-list' }, h('thead', {}, h('tr', {}, h('th', {}, 'Sida'), h('th', {}, 'Vem ser den'), h('th', {}, 'Status'), h('th', {}))), h('tbody', {}, rows))
-        : h('div', { class: 'hs-card p-4 text-center' }, h('p', { class: 'mb-2' }, 'Ni har inga egna sidor än.'), h('p', { class: 'text-muted mb-3' }, 'Skapa en sida för till exempel banregler, klubbens historia eller hitta hit.')),
-      h('p', { class: 'text-muted small mt-3' }, 'Klubbens vanliga sidor (Hem, Om klubben, Banor, Kalender m.fl.) hanteras som förut och finns kvar.'),
-      slotsCard(), auditCard()]);
+    setHash('#sidor');
+    const st = S.st, sys = st.systemPages || [];
+    const slotByKey = Object.fromEntries((st.slots || []).map(x => [x.key, x]));
+    const hiddenCount = st.pages.filter(p => p.visibility === 4).length;
+    const own = st.pages.filter(p => S.showHidden || p.visibility !== 4);
+    const total = sys.length + st.pages.length, shown = sys.length + own.length;
+    const full = st.pages.length >= st.maxPages;
+
+    const sysRows = sys.map(p => {
+      const slot = slotByKey[p.key];
+      return h('tr', {},
+        h('td', {}, h('a', { href: '#sida=' + p.key, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#sida=' + p.key); } }, p.label)),
+        h('td', {}, modePill(p), slot && slot.page && p.mode === 'asBefore' ? h('span', { class: 'text-muted small ms-2' }, 'med egen text') : null),
+        h('td', {}, visBadge(p.level)),
+        h('td', { class: 'text-end' }, rowMenu([['Öppna', () => go('#sida=' + p.key)]])));
+    });
+    const ownRows = own.map(p => h('tr', {},
+      h('td', {}, h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title)),
+      h('td', {}, 'Egen sida ', statusBadge(p)),
+      h('td', {}, visBadge(p.visibility)),
+      h('td', { class: 'text-end' }, rowMenu([
+        ['Ändra', () => go('#redigera=' + p.id)],
+        p.status !== 'Utkast' && p.url ? ['Se sidan', null, { href: p.url }] : null,
+        p.status !== 'Utkast' && p.url ? ['Kopiera länk', () => { S.visibility = p.visibility; copyLink(p.url); }] : null,
+        '-',
+        ['Radera', async () => {
+          if (!await confirmDialog('Radera sidan?', 'Sidan "' + p.title + '" tas bort från sajten. Ni kan ångra det i 30 dagar.', 'Radera', true)) return;
+          const r = await api('POST', 'DeletePage', { pageId: p.id, expectedRevision: p.revision });
+          S.banner = r.success ? { cls: 'success', text: 'Sidan är raderad. Du kan ångra under "Raderade sidor".' } : { cls: 'danger', text: r.message };
+          await reloadState();
+        }, { danger: true }]]))));
+
+    const filter = h('div', { class: 'd-flex flex-wrap gap-3 align-items-center px-3 pt-3 pb-1' },
+      hiddenCount ? h('label', { class: 'd-flex gap-2 align-items-center' }, h('input', { type: 'checkbox', class: 'form-check-input mt-0', checked: !!S.showHidden,
+        onchange: e => { S.showHidden = e.target.checked; renderList(); } }), 'Visa dolda (' + hiddenCount + ')') : null,
+      h('span', { class: 'text-muted ms-auto' }, shown + ' av ' + total));
+    view(shell('sidor',
+      pageHead('Sidor', 'Här ser du alla sidor på ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' hemsida. De vanliga sidorna finns redan. Egna sidor lägger du till under Åtgärder → Ny sida.', [
+        ['Ny sida', () => go('#ny'), full ? { disabled: true } : null],
+        st.trash.length ? ['Raderade sidor (' + st.trash.length + ')', () => go('#raderade')] : null]),
+      h('div', { id: 'hsBanner' }),
+      h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, filter,
+        h('table', { class: 'table align-middle hs-list mb-0' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, 'Sida'), h('th', {}, 'Vad är det'), h('th', {}, 'Vem ser den'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
+          h('tbody', {}, sysRows, ownRows))),
+      st.pages.length ? null : h('p', { class: 'text-muted' }, 'Ni har inga egna sidor än. Skapa en för till exempel banregler, klubbens historia eller hitta hit.'),
+      h('p', { class: 'text-muted small' }, st.pages.length + ' av högst ' + st.maxPages + ' egna sidor.')));
     renderBanner();
   }
 
-  // Egen text före/efter klubbens vanliga sidor (Hem, Om klubben, Banor …): en mallkopia per systemsida. Systemsidan är exakt som förut utan den.
-  function slotsCard() {
-    const slots = (S.st && S.st.slots) || [];
-    if (!slots.length) return null;
-    const rows = slots.map(x => h('tr', {},
-      h('td', {}, h('strong', {}, x.label)),
-      h('td', {}, x.page ? [visBadge(x.page.visibility), ' ', statusBadge({ status: x.page.status })] : h('span', { class: 'text-muted' }, 'Ingen egen text')),
-      h('td', { class: 'text-end' }, h('button', { class: 'btn btn-sm btn-outline-secondary', onclick: () => x.page ? openEditor(x.page.id) : chooseSlotVisibility(x) }, x.page ? 'Ändra' : 'Lägg till egen text'))));
-    return h('details', { class: 'hs-card p-3 mt-4' }, h('summary', { class: 'fw-semibold' }, 'Egen text på de vanliga sidorna'),
-      h('p', { class: 'text-muted small mt-2' }, 'Skriv egen text före eller efter innehållet på Hem, Om klubben, Banor och de andra vanliga sidorna. Sidorna är som förut tills ni lägger till något.'),
-      h('table', { class: 'table align-middle hs-list mb-0' }, h('tbody', {}, rows)));
+  // En vanlig sida (Hem, Om klubben …) som en plats i menyn: läget som ord, vad som visas, och ägarens egen text före/efter. Sidan är exakt som förut utan den.
+  function renderSystemPage(key) {
+    const st = S.st, p = (st.systemPages || []).find(x => x.key === key);
+    if (!p) return renderList();
+    setHash('#sida=' + key);
+    const slot = (st.slots || []).find(x => x.key === key);
+    const intro = p.mode === 'asBefore' ? 'Den här sidan visas som den alltid har gjort. Innehållet hämtas automatiskt.'
+      : p.mode === 'draft' ? 'Det finns ett utkast till en egen version. Besökarna ser fortfarande den vanliga sidan.'
+      : 'Sidan är er egen version.' + (p.pendingChanges ? ' Det finns ändringar som inte är publicerade.' : '');
+    const panelsCard = p.mode === 'asBefore' && p.panels.length
+      ? h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-2' }, 'Det här visas på sidan'),
+          p.panels.map(x => h('div', { class: 'hs-panelrow' }, h('div', {}, h('strong', {}, x.name), h('div', { class: 'text-muted small' }, x.description)),
+            h('span', { class: 'text-muted small' }, 'Hämtas automatiskt'))))
+      : null;
+    view(shell('sys:' + key,
+      h('div', { class: 'hs-head' }, h('div', {}, h('h1', {}, p.label), h('div', { class: 'hs-sub' }, modePill(p), ' ', intro))),
+      h('div', { id: 'hsBanner' }),
+      panelsCard, p.mode === 'asBefore' ? slotCard(slot) : null));
+    renderBanner();
+  }
+
+  // Egen text före/efter en vanlig sida: en mallkopia per sida. Sidan är exakt som förut utan den.
+  function slotCard(x) {
+    if (!x) return null;
+    return h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-1' }, 'Egen text på sidan'),
+      h('p', { class: 'text-muted mb-2' }, 'Skriv egen text före eller efter innehållet. Sidan är som förut tills ni lägger till något.'),
+      h('div', { class: 'd-flex flex-wrap gap-2 align-items-center' },
+        x.page ? [visBadge(x.page.visibility), statusBadge({ status: x.page.status })] : h('span', { class: 'text-muted' }, 'Ingen egen text'),
+        h('button', { class: 'btn btn-sm btn-outline-secondary ms-auto', onclick: () => x.page ? go('#redigera=' + x.page.id) : chooseSlotVisibility(x) }, x.page ? 'Ändra' : 'Lägg till egen text')));
   }
 
   async function chooseSlotVisibility(x) {
@@ -262,9 +370,14 @@
   }
 
   // "Vad som hänt": vem gjorde vad och när (senaste 100). Bara föreningens egna administratörer läser loggen, så den visas inte i stödläge.
-  function auditCard() {
-    if (S.st && S.st.support) return null;
-    const out = h('div', { class: 'mt-2' });
+  function renderAudit() {
+    if (S.st && S.st.support) return renderList();
+    setHash('#logg');
+    const out = h('div', { class: 'hs-card p-3' });
+    view(shell('logg', pageHead('Vad som hänt', 'Vem som gjorde vad på hemsidan, och när (de senaste 100).'), out));
+    auditLoad(out);
+  }
+  function auditLoad(out) {
     const fmt = s => new Date(s).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
     const load = async () => {
       out.replaceChildren(h('span', { class: 'text-muted' }, 'Laddar …'));
@@ -275,9 +388,7 @@
         h('td', { class: 'text-nowrap text-muted' }, fmt(x.when)),
         h('td', {}, h('strong', {}, x.who), x.support ? h('span', { class: 'badge text-bg-warning ms-1' }, 'stödläge') : null, ' ' + x.text)))))));
     };
-    const box = h('details', { class: 'hs-card p-3 mt-4' }, h('summary', { class: 'fw-semibold' }, 'Vad som hänt'), out);
-    box.addEventListener('toggle', () => { if (box.open && !box.dataset.loaded) { box.dataset.loaded = '1'; load(); } });
-    return box;
+    load();
   }
 
   function renderBanner() {
@@ -290,20 +401,23 @@
   }
 
   function renderTrash() {
+    if (!S.st.trash.length) return renderList();
+    setHash('#raderade');
     const rows = S.st.trash.map(p => h('tr', {}, h('td', {}, p.title), h('td', {}, visBadge(p.visibility)),
       h('td', { class: 'text-end' }, h('button', { class: 'btn btn-sm btn-outline-primary', onclick: async () => {
         const r = await api('POST', 'RestorePage', { pageId: p.id, expectedRevision: p.revision });
         S.banner = r.success ? { cls: 'success', text: 'Sidan "' + p.title + '" är tillbaka.' } : { cls: 'danger', text: r.message };
         await reloadState();
       } }, 'Ångra radering'))));
-    view([header('Raderade sidor'), h('p', {}, h('a', { href: '#', onclick: e => { e.preventDefault(); renderList(); } }, '← Tillbaka till sidorna')),
-      h('p', { class: 'text-muted' }, 'En raderad sida kan ångras i 30 dagar.'),
-      h('table', { class: 'table align-middle hs-list' }, h('tbody', {}, rows))]);
+    view(shell('raderade', pageHead('Raderade sidor', 'En raderad sida kan ångras i 30 dagar. Därefter försvinner den för gott.'), h('div', { id: 'hsBanner' }),
+      h('div', { class: 'hs-card p-0 overflow-hidden' }, h('table', { class: 'table align-middle hs-list mb-0' }, h('tbody', {}, rows)))));
+    renderBanner();
   }
 
   // ── Ny sida i tre steg ──────────────────────────────────────────────────────
   function renderNew(w) {
     w = w || { step: 1, title: '', template: 'text', visibility: OWNER.type === 'Region' ? 1 : 2 };
+    setHash('#ny');
     const err = h('div');
     const step = (n, t) => h('li', { class: 'list-inline-item ' + (w.step === n ? 'fw-bold' : 'text-muted') }, n + '. ' + t);
     let content, next, back = null;
@@ -345,9 +459,9 @@
       };
     }
     const nextBtn = h('button', { class: 'btn btn-primary', onclick: () => next() }, w.step === 3 ? 'Skapa sidan' : 'Nästa');
-    view([header('Ny sida'), h('ol', { class: 'list-inline mb-3' }, step(1, 'Namn'), step(2, 'Mall'), step(3, 'Vem ser den')),
+    view(shell('sidor', pageHead('Ny sida', 'En egen sida i tre steg: namn, mall och vem som får läsa den.'), h('ol', { class: 'list-inline mb-3' }, step(1, 'Namn'), step(2, 'Mall'), step(3, 'Vem ser den')),
       h('div', { class: 'hs-card p-3 p-md-4', style: 'max-width:46rem' }, content,
-        h('div', { class: 'd-flex gap-2 mt-3' }, back ? h('button', { class: 'btn btn-outline-secondary', onclick: back }, 'Tillbaka') : h('button', { class: 'btn btn-outline-secondary', onclick: renderList }, 'Avbryt'), nextBtn))]);
+        h('div', { class: 'd-flex gap-2 mt-3' }, back ? h('button', { class: 'btn btn-outline-secondary', onclick: back }, 'Tillbaka') : h('button', { class: 'btn btn-outline-secondary', onclick: renderList }, 'Avbryt'), nextBtn))));
   }
 
   function templateBlocks(tpl, vis) {
@@ -380,6 +494,7 @@
 
   // ── Redigeraren ─────────────────────────────────────────────────────────────
   async function openEditor(pageId) {
+    setHash('#redigera=' + pageId);
     view(h('p', { class: 'text-muted' }, 'Laddar sidan …'));
     const r = await api('GET', 'Page', { pageId });
     if (!r.success) { view([header(), alertBox('danger', r.message || 'Sidan kunde inte öppnas.'), h('button', { class: 'btn btn-outline-secondary', onclick: load }, 'Tillbaka')]); return; }
@@ -515,7 +630,7 @@
     const blocksEl = h('div', { id: 'hsBlocks' });
 
     const bar = h('div', { class: 'hs-bar d-flex flex-wrap gap-2 align-items-center' },
-      h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); load(); } }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Alla sidor'),
+      h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : '#sidor'); load(); } }, h('i', { class: 'bi bi-arrow-left me-1' }), slots ? 'Tillbaka till sidan' : 'Sidor'),
       h('span', { id: 'hsStatus', class: 'hs-status ms-auto' }, S.statusText),
       h('button', { id: 'hsDiscard', class: 'btn btn-outline-secondary', hidden: true, onclick: async () => {
         if (!await confirmDialog('Kasta ändringarna?', 'Ändringarna sedan senaste publiceringen försvinner. Den publicerade sidan påverkas inte.', 'Kasta ändringarna', true)) return;
@@ -526,7 +641,7 @@
       } }, 'Kasta ändringarna'),
       h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
 
-    view([bar, supportBanner(), h('div', { id: 'hsBanner' }),
+    view(shell(slots ? 'sys:' + S.templateKey : 'sidor', bar, h('div', { id: 'hsBanner' }),
       slots
         ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Egen text på "' + S.title + '"'),
             h('p', { class: 'text-muted mb-0' }, 'Texten visas före och efter sidans vanliga innehåll. Sidans eget innehåll ändras inte.'))
@@ -534,7 +649,7 @@
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, slots ? 'Vem ser texten?' : 'Vem ser sidan?'), visSel, consequence,
         !slots && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
       slots ? null : menuToggle(), slots ? null : previewRow(),
-      blocksEl, slots ? null : addBlockBar(), moreCard()]);
+      blocksEl, slots ? null : addBlockBar(), moreCard()));
     drawBlocks();
     paintStatus(); paintEditorBanner();
   }

@@ -166,7 +166,7 @@ namespace HpskSite.Controllers
                 systemPages = sysStates.Select(s => new
                 {
                     key = s.Key, label = s.Label, mode = SiteSystemPages.Code(s.Mode), word = SiteSystemPages.Word(s.Mode),
-                    pageId = s.PageId, revision = s.Revision, pendingChanges = s.PendingChanges, canConvert = s.CanConvert,
+                    pageId = s.PageId, revision = s.Revision, pendingChanges = s.PendingChanges, canConvert = s.CanConvert, level = s.Level,
                     panels = SiteSystemPages.PanelsFor(g.OwnerType, s.Key),
                 }),
                 // Egen text före/efter systemsidorna: varje sida som kan ha det, hur öppen texten får vara, och ägarens kopia om den finns.
