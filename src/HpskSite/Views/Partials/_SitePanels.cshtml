@@ -1,0 +1,52 @@
+@* EN ritväg för systemsidornas paneler (konvertera-planen v2, K0b). Modell: SitePanelContext med PageKey satt.
+   Panelerna kommer ur standardlistan i PanelCatalog (en omvandlad sida ritas senare ur lagrade block genom samma loop).
+   Full = hela bredden; på Hem ritas följande Main/Side-paneler i en rad med col-lg-8 / col-lg-4. Varje panel är en egen delvy:
+   lokala namn kolliderar därför inte (Razor-vyn är annars EN metod). *@
+@model HpskSite.Services.SitePages.SitePanelContext
+@using HpskSite.Services.SitePages
+@{
+    var placements = PanelCatalog.Standard(Model.OwnerType, Model.PageKey, Model.LoggedIn);
+    var segments = new List<(bool Row, List<PanelPlacement> Items)>();
+    foreach (var p in placements)
+    {
+        var inRow = p.Zone != PanelZone.Full;
+        if (segments.Count == 0 || segments[^1].Row != inRow || !inRow)
+            segments.Add((inRow, new List<PanelPlacement>()));
+        segments[^1].Items.Add(p);
+    }
+}
+@foreach (var seg in segments)
+{
+    if (!seg.Row)
+    {
+        foreach (var p in seg.Items)
+        {
+            @await RenderPanelAsync(p.Key)
+        }
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-lg-8">
+                @foreach (var p in seg.Items.Where(x => x.Zone == PanelZone.Main))
+                {
+                    @await RenderPanelAsync(p.Key)
+                }
+            </div>
+            <div class="col-lg-4">
+                @foreach (var p in seg.Items.Where(x => x.Zone == PanelZone.Side))
+                {
+                    @await RenderPanelAsync(p.Key)
+                }
+            </div>
+        </div>
+    }
+}
+@functions {
+    private async Task<Microsoft.AspNetCore.Html.IHtmlContent> RenderPanelAsync(string key)
+    {
+        var def = PanelCatalog.Find(Model.OwnerType, key);
+        if (def?.Partial == null) return Microsoft.AspNetCore.Html.HtmlString.Empty;
+        return await Html.PartialAsync(def.Partial, Model);
+    }
+}

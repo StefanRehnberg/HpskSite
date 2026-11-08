@@ -1,0 +1,3 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@* "Det här händer" — flödet låst till kretsen (ingen kretsväljare, ingen kretsnavigering). *@
+@await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedRegionCode = Model.RegionCode, LockedRegionName = Model.OwnerName })

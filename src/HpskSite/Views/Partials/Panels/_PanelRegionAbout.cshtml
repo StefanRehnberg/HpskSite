@@ -1,0 +1,22 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@* Om kretsen: LIVE ur kretsnodens egenskap aboutRegion. Texten sätts in av sidans skript i #regionAboutContent (säker rendering). *@
+@{
+    var aboutRegion = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Node.Value<string>("aboutRegion"));
+}
+@if (!string.IsNullOrEmpty(aboutRegion))
+{
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om @Model.OwnerName</h5>
+        </div>
+        <div class="card-body">
+            <div id="regionAboutContent" class="prose"></div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-2"></i>Ingen information om kretsen har lagts till ännu.
+    </div>
+}

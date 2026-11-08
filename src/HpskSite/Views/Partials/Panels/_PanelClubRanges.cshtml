@@ -1,0 +1,62 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+                    @*
+                        Klubbens banor (omgjord 2026-10-11): ett kort per bana med samma karta som tävlingssidan
+                        (röd punkt, Vägbeskrivning), klubbens fasta tider och länkar till banans egen sida
+                        (/skjutbana/{id}) och dess kalender. Kartan ritas när fliken visas — Leaflet räknar fel i
+                        en dold ruta. ⚠️ Inga användartexter i onclick.
+                    *@
+                    <div id="clubRangesList"></div>
+                    <div id="clubRangesEmpty" class="alert alert-info" style="display:none">
+                        <i class="bi bi-info-circle me-1"></i>Ingen skjutbana är kopplad till klubben ännu.
+                        Klubbens administratör hittar er bana bland <a href="/skjutbanor">skjutbanorna</a> och gör anspråk på den.
+                    </div>
+                    <link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+                    <script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+                    <script src="~/js/range-map.js" asp-append-version="true"></script>
+                    <script>
+                    (function () {
+                        const crClubId = @Model.OwnerId;
+                        const DAYS = { 1:'Måndag', 2:'Tisdag', 3:'Onsdag', 4:'Torsdag', 5:'Fredag', 6:'Lördag', 7:'Söndag' };
+                        const RELATION = { Owner:'Klubben äger banan', Huvudman:'Klubben äger banan', PrimaryUser:'Klubbens huvudbana', User:'Klubben använder banan', Tenant:'Klubben hyr tider på banan' };
+                        const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+                        let ranges = [];
+                        function drawMaps() {
+                            if (!document.getElementById('clubRanges').classList.contains('active') || !window.hpskRangeMap) return;
+                            ranges.forEach(r => window.hpskRangeMap.render(document.getElementById('crMap' + r.id), r));
+                        }
+                        async function load() {
+                            try {
+                                const res = await fetch('/umbraco/surface/ShootingRange/GetClubRanges?clubId=' + crClubId, { credentials: 'same-origin' });
+                                const d = res.ok ? await res.json() : null;
+                                if (!d || !d.success || !d.ranges.length) { document.getElementById('clubRangesEmpty').style.display = ''; return; }
+                                ranges = d.ranges;
+                                document.getElementById('clubRangesList').innerHTML = ranges.map(r => {
+                                    const pos = window.hpskRangeMap && window.hpskRangeMap.hasPos(r);
+                                    const addr = window.hpskRangeMap ? window.hpskRangeMap.addressText(r) : (r.city || '');
+                                    const times = r.allocations.length
+                                        ? '<ul class="list-unstyled mb-0">' + r.allocations.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime))
+                                            .map(a => `<li>${DAYS[a.dayOfWeek]} ${esc(a.startTime)}–${esc(a.endTime)}${a.note ? ' <span class="text-muted">(' + esc(a.note) + ')</span>' : ''}</li>`).join('') + '</ul>'
+                                        : '<span class="text-muted">Inga fasta tider.</span>';
+                                    return `<div class="card mb-3"><div class="card-body">
+                                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                                            <div><h5 class="mb-0"><a class="text-decoration-none" href="/skjutbana/${r.id}">${esc(r.name)}</a></h5>
+                                                <div class="small text-muted">${esc(RELATION[r.relationType] || '')}</div></div>
+                                            <div class="d-flex flex-wrap gap-2">
+                                                ${pos ? `<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="${esc(window.hpskRangeMap.directionsUrl(r))}"><i class="bi bi-signpost-2 me-1"></i>Vägbeskrivning</a>` : ''}
+                                                <a class="btn btn-sm btn-outline-primary" href="/skjutbana/${r.id}#vy=kalender"><i class="bi bi-calendar3 me-1"></i>Banans kalender</a>
+                                                <a class="btn btn-sm btn-outline-secondary" href="/skjutbana/${r.id}">Om banan</a>
+                                            </div></div>
+                                        <div class="row g-3">
+                                            <div class="col-md-7">${addr ? `<div class="mb-2"><i class="bi bi-geo-alt-fill text-danger me-1"></i>${esc(addr)}</div>` : ''}
+                                                ${pos ? `<div id="crMap${r.id}" style="height:220px;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>` : '<div class="text-muted small">Banan har ingen plats på kartan ännu.</div>'}</div>
+                                            <div class="col-md-5"><div class="fw-semibold mb-1">Klubbens tider</div>${times}</div>
+                                        </div></div></div>`;
+                                }).join('');
+                                drawMaps();
+                            } catch (e) { document.getElementById('clubRangesEmpty').style.display = ''; }
+                        }
+                        const tabBtn = document.getElementById('clubRanges-tab');
+                        if (tabBtn) tabBtn.addEventListener('shown.bs.tab', drawMaps);
+                        load();
+                    })();
+                    </script>

@@ -1,0 +1,5 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@if (Model.LoggedIn)
+{
+    @await Html.PartialAsync("RegionInstructorsPublicPanel", Model.Node)
+}

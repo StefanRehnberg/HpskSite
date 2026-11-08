@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Globalization;
 @using Umbraco.Cms.Core.Security;
 @using Umbraco.Cms.Core.Services;
@@ -71,6 +71,8 @@
     var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
         await SiteViewers.ResolveAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode));   // kretsmedlem (2d) räknas ut på EN plats
     ViewBag.sitePageView = sp;
+    // Panelregistret (K0b): EN ritväg för systemsidornas paneler.
+    var panelCtx = new HpskSite.Services.SitePages.SitePanelContext(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionName, Model, sp.Viewer with { IsOwnerAdmin = isRegionalAdmin }, regionCode);
     // Kretsens egen text före/efter systemsidorna (slots): bara när egen redigering är PÅ (annars ritas ingenting).
     ViewBag.slotCtx = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
         ? new HpskSite.Services.SitePages.SiteSlotContext(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, sp.Viewer, Model.Url(), Model)
@@ -174,17 +176,7 @@
     <div class="tab-pane fade @sp.PaneClass("regionHome")" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
         @await Html.PartialAsync("_SitePageSlots", ("home", "before"))
         @* "Det här händer" feed, locked to this krets (no krets selector, no region nav) *@
-        @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedRegionCode = regionCode, LockedRegionName = regionName })
-        @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
-        {
-            { "clubsPage", clubsPage },
-            { "clubsUrl", clubsUrl },
-            { "clubCount", clubCount },
-            { "aboutRegion", aboutRegion },
-            { "contactPerson", contactPerson },
-            { "contactEmail", contactEmail },
-            { "contactPhone", contactPhone }
-        })
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
         @await Html.PartialAsync("_SitePageSlots", ("home", "after"))
     </div>
     }
@@ -194,27 +186,7 @@
     {
     <div class="tab-pane fade @sp.PaneClass("regionAbout")" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
         @await Html.PartialAsync("_SitePageSlots", ("about", "before"))
-        @if (!string.IsNullOrEmpty(aboutRegion))
-        {
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om @regionName</h5>
-                </div>
-                <div class="card-body">
-                    <div id="regionAboutContent" class="prose"></div>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>Ingen information om kretsen har lagts till ännu.
-            </div>
-        }
-        @if (isLoggedIn)
-        {
-            @await Html.PartialAsync("RegionInstructorsPublicPanel")
-        }
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "about" })
         @await Html.PartialAsync("_SitePageSlots", ("about", "after"))
     </div>
     }
@@ -224,7 +196,7 @@
     {
     <div class="tab-pane fade @sp.PaneClass("regionCompetitions")" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
         @await Html.PartialAsync("_SitePageSlots", ("competitions", "before"))
-        @await Html.PartialAsync("RegionCompetitionsList")
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "competitions" })
         @await Html.PartialAsync("_SitePageSlots", ("competitions", "after"))
     </div>
     }
@@ -234,7 +206,7 @@
     {
     <div class="tab-pane fade @sp.PaneClass("regionCalendar")" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
         @await Html.PartialAsync("_SitePageSlots", ("calendar", "before"))
-        @await Html.PartialAsync("_KretsCalendar", Model.Id)
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "calendar" })
         @await Html.PartialAsync("_SitePageSlots", ("calendar", "after"))
     </div>
     }
@@ -246,14 +218,7 @@
         {
         <div class="tab-pane fade @sp.PaneClass("regionRecords")" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
             @await Html.PartialAsync("_SitePageSlots", ("records", "before"))
-            @{
-                var regionRecVD = new ViewDataDictionary(ViewData);
-                regionRecVD["RecordsScopeType"] = "Region";
-                regionRecVD["RecordsScopeId"] = regionCode;
-                regionRecVD["RecordsCanEdit"] = isRegionalAdmin;
-                regionRecVD["RecordsScopeName"] = regionName;
-            }
-            @await Html.PartialAsync("RecordsHallOfFame", null, regionRecVD)
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "records" })
             @await Html.PartialAsync("_SitePageSlots", ("records", "after"))
         </div>
         }
@@ -263,11 +228,7 @@
         {
         <div class="tab-pane fade @sp.PaneClass("regionDocuments")" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
             @await Html.PartialAsync("_SitePageSlots", ("documents", "before"))
-            @{
-                ViewBag.DocumentOwnerType = 1;
-                ViewBag.DocumentOwnerId = Model.Id;
-            }
-            @await Html.PartialAsync("DocumentArchive")
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "documents" })
             @await Html.PartialAsync("_SitePageSlots", ("documents", "after"))
         </div>
         }
@@ -277,10 +238,7 @@
         {
         <div class="tab-pane fade @sp.PaneClass("regionBoard")" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
             @await Html.PartialAsync("_SitePageSlots", ("board", "before"))
-            @{
-                ViewBag.regionContentId = Model.Id;
-            }
-            @await Html.PartialAsync("RegionalBoardPanel")
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "board" })
             @await Html.PartialAsync("_SitePageSlots", ("board", "after"))
         </div>
         }

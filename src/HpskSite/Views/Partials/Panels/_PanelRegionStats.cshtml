@@ -1,0 +1,86 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@using Umbraco.Extensions
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@* Kretsen i siffror: antal klubbar och kommande tävlingar. Hämtas automatiskt ur trädet och tävlingslagret. *@
+@{
+    var clubsPage = Model.Node.Children.FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+    var clubsUrl = clubsPage?.Url() ?? $"{Model.Node.Url()}klubbar";
+    var clubCount = clubsPage?.Children.Count(c => c.ContentType.Alias == "club") ?? 0;
+    var regionName = Model.OwnerName;
+
+    var rootPageForStats = Model.Node.SiteRoot();
+    var competitionsHub = rootPageForStats?.Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+    var upcomingCompetitionsCount = 0;
+
+    // Klubb-id:n i kretsen
+    var regionClubIds = new HashSet<int>();
+    if (clubsPage != null)
+    {
+        foreach (var club in clubsPage.Children.Where(c => c.ContentType.Alias == "club"))
+        {
+            regionClubIds.Add(club.Id);
+        }
+    }
+
+    // Kommande tävlingar för kretsens klubbar
+    if (competitionsHub != null && regionClubIds.Any())
+    {
+        upcomingCompetitionsCount = Competitions.List()
+            .Where(c => (c.CompetitionDate ?? DateTime.MinValue) >= DateTime.Today)
+            .Count(c => regionClubIds.Contains(c.ClubId));
+    }
+}
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row text-center">
+            <div class="col-md-4 mb-3 mb-md-0">
+                <a href="@clubsUrl" class="text-decoration-none region-stat-link">
+                    <div class="d-flex flex-column align-items-center">
+                        <i class="bi bi-building fs-1 text-primary mb-2"></i>
+                        <h3 class="mb-0">@clubCount</h3>
+                        <small class="text-muted">Klubbar</small>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-4 mb-3 mb-md-0">
+                <div class="d-flex flex-column align-items-center">
+                    <i class="bi bi-geo-alt fs-1 text-primary mb-2"></i>
+                    <h3 class="mb-0">@regionName</h3>
+                    <small class="text-muted">Krets</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                @if (competitionsHub != null)
+                {
+                    <a href="@competitionsHub.Url()" class="text-decoration-none region-stat-link">
+                        <div class="d-flex flex-column align-items-center">
+                            <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                            <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                            <small class="text-muted">Kommande tävlingar</small>
+                        </div>
+                    </a>
+                }
+                else
+                {
+                    <div class="d-flex flex-column align-items-center">
+                        <i class="bi bi-trophy fs-1 text-primary mb-2"></i>
+                        <h3 class="mb-0">@upcomingCompetitionsCount</h3>
+                        <small class="text-muted">Kommande tävlingar</small>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+.region-stat-link {
+    display: block;
+    color: inherit;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    transition: background-color 0.15s;
+}
+.region-stat-link:hover {
+    background-color: var(--bs-tertiary-bg);
+}
+</style>

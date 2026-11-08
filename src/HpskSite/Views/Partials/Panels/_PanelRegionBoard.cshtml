@@ -1,0 +1,5 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@{
+    ViewBag.regionContentId = Model.OwnerId;
+}
+@await Html.PartialAsync("RegionalBoardPanel", Model.Node)

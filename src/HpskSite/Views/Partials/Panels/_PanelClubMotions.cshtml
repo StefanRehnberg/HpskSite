@@ -1,0 +1,3 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@* Motionerna (för klubbens medlemmar) och styrelsens ärenden (för styrelseledamöter). *@
+@await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardClubId", Model.OwnerId } })

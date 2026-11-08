@@ -1,0 +1,47 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@* Kontakt: LIVE ur kretsnodens egenskaper; ritas bara när något är ifyllt. *@
+@{
+    var contactPerson = Model.Node.Value<string>("contactPerson") ?? "";
+    var contactEmail = Model.Node.Value<string>("contactEmail") ?? "";
+    var contactPhone = Model.Node.Value<string>("contactPhone") ?? "";
+}
+@if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
+{
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontakt</h5>
+        </div>
+        <div class="card-body">
+            @if (!string.IsNullOrEmpty(contactPerson))
+            {
+                <div class="d-flex align-items-center mb-3">
+                    <i class="bi bi-person fs-4 text-primary me-3"></i>
+                    <div>
+                        <small class="text-muted d-block">Kontaktperson</small>
+                        <span>@contactPerson</span>
+                    </div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(contactEmail))
+            {
+                <div class="d-flex align-items-center mb-3">
+                    <i class="bi bi-envelope fs-4 text-primary me-3"></i>
+                    <div>
+                        <small class="text-muted d-block">E-post</small>
+                        <a href="mailto:@contactEmail">@contactEmail</a>
+                    </div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(contactPhone))
+            {
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-telephone fs-4 text-primary me-3"></i>
+                    <div>
+                        <small class="text-muted d-block">Telefon</small>
+                        <a href="tel:@contactPhone">@contactPhone</a>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}

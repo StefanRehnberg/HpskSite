@@ -1,0 +1,17 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@using Umbraco.Extensions
+@{
+    var loginPage = Model.Node.SiteRoot().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                    ?? Model.Node.SiteRoot().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+    var loginUrl = loginPage != null ? loginPage.Url() : "/login-register";
+}
+<div class="card">
+    <div class="card-body text-center">
+        <i class="bi bi-lock fs-1 text-muted mb-3 d-block"></i>
+        <h6 class="mb-2">Medlemsinloggning</h6>
+        <p class="text-muted small mb-3">Logga in för att se händelser, nyheter, kalender och mer</p>
+        <a href="@loginUrl" class="btn btn-primary btn-sm">
+            <i class="bi bi-box-arrow-in-right me-1"></i>Logga in
+        </a>
+    </div>
+</div>
