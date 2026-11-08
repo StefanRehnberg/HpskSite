@@ -36,6 +36,8 @@ namespace HpskSite.Services.SitePages
         SlugTaken,
         /// <summary>Texten ser ut att innehålla ett personnummer (<see cref="SiteWriteResult.Match"/>); admin väljer Ändra eller publicera ändå.</summary>
         PersonalNumber,
+        /// <summary>Sajtadmin har stoppat sidan (nödbromsen): den kan inte publiceras förrän den hävs.</summary>
+        Suspended,
     }
 
     public sealed record SiteWriteResult(SiteWriteStatus Status, int PageId = 0, int Revision = 0, string? Slug = null,
@@ -177,6 +179,7 @@ namespace HpskSite.Services.SitePages
         {
             var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
             if (page == null) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (page.SuspendedDate != null) return new SiteWriteResult(SiteWriteStatus.Suspended, pageId, page.Revision);
             var draft = SitePageStore.GetDraft(db, pageId, ownerType, ownerId);
             if (draft == null) return new SiteWriteResult(SiteWriteStatus.NothingToPublish, pageId, page.Revision);
 
@@ -188,6 +191,20 @@ namespace HpskSite.Services.SitePages
             RebuildRefs(db, facts, page, ownerType, ownerId, page.VisibilityLevel, includeDraft: false);
             Audit(db, ownerType, ownerId, actor, "page", pageId, "page-publish", SitePageStore.Hash(page.Title, draft.BlocksJson), now);
             return new SiteWriteResult(SiteWriteStatus.Ok, pageId, published.Revision);
+        }
+
+        /// <summary>
+        /// Nödbromsen (sajtadmin): stoppar en sida eller häver stoppet. Kräver inget stödläge, ändrar inget innehåll och loggas i SiteAudit
+        /// (<c>page-suspend</c> / <c>page-release</c>) i samma transaktion. Aktören är alltid sajtadmin (<c>AsSupport</c>).
+        /// </summary>
+        public static SiteWriteResult SetSuspended(IDatabase db, int pageId, string ownerType, int ownerId, bool suspended, SiteActor actor, DateTime now)
+        {
+            var before = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            var r = SitePageStore.SetSuspended(db, pageId, ownerType, ownerId, suspended, actor.MemberId, now);
+            if (r.Outcome != SiteStoreOutcome.Ok) return From(r);
+            if (before != null && (before.SuspendedDate != null) == suspended) return new SiteWriteResult(SiteWriteStatus.Ok, pageId, r.Revision);   // redan i det läget: ingen ny loggrad
+            Audit(db, ownerType, ownerId, actor with { AsSupport = true }, "page", pageId, suspended ? "page-suspend" : "page-release", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, r.Revision);
         }
 
         /// <summary>

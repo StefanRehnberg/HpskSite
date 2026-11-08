@@ -167,7 +167,14 @@
     chk.addEventListener('change', () => { btn.disabled = !chk.checked; });
     const msg = h('div');
     view([header('Innan ni börjar'), h('div', { class: 'hs-card p-3 p-md-4', style: 'max-width:46rem' },
-      h('p', {}, 'Här kan ' + OWNER.name + ' skriva egna sidor som visas på pistol.nu. Läs det här först:'),
+      h('p', {}, 'Här kan ' + OWNER.name + ' skriva egna sidor som visas på pistol.nu.'),
+      h('h2', { class: 'h6' }, 'Det här kan du göra'),
+      h('ul', { class: 'mb-3' },
+        h('li', { class: 'mb-1' }, 'Skriva en egen sida, till exempel banregler, hitta hit eller information till nya medlemmar.'),
+        h('li', { class: 'mb-1' }, 'Bestämma vem som får se varje sida: alla, inloggade, klubbens medlemmar eller bara styrelsen.'),
+        h('li', { class: 'mb-1' }, 'Lägga egen text före eller efter de vanliga sidorna (Hem, Kalender och så vidare).'),
+        h('li', { class: 'mb-1' }, 'Se sidan som en medlem eller en besökare ser den innan du publicerar.')),
+      h('h2', { class: 'h6' }, 'Läs det här först'),
       h('ul', {}, TERMS.map(t => h('li', { class: 'mb-1' }, t))),
       h('div', { class: 'form-check my-3' }, chk, h('label', { class: 'form-check-label', for: 'hsTermsOk' }, 'Jag har läst och godkänner villkoren för ' + OWNER.name + 's hemsida.')),
       msg, btn)]);

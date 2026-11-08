@@ -43,6 +43,8 @@ namespace HpskSite.Services.SitePages
             "page-visibility" => "ändrade vem som ser",
             "page-restore-version" => "använde en tidigare version av",
             "slot-create" => "lade till egen text på systemsidan",
+            "page-suspend" => "stoppade sidan (nödbroms av pistol.nu)",
+            "page-release" => "hävde stoppet på sidan",
             "menu-add" => "lade i menyn:",
             "menu-remove" => "tog ur menyn:",
             "terms-accepted" => "godkände villkoren för klubbens sidor",

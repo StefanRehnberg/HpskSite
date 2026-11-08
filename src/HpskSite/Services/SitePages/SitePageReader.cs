@@ -61,7 +61,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             var page = SitePageStore.GetTemplateCopy(scope.Database, ownerType, ownerId, templateKey);
-            if (page == null || page.PublishedVersionId == null) return null;
+            if (page == null || page.PublishedVersionId == null || page.SuspendedDate != null) return null;
             var version = SitePageStore.GetPublished(scope.Database, page.Id, ownerType, ownerId);
             if (version == null) return null;
             var content = SiteBlockSchema.Parse(version.BlocksJson, SiteContentKind.TemplateCopy, page.VisibilityLevel, SiteTemplates.For(ownerType));
@@ -73,7 +73,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             var page = SitePageStore.GetPage(scope.Database, pageId, ownerType, ownerId);
-            if (page == null) return null;
+            if (page == null || page.SuspendedDate != null) return null;
             var version = SitePageStore.GetPublished(scope.Database, pageId, ownerType, ownerId);
             if (version == null) return null;
             var content = SiteBlockSchema.Parse(version.BlocksJson,

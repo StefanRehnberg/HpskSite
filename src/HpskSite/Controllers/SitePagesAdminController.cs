@@ -34,10 +34,11 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly DpaAcceptanceService _dpa;
+        private readonly ISiteSupportNotifier _notifier;
 
         public SitePagesAdminController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
-            AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, IMemberManager memberManager, IMemberService memberService, DpaAcceptanceService dpa)
+            AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, IMemberManager memberManager, IMemberService memberService, DpaAcceptanceService dpa, ISiteSupportNotifier notifier)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth;
@@ -46,6 +47,59 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _dpa = dpa;
+            _notifier = notifier;
+        }
+
+        /// <summary>Ägarens egna sidor (ingen text, bara läge) för nödbromsen. Bara sajtadmin.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> OwnerPages(string ownerType, int ownerId)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
+            if (!OwnerNodeExists(ownerType, ownerId)) return Json(new { success = false, message = "Okänd ägare." });
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var pages = SitePageStore.ListFree(scope.Database, ownerType, ownerId).Concat(SitePageStore.ListTemplateCopies(scope.Database, ownerType, ownerId).Select(p =>
+            {
+                p.Title = "Egen text: " + p.Title; return p;
+            }));
+            return Json(new { success = true, pages = pages.Select(p => new { id = p.Id, title = p.Title, status = p.Status, suspended = p.SuspendedDate != null }) });
+        }
+
+        /// <summary>
+        /// Nödbromsen per sida: stoppar en sida (den visas inte och kan inte publiceras) eller häver stoppet. Kräver inget stödläge, ändrar inget innehåll,
+        /// loggas i SiteAudit i samma transaktion och mejlas till ägarens egna administratörer. Bara sajtadmin.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> SuspendPage(string ownerType, int ownerId, int pageId, bool suspend)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
+            if (!OwnerNodeExists(ownerType, ownerId)) return Json(new { success = false, message = "Okänd ägare." });
+            var cur = await _memberManager.GetCurrentMemberAsync();
+            var memberId = cur?.Email == null ? (int?)null : _memberService.GetByEmail(cur.Email)?.Id;
+            SiteWriteResult r; string title = "";
+            using (var scope = _scopes.CreateScope())
+            {
+                title = SitePageStore.GetPage(scope.Database, pageId, ownerType, ownerId)?.Title ?? "";
+                r = SitePageWriter.SetSuspended(scope.Database, pageId, ownerType, ownerId, suspend, new SiteActor(memberId, AsSupport: true), DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            if (!r.Ok) return Json(new { success = false, message = "Sidan finns inte hos den ägaren." });
+            var node = Services.ContentService.GetById(ownerId);
+            var notified = await _notifier.NotifyPageSuspendedAsync(ownerType, ownerId, node?.Name ?? "", node?.GetValue<string>("regionCode"), title, suspend);
+            return Json(new { success = true, suspended = suspend, notified });
+        }
+
+        private bool OwnerNodeExists(string ownerType, int ownerId)
+        {
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region) return false;
+            if (ownerId <= 0) return false;
+            var alias = ownerType == SiteTemplates.Club ? "club" : "regionalPage";
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM umbracoNode n JOIN umbracoContent c ON c.nodeId = n.id JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, ownerId) == 1;
         }
 
         /// <summary>

@@ -23,6 +23,8 @@ namespace HpskSite.Services.SitePages
         public DateTime CreatedDate { get; set; }
         public DateTime UpdatedDate { get; set; }
         public DateTime? DeletedDate { get; set; }
+        /// <summary>Nödbromsen: satt av sajtadmin. Sidan visas inte och kan inte publiceras förrän den hävs.</summary>
+        public DateTime? SuspendedDate { get; set; }
 
         public SiteVisibility VisibilityLevel => (SiteVisibility)Visibility;
         public bool IsFree => TemplateKey == null;
@@ -58,11 +60,12 @@ namespace HpskSite.Services.SitePages
         public int Revision { get; set; }
         public DateTime UpdatedDate { get; set; }
         public DateTime? DeletedDate { get; set; }
+        public DateTime? SuspendedDate { get; set; }
         public string? Slug { get; set; }
         public bool InMenu { get; set; }
 
         /// <summary>Det användaren ser: "Publicerad", "Publicerad, med osparade ändringar" eller "Utkast".</summary>
-        public string Status => PublishedVersionId == null ? "Utkast" : DraftVersionId != null ? "Publicerad, med osparade ändringar" : "Publicerad";
+        public string Status => SuspendedDate != null ? "Stoppad av pistol.nu" : PublishedVersionId == null ? "Utkast" : DraftVersionId != null ? "Publicerad, med osparade ändringar" : "Publicerad";
     }
 
     /// <summary>En egen sida i ägarens meny (bara publicerade, ej raderade sidor med en aktuell adress).</summary>
@@ -119,7 +122,7 @@ namespace HpskSite.Services.SitePages
 
         private const string PageColumns =
             "Id, OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, PublishedTitle, Visibility, PublishedVersionId, DraftVersionId, " +
-            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate";
+            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate, SuspendedDate";
 
         private const string VersionColumns =
             "Id, PageId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedByMemberId, SavedAsSupport, SavedDate";
@@ -252,7 +255,7 @@ namespace HpskSite.Services.SitePages
         /// <summary>Ägarens FRIA sidor för redigeringslistan, med aktuell adress. Aldrig innehåll. Mallkopior (systemsidor) ingår inte.</summary>
         public static List<SitePageListItem> ListFree(IDatabase db, string ownerType, int ownerId, bool deleted = false) =>
             db.Fetch<SitePageListItem>(
-                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate,
+                @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.SuspendedDate,
                          (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug,
                          CASE WHEN EXISTS (SELECT 1 FROM dbo.SiteMenuItem m WHERE m.Kind = 1 AND m.PageId = p.Id AND m.IsRemoved = 0) THEN 1 ELSE 0 END AS InMenu
                   FROM dbo.SitePage p
@@ -270,7 +273,7 @@ namespace HpskSite.Services.SitePages
                   FROM dbo.SiteMenuItem m
                   JOIN dbo.SitePage p ON p.Id = m.PageId AND p.OwnerType = m.OwnerType AND p.OwnerId = m.OwnerId
                   JOIN dbo.PageAddress a ON a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1
-                  WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND m.IsRemoved = 0 AND p.DeletedDate IS NULL AND p.PublishedVersionId IS NOT NULL
+                  WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND m.IsRemoved = 0 AND p.DeletedDate IS NULL AND p.SuspendedDate IS NULL AND p.PublishedVersionId IS NOT NULL
                   ORDER BY m.SortOrder, p.Id",
                 ownerType, ownerId);
 
@@ -417,6 +420,21 @@ namespace HpskSite.Services.SitePages
             return rows == 0
                 ? new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision)
                 : new SiteStoreResult(SiteStoreOutcome.Ok, pageId, expectedRevision + 1);
+        }
+
+        /// <summary>
+        /// Nödbromsen: sätter eller hävar <c>SuspendedDate</c>. Höjer revisionen (en öppen redigerare får konflikt och ser att något hänt).
+        /// Oförändrat läge ger Ok utan skrivning. Sidan måste höra till ägaren och får inte vara raderad.
+        /// </summary>
+        public static SiteStoreResult SetSuspended(IDatabase db, int pageId, string ownerType, int ownerId, bool suspended, int? byMemberId, DateTime now)
+        {
+            var page = GetPage(db, pageId, ownerType, ownerId);
+            if (page == null) return new SiteStoreResult(SiteStoreOutcome.NotFound);
+            if ((page.SuspendedDate != null) == suspended) return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, page.Revision);
+            var rows = db.Execute(
+                "UPDATE dbo.SitePage SET Revision = Revision + 1, SuspendedDate = @3, UpdatedDate = @4, UpdatedByMemberId = @5 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND DeletedDate IS NULL",
+                pageId, ownerType, ownerId, suspended ? now : (DateTime?)null, now, byMemberId);
+            return rows == 0 ? new SiteStoreResult(SiteStoreOutcome.NotFound) : new SiteStoreResult(SiteStoreOutcome.Ok, pageId, page.Revision + 1);
         }
 
         /// <summary>Ur papperskorgen (inom 30 dagar). Synligheten är den sidan hade; <c>LastVisibleLevel</c> nollas.</summary>

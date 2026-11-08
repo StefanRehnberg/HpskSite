@@ -456,6 +456,55 @@ namespace HpskSite.Tests
             Assert.Equal(SiteWriteStatus.Invalid, SitePageWriter.RestoreVersion(f.Db, facts, c.PageId, Club, Owner, v.Id, rev, Admin, Now).Status);
         }
 
+        // ── Nödbromsen (sajtadmin stoppar en sida) ────────────────────────────────
+
+        [SqlFact]
+        public void Nödbromsen_stoppar_publicering_och_menyn_loggas_och_kan_hävas()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts(); var c = NewPage(f.Db, facts);
+            SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, 1, "Regler", TextBlock("<p>x</p>"), null, Admin, Now);
+            Assert.True(SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, 2, Admin, Now).Ok);
+            HpskSite.Services.Addresses.PageAddressService.SetCurrentFlat(f.Db, HpskSite.Services.Addresses.PageAddressKinds.SitePage, c.PageId, new HpskSite.Services.Addresses.PageAddressOwner(Club, Owner), "regler");
+            Assert.True(SitePageStore.SetInMenu(f.Db, c.PageId, Club, Owner, true, Now));
+            Assert.Single(SitePageStore.MenuPages(f.Db, Club, Owner));
+
+            var sajtadmin = new SiteActor(4242);
+            var stop = SitePageWriter.SetSuspended(f.Db, c.PageId, Club, Owner, true, sajtadmin, Now);
+            Assert.True(stop.Ok);
+            Assert.NotNull(SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!.SuspendedDate);
+            Assert.Empty(SitePageStore.MenuPages(f.Db, Club, Owner));                                   // syns inte som länk
+            Assert.Equal("Stoppad av pistol.nu", SitePageStore.ListFree(f.Db, Club, Owner).Single().Status);
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-suspend' AND ActorMemberId=4242 AND ActedAsSupport=1", c.PageId));
+
+            // Föreningen kan fortsätta skriva utkast men inte publicera.
+            var draft = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, stop.Revision, "Regler", TextBlock("<p>y</p>"), null, Admin, Now);
+            Assert.True(draft.Ok, draft.Message);
+            Assert.Equal(SiteWriteStatus.Suspended, SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, draft.Revision, Admin, Now).Status);
+
+            // Ett andra stopp ändrar ingenting (ingen ny logg, ingen ny revision).
+            var again = SitePageWriter.SetSuspended(f.Db, c.PageId, Club, Owner, true, sajtadmin, Now);
+            Assert.Equal(draft.Revision, again.Revision);
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-suspend'", c.PageId));
+
+            var release = SitePageWriter.SetSuspended(f.Db, c.PageId, Club, Owner, false, sajtadmin, Now);
+            Assert.True(release.Ok);
+            Assert.Null(SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!.SuspendedDate);
+            Assert.Single(SitePageStore.MenuPages(f.Db, Club, Owner));
+            Assert.Equal(1, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-release'", c.PageId));
+            Assert.True(SitePageWriter.Publish(f.Db, facts, c.PageId, Club, Owner, release.Revision, Admin, Now).Ok);
+        }
+
+        [SqlFact]
+        public void Nödbromsen_gäller_bara_sidan_hos_rätt_ägare()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var c = NewPage(f.Db, new Facts());
+            Assert.Equal(SiteWriteStatus.NotFound, SitePageWriter.SetSuspended(f.Db, c.PageId, Club, OtherOwner, true, new SiteActor(4242), Now).Status);
+            Assert.Null(SitePageStore.GetPage(f.Db, c.PageId, Club, Owner)!.SuspendedDate);
+            Assert.Equal(0, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SiteAudit WHERE ObjectId=@0 AND Action='page-suspend'", c.PageId));
+        }
+
         [SqlFact]
         public void Radera_loggas_och_synlighetsbyte_loggas()
         {

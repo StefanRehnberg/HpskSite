@@ -129,6 +129,7 @@ namespace HpskSite.Controllers
             SiteWriteStatus.NothingToPublish => "Det finns inga ändringar att publicera.",
             SiteWriteStatus.SlugTaken => "Adressen går inte att använda.",
             SiteWriteStatus.PersonalNumber => "Det här ser ut som ett personnummer.",
+            SiteWriteStatus.Suspended => "Sidan är stoppad av pistol.nu och kan inte publiceras. Kontakta oss om du undrar varför.",
             _ => "Det gick inte att spara."
         };
 
@@ -146,7 +147,7 @@ namespace HpskSite.Controllers
             var copies = SitePageStore.ListTemplateCopies(scope.Database, g.OwnerType, g.OwnerId);
             object Row(SitePageListItem p) => new
             {
-                id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu,
+                id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu, suspended = p.SuspendedDate != null,
                 url = p.Slug == null ? null : g.OwnerUrl + p.Slug + "/", updated = p.UpdatedDate, deleted = p.DeletedDate,
             };
             return Json(new
