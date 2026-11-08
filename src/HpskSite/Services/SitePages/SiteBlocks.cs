@@ -245,8 +245,9 @@ namespace HpskSite.Services.SitePages
             if (Int(b["visibility"]) is not int v) errors.Add(new($"{p}.visibility", "Blocket saknar synlighet."));
             else
             {
-                var systemLoggedOut = panelDef is { System: true } && v == (int)SiteVisibility.Utloggad;
-                if (panelDef is { System: true } && !systemLoggedOut) errors.Add(new($"{p}.visibility", "Systemrutan visas bara för den som inte är inloggad."));
+                var outOnly = panelDef != null && pageKey != null && template.IsLoggedOutOnly(pageKey, panelDef.Key);   // mallen avgör vilka paneler som bara finns för utloggade
+                var systemLoggedOut = outOnly && v == (int)SiteVisibility.Utloggad;
+                if (outOnly && !systemLoggedOut) errors.Add(new($"{p}.visibility", "Systemrutan visas bara för den som inte är inloggad."));
                 else if (!systemLoggedOut && (v < 0 || v > 4 || !SiteAccess.IsSelectable((SiteVisibility)v))) errors.Add(new($"{p}.visibility", "Ogiltig synlighet."));
                 else
                 {

@@ -110,7 +110,11 @@ namespace HpskSite.Services.SitePages
 ;WITH ranked AS (
     SELECT v.Id, v.SavedDate, ROW_NUMBER() OVER (PARTITION BY v.PageId ORDER BY v.Id DESC) AS rn
     FROM dbo.SitePageVersion v JOIN dbo.SitePage p ON p.Id = v.PageId
-    WHERE v.IsBaseline = 0 AND v.Id <> ISNULL(p.PublishedVersionId, 0) AND v.Id <> ISNULL(p.DraftVersionId, 0))
+    WHERE v.IsBaseline = 0 AND v.Id <> ISNULL(p.PublishedVersionId, 0) AND v.Id <> ISNULL(p.DraftVersionId, 0)
+      -- Lägg tillbaka (konvertera-planen K2): på en omgjord sida skyddas den senaste versionen i schema 1 (det sidan hade före omvandlingen), hur gammal den än är.
+      AND NOT (v.SchemaVersion = 1
+               AND v.Id = (SELECT MAX(x.Id) FROM dbo.SitePageVersion x WHERE x.PageId = v.PageId AND x.SchemaVersion = 1 AND x.IsBaseline = 0)
+               AND EXISTS (SELECT 1 FROM dbo.SitePageVersion c WHERE c.PageId = p.Id AND c.SchemaVersion = 2 AND c.Id IN (ISNULL(p.PublishedVersionId, 0), ISNULL(p.DraftVersionId, 0)))))
 DELETE TOP (@3) v FROM dbo.SitePageVersion v JOIN ranked r ON r.Id = v.Id
 WHERE (r.rn > @4 AND r.SavedDate < @0) OR r.SavedDate < @1 OR r.rn > @2";
             return Repeat(() => db.Execute(sql, soft, hard, MaxVersionsPerPage, Batch, KeepVersions));

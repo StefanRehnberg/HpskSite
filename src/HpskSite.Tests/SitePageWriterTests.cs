@@ -327,9 +327,10 @@ namespace HpskSite.Tests
             Assert.Equal(SiteWriteStatus.Invalid, refused.Status);                                  // grinden: en vanlig sparning omvandlar inte
             Assert.Equal(0, Scalar(f.Db, "SELECT COUNT(*) FROM dbo.SitePageVersion WHERE PageId=@0 AND SchemaVersion=2", c.PageId));
 
-            // Som K2:s omvandling kommer att göra det: en schema-2-version finns. Därefter går redigering och publicering.
-            f.Db.Execute(@"INSERT INTO dbo.SitePageVersion (PageId, OwnerType, OwnerId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedAsSupport, SavedDate)
-                           VALUES (@0, 'Club', @1, 0, N'Kalender', @2, 2, 0x00, 0, 0, 0, @3)", c.PageId, Owner, converted, Now);
+            // Som omvandlingen gör det (K2): utkastet pekar på en version i schema 2. Därefter går redigering och publicering.
+            var vid = f.Db.ExecuteScalar<int>(@"INSERT INTO dbo.SitePageVersion (PageId, OwnerType, OwnerId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedAsSupport, SavedDate)
+                           VALUES (@0, 'Club', @1, 0, N'Kalender', @2, 2, 0x00, 0, 0, 0, @3); SELECT CAST(SCOPE_IDENTITY() AS int)", c.PageId, Owner, converted, Now);
+            f.Db.Execute("UPDATE dbo.SitePage SET DraftVersionId = @1 WHERE Id = @0", c.PageId, vid);
             var s = SitePageWriter.SaveDraft(f.Db, facts, c.PageId, Club, Owner, c.Revision, "Kalender", converted, null, Admin, Now);
             Assert.True(s.Ok, s.Message);
             Assert.Equal(2, Scalar(f.Db, "SELECT TOP 1 SchemaVersion FROM dbo.SitePageVersion WHERE PageId=@0 ORDER BY Id DESC", c.PageId));   // kolumnen följer innehållet

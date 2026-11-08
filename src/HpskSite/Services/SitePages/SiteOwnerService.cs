@@ -14,6 +14,8 @@ namespace HpskSite.Services.SitePages
         public int? EnabledByMemberId { get; set; }
         public bool EditingEnabled { get; set; }
         public DateTime? TermsAcceptedDate { get; set; }
+        /// <summary>Brytare 3: får ägarens admin göra om en systemsida till en blocksida? AV som standard.</summary>
+        public bool ConvertEnabled { get; set; }
     }
 
     /// <summary>
@@ -210,7 +212,32 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopeProvider!.CreateScope(autoComplete: true);
             return scope.Database.Fetch<SiteOwnerRow>(
-                "SELECT OwnerType, OwnerId, IsEnabled, TemplateVersion, EnabledDate, EnabledByMemberId, EditingEnabled, TermsAcceptedDate FROM dbo.SiteOwner ORDER BY OwnerType, OwnerId");
+                "SELECT OwnerType, OwnerId, IsEnabled, TemplateVersion, EnabledDate, EnabledByMemberId, EditingEnabled, TermsAcceptedDate, ConvertEnabled FROM dbo.SiteOwner ORDER BY OwnerType, OwnerId");
+        }
+
+        /// <summary>
+        /// Slå på eller av brytare 3 (omvandling tillåten). Läses aldrig ur cachen: skrivlagret prövar kolumnen under ägarens lås vid varje omvandling, så det
+        /// finns inget att tömma. Raden måste finnas (brytare 1 först). Loggas.
+        /// </summary>
+        public void SetConversion(string ownerType, int ownerId, bool enabled, int? byMemberId)
+        {
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region)
+                throw new ArgumentOutOfRangeException(nameof(ownerType), ownerType, "Okänd ägartyp");
+            if (ownerId <= 0) throw new ArgumentOutOfRangeException(nameof(ownerId), ownerId, "Ogiltigt id");
+            if (WriteConversion(ownerType, ownerId, enabled) == 0)
+                throw new InvalidOperationException($"{ownerType} {ownerId} har ingen rad i SiteOwner: slå på den nya sidstrukturen först.");
+            _logger.LogWarning("Klubbsidorna: omvandling av systemsidor för {OwnerType} {OwnerId} {State} av medlem {MemberId}",
+                ownerType, ownerId, enabled ? "PÅ" : "AV", byMemberId);
+        }
+
+        protected virtual int WriteConversion(string ownerType, int ownerId, bool enabled)
+        {
+            using var scope = _scopeProvider!.CreateScope();
+            var n = scope.Database.Execute(
+                "UPDATE dbo.SiteOwner SET ConvertEnabled = @2, UpdatedDate = SYSDATETIME() WHERE OwnerType = @0 AND OwnerId = @1",
+                ownerType, ownerId, enabled);
+            scope.Complete();
+            return n;
         }
 
         protected virtual void WriteRow(string ownerType, int ownerId, bool enabled, int templateVersion, int? byMemberId)

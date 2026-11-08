@@ -269,9 +269,10 @@ namespace HpskSite.Tests
             var combos = 0;
             foreach (var template in new[] { SiteTemplates.ClubTemplate, SiteTemplates.RegionTemplate })
             foreach (var def in PanelCatalog.For(template.OwnerType))
+            foreach (var pageKey in template.Pages.Where(p => !p.IsAdmin).Select(p => p.Key).Where(k => PanelCatalog.AllowedOn(template.OwnerType, k, def.Key)))
             foreach (var persona in Viewers)
             foreach (var pageVis in Enumerable.Range(0, 5))
-            foreach (var blockVis in def.System ? new[] { 5 } : Enumerable.Range(0, 5).ToArray())
+            foreach (var blockVis in template.IsLoggedOutOnly(pageKey, def.Key) ? new[] { 5 } : Enumerable.Range(0, 5).ToArray())   // mallen avgör vad som bara finns för utloggade
             {
                 combos++;
                 var personal = (template.OwnerType == SiteTemplates.Club ? PersonalPanelsClub : PersonalPanelsRegion).Contains(def.Key);

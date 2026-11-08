@@ -183,9 +183,60 @@ namespace HpskSite.Services.SitePages
                 $"SELECT {PageColumns} FROM dbo.SitePage WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2" + (includeDeleted ? "" : " AND DeletedDate IS NULL"),
                 pageId, ownerType, ownerId);
 
-        /// <summary>Har sidan någon version i schema 2 (är den omvandlad)? Vanlig sparning får bara skriva schema 2 på en sida som redan är det; själva omvandlingen går bara genom sin egen grind (K2).</summary>
-        public static bool HasConvertedVersion(IDatabase db, int pageId) =>
-            db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SitePageVersion WHERE PageId = @0 AND SchemaVersion = @1", pageId, SiteBlockSchema.ConvertedSchemaVersion) > 0;
+        /// <summary>
+        /// Är sidan omvandlad just nu: pekar utkastet eller det publicerade på en version i schema 2? Äldre versioner i schema 2 räknas inte (efter
+        /// Lägg tillbaka är sidan en vanlig systemsida igen). Vanlig sparning får bara skriva schema 2 på en sida som redan är det, och aldrig schema 1 på
+        /// en som är det; själva omvandlingen och återgången går bara genom sina egna grindar (<see cref="SitePageWriter.ConvertTemplatePage"/>).
+        /// </summary>
+        public static bool IsConverted(IDatabase db, int pageId) =>
+            db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM dbo.SitePage p JOIN dbo.SitePageVersion v ON v.PageId = p.Id AND v.Id IN (p.PublishedVersionId, p.DraftVersionId)
+                  WHERE p.Id = @0 AND v.SchemaVersion = @1", pageId, SiteBlockSchema.ConvertedSchemaVersion) > 0;
+
+        /// <summary>Den senaste versionen i schema 1 (inte baslinjen): det sidan hade innan den gjordes om, eller det som publicerades före. Null = ingen.</summary>
+        public static SitePageVersionRow? LatestSchema1Version(IDatabase db, int pageId) =>
+            db.FirstOrDefault<SitePageVersionRow>(
+                $"SELECT TOP 1 {VersionColumns} FROM dbo.SitePageVersion WHERE PageId = @0 AND SchemaVersion = 1 AND IsBaseline = 0 ORDER BY Id DESC", pageId);
+
+        /// <summary>
+        /// Publicerar angivet innehåll direkt (en ny publiceringsversion; utkastet kastas). Används av Lägg tillbaka, som publicerar sidans senaste schema-1-version
+        /// utan att gå via ett utkast. Revisionen höjs med CAS.
+        /// </summary>
+        public static SiteStoreResult PublishContent(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, string title, string blocksJson,
+            int? byMemberId, bool asSupport, DateTime now)
+        {
+            var page = GetPage(db, pageId, ownerType, ownerId);
+            if (page == null) return new SiteStoreResult(SiteStoreOutcome.NotFound);
+            if (page.Revision != expectedRevision) return new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision);
+            var rows = db.Execute(
+                "UPDATE dbo.SitePage SET Revision = Revision + 1, UpdatedDate = @3, UpdatedByMemberId = @4 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND Revision = @5 AND DeletedDate IS NULL",
+                pageId, ownerType, ownerId, now, byMemberId, expectedRevision);
+            if (rows == 0) return new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision);
+            var revision = expectedRevision + 1;
+            var publishedId = InsertVersion(db, pageId, ownerType, ownerId, revision, title, blocksJson, isBaseline: false, isPublish: true, byMemberId, asSupport, now);
+            db.Execute("UPDATE dbo.SitePage SET PublishedVersionId = @1, PublishedTitle = @2, DraftVersionId = NULL WHERE Id = @0", pageId, publishedId, title);
+            if (page.DraftVersionId is int draftId) db.Execute("DELETE FROM dbo.SitePageVersion WHERE Id = @0 AND PageId = @1 AND IsBaseline = 0", draftId, pageId);
+            return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, revision);
+        }
+
+        /// <summary>
+        /// Kastar utkastet på en sida som aldrig publicerats: utkastraden tas bort och sidan pekar på sin baslinje (det tomma första utkastet) igen.
+        /// Revisionen höjs med CAS. (På en publicerad sida används <see cref="DiscardDraft"/>.)
+        /// </summary>
+        public static SiteStoreResult ResetToBaseline(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, int? byMemberId, DateTime now)
+        {
+            var page = GetPage(db, pageId, ownerType, ownerId);
+            if (page == null) return new SiteStoreResult(SiteStoreOutcome.NotFound);
+            if (page.Revision != expectedRevision) return new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision);
+            var baseline = db.ExecuteScalar<int?>("SELECT TOP 1 Id FROM dbo.SitePageVersion WHERE PageId = @0 AND IsBaseline = 1 ORDER BY Id", pageId);
+            var rows = db.Execute(
+                "UPDATE dbo.SitePage SET Revision = Revision + 1, UpdatedDate = @3, UpdatedByMemberId = @4, DraftVersionId = @6 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND Revision = @5 AND DeletedDate IS NULL",
+                pageId, ownerType, ownerId, now, byMemberId, expectedRevision, baseline);
+            if (rows == 0) return new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision);
+            if (page.DraftVersionId is int draftId && draftId != baseline)
+                db.Execute("DELETE FROM dbo.SitePageVersion WHERE Id = @0 AND PageId = @1 AND IsBaseline = 0", draftId, pageId);
+            return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, expectedRevision + 1);
+        }
 
         public static SitePageVersionRow? GetVersion(IDatabase db, int versionId, int pageId) =>
             db.FirstOrDefault<SitePageVersionRow>($"SELECT {VersionColumns} FROM dbo.SitePageVersion WHERE Id = @0 AND PageId = @1", versionId, pageId);

@@ -54,6 +54,14 @@ namespace HpskSite.Services.SitePages
             return levels.Count == 0 ? SiteVisibility.Dold : (SiteVisibility)levels.Min();
         }
 
+        /// <summary>
+        /// Är <paramref name="blockKey"/> på sidan <paramref name="pageKey"/> ett systemblock bara för den som INTE är inloggad (<see cref="SiteVisibility.Utloggad"/>)?
+        /// Mallen avgör: Hem för en klubb visar Om-text och inloggningsruta för utloggade, medan Om-sidan visar samma Om-text för inloggade.
+        /// En omvandlad sida lagrar ett sådant block som Utloggad och ingenting annat, och en klubb kan aldrig välja det.
+        /// </summary>
+        public bool IsLoggedOutOnly(string pageKey, string blockKey) =>
+            PageByKey(pageKey)?.Blocks.Any(b => b.Key == blockKey && b.Visibility == SiteVisibility.Utloggad) == true;
+
         /// <summary>Blockets synlighet efter taket för personuppgiftsblock.</summary>
         public static SiteVisibility EffectiveVisibility(SiteBlockDef b) =>
             b.PersonalData ? SiteAccess.CapPersonal(b.Visibility) : b.Visibility;

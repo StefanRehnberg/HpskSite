@@ -130,6 +130,7 @@ namespace HpskSite.Controllers
             SiteWriteStatus.SlugTaken => "Adressen går inte att använda.",
             SiteWriteStatus.PersonalNumber => "Det här ser ut som ett personnummer.",
             SiteWriteStatus.Suspended => "Sidan är stoppad av pistol.nu och kan inte publiceras. Kontakta oss om du undrar varför.",
+            SiteWriteStatus.ConvertOff => "Det går inte att göra om sidorna för den här föreningen än.",
             _ => "Det gick inte att spara."
         };
 
@@ -540,6 +541,61 @@ namespace HpskSite.Controllers
                 var s = SitePageStore.DiscardDraft(scope.Database, pageId, g.OwnerType, g.OwnerId, expectedRevision, g.Actor!.MemberId, DateTime.Now);
                 r = new SiteWriteResult(s.Outcome == SiteStoreOutcome.Ok ? SiteWriteStatus.Ok : s.Outcome == SiteStoreOutcome.Conflict ? SiteWriteStatus.Conflict
                     : s.Outcome == SiteStoreOutcome.NotFound ? SiteWriteStatus.NotFound : SiteWriteStatus.NothingToPublish, s.PageId, s.Revision);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        // ── Göra om en systemsida (konvertera-planen K2) ─────────────────────────
+        // Bara ägarens EGEN admin (OwnOnly): ett stödläge gör aldrig om en förenings sidor. Brytare 3 prövas av skrivlagret under ägarens lås.
+
+        /// <summary>Gör om en systemsida till en blocksida: ett utkast med dagens paneler. Den levande sidan är oförändrad tills utkastet publiceras.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade; brytare 3 prövas i skrivlagret")]
+        public async Task<IActionResult> ConvertPage(string ownerType, int ownerId, string templateKey)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"siteconvert:{g.OwnerType}:{g.OwnerId}", WritesPerMinute, TimeSpan.FromMinutes(1))) return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.ConvertTemplatePage(scope.Database, _facts, g.OwnerType, g.OwnerId, templateKey ?? "", g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Avbryt en omvandling som inte är publicerad: utkastet kastas, den levande sidan rörs inte.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> CancelConversion(string ownerType, int ownerId, int pageId, int expectedRevision)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.CancelConversion(scope.Database, _facts, pageId, g.OwnerType, g.OwnerId, expectedRevision, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Lägg tillbaka: sidan är en vanlig systemsida igen (dess tidigare version publiceras; allt finns kvar i historiken).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> RevertConversion(string ownerType, int ownerId, int pageId, int expectedRevision)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.RevertConversion(scope.Database, _facts, pageId, g.OwnerType, g.OwnerId, expectedRevision, g.Actor!, DateTime.Now);
                 if (r.Ok) scope.Complete();
             }
             return Map(r);

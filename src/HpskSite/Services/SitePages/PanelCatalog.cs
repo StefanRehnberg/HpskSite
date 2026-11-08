@@ -16,9 +16,8 @@ namespace HpskSite.Services.SitePages
     /// <param name="PersonalData">Visar personuppgifter (kan aldrig bli öppnare än Inloggade).</param>
     /// <param name="Required">Kan flyttas men aldrig tas bort av klubben när sidan blir en blocksida.</param>
     /// <param name="HostedBy">Panelen ritas inuti en annan panel (snabblänkdokumenten i Snabblänkar).</param>
-    /// <param name="System">Systempanel: schemat får lagra den (med synligheten Utloggad) men en klubb kan aldrig välja eller lägga till den (<c>login-prompt</c>).</param>
     public sealed record PanelDef(string Key, string Name, string Description, string? Partial, PanelZone Zone = PanelZone.Full,
-        bool PersonalData = false, bool Required = false, string? HostedBy = null, bool System = false);
+        bool PersonalData = false, bool Required = false, string? HostedBy = null);
 
     /// <summary>En panel på en sida, i ordning, med sin zon.</summary>
     public sealed record PanelPlacement(string Key, PanelZone Zone);
@@ -44,13 +43,13 @@ namespace HpskSite.Services.SitePages
         private const string Dir = "~/Views/Partials/Panels/";
 
         private static PanelDef D(string key, string name, string description, string? partial, PanelZone zone = PanelZone.Full,
-            bool personal = false, bool required = false, string? hostedBy = null, bool system = false) =>
-            new(key, name, description, partial == null ? null : Dir + partial + ".cshtml", zone, personal, required, hostedBy, system);
+            bool personal = false, bool required = false, string? hostedBy = null) =>
+            new(key, name, description, partial == null ? null : Dir + partial + ".cshtml", zone, personal, required, hostedBy);
 
         public static readonly IReadOnlyList<PanelDef> Club = new[]
         {
             D("about-text", "Om klubben", "Klubbens presentation. Texten skrivs under Klubbens uppgifter och visas här automatiskt.", "_PanelClubAbout", PanelZone.Main),
-            D("login-prompt", "Inloggningsruta", "Rutan som bjuder besökare som inte är inloggade att logga in.", "_PanelClubLoginPrompt", PanelZone.Side, required: true, system: true),
+            D("login-prompt", "Inloggningsruta", "Rutan som bjuder besökare som inte är inloggade att logga in.", "_PanelClubLoginPrompt", PanelZone.Side, required: true),
             D("contact-card", "Kontakt", "Kontaktperson, e-post och telefon. Hämtas automatiskt ur klubbens uppgifter.", "_PanelClubContact", PanelZone.Side),
             D("quicklink-docs", "Dokument med snabblänk", "Dokument som klubben valt att visa som snabblänk.", "_PanelClubQuickLinkDocs", PanelZone.Side, required: true),
             D("whats-happening", "Det här händer", "Klubbens senaste händelser, tävlingar och träningar. Hämtas automatiskt.", "_PanelClubWhatsHappening"),
@@ -138,9 +137,9 @@ namespace HpskSite.Services.SitePages
             Find(ownerType, key) != null
             && Standard(ownerType, pageKey, true).Concat(Standard(ownerType, pageKey, false)).Any(p => p.Key == key);
 
-        /// <summary>Panelerna en klubb får välja på sidan: de tillåtna, utan systempaneler.</summary>
+        /// <summary>Panelerna en klubb får välja på sidan: de tillåtna, utan det mallen bestämt är bara för utloggade (inloggningsruta, Om-text på Hem).</summary>
         public static IReadOnlyList<PanelDef> Selectable(string ownerType, string pageKey) =>
-            For(ownerType).Where(d => !d.System && AllowedOn(ownerType, pageKey, d.Key)).ToList();
+            For(ownerType).Where(d => AllowedOn(ownerType, pageKey, d.Key) && !SiteTemplates.For(ownerType).IsLoggedOutOnly(pageKey, d.Key)).ToList();
 
         /// <summary>Nycklar som någon standardlista ritar direkt (för testet av täckningen).</summary>
         public static IReadOnlySet<string> ListedKeys(string ownerType)

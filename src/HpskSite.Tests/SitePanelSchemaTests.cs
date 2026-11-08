@@ -88,12 +88,17 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Inloggningsrutan_går_att_lagra_som_Utloggad_men_aldrig_med_en_annan_nivå_och_ingen_annan_panel_får_vara_Utloggad()
+        public void Mallen_avgör_vilka_paneler_som_bara_finns_för_utloggade_och_de_lagras_som_Utloggad_och_inget_annat()
         {
             Assert.True(Converted(Page(2, Panel("abcd1", "login-prompt", 5)), "home").Ok);
             Assert.False(Converted(Page(2, Panel("abcd1", "login-prompt", 0)), "home").Ok);
             Assert.False(Converted(Page(2, Panel("abcd1", "login-prompt", 1)), "home").Ok);
             Assert.False(Converted(Page(2, Panel("abcd1", "contact-card", 5)), "home").Ok);
+            // Om-texten är utloggad-bara på Hem men en vanlig inloggad panel på Om klubben: samma panel, olika regel per sida.
+            Assert.True(Converted(Page(2, Panel("abcd1", "about-text", 5)), "home").Ok);
+            Assert.False(Converted(Page(2, Panel("abcd1", "about-text", 1)), "home").Ok);
+            Assert.False(Converted(Page(2, Panel("abcd1", "about-text", 5)), "about").Ok);
+            Assert.True(Converted(Page(2, Panel("abcd1", "about-text", 1)), "about").Ok);
             Assert.False(Converted(Page(2, "{\"id\":\"abcd1\",\"type\":\"text\",\"visibility\":5,\"data\":{\"html\":\"x\"}}"), "home").Ok);   // ett vanligt block är aldrig Utloggad
         }
 
@@ -101,8 +106,9 @@ namespace HpskSite.Tests
         public void Inloggningsrutan_kan_aldrig_väljas_av_en_klubb()
         {
             Assert.DoesNotContain(PanelCatalog.Selectable(SiteTemplates.Club, "home"), d => d.Key == "login-prompt");
+            Assert.DoesNotContain(PanelCatalog.Selectable(SiteTemplates.Club, "home"), d => d.Key == "about-text");   // utloggad-bara på Hem
+            Assert.Contains(PanelCatalog.Selectable(SiteTemplates.Club, "about"), d => d.Key == "about-text");        // men valbar på Om klubben
             Assert.Contains(PanelCatalog.Selectable(SiteTemplates.Club, "home"), d => d.Key == "contact-card");
-            Assert.All(PanelCatalog.Club.Concat(PanelCatalog.Region).Where(d => d.System), d => Assert.Equal("login-prompt", d.Key));
         }
 
         [Fact]
