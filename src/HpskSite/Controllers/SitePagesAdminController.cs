@@ -142,6 +142,30 @@ WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, ownerId);
             return Json(new { success = true });
         }
 
+        /// <summary>
+        /// Brytare 3 (omvandling tillåten) per ägare: får ägarens egen admin göra om en systemsida till en blocksida? Kräver brytare 1 och 2 PÅ.
+        /// Att slå av kräver ingenting och rör inga redan omgjorda sidor (de ligger kvar och går att lägga tillbaka). Prövas av skrivlagret vid varje omvandling.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> SetConversion(string ownerType, int ownerId, bool enabled)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
+            if (ownerType != SiteTemplates.Club && ownerType != SiteTemplates.Region) return Json(new { success = false, message = "Okänd ägartyp." });
+            if (ownerId <= 0) return Json(new { success = false, message = "Ogiltigt id." });
+            if (enabled)
+            {
+                var row = _owners.ListAll().FirstOrDefault(r => r.OwnerType == ownerType && r.OwnerId == ownerId);
+                if (row == null || !row.IsEnabled || !row.EditingEnabled) return Json(new { success = false, message = "Slå på egen redigering först." });
+            }
+            var cur = await _memberManager.GetCurrentMemberAsync();
+            var memberId = cur?.Email == null ? (int?)null : _memberService.GetByEmail(cur.Email)?.Id;
+            try { _owners.SetConversion(ownerType, ownerId, enabled, memberId); }
+            catch (InvalidOperationException ex) { return Json(new { success = false, message = ex.Message }); }
+            return Json(new { success = true });
+        }
+
         public sealed class OwnerNodeRow
         {
             public int Id { get; set; }
@@ -193,6 +217,7 @@ ORDER BY ct.alias, n.[text]");
                     templateVersion = row?.TemplateVersion,
                     enabledDate = row?.EnabledDate,
                     editing = row?.IsEnabled == true && row.EditingEnabled,
+                    convert = row?.IsEnabled == true && row.EditingEnabled && row.ConvertEnabled,
                     termsAccepted = row?.TermsAcceptedDate != null,
                     dpaAccepted = ownerType == SiteTemplates.Club && dpa.TryGetValue(n.Id, out var st) && st.Accepted,
                 };

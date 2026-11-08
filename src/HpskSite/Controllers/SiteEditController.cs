@@ -190,7 +190,7 @@ namespace HpskSite.Controllers
             return Json(new
             {
                 success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug,
-                kind = page.IsFree ? "free" : "slots", templateKey = page.TemplateKey,
+                kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) switch { SiteContentKind.FreePage => "free", SiteContentKind.ConvertedPage => "converted", _ => "slots" }, templateKey = page.TemplateKey,
                 minVisibility = page.IsFree ? 0 : (int)SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value, inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
                 url = slug == null ? null : g.OwnerUrl + slug + "/", hasUnpublishedChanges = page.HasUnpublishedChanges, published = page.PublishedVersionId != null,
                 blocksJson = version.BlocksJson, savedDate = version.SavedDate,

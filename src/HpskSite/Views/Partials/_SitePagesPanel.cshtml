@@ -44,8 +44,13 @@
         var info = o.type === 'Club' ? (o.dpaAccepted ? '' : ' <span class="text-warning small" title="Klubben har inte godkänt DPA">DPA saknas</span>') : '';
         var terms = o.editing ? ' <span class="small text-body-secondary">' + (o.termsAccepted ? 'villkor godkända' : 'villkor ej godkända') + '</span>' : '';
         var label = o.editing ? 'Slå av redigering' : 'Slå på redigering';
-        return state + info + terms + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-edit-type="' + esc(o.type) + '" data-sgp-edit-id="' + esc(o.id)
+        var main = state + info + terms + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-edit-type="' + esc(o.type) + '" data-sgp-edit-id="' + esc(o.id)
             + '" data-sgp-edit="' + (o.editing ? '0' : '1') + '">' + label + '</button>';
+        // Brytare 3: får ägarens admin göra om en systemsida till en blocksida? Bara när egen redigering är på.
+        if (!o.editing) return main;
+        var conv = o.convert ? '<span class="badge text-bg-success">Tillåten</span>' : '<span class="badge text-bg-secondary">Inte tillåten</span>';
+        return main + '<div class="mt-1 small">Göra om sidor: ' + conv + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-conv-type="' + esc(o.type)
+            + '" data-sgp-conv-id="' + esc(o.id) + '" data-sgp-conv="' + (o.convert ? '0' : '1') + '">' + (o.convert ? 'Tillåt inte' : 'Tillåt') + '</button></div>';
     }
 
     function render(d) {
@@ -117,6 +122,25 @@
         }
     }
 
+    async function setConversion(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpConvType);
+            fd.append('ownerId', btn.dataset.sgpConvId);
+            fd.append('enabled', btn.dataset.sgpConv === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/SetConversion', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
     // Nödbromsen per sida: Sidor-knappen fäller ut ägarens sidor under raden, med Stoppa / Häv stopp (två tryck, aldrig confirm()).
     async function showPages(btn) {
         var tr = btn.closest('tr');
@@ -164,6 +188,13 @@
             if (sb.dataset.armed === '1') { sb.dataset.armed = ''; suspendPage(sb); return; }
             sb.dataset.label = sb.textContent; sb.dataset.armed = '1'; sb.textContent = 'Tryck igen';
             setTimeout(function () { if (sb.dataset.armed === '1') { sb.dataset.armed = ''; sb.textContent = sb.dataset.label; } }, 6000);
+            return;
+        }
+        var cb = e.target.closest('button[data-sgp-conv-id]');
+        if (cb) {
+            if (cb.dataset.armed === '1') { cb.dataset.armed = ''; setConversion(cb); return; }
+            cb.dataset.label = cb.textContent; cb.dataset.armed = '1'; cb.textContent = 'Tryck igen';
+            setTimeout(function () { if (cb.dataset.armed === '1') { cb.dataset.armed = ''; cb.textContent = cb.dataset.label; } }, 6000);
             return;
         }
         var eb = e.target.closest('button[data-sgp-edit-id]');
