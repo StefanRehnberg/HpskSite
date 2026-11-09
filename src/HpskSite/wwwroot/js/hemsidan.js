@@ -348,7 +348,9 @@
     view(shell('sys:' + key,
       pageHead(p.label, [modePill(p), ' ', intro], actions),
       h('div', { id: 'hsBanner' }),
-      panelsCard, p.mode === 'asBefore' ? whoSeesCard(() => ({ templateKey: p.key })) : null, p.mode === 'asBefore' ? slotCard(slot) : null));
+      panelsCard, p.mode === 'asBefore' ? whoSeesCard(() => ({ templateKey: p.key }), p.canConvert
+        ? { change: { intro: 'Vill du bestämma vem som ser delarna av sidan?', label: 'Ändra den här sidan', run: () => convertFlow(p) } }
+        : { note: 'Vem som ser den här sidan går inte att ändra.' }) : null, p.mode === 'asBefore' ? slotCard(slot) : null));
     renderBanner();
   }
 
@@ -715,7 +717,10 @@
       h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, slots ? 'Vem ser texten?' : 'Vem ser sidan?'), visSel, consequence,
         !slots && !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
       slots || conv ? null : menuToggle(),
-      slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), { beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null }),
+      slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), {
+        beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null,
+        change: { intro: 'Så ändrar du vem som ser sidan:', label: 'välj under "Vem ser sidan?" högre upp', run: () => { const el = document.querySelector('select[aria-label="Vem ser sidan"]'); if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); } } },
+      }),
       slots ? null : previewRow(),
       blocksEl, slots ? null : addBlockBar(), moreCard()));
     drawBlocks();
@@ -783,9 +788,12 @@
     };
     load();
     return h('div', { class: 'hs-card p-3 mb-3', id: 'hsWhoSees' },
-      h('div', { class: 'd-flex align-items-center gap-2' }, h('h2', { class: 'h5 mb-0' }, 'Vem ser sidan?'),
+      h('div', { class: 'd-flex align-items-center gap-2' }, h('h2', { class: 'h5 mb-0' }, 'Vad ser olika besökare?'),
         h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary ms-auto', onclick: load }, 'Uppdatera')),
-      h('p', { class: 'text-muted mb-0' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'), out);
+      h('p', { class: 'text-muted mb-1' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'),
+      // Tabellen visar bara resultatet; inställningen ligger på ett annat ställe och kortet pekar dit.
+      opts.change ? h('p', { class: 'mb-0' }, opts.change.intro + ' ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', onclick: opts.change.run }, opts.change.label))
+        : opts.note ? h('p', { class: 'text-muted mb-0' }, opts.note) : null, out);
   }
 
   // "Mer": återställningspunkt, tidigare versioner och adressbyte (avancerat). Inget av det publicerar något.
