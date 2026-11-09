@@ -354,44 +354,51 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// "Se som": renderar sidans utkast (annars publicerade innehåll) för en vald FAST tittare (Utloggad, Inloggad, Medlem, Styrelse) och ger ett dokument till en
-        /// sandlådad iframe. Samma renderare och åtkomstregler som besökarna; adminens egen roll påverkar inte bilden. POST med antiforgery och <c>no-store</c> — aldrig en
-        /// parameter på den publika adressen.
+        /// "Förhandsvisa" under en besökare i Vem ser sidan?: ger en signerad biljett (<see cref="SitePreviewTicket"/>) och en adress till den RIKTIGA sidan med biljetten, att öppna i en
+        /// ny flik. Fliken behandlas då som den besökaren (<see cref="SitePreviewMiddleware"/>): bara läsning, bara föreningens egna sidor, aldrig Ekonomi, Styrelsearbete eller
+        /// Hemsidan. POST med antiforgery, aldrig en parameter på en publik adress.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
-        public async Task<IActionResult> Preview(string ownerType, int ownerId, int pageId, string persona, [FromServices] SiteBlockDataFactory blockData)
+        public async Task<IActionResult> StartPreview(string ownerType, int ownerId, string persona, string url, [FromServices] SitePreviewTickets tickets)
         {
             var g = await Gate(ownerType, ownerId, write: false);
             if (g.Error != null) return g.Error;
             Response.Headers["Cache-Control"] = "private, no-store";
             if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förhandsvisningar på kort tid.", "rate");
             var who = SitePagePreview.Persona(g.OwnerType, persona);
-            if (who == null) return Fail("Okänd tittare.");
+            if (who == null) return Fail("Okänd besökare.");
 
-            SitePageRow? page; SitePageVersionRow? version;
-            using (var scope = _scopes.CreateScope(autoComplete: true))
-            {
-                page = SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId);
-                version = page == null ? null
-                    : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId) ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
-            }
-            if (page == null || version == null) return Fail("Sidan finns inte.");
-            var kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson);
-            // En vanlig sida som inte är omgjord har ingen förhandsvisning här: den ritas av sidans egna vyer.
-            if (kind == SiteContentKind.TemplateCopy) return Fail("Sidan finns inte.");
-            var content = SiteBlockSchema.Parse(version.BlocksJson, kind, page.VisibilityLevel, SiteTemplates.For(g.OwnerType), page.TemplateKey);
-            if (!content.Ok) return Fail("Sidan kan inte visas ännu: " + content.Errors[0].Message);
+            // Adressen kommer utifrån: bara en adress under föreningens egen, utan fråga eller ankare, och som förhandsläget själv tillåter (aldrig Ekonomi, Styrelse, Hemsidan eller adminsidor).
+            if (string.IsNullOrEmpty(url) || url.Length > 300 || !url.StartsWith('/') || url.StartsWith("//") || url.Contains('?') || url.Contains('#')) return Fail("Sidans adress är ogiltig.");
+            var probe = new SitePreviewTicket(g.OwnerType, g.OwnerId, who.Key, g.OwnerUrl, who.Key == "anon" ? null : url, "-", 0);
+            if (!SitePreviewPolicy.PathAllowed(probe, url)) return Fail("Den sidan går inte att förhandsvisa.");
 
-            var node = UmbracoContext.Content?.GetById(g.OwnerId);
-            if (kind == SiteContentKind.ConvertedPage && page.TemplateKey != null)
+            // En annan besökare än utloggad förhandsvisas bara på en PUBLICERAD egen sida (den ritas på servern för just den tittaren). Övriga sidor hämtar sina delar med den
+            // inloggades egen session och kan därför inte visas som en annan person.
+            if (who.Key != "anon")
             {
-                var rc = SitePagePreview.BuildConverted(g.OwnerType, version.Title, page.TemplateKey, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
-                return Json(new { success = true, decision = rc.Decision.ToString(), notice = rc.Notice, document = rc.Document, persona = who.Key });
+                var slug = url.Trim('/').Split('/').Last();
+                if (!string.Equals(url.TrimEnd('/'), g.OwnerUrl.TrimEnd('/') + "/" + slug, StringComparison.OrdinalIgnoreCase)) return Fail("Den sidan går inte att förhandsvisa.");
+                int found;
+                using (var scope = _scopes.CreateScope(autoComplete: true))
+                    found = scope.Database.ExecuteScalar<int>(
+                        @"SELECT COUNT(*) FROM dbo.PageAddress a JOIN dbo.SitePage p ON p.Id = a.TargetId
+                          WHERE a.TargetKind = 'sitepage' AND a.IsCurrent = 1 AND a.OwnerType = @0 AND a.OwnerId = @1 AND a.Slug = @2
+                            AND p.TemplateKey IS NULL AND p.PublishedVersionId IS NOT NULL AND p.DeletedDate IS NULL", g.OwnerType, g.OwnerId, slug);
+                if (found == 0) return Fail("Bara en publicerad egen sida kan förhandsvisas som den besökaren. Publicera sidan först.");
             }
-            var r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
-            return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
+
+            // Biljetten knyts till den inloggade (samma läsning av kakan som förhandsläget gör vid varje anrop).
+            var auth = await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.AuthenticateAsync(HttpContext, Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme);
+            var member = auth?.Succeeded == true ? auth.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value : null;
+            if (string.IsNullOrEmpty(member)) return Fail(NotAllowed, "denied");
+
+            var token = tickets.Issue(g.OwnerType, g.OwnerId, who.Key, g.OwnerUrl, who.Key == "anon" ? null : url, member, DateTimeOffset.UtcNow);
+            HttpContext.RequestServices.GetService<Microsoft.Extensions.Logging.ILogger<SiteEditController>>()?
+                .LogInformation("SITEPREVIEW: {Owner} {OwnerId} som {Persona} på {Url}", g.OwnerType, g.OwnerId, who.Key, url);   // spår: vem som öppnade ett förhandsläge och för vilken besökare
+            return Json(new { success = true, url = url + "?" + SitePreviewPolicy.QueryKey + "=" + Uri.EscapeDataString(token), persona = who.Key });
         }
 
         /// <summary>
@@ -415,7 +422,7 @@ namespace HpskSite.Controllers
                 var def = template.PageByKey(templateKey ?? "");
                 if (def == null || def.IsAdmin || PanelCatalog.Standard(g.OwnerType, def.Key, true).Count == 0) return Fail("Den sidan går inte att granska.");
                 var std = SitePagePreview.Matrix(g.OwnerType, def.Label, def.Key, SiteConversion.PageVisibility(g.OwnerType, def.Key), SiteConversion.Build(g.OwnerType, def.Key, null));
-                return Json(new { success = true, basis = "standard", columns = std.Columns, rows = std.Rows, summary = std.Summary, publicUrl = g.OwnerUrl + (def.IsHome ? "" : def.Slug + "/") });
+                return Json(new { success = true, kind = "standard", basis = "standard", columns = std.Columns, rows = std.Rows, summary = std.Summary, publicUrl = g.OwnerUrl + (def.IsHome ? "" : def.Slug + "/") });
             }
 
             SitePageRow? page; SitePageVersionRow? version; bool isDraft;
@@ -438,17 +445,7 @@ namespace HpskSite.Controllers
                 var d = template.PageByKey(page.TemplateKey);
                 if (d != null) url = g.OwnerUrl + (d.IsHome ? "" : d.Slug + "/");
             }
-            return Json(new { success = true, basis = isDraft ? "draft" : "published", published = page.PublishedVersionId != null, columns = m.Columns, rows = m.Rows, summary = m.Summary, publicUrl = url });
-        }
-
-        /// <summary>Tittarna man kan förhandsvisa som, för den här ägarens typ.</summary>
-        [HttpGet]
-        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
-        public async Task<IActionResult> PreviewPersonas(string ownerType, int ownerId)
-        {
-            var g = await Gate(ownerType, ownerId, write: false);
-            if (g.Error != null) return g.Error;
-            return Json(new { success = true, personas = SitePagePreview.Personas(g.OwnerType).Select(p => new { key = p.Key, label = p.Label }) });
+            return Json(new { success = true, kind = kind == SiteContentKind.ConvertedPage ? "converted" : "free", basis = isDraft ? "draft" : "published", published = page.PublishedVersionId != null, columns = m.Columns, rows = m.Rows, summary = m.Summary, publicUrl = url });
         }
 
         /// <summary>

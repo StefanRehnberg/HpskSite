@@ -63,10 +63,13 @@ namespace HpskSite.Services.SitePages
         private readonly ClubRosterService _roster;
         private readonly BoardRoleService _board;
         private readonly IUmbracoContextAccessor _ctx;
+        private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
 
         public SiteViewerResolver(Umbraco.Cms.Core.Security.IMemberManager members, Umbraco.Cms.Core.Services.IMemberService memberService,
-            AdminAuthorizationService auth, ClubRosterService roster, BoardRoleService board, IUmbracoContextAccessor ctx)
+            AdminAuthorizationService auth, ClubRosterService roster, BoardRoleService board, IUmbracoContextAccessor ctx,
+            Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
         {
+            _http = http;
             _ctx = ctx;
             _members = members;
             _memberService = memberService;
@@ -80,7 +83,8 @@ namespace HpskSite.Services.SitePages
         /// får redigera ägarens egna sidor (Hemsidan). EN plats för regeln: filtret, vyerna och kontrollern frågar samma sak.
         /// </summary>
         public async Task<bool> IsOwnAdminAsync(string ownerType, int ownerId, string? regionCode) =>
-            ownerType == SiteTemplates.Club
+            PreviewFor(ownerType, ownerId) != null ? false   // i förhandsläget ser sidan inga redigeringsknappar: fliken är en besökare, inte adminen
+            : ownerType == SiteTemplates.Club
                 ? ownerId > 0 && await _auth.IsOwnClubAdmin(ownerId)
                 : !string.IsNullOrEmpty(regionCode) && await _auth.IsOwnRegionAdmin(regionCode);
 
@@ -95,8 +99,18 @@ namespace HpskSite.Services.SitePages
                 : await _auth.IsCurrentUserAdminAsync();
 
         /// <param name="regionCode">Kretsens kod (krets-ägare); behövs för kretsens admin.</param>
+        /// <summary>Förhandsläget för just den här ägaren, om begäran har ett (satt av <see cref="SitePreviewMiddleware"/> efter att biljetten godkänts).</summary>
+        private SitePreviewTicket? PreviewFor(string ownerType, int ownerId)
+        {
+            var t = SitePreviewContext.Current(_http?.HttpContext);
+            return t != null && t.OwnerType == ownerType && t.OwnerId == ownerId ? t : null;
+        }
+
         public async Task<SiteViewer> ResolveAsync(string ownerType, int ownerId, string? regionCode)
         {
+            // Förhandsläget: tittaren är den fasta besökaren biljetten gäller, aldrig den inloggade adminen.
+            if (PreviewFor(ownerType, ownerId) is { } preview)
+                return SitePagePreview.Persona(ownerType, preview.Persona)?.Viewer ?? SiteViewer.Anonymous;
             var current = await _members.GetCurrentMemberAsync();
             if (current == null) return SiteViewer.Anonymous;
 
