@@ -41,8 +41,28 @@ public class SiteHtmlSanitizerTests
         Assert.Contains("alt=\"Skyttar\"", html);
         Assert.DoesNotContain("onerror", html);
         Assert.DoesNotContain("style", html);
-        Assert.DoesNotContain("class", html);
+        Assert.Contains("class=\"image\"", html);
     }
+
+    [Theory]
+    [InlineData("image image-style-align-left", "width:40%;", "class=\"image image-style-align-left\"", "style=\"width:40%;\"")]
+    [InlineData("image image_resized", "width: 33.5%", "class=\"image image_resized\"", "style=\"width:33.5%;\"")]
+    public void En_bilds_placering_och_procentbredd_behålls(string cls, string style, string expectClass, string expectStyle)
+    {
+        var html = SiteHtmlSanitizer.Sanitize($"<figure class=\"{cls}\" style=\"{style}\"><img src=\"/umbraco/surface/SiteFile/Image?id=3\" alt=\"a\"></figure>");
+        Assert.Contains(expectClass, html);
+        Assert.Contains(expectStyle, html);
+    }
+
+    [Theory]
+    [InlineData("<figure class=\"image btn position-fixed\" style=\"width:50%\"><img src=\"/umbraco/surface/SiteFile/Image?id=3\" alt=\"a\"></figure>", "btn")]
+    [InlineData("<figure class=\"image\" style=\"width:500px\"><img src=\"/umbraco/surface/SiteFile/Image?id=3\" alt=\"a\"></figure>", "style")]
+    [InlineData("<figure class=\"image\" style=\"width:150%\"><img src=\"/umbraco/surface/SiteFile/Image?id=3\" alt=\"a\"></figure>", "style")]
+    [InlineData("<figure class=\"image\" style=\"width:50%;position:fixed;top:0\"><img src=\"/umbraco/surface/SiteFile/Image?id=3\" alt=\"a\"></figure>", "position")]
+    [InlineData("<p class=\"image image_resized\" style=\"width:50%\">x</p>", "style")]
+    [InlineData("<p class=\"image\">x</p>", "class")]
+    public void Annan_class_och_style_än_bildens_placering_och_procentbredd_tas_bort(string input, string forbidden)
+        => Assert.DoesNotContain(forbidden, SiteHtmlSanitizer.Sanitize(input), StringComparison.OrdinalIgnoreCase);
 
     [Fact]
     public void Bilderna_en_text_bäddar_in_räknas_så_att_de_hålls_kvar_och_serveras_rätt()

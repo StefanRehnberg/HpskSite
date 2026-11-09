@@ -31,12 +31,18 @@ namespace HpskSite.Extensions
             }) s.AllowedTags.Add(t);
 
             s.AllowedAttributes.Clear();
-            foreach (var a in new[] { "href", "title", "colspan", "rowspan", "src", "alt" }) s.AllowedAttributes.Add(a);
+            foreach (var a in new[] { "href", "title", "colspan", "rowspan", "src", "alt", "class", "style" }) s.AllowedAttributes.Add(a);
+
+            // class och style finns bara för en bilds ram (figure): en placering ur en fast lista och en bredd i procent. Allt annat tas bort,
+            // och på alla andra element tas båda bort i PostProcessNode nedan.
+            s.AllowedClasses.Clear();
+            foreach (var c in ImageClasses) s.AllowedClasses.Add(c);
 
             s.AllowedSchemes.Clear();
             foreach (var sc in new[] { "https", "mailto", "tel" }) s.AllowedSchemes.Add(sc);
 
             s.AllowedCssProperties.Clear();
+            s.AllowedCssProperties.Add("width");
             s.AllowDataAttributes = false;
 
             s.FilterUrl += (_, e) =>
@@ -47,6 +53,19 @@ namespace HpskSite.Extensions
             };
             s.PostProcessNode += (_, e) =>
             {
+                if (e.Node is AngleSharp.Dom.IElement el)
+                {
+                    if (el.LocalName != "figure") { el.RemoveAttribute("class"); el.RemoveAttribute("style"); }
+                    else
+                    {
+                        var style = el.GetAttribute("style");
+                        if (style != null)
+                        {
+                            var m = WidthRx.Match(style);
+                            if (m.Success && double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) is > 0 and <= 100) el.SetAttribute("style", $"width:{m.Groups[1].Value}%;"); else el.RemoveAttribute("style");
+                        }
+                    }
+                }
                 if (e.Node is AngleSharp.Html.Dom.IHtmlImageElement img && !IsOwnImageUrl(img.GetAttribute("src")))
                 {
                     e.ReplacementNodes.Clear();   // en bild utan godkänd källa är ingen bild
@@ -88,6 +107,16 @@ namespace HpskSite.Extensions
             if (!Uri.TryCreate(n, UriKind.Absolute, out var u)) return false;
             return u.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(u.UserInfo) && !string.IsNullOrEmpty(u.Host);
         }
+
+        /// <summary>Klasserna en bilds ram får ha: placering i sidled och "storleken är ändrad". Samma namn som redigeraren (CKEditor) skriver.</summary>
+        public static readonly string[] ImageClasses =
+        {
+            "image", "image_resized", "image-style-align-left", "image-style-align-right", "image-style-align-center",
+            "image-style-block-align-left", "image-style-block-align-right", "image-style-side"
+        };
+
+        private static readonly System.Text.RegularExpressions.Regex WidthRx =
+            new(@"^\s*width\s*:\s*(\d{1,3}(?:\.\d{1,2})?)\s*%\s*;?\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>Adressen till en av sajtens bildfiler (<c>/umbraco/surface/SiteFile/Image?id=N</c>), exakt den formen och inget annat.</summary>
         public static bool IsOwnImageUrl(string? url) => url != null && OwnImageRx.IsMatch(url);

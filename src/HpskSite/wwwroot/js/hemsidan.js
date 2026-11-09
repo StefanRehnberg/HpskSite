@@ -945,6 +945,40 @@
         h('div', { class: 'text-muted small mt-1' }, 'Hämtas automatiskt vid varje besök.' + (isHome ? ' Plats: ' + (ZONE_LABEL[b.data.zone] || ZONE_LABEL.full) + '.' : '') + (c.mustKeep ? ' Kan flyttas men inte tas bort.' : ''))));
   }
 
+  // Bildens bredd i procent: ett eget attribut på bildblocket som skrivs som style="width:N%" på bildens ram (figure) och läses tillbaka därifrån.
+  // Servern släpper bara igenom just det (SiteHtmlSanitizer), så ingen annan storlek eller stil kan sparas.
+  class SiteImageWidth {
+    constructor(editor) { this.editor = editor; }
+    init() {
+      const ed = this.editor;
+      ed.model.schema.extend('imageBlock', { allowAttributes: 'siteWidth' });
+      ed.conversion.for('upcast').attributeToAttribute({
+        view: { name: 'figure', styles: { width: /^\d{1,3}(\.\d+)?%$/ } },
+        model: { key: 'siteWidth', value: el => el.getStyle('width') },
+      });
+      ed.conversion.for('downcast').add(dispatcher => dispatcher.on('attribute:siteWidth:imageBlock', (evt, data, api) => {
+        if (!api.consumable.consume(data.item, evt.name)) return;
+        const fig = api.mapper.toViewElement(data.item);
+        if (!fig) return;
+        if (data.attributeNewValue) api.writer.setStyle('width', data.attributeNewValue, fig); else api.writer.removeStyle('width', fig);
+      }));
+    }
+  }
+
+  // Storleksknapparna ovanför textrutan. Verkar på den markerade bilden; ingen markerad bild ger en hjälptext.
+  function widthBar(getEd) {
+    const hint = h('span', { class: 'small text-muted ms-2', role: 'status' });
+    const set = (value, label) => h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', 'data-img-width': value || 'full', onclick: () => {
+      const ed = getEd(); const el = ed && ed.model.document.selection.getSelectedElement();
+      if (!el || el.name !== 'imageBlock') { hint.textContent = 'Klicka först på bilden du vill ändra.'; return; }
+      hint.textContent = '';
+      ed.model.change(w => { if (value) w.setAttribute('siteWidth', value, el); else w.removeAttribute('siteWidth', el); });
+      ed.editing.view.focus();
+    } }, label);
+    return h('span', { class: 'd-inline-flex align-items-center gap-1 ms-2', role: 'group', 'aria-label': 'Bildens storlek' },
+      h('span', { class: 'small text-muted' }, 'Bildens storlek:'), set('25%', '25 %'), set('50%', '50 %'), set('75%', '75 %'), set(null, 'Hela bredden'), hint);
+  }
+
   function initRte(node, block) {
     if (!window.ClassicEditor || !block) { node.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte laddas. Ladda om sidan.')); return; }
     ClassicEditor.create(node, {
@@ -953,12 +987,18 @@
                            { model: 'heading3', view: 'h3', title: 'Underrubrik', class: 'ck-heading_heading3' }] },
       // Bilder: bara ur föreningens egna bilder (knappen Infoga bild nedan). Ingen uppladdning direkt i texten, ingen bildtext eller storleksändring
       // (saneraren släpper bara igenom en bild med sajtens egen adress och en beskrivning). Klick på en bild ger knappen för beskrivningen.
-      removePlugins: ['ImageCaption', 'ImageStyle', 'ImageUpload', 'ImageResize', 'EasyImage', 'CKFinder', 'CKFinderUploadAdapter', 'CKBox', 'CKBoxUI', 'CKBoxEditing', 'CKBoxUtils', 'CKBoxImageEdit', 'MediaEmbed'],
-      image: { toolbar: ['imageTextAlternative'] },
+      removePlugins: ['ImageCaption', 'ImageUpload', 'EasyImage', 'CKFinder', 'CKFinderUploadAdapter', 'CKBox', 'CKBoxUI', 'CKBoxEditing', 'CKBoxUtils', 'CKBoxImageEdit', 'MediaEmbed'],
+      // Klick på en bild: placering (vänster med text runt, mitten, höger med text runt), storlek i procent av textbredden, och beskrivningen.
+      // Storleken (procent av textbredden) sätts med knapparna ovanför textrutan, se SiteImageWidth: det färdiga CKEditor-bygget har ingen storleksändring.
+      image: {
+        toolbar: ['imageStyle:alignLeft', 'imageStyle:alignCenter', 'imageStyle:alignRight', '|', 'imageTextAlternative'],
+        styles: { options: ['alignLeft', 'alignCenter', 'alignRight'] },
+      },
+      extraPlugins: [SiteImageWidth],
     }).then(ed => {
       ed.setData(block.data.html || '');
-      node.parentNode.insertBefore(h('div', { class: 'mb-2' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: () => insertImage(ed) },
-        h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild')), node);
+      node.parentNode.insertBefore(h('div', { class: 'mb-2 d-flex flex-wrap align-items-center gap-1' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: () => insertImage(ed) },
+        h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), widthBar(() => ed)), node);
       ed.model.document.on('change:data', () => { block.data.html = ed.getData(); markDirty(); });
       S.editors.push(ed);
     }).catch(err => { console.error('CKEditor kunde inte startas:', err && (err.message || err)); node.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte startas.')); });
