@@ -52,15 +52,10 @@
                 <a class="nav-link hpsk-external" href="@Model.ExternalUrl">@Model.ExternalLabel<i class="bi bi-box-arrow-up-right ms-2" aria-hidden="true"></i></a>
             </li>
         }
-        @if (Model.CanEditSite || (Model.IsAdmin && !string.IsNullOrEmpty(Model.Tutorial)))
+        @* Hemsidan ligger i Admin (som Styrelsearbete och Ekonomi), inte här. *@
+        @if (Model.IsAdmin && !string.IsNullOrEmpty(Model.Tutorial))
         {
             <li class="hpsk-sidemenu-sep" role="presentation" aria-hidden="true"></li>
-        }
-        @if (Model.CanEditSite)
-        {
-            <li class="nav-item mb-1" role="presentation">
-                <a class="btn btn-sm btn-primary w-100" href="@(Model.OwnerUrl)hemsidan/" title="Skriv och ändra era egna sidor"><i class="bi bi-pencil-square me-1"></i>Hemsidan</a>
-            </li>
         }
         @if (Model.IsAdmin && !string.IsNullOrEmpty(Model.Tutorial))
         {
