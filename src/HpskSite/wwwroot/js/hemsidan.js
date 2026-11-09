@@ -121,7 +121,7 @@
 
   // ── Vyer ───────────────────────────────────────────────────────────────────
   function clearEditors() { for (const e of S.editors) { try { e.destroy(); } catch { /* redan borta */ } } S.editors = []; }
-  function view(nodes) { clearEditors(); clearTimeout(S.timer); body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
+  function view(nodes) { clearEditors(); clearTimeout(S.timer); S.refreshWho = null; body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
   const header = (sub) => h('div', { class: 'mb-3' },
     h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)),
     h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null, supportBanner());
@@ -691,6 +691,16 @@
     });
     const consequence = h('div', { class: 'text-muted small mt-1' }, CONSEQUENCE[S.visibility]);
     const blocksEl = h('div', { id: 'hsBlocks' });
+    // Inställningen och resultatet är EN sektion, "Vem ser sidan?" (egen text på en vanlig sida har bara inställningen).
+    const who = slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), {
+      beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null, previewPageId: () => S.page.id,
+      setting: [
+        h('label', { class: 'form-label small text-muted mb-1', for: 'hsVisSel' }, 'Vem får läsa sidan?'), visSel, consequence,
+        !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null,
+        conv ? null : h('div', { class: 'mt-3' }, menuToggle()),
+      ],
+    });
+    visSel.id = 'hsVisSel';
 
     const bar = h('div', { class: 'hs-bar d-flex flex-wrap gap-2 align-items-center' },
       h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : conv ? '#sida=' + S.pageKey : '#sidor'); load(); } },
@@ -714,51 +724,34 @@
           ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Ändra sidan "' + S.title + '"'),
               h('p', { class: 'text-muted mb-0' }, 'Här bestämmer ni hur sidan ser ut. Det som hämtas automatiskt visas som kort som ni kan flytta, och ta bort om det inte är obligatoriskt. Ni kan också lägga till eget innehåll. Ändringarna syns för besökarna först när ni publicerar.'))
           : h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
-      h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, slots ? 'Vem ser texten?' : 'Vem ser sidan?'), visSel, consequence,
-        !slots && !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null),
-      slots || conv ? null : menuToggle(),
-      slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), {
-        beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null,
-        change: { intro: 'Så ändrar du vem som ser sidan:', label: 'välj under "Vem ser sidan?" högre upp', run: () => { const el = document.querySelector('select[aria-label="Vem ser sidan"]'); if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); } } },
-      }),
-      slots ? null : previewRow(),
+      who || h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser texten?'), visSel, consequence),
       blocksEl, slots ? null : addBlockBar(), moreCard()));
+    S.refreshWho = who ? who._refresh : null;
     drawBlocks();
     paintStatus(); paintEditorBanner();
   }
 
-  // "Förhandsvisa innehållet som": ritar sidans egna block för en vald fast tittare. Servern renderar (samma renderare och regler som besökarna), svaret läggs i en sandlådad iframe.
-  // Delar som hämtas ur systemet (paneler) visas bara med namn, så det här är en granskning av innehållet, inte av hela sidan; hela bilden ger "Vem ser sidan?" ovanför.
-  function previewRow() {
-    const sel = h('select', { class: 'form-select w-auto', 'aria-label': 'Förhandsvisa innehållet som' }, (S.personas || []).map(x => h('option', { value: x.key }, x.label)));
-    return h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-4' },
-      h('span', { class: 'fw-semibold' }, 'Förhandsvisa innehållet som'), sel,
-      h('button', { class: 'btn btn-outline-secondary', onclick: async e => {
-        e.target.disabled = true;
-        if (S.dirty) await saveNow();                                   // förhandsvisningen läser det sparade utkastet
-        const r = await api('POST', 'Preview', { pageId: S.page.id, persona: sel.value });
-        e.target.disabled = false;
-        if (!r.success) { setBanner('danger', r.message || 'Förhandsvisningen gick inte att göra.'); return; }
-        openPreviewModal(r, sel.options[sel.selectedIndex].text);
-      } }, h('i', { class: 'bi bi-eye me-1' }), 'Förhandsvisa'));
-  }
+  // Förhandsvisning av en besökares innehåll: servern renderar sidans block för en fast tittare (samma renderare och regler som besökarna), svaret läggs i en sandlådad iframe.
   function openPreviewModal(r, who) {
     const kids = [alertBox(r.decision === 'Serve' ? 'info' : 'warning', r.notice)];
     if (r.document) kids.push(h('iframe', { sandbox: '', srcdoc: r.document, title: 'Förhandsvisning', style: 'width:100%;height:55vh;border:1px solid var(--bs-border-color);border-radius:.5rem;background:#fff' }));
     modal('Så ser ' + who.toLowerCase() + ' sidans innehåll', kids, [{ label: 'Stäng', value: true, cls: 'btn-primary' }], true);
   }
 
-  // "Vem ser sidan?": en tabell över vad varje tittare ser (sidan i menyn, varje del av sidan), ur samma regler som besökarna möter. Servern ritar ingenting och hämtar ingen
-  // paneldata, så tabellen är ärlig om vad den är: hur sidan är inställd. Den riktiga utloggade vyn är sidans adress i ett privat fönster.
+  // "Vem ser sidan?": EN sektion med inställningen (opts.setting: rullgardinen, förklaringen, adressen, menyvalet), resultatet som tabell över vad varje tittare ser (sidan i menyn,
+  // varje del av sidan; ur samma regler som besökarna möter) och vägen till den riktiga sidan. Tabellen uppdaterar sig själv när något som styr åtkomst ändras (el._refresh).
+  // Servern ritar ingen paneldata, så tabellen är ärlig om vad den är: hur sidan är inställd. En förhandsvisning per tittare (opts.previewPageId) erbjuds bara när sidan inte har delar
+  // som hämtas ur systemet, för då är den sann; en sida med paneler går inte att förhandsvisa som en annan person (panelerna hämtar innehåll med den riktiga inloggningen), och det står.
   // params = { templateKey } (vanlig sida) eller { pageId } (fri eller omgjord sida); beforeLoad körs först (spara utkastet).
   function whoSeesCard(params, opts) {
     opts = opts || {};
-    const out = h('div', { class: 'mt-2' }, h('span', { class: 'text-muted' }, 'Laddar …'));
+    let ready = false, timer = null;
+    const out = h('div', { class: 'mt-3' }, h('span', { class: 'text-muted' }, 'Laddar …'));
     const cell = st => st === 'see' ? h('span', { class: 'text-success' }, h('i', { class: 'bi bi-check-lg', 'aria-hidden': 'true' }), h('span', { class: 'visually-hidden' }, 'Ser'))
       : st === 'lock' ? h('span', { class: 'text-body-secondary' }, h('i', { class: 'bi bi-lock-fill', 'aria-hidden': 'true' }), h('span', { class: 'visually-hidden' }, 'Ser menyvalet med ett hänglås, får en låsruta'))
       : h('span', { class: 'text-body-secondary' }, '–', h('span', { class: 'visually-hidden' }, 'Ser inte'));
     const load = async () => {
-      out.replaceChildren(h('span', { class: 'text-muted' }, 'Laddar …'));
+      if (!ready) out.replaceChildren(h('span', { class: 'text-muted' }, 'Laddar …'));   // vid en uppdatering ligger gamla tabellen kvar tills den nya är klar
       if (opts.beforeLoad) await opts.beforeLoad();
       const r = await api('POST', 'Visibility', params());
       if (!r.success) { out.replaceChildren(alertBox('danger', r.message || 'Det gick inte att visa vem som ser sidan.')); return; }
@@ -772,28 +765,45 @@
         try { await navigator.clipboard.writeText(full); b.textContent = 'Kopierad'; } catch { input.select(); b.textContent = 'Markerad, tryck Ctrl+C'; }
         setTimeout(() => { b.textContent = 'Kopiera adressen'; }, 2500);
       } }, 'Kopiera adressen') : null;
-      out.replaceChildren(
+      const hasPanels = r.rows.some(x => x.kind === 'panel');
+      const canPreview = !!opts.previewPageId && !hasPanels;
+      const previewBtn = c => h('button', { type: 'button', class: 'btn btn-link btn-sm p-0 d-block mx-auto', onclick: async e => {
+        const b = e.currentTarget; b.disabled = true;
+        if (S.dirty) await saveNow();                                   // förhandsvisningen läser det sparade utkastet
+        const pr = await api('POST', 'Preview', { pageId: opts.previewPageId(), persona: c.key });
+        b.disabled = false;
+        if (!pr.success) { setBanner('danger', pr.message || 'Förhandsvisningen gick inte att göra.'); return; }
+        openPreviewModal(pr, c.label);
+      } }, h('i', { class: 'bi bi-eye me-1', 'aria-hidden': 'true' }), 'Förhandsvisa');
+      const put = (...nodes) => out.replaceChildren(...nodes.filter(Boolean));   // en tom nod skulle annars skrivas ut som texten "null"
+      put(
         h('div', { class: 'table-responsive' }, h('table', { class: 'table table-sm align-middle mb-2' },
-          h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, ''), r.columns.map(c => h('th', { scope: 'col', class: 'text-center small fw-semibold' }, c.label)))),
+          h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, ''), r.columns.map(c => h('th', { scope: 'col', class: 'text-center small fw-semibold' }, c.label, canPreview ? previewBtn(c) : null)))),
           h('tbody', {}, r.rows.map(row => h('tr', {}, h('th', { scope: 'row', class: 'fw-normal' }, h('span', { class: row.kind === 'page' ? 'fw-semibold' : '' }, row.label),
             row.detail ? h('span', { class: 'text-muted small ms-2' }, row.detail) : null), row.states.map(st => h('td', { class: 'text-center position-relative' }, cell(st)))))))),
         h('p', { class: 'small text-muted mb-2' }, [h('i', { class: 'bi bi-check-lg text-success me-1', 'aria-hidden': 'true' }), 'ser  ',
           h('i', { class: 'bi bi-lock-fill ms-3 me-1', 'aria-hidden': 'true' }), 'ser sidan i menyn med ett hänglås och får en låsruta  ', h('span', { class: 'ms-3' }, '– ser inte')]),
         h('p', { class: 'mb-1' }, r.summary + ' ' + basis),
+        hasPanels ? h('p', { class: 'small text-muted mb-1' }, 'Delar som hämtas ur systemet (till exempel Banor och Kalender) går inte att förhandsvisa som en annan besökare. Tabellen visar vilka som ser dem.') : null,
         full ? h('div', { class: 'mt-3' },
-          h('div', { class: 'fw-semibold mb-1' }, 'Så ser en utloggad besökare den riktiga sidan'),
+          h('div', { class: 'fw-semibold mb-1' }, 'Se den riktiga sidan som utloggad'),
           h('p', { class: 'small text-muted mb-2' }, 'Öppna adressen i ett privat fönster, där du inte är inloggad. Öppnar du den här ser du sidan som dig själv.' + (r.published === false ? ' Tills du har publicerat får alla beskedet att sidan inte finns.' : '')),
           h('div', { class: 'd-flex flex-wrap gap-2' }, h('div', { class: 'flex-grow-1', style: 'min-width:14rem' }, input), copyBtn,
             h('a', { class: 'btn btn-outline-secondary', href: full, target: '_blank', rel: 'noopener' }, 'Öppna sidan ', h('i', { class: 'bi bi-box-arrow-up-right ms-1', 'aria-hidden': 'true' })))) : null);
     };
-    load();
-    return h('div', { class: 'hs-card p-3 mb-3', id: 'hsWhoSees' },
-      h('div', { class: 'd-flex align-items-center gap-2' }, h('h2', { class: 'h5 mb-0' }, 'Vad ser olika besökare?'),
-        h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary ms-auto', onclick: load }, 'Uppdatera')),
-      h('p', { class: 'text-muted mb-1' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'),
-      // Tabellen visar bara resultatet; inställningen ligger på ett annat ställe och kortet pekar dit.
-      opts.change ? h('p', { class: 'mb-0' }, opts.change.intro + ' ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', onclick: opts.change.run }, opts.change.label))
-        : opts.note ? h('p', { class: 'text-muted mb-0' }, opts.note) : null, out);
+    const run = () => load().finally(() => { ready = true; });
+    run();
+    const el = h('div', { class: 'hs-card p-3 mb-3', id: 'hsWhoSees' },
+      h('h2', { class: 'h5 mb-2' }, 'Vem ser sidan?'),
+      opts.setting
+        ? h('div', {}, opts.setting)
+        : h('div', {}, h('p', { class: 'text-muted mb-1' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'),
+            opts.change ? h('p', { class: 'mb-0' }, opts.change.intro + ' ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', onclick: opts.change.run }, opts.change.label))
+              : opts.note ? h('p', { class: 'text-muted mb-0' }, opts.note) : null),
+      out);
+    // Uppdatera tabellen en kort stund efter en ändring som styr åtkomst (sidans nivå, ett blocks nivå, ett block som läggs till eller tas bort). Inte före första ritningen.
+    el._refresh = () => { if (!ready) return; clearTimeout(timer); timer = setTimeout(load, 500); };
+    return el;
   }
 
   // "Mer": återställningspunkt, tidigare versioner och adressbyte (avancerat). Inget av det publicerar något.
@@ -858,7 +868,7 @@
       if (!r.success) { cb.checked = !cb.checked; setBanner('danger', r.message || 'Det gick inte att ändra menyn.'); return; }
       S.page.inMenu = cb.checked;
     });
-    return h('div', { class: 'form-check mb-4' }, cb, h('label', { class: 'form-check-label', for: 'hsInMenu' }, 'Visa sidan i menyn'),
+    return h('div', { class: 'form-check mb-0' }, cb, h('label', { class: 'form-check-label', for: 'hsInMenu' }, 'Visa sidan i menyn'),
       h('div', { class: 'form-text' }, 'Länken syns i menyn när sidan är publicerad, och bara för dem som får läsa sidan.'));
   }
 
@@ -890,7 +900,7 @@
   function move(i, d) { const j = neighbour(i, d); if (j < 0) return; [S.blocks[i], S.blocks[j]] = [S.blocks[j], S.blocks[i]]; markDirty(); drawBlocks(); }
 
   function drawBlocks() {
-    clearEditors();
+    clearEditors(); S.refreshWho && S.refreshWho();   // blocken (och deras nivåer) styr tabellen i Vem ser sidan?
     const el = document.getElementById('hsBlocks'); if (!el) return;
     if (S.kind === 'slots') {
       const group = (pos, title, help) => {
@@ -1064,7 +1074,7 @@
     const info = typeInfo(b.type), min = minVisFor(b.type);
     const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser blocket' },
       visOptions().filter(o => o.v >= min).map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.t)));
-    visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); });
+    visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); S.refreshWho && S.refreshWho(); });
     const head = h('div', { class: 'hs-block-head' },
       h('span', { class: 'hs-type' }, h('i', { class: 'bi ' + info.icon + ' me-2' }), info.label),
       visOptions().filter(o => o.v >= min).length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : null,
