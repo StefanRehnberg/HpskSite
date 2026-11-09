@@ -75,13 +75,16 @@
 <style>
     @@media (min-width: 768px) {
         .hpsk-sidelayout { display: flex; gap: 1.5rem; align-items: flex-start; }
-        .hpsk-sidelayout > .hpsk-sidemenu { flex: 0 0 15rem; position: sticky; top: 1rem; }
+        .hpsk-sidelayout > .hpsk-sidemenu { flex: 0 0 250px; width: 250px; position: sticky; top: 1rem; }
         .hpsk-sidelayout > .hpsk-sidebody { flex: 1 1 auto; min-width: 0; }
-        .hpsk-sidemenu .hpsk-sidemenu-list { background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem; }
+        .hpsk-sidemenu .hpsk-sidemenu-list { gap: 2px; background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: 8px; }
     }
-    .hpsk-sidemenu .nav-link { display: flex; align-items: center; width: 100%; text-align: left; color: var(--bs-body-color); border-radius: .375rem; }
+    .hpsk-sidelayout.hpsk-admin-open > .hpsk-sidemenu { display: none; }
+    .hpsk-admin-back { display: none; }
+    .hpsk-sidelayout .hpsk-admin-back { display: block; }
+    .hpsk-sidemenu .nav-link { display: flex; align-items: center; width: 100%; text-align: left; color: var(--bs-body-color); border-radius: 8px; padding: 8px 12px; border-left: 3px solid transparent; }
     .hpsk-sidemenu .nav-link:hover { background-color: var(--bs-secondary-bg); }
-    .hpsk-sidemenu .nav-link.active { background-color: var(--bs-primary); color: #fff; font-weight: 600; }
+    .hpsk-sidemenu .nav-link.active { background-color: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); font-weight: 600; border-left-color: var(--bs-primary); }
     .hpsk-sidemenu .nav-link.hpsk-locked:not(.active) { color: var(--bs-secondary-color); }
     .hpsk-sidemenu .hpsk-lock { margin-left: auto; font-size: .85rem; }
     .hpsk-sidemenu .hpsk-external { font-size: .9rem; color: var(--bs-link-color); }
@@ -99,10 +102,19 @@
             if (list.classList.contains('show') && window.bootstrap) bootstrap.Collapse.getOrCreateInstance(list).hide();
         }
         // Hem och Admin är flikar på samma sida: etiketten följer den aktiva fliken och menyn fälls ihop.
+        // Admin har en egen meny: den ERSÄTTER sidmenyn (ingen andra meny bredvid), och "Tillbaka till sidorna" i adminpanelen leder hem.
+        var layout = list.closest('.hpsk-sidelayout');
         list.addEventListener('shown.bs.tab', function (e) {
             var t = e.target && e.target.textContent ? e.target.textContent.replace(/\s+/g, ' ').trim() : '';
             if (t && label) label.textContent = t;
+            if (layout) layout.classList.toggle('hpsk-admin-open', !!(e.target && /Admin-tab$/.test(e.target.id)));
             collapseIfOpen();
+        });
+        document.addEventListener('click', function (e) {
+            var b = e.target && e.target.closest ? e.target.closest('[data-hpsk-back-to-pages]') : null;
+            if (!b) return;
+            var home = list.querySelector('button[data-bs-toggle="tab"]:not([id$="Admin-tab"])');
+            if (home) home.click();
         });
         list.addEventListener('shown.bs.collapse', function () { btn.setAttribute('aria-expanded', 'true'); });
         list.addEventListener('hidden.bs.collapse', function () { btn.setAttribute('aria-expanded', 'false'); });
