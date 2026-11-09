@@ -36,7 +36,8 @@ namespace HpskSite.Services.SitePages
     }
 
     /// <summary>En egen sida i menyn: sidan, etiketten (publicerad titel), adressen, synligheten och ordningen.</summary>
-    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort);
+    /// <param name="ParentPageId">Sidan den ligger under i menyn (null = egen nivå).</param>
+    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort, int? ParentPageId = null);
 
     /// <summary>En post i den nya menyn.</summary>
     /// <param name="Page">Mallsidan.</param>
@@ -45,7 +46,9 @@ namespace HpskSite.Services.SitePages
     /// <param name="Current">Den här sidan.</param>
     /// <param name="IsTabButton">En Bootstrap-flik på rotadressen (Hem och Admin växlar där utan omladdning); annars en länk.</param>
     /// <param name="Locked">Sidan finns men tittaren får inte se den (en vanlig medlem skulle): raden visas med hänglås och leder till en ruta, aldrig till sidans innehåll.</param>
-    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false);
+    /// <param name="FreePageId">Id:t på en egen sida (null för en systemsida).</param>
+    /// <param name="ParentPageId">Posten är en undersida till den egna sidan med det id:t; den följer direkt efter sin förälder i listan.</param>
+    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false, int? FreePageId = null, int? ParentPageId = null);
 
     /// <summary>Vad vänstermenyn (<c>_SiteSideMenu</c>) ritas ur: posterna, ägarens adress, om Hemsidan-knappen och Guide ska visas och en eventuell extern länk längst ned.</summary>
     /// <param name="ListId">Menylistans id (<c>clubPageTabs</c>/<c>regionPageTabs</c>): dagens skript och djuplänkar slår upp flikarna i den.</param>
@@ -170,15 +173,26 @@ namespace HpskSite.Services.SitePages
                 var entry = new SiteMenuEntry(p, pane, href, Current: _freePageId == null && p.Key == _page!.Key && !p.IsAdmin, tabButton, locked);
                 if (p.IsAdmin) admin = entry; else result.Add(entry);
             }
-            foreach (var e in _extra.OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+            // Ägarens egna sidor som träd: sidor på egen nivå i sin ordning, var och en följd av sina undersidor. En undersida visas bara när dess förälder visas, och aldrig under en
+            // LÅST förälder (en låst sida visar bara sitt eget namn med ett hänglås, inga etiketter under den). En undersida vars förälder inte finns i menyn (inte publicerad, inte i menyn) visas inte.
+            SiteMenuEntry? EntryFor(SiteMenuPage e)
             {
                 var visible = SiteAccess.CanSee(e.Visibility, Viewer);
                 // En egen sidas etikett visas aldrig för en utloggad (ingen fri text läcker till anonyma, plan v3 B3); en inloggad som inte är medlem ser en låst medlemssida.
                 var locked = !visible && Viewer.LoggedIn && e.Visibility == SiteVisibility.Klubbmedlemmar;
-                if (!visible && !locked) continue;
-                if (visible && _template.MenuRequiresLogin && !Viewer.LoggedIn) continue;
+                if (!visible && !locked) return null;
+                if (visible && _template.MenuRequiresLogin && !Viewer.LoggedIn) return null;
                 var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
-                result.Add(new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked));
+                return new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked, FreePageId: e.PageId, ParentPageId: e.ParentPageId);
+            }
+            foreach (var top in _extra.Where(x => x.ParentPageId == null).OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+            {
+                var parentEntry = EntryFor(top);
+                if (parentEntry == null) continue;
+                result.Add(parentEntry);
+                if (parentEntry.Locked) continue;
+                foreach (var child in _extra.Where(x => x.ParentPageId == top.PageId).OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+                    if (EntryFor(child) is { } childEntry) result.Add(childEntry);
             }
             if (admin != null) result.Add(admin);
             return result;

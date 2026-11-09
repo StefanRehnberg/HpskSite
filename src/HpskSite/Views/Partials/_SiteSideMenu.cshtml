@@ -16,32 +16,32 @@
         <i class="bi bi-chevron-down float-end mt-1"></i>
     </button>
     <ul class="nav nav-pills flex-column collapse d-md-flex hpsk-sidemenu-list" id="@listId" role="tablist">
-        @foreach (var item in Model.Items)
+        @* Sidor under sidor: en undersida ritas inuti sin förälders post (en grupp som fälls ut), aldrig som egen post på första nivån. Gruppen är utfälld när sidan eller en av
+           undersidorna är den aktuella. Pilen är en egen knapp, så att själva sidnamnet fortfarande är en länk. *@
+        @foreach (var item in Model.Items.Where(i => i.ParentPageId == null))
         {
-            var icon = HpskSite.Services.SitePages.SiteMenuIcons.For(Model.OwnerType, item.Page.Key);
+            var children = item.FreePageId == null ? new List<HpskSite.Services.SitePages.SiteMenuEntry>()
+                : Model.Items.Where(c => c.ParentPageId == item.FreePageId).ToList();
+            var groupOpen = item.Current || children.Any(c => c.Current);
+            var subId = "sub-" + item.PaneId;
             <li class="nav-item" role="presentation">
-                @if (item.Locked)
+                @if (children.Count == 0)
                 {
-                    <a class="nav-link hpsk-locked @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)" title="Bara för inloggade medlemmar">
-                        <i class="bi @icon me-2"></i>@item.Page.Label
-                        <i class="bi bi-lock-fill hpsk-lock" role="img" aria-label="Låst, bara för medlemmar"></i>
-                    </a>
-                }
-                else if (item.IsTabButton)
-                {
-                    <button class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" data-bs-toggle="tab" data-bs-target="#@(item.PaneId)" type="button" role="tab" aria-controls="@(item.PaneId)" aria-selected="@(item.Current ? "true" : "false")">
-                        <i class="bi @icon me-2"></i>@item.Page.Label
-                    </button>
+                    @await Html.PartialAsync("_SiteSideMenuItem", (item, Model.OwnerType))
                 }
                 else
                 {
-                    <a class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)">
-                        <i class="bi @icon me-2"></i>@item.Page.Label
-                        @if (item.Page.Key == "members")
+                    <div class="hpsk-menurow">
+                        @await Html.PartialAsync("_SiteSideMenuItem", (item, Model.OwnerType))
+                        <button type="button" class="hpsk-subtoggle" data-bs-toggle="collapse" data-bs-target="#@subId" aria-controls="@subId"
+                                aria-expanded="@(groupOpen ? "true" : "false")" aria-label="Undersidor till @item.Page.Label"><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
+                    </div>
+                    <ul class="nav flex-column hpsk-submenu collapse @(groupOpen ? "show" : "")" id="@subId" aria-label="Undersidor till @item.Page.Label">
+                        @foreach (var child in children)
                         {
-                            <span id="prospectBadge" class="badge bg-warning text-dark ms-2" style="display: none;"></span>
+                            <li class="nav-item" role="presentation">@await Html.PartialAsync("_SiteSideMenuItem", (child, Model.OwnerType))</li>
                         }
-                    </a>
+                    </ul>
                 }
             </li>
         }
@@ -86,6 +86,15 @@
     .hpsk-sidemenu .hpsk-lock { margin-left: auto; font-size: .85rem; }
     .hpsk-sidemenu .hpsk-external { font-size: .9rem; color: var(--bs-link-color); }
     .hpsk-sidemenu .hpsk-sidemenu-sep { border-top: 1px solid var(--bs-border-color); margin: .5rem .25rem; list-style: none; }
+    /* Sidor under sidor: sidnamnet är en länk och pilen en egen knapp; undersidorna ligger indragna under en linje. */
+    .hpsk-sidemenu .hpsk-menurow { display: flex; align-items: stretch; gap: 2px; }
+    .hpsk-sidemenu .hpsk-menurow > .nav-link { flex: 1 1 auto; min-width: 0; width: auto; }
+    .hpsk-sidemenu .hpsk-subtoggle { flex: 0 0 auto; width: 2.25rem; border: 0; background: transparent; color: var(--bs-secondary-color); border-radius: 8px; }
+    .hpsk-sidemenu .hpsk-subtoggle:hover { background-color: var(--bs-secondary-bg); }
+    .hpsk-sidemenu .hpsk-subtoggle i { transition: transform .15s; }
+    .hpsk-sidemenu .hpsk-subtoggle[aria-expanded="true"] i { transform: rotate(180deg); }
+    .hpsk-sidemenu .hpsk-submenu { margin: 2px 0 4px 1.1rem; padding-left: .5rem; border-left: 2px solid var(--bs-border-color); gap: 2px; }
+    .hpsk-sidemenu .hpsk-submenu .nav-link { font-size: .95rem; padding: 6px 10px; }
     @@media (max-width: 767.98px) {
         .hpsk-sidemenu .hpsk-sidemenu-list { margin-bottom: .75rem; border: 1px solid var(--bs-border-color); border-radius: .375rem; padding: .25rem; }
     }
@@ -114,7 +123,8 @@
             var home = list.querySelector('button[data-bs-toggle="tab"]:not([id$="Admin-tab"])');
             if (home) home.click();
         });
-        list.addEventListener('shown.bs.collapse', function () { btn.setAttribute('aria-expanded', 'true'); });
-        list.addEventListener('hidden.bs.collapse', function () { btn.setAttribute('aria-expanded', 'false'); });
+        // Bara menyns egen utfällning (telefon), inte en undersidegrupp inuti den: de bubblar upp hit.
+        list.addEventListener('shown.bs.collapse', function (e) { if (e.target === list) btn.setAttribute('aria-expanded', 'true'); });
+        list.addEventListener('hidden.bs.collapse', function (e) { if (e.target === list) btn.setAttribute('aria-expanded', 'false'); });
     })();
 </script>

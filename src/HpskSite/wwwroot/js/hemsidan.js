@@ -171,7 +171,7 @@
     if ((m = /^#redigera=(\d+)$/.exec(hsh))) return openEditor(parseInt(m[1], 10));
     if (hsh === '#raderade') return renderTrash();
     if (hsh === '#logg') return renderAudit();
-    if (hsh === '#ny') return renderNew();
+    if ((m = /^#ny(?:=(\d+))?$/.exec(hsh))) return renderNew(null, m[1] ? parseInt(m[1], 10) : null);   // #ny=12 = en ny undersida till sidan 12
     return renderList();
   }
   window.addEventListener('hashchange', async () => {
@@ -276,6 +276,58 @@
   }
   function flash(text) { S.banner = { cls: 'success', text }; const b = document.getElementById('hsBanner'); if (b) renderBanner(); }
 
+  // I redigeraren för en egen sida: vilken sida den ligger under, eller hur många undersidor den har.
+  function treeInfo() {
+    const p = S.page || {};
+    if (p.parentId) return h('p', { class: 'small text-muted mb-2' }, 'Undersida till ', h('a', { href: '#redigera=' + p.parentId, onclick: e => { e.preventDefault(); go('#redigera=' + p.parentId); } }, p.parentTitle || 'en annan sida'), '.');
+    if (p.childCount > 0) return h('p', { class: 'small text-muted mb-2' }, 'Har ' + p.childCount + (p.childCount === 1 ? ' undersida' : ' undersidor') + '. ', h('a', { href: '#sidor', onclick: e => { e.preventDefault(); go('#sidor'); } }, 'Visa i sidlistan'), '.');
+    return null;
+  }
+
+  // Sidor under sidor: trädordningen (sidor på egen nivå i sin ordning, var och en följd av sina undersidor). Samma regel som servern (SitePageTree.Flatten): en undersida vars förälder saknas
+  // räknas som egen nivå, och ingen sida får försvinna ur listan.
+  function treeRows(pages) {
+    const ids = new Set(pages.map(p => p.id));
+    const valid = new Set(pages.filter(p => !p.parentId || !ids.has(p.parentId) || p.parentId === p.id).map(p => p.id));
+    const by = (a, b) => (a.sortOrder - b.sortOrder) || a.title.localeCompare(b.title, 'sv') || (a.id - b.id);
+    const top = pages.filter(p => !p.parentId || !valid.has(p.parentId) || p.parentId === p.id).sort(by);
+    const out = [];
+    for (const t of top) {
+      out.push({ p: t, depth: 0 });
+      if (valid.has(t.id)) for (const c of pages.filter(x => x.parentId === t.id && x.id !== t.id).sort(by)) out.push({ p: c, depth: 1 });
+    }
+    const seen = new Set(out.map(o => o.p.id));
+    for (const x of pages.filter(x => !seen.has(x.id)).sort(by)) out.push({ p: x, depth: 0 });
+    return out;
+  }
+
+  async function movePage(p, direction) {
+    const r = await api('POST', 'MovePage', { pageId: p.id, direction });
+    if (!r.success) S.banner = { cls: 'danger', text: r.message || 'Det gick inte att flytta sidan.' };
+    await reloadState();
+  }
+
+  // Flytta en sida under en annan egen sida (eller till egen nivå). En undersida kan inte vara öppnare än sin förälder, så sidan får förälderns nivå om den var öppnare.
+  async function chooseParent(p) {
+    const candidates = S.st.pages.filter(x => !x.parentId && x.id !== p.id);
+    let chosen = p.parentId || 0;
+    const box = h('div');
+    const draw = () => box.replaceChildren(
+      h('label', { class: 'hs-choice ' + (chosen === 0 ? 'active' : '') }, h('input', { type: 'radio', name: 'parent', checked: chosen === 0, onchange: () => { chosen = 0; draw(); } }),
+        h('strong', {}, 'Egen nivå'), h('span', { class: 'hs-sub' }, 'Sidan ligger direkt i menyn, inte under någon annan sida.')),
+      ...candidates.map(c => h('label', { class: 'hs-choice ' + (chosen === c.id ? 'active' : '') }, h('input', { type: 'radio', name: 'parent', checked: chosen === c.id, onchange: () => { chosen = c.id; draw(); } }),
+        h('strong', {}, c.title), h('span', { class: 'hs-sub' }, 'Syns för: ' + visLabel(c.visibility).toLowerCase() + (c.visibility > p.visibility ? '. Sidan får då samma nivå, eftersom en undersida inte kan vara öppnare.' : '')))),
+      candidates.length ? null : h('p', { class: 'text-muted' }, 'Det finns ingen annan egen sida att lägga den under.'));
+    draw();
+    const ok = await modal('Flytta "' + p.title + '" under …', box, [{ label: 'Avbryt', value: false }, { label: 'Flytta', value: true, cls: 'btn-primary' }]);
+    if (ok !== true || chosen === (p.parentId || 0)) return;
+    const r = await api('POST', 'SetParent', { pageId: p.id, parentPageId: chosen });
+    S.banner = r.success
+      ? { cls: 'success', text: chosen ? 'Sidan ligger nu under en annan sida.' + (r.affected ? ' Dess nivå eller menyplats ändrades så att den passar där.' : '') : 'Sidan ligger nu på egen nivå.' }
+      : { cls: 'danger', text: r.message || 'Det gick inte att flytta sidan.' };
+    await reloadState();
+  }
+
   // Översikten (förslag 3): EN tabell över alla sidor — klubbens vanliga sidor och de egna — med läget som ord. Åtgärder är blå uppe till höger, radmenyn grå.
   function renderList() {
     setHash('#sidor');
@@ -294,21 +346,36 @@
         h('td', {}, visBadge(p.level)),
         h('td', { class: 'text-end' }, rowMenu([['Öppna', () => go('#sida=' + p.key)]])));
     });
-    const ownRows = own.map(p => h('tr', {},
-      h('td', {}, h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title)),
-      h('td', {}, 'Egen sida ', statusBadge(p)),
-      h('td', {}, visBadge(p.visibility)),
-      h('td', { class: 'text-end' }, rowMenu([
-        ['Ändra', () => go('#redigera=' + p.id)],
-        p.status !== 'Utkast' && p.url ? ['Se sidan', null, { href: p.url }] : null,
-        p.status !== 'Utkast' && p.url ? ['Kopiera länk', () => { S.visibility = p.visibility; copyLink(p.url); }] : null,
-        '-',
-        ['Radera', async () => {
-          if (!await confirmDialog('Radera sidan?', 'Sidan "' + p.title + '" tas bort från sajten. Ni kan ångra det i 30 dagar.', 'Radera', true)) return;
-          const r = await api('POST', 'DeletePage', { pageId: p.id, expectedRevision: p.revision });
-          S.banner = r.success ? { cls: 'success', text: 'Sidan är raderad. Du kan ångra under "Raderade sidor".' } : { cls: 'danger', text: r.message };
-          await reloadState();
-        }, { danger: true }]]))));
+    // Egna sidor som träd: sidor på egen nivå i sin ordning, var och en följd av sina undersidor (indragna). Dolda sidor filtreras bort efteråt så att ordningen alltid är hela trädets.
+    const tree = treeRows(st.pages);
+    const siblingsOf = p => tree.filter(t => (t.p.parentId || 0) === (p.parentId || 0) && t.depth === (p.parentId ? 1 : 0)).map(t => t.p);
+    const ownRows = tree.filter(t => S.showHidden || t.p.visibility !== 4).map(({ p, depth }) => {
+      const sibs = siblingsOf(p), at = sibs.findIndex(x => x.id === p.id);
+      return h('tr', {},
+        h('td', { class: depth ? 'ps-4' : '' },
+          depth ? h('span', { class: 'text-muted me-1', 'aria-hidden': 'true' }, '↳') : null,
+          h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title),
+          depth ? h('span', { class: 'visually-hidden' }, ' (undersida)') : null,
+          p.childCount ? h('span', { class: 'text-muted small ms-2' }, p.childCount + (p.childCount === 1 ? ' undersida' : ' undersidor')) : null),
+        h('td', {}, (depth ? 'Undersida ' : 'Egen sida '), statusBadge(p)),
+        h('td', {}, visBadge(p.visibility)),
+        h('td', { class: 'text-end' }, rowMenu([
+          ['Ändra', () => go('#redigera=' + p.id)],
+          p.status !== 'Utkast' && p.url ? ['Se sidan', null, { href: p.url }] : null,
+          p.status !== 'Utkast' && p.url ? ['Kopiera länk', () => { S.visibility = p.visibility; copyLink(p.url); }] : null,
+          '-',
+          !p.parentId ? ['Ny undersida', () => go('#ny=' + p.id), full ? { disabled: true } : null] : null,   // bara en sida på egen nivå kan ha undersidor
+          ['Flytta upp', () => movePage(p, -1), at <= 0 ? { disabled: true } : null],
+          ['Flytta ner', () => movePage(p, 1), at < 0 || at >= sibs.length - 1 ? { disabled: true } : null],
+          p.childCount ? null : ['Flytta under …', () => chooseParent(p)],   // en sida med undersidor kan inte själv bli en undersida (två nivåer)
+          '-',
+          p.childCount ? ['Radera (flytta undersidorna först)', null, { disabled: true }] : ['Radera', async () => {
+            if (!await confirmDialog('Radera sidan?', 'Sidan "' + p.title + '" tas bort från sajten. Ni kan ångra det i 30 dagar.', 'Radera', true)) return;
+            const r = await api('POST', 'DeletePage', { pageId: p.id, expectedRevision: p.revision });
+            S.banner = r.success ? { cls: 'success', text: 'Sidan är raderad. Du kan ångra under "Raderade sidor".' } : { cls: 'danger', text: r.message };
+            await reloadState();
+          }, { danger: true }]])));
+    });
 
     const filter = h('div', { class: 'd-flex flex-wrap gap-3 align-items-center px-3 pt-3 pb-1' },
       hiddenCount ? h('label', { class: 'd-flex gap-2 align-items-center' }, h('input', { type: 'checkbox', class: 'form-check-input mt-0', checked: !!S.showHidden,
@@ -452,16 +519,20 @@
   }
 
   // ── Ny sida i tre steg ──────────────────────────────────────────────────────
-  function renderNew(w) {
-    w = w || { step: 1, title: '', template: 'text', visibility: OWNER.type === 'Region' ? 1 : 2 };
-    setHash('#ny');
+  function renderNew(w, parentId) {
+    // En ny undersida (parentId): föräldern måste vara en egen sida på egen nivå, och undersidan får aldrig vara öppnare än den.
+    const parentRow = (w ? w.parentId : parentId) ? (S.st.pages || []).find(x => x.id === (w ? w.parentId : parentId) && !x.parentId) : null;
+    const minV = parentRow ? parentRow.visibility : 0;
+    w = w || { step: 1, title: '', template: 'text', visibility: Math.max(OWNER.type === 'Region' ? 1 : 2, minV), parentId: parentRow ? parentRow.id : null };
+    setHash('#ny' + (parentRow ? '=' + parentRow.id : ''));
     const err = h('div');
     const step = (n, t) => h('li', { class: 'list-inline-item ' + (w.step === n ? 'fw-bold' : 'text-muted') }, n + '. ' + t);
     let content, next, back = null;
     if (w.step === 1) {
       const inp = h('input', { class: 'form-control', maxlength: '120', value: w.title, placeholder: 'Till exempel: Regler för banan', 'aria-label': 'Sidans namn' });
       inp.addEventListener('input', () => { w.title = inp.value; });
-      content = [h('label', { class: 'form-label fw-semibold' }, 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text' }, 'Namnet blir sidans rubrik och en del av adressen.'), err];
+      content = [parentRow ? h('p', { class: 'text-muted' }, 'Undersida till ', h('strong', {}, parentRow.title), '.') : null,
+        h('label', { class: 'form-label fw-semibold' }, parentRow ? 'Vad ska undersidan heta?' : 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text' }, 'Namnet blir sidans rubrik och en del av adressen.'), err];
       next = () => { if (!w.title.trim()) { err.replaceChildren(alertBox('warning', 'Skriv ett namn på sidan.')); return; } w.step = 2; renderNew(w); };
       setTimeout(() => inp.focus(), 0);
     } else if (w.step === 2) {
@@ -478,11 +549,13 @@
       back = () => { w.step = 1; renderNew(w); };
       next = () => { w.step = 3; renderNew(w); };
     } else {
-      content = [h('p', { class: 'fw-semibold mb-2' }, 'Vem ska kunna läsa sidan?'), visibilityChoices(w.visibility, v => { w.visibility = v; renderNew(w); }), err];
+      content = [h('p', { class: 'fw-semibold mb-2' }, 'Vem ska kunna läsa sidan?'),
+        parentRow ? h('p', { class: 'text-muted small' }, 'En undersida kan inte vara öppnare än sidan den ligger under (' + visLabel(parentRow.visibility).toLowerCase() + ').') : null,
+        visibilityChoices(w.visibility, v => { w.visibility = v; renderNew(w); }, minV), err];
       back = () => { w.step = 2; renderNew(w); };
       next = async () => {
         if (w.visibility === 0 && !await confirmPublic()) return;
-        const create = await api('POST', 'CreatePage', { title: w.title.trim(), visibility: w.visibility });
+        const create = await api('POST', 'CreatePage', { title: w.title.trim(), visibility: w.visibility, parentPageId: parentRow ? parentRow.id : undefined });
         if (!create.success) { err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return; }
         // Mallens startinnehåll sparas som första utkast, därefter öppnas redigeraren.
         const blocks = templateBlocks(w.template, w.visibility);
@@ -496,7 +569,7 @@
       };
     }
     const nextBtn = h('button', { class: 'btn btn-primary', onclick: () => next() }, w.step === 3 ? 'Skapa sidan' : 'Nästa');
-    view(shell('sidor', pageHead('Ny sida', 'En egen sida i tre steg: namn, mall och vem som får läsa den.'), h('ol', { class: 'list-inline mb-3' }, step(1, 'Namn'), step(2, 'Mall'), step(3, 'Vem ser den')),
+    view(shell('sidor', pageHead(parentRow ? 'Ny undersida' : 'Ny sida', 'En egen sida i tre steg: namn, mall och vem som får läsa den.'), h('ol', { class: 'list-inline mb-3' }, step(1, 'Namn'), step(2, 'Mall'), step(3, 'Vem ser den')),
       h('div', { class: 'hs-card p-3 p-md-4', style: 'max-width:46rem' }, content,
         h('div', { class: 'd-flex gap-2 mt-3' }, back ? h('button', { class: 'btn btn-outline-secondary', onclick: back }, 'Tillbaka') : h('button', { class: 'btn btn-outline-secondary', onclick: renderList }, 'Avbryt'), nextBtn))));
   }
@@ -513,8 +586,8 @@
     return [text()];
   }
 
-  function visibilityChoices(current, onPick) {
-    return h('div', {}, visOptions().map(o => h('label', { class: 'hs-choice ' + (current === o.v ? 'active' : '') },
+  function visibilityChoices(current, onPick, min) {
+    return h('div', {}, visOptions().filter(o => o.v >= (min || 0)).map(o => h('label', { class: 'hs-choice ' + (current === o.v ? 'active' : '') },
       h('input', { type: 'radio', name: 'vis', checked: current === o.v, onchange: () => onPick(o.v) }), h('strong', {}, o.t), h('span', { class: 'hs-sub' }, o.s))),
       h('p', { class: 'text-muted small mt-2 mb-0' }, CONSEQUENCE[current]));
   }
@@ -683,10 +756,13 @@
     const slots = S.kind === 'slots', conv = S.kind === 'converted';
     const titleInp = h('input', { class: 'form-control form-control-lg', maxlength: '120', value: S.title, 'aria-label': 'Sidans rubrik' });
     titleInp.addEventListener('input', () => { S.title = titleInp.value; markDirty(); });
-    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => (!slots && !conv) || o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
+    const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
     visSel.addEventListener('change', async () => {
       const v = parseInt(visSel.value, 10);
       if (v === 0 && !await confirmPublic()) { visSel.value = S.visibility; return; }
+      // Gör man en förälder strängare får undersidorna samma nivå (en undersida kan inte vara öppnare än sidan den ligger under). Servern gör det alltid; här frågar vi först.
+      const kids = !slots && !conv ? (S.page.childCount || 0) : 0;
+      if (kids > 0 && v > S.visibility && !await confirmDialog('Undersidorna får också nivån', kids + (kids === 1 ? ' undersida får' : ' undersidor får') + ' också nivån "' + visLabel(v) + '", eftersom en undersida inte kan vara öppnare än sidan den ligger under.', 'Ändra', false)) { visSel.value = S.visibility; return; }
       setPageVisibility(v);
     });
     const consequence = h('div', { class: 'text-muted small mt-1' }, CONSEQUENCE[S.visibility]);
@@ -723,7 +799,7 @@
         : conv
           ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Ändra sidan "' + S.title + '"'),
               h('p', { class: 'text-muted mb-0' }, 'Här bestämmer ni hur sidan ser ut. Det som hämtas automatiskt visas som kort som ni kan flytta, och ta bort om det inte är obligatoriskt. Ni kan också lägga till eget innehåll. Ändringarna syns för besökarna först när ni publicerar.'))
-          : h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
+          : h('div', { class: 'mb-3' }, treeInfo(), h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
       who || h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser texten?'), visSel, consequence),
       blocksEl, slots ? null : addBlockBar(), moreCard()));
     S.refreshWho = who ? who._refresh : null;
@@ -869,6 +945,7 @@
       cb.disabled = false;
       if (!r.success) { cb.checked = !cb.checked; setBanner('danger', r.message || 'Det gick inte att ändra menyn.'); return; }
       S.page.inMenu = cb.checked;
+      if (r.affected) setBanner('info', r.affected + (r.affected === 1 ? ' undersida togs' : ' undersidor togs') + ' också ur menyn, eftersom de hör till den här sidan.');
     });
     return h('div', { class: 'form-check mb-0' }, cb, h('label', { class: 'form-check-label', for: 'hsInMenu' }, 'Visa sidan i menyn'),
       h('div', { class: 'form-text' }, 'Länken syns i menyn när sidan är publicerad, och bara för dem som får läsa sidan.'));

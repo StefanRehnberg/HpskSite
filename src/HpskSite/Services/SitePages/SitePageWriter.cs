@@ -42,8 +42,9 @@ namespace HpskSite.Services.SitePages
         ConvertOff,
     }
 
+    /// <param name="Affected">Antal andra sidor åtgärden också ändrade (undersidor som fick strängare nivå, undersidor som togs ur menyn …), för meddelandet till användaren.</param>
     public sealed record SiteWriteResult(SiteWriteStatus Status, int PageId = 0, int Revision = 0, string? Slug = null,
-        IReadOnlyList<SiteContentError>? Errors = null, string? Message = null, string? Match = null)
+        IReadOnlyList<SiteContentError>? Errors = null, string? Message = null, string? Match = null, int Affected = 0)
     {
         public bool Ok => Status == SiteWriteStatus.Ok;
     }
@@ -185,7 +186,7 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Skapa en fri sida med adress. Sluggen utelämnad = ur titeln (numrerad om upptagen).</summary>
         public static SiteWriteResult CreatePage(IDatabase db, ISiteOwnerFacts facts, string ownerType, int ownerId, string title,
-            string? requestedSlug, SiteVisibility visibility, SiteActor actor, DateTime now)
+            string? requestedSlug, SiteVisibility visibility, SiteActor actor, DateTime now, int? parentPageId = null)
         {
             title = (title ?? "").Trim();
             if (title.Length is 0 or > 120)
@@ -194,6 +195,16 @@ namespace HpskSite.Services.SitePages
             if (hit != null) return new SiteWriteResult(SiteWriteStatus.PersonalNumber, Match: hit, Message: "Titeln ser ut att innehålla ett personnummer.");
 
             if (!SitePageStore.LockOwner(db, ownerType, ownerId)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+
+            // En undersida: föräldern måste vara en egen sida på egen nivå hos samma förening, och sidan får inte vara öppnare än den (ParentPageId kommer utifrån och prövas mot radens ägare).
+            if (parentPageId != null)
+            {
+                var parent = SitePageStore.GetPage(db, parentPageId.Value, ownerType, ownerId);
+                var parentError = SitePageTree.NewChildError(ownerType, ownerId, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id));
+                if (parentError != null) return Invalid("parent", parentError);
+                if (!SitePageTree.ChildLevelOk(visibility, parent!.VisibilityLevel))
+                    return Invalid("visibility", $"Sidan får inte vara öppnare än sidan den ligger under ({SlotLevelLabel(parent.VisibilityLevel)} eller strängare).");
+            }
 
             var taken = TakenAddressSlugs(db, ownerType, ownerId);
             var children = facts.ChildNodeSegments(ownerType, ownerId);
@@ -212,7 +223,7 @@ namespace HpskSite.Services.SitePages
                 if (!check.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, Message: check.Reason);
             }
 
-            var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, null, null, actor.MemberId, actor.AsSupport, now);
+            var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, null, null, actor.MemberId, actor.AsSupport, now, parentPageId);
             if (created.Outcome != SiteStoreOutcome.Ok) return From(created);
 
             var addr = PageAddressService.SetCurrentFlat(db, PageAddressKinds.SitePage, created.PageId, new PageAddressOwner(ownerType, ownerId), slug);
@@ -265,6 +276,14 @@ namespace HpskSite.Services.SitePages
             if (!page.IsFree && (SiteBlockSchema.KindOf(false, blocksJson) == SiteContentKind.ConvertedPage ? SiteConversion.PageFloor(ownerType, page.TemplateKey!) : SiteTemplates.For(ownerType).MostOpenLevel(page.TemplateKey!)) is { } floor && vis < floor)
                 return Invalid("visibility", "Texten får inte vara öppnare än sidan själv.");   // ett slot kan aldrig vara bredare än systemsidan
 
+            // En undersida är aldrig öppnare än sin förälder (föräldern läses färskt: nivån gäller direkt, inte först vid publicering).
+            if (page.IsFree && page.ParentPageId is int parentId)
+            {
+                var parent = SitePageStore.GetPage(db, parentId, ownerType, ownerId);
+                if (parent != null && !SitePageTree.ChildLevelOk(vis, parent.VisibilityLevel))
+                    return Invalid("visibility", $"Sidan får inte vara öppnare än sidan den ligger under ({SlotLevelLabel(parent.VisibilityLevel)} eller strängare).");
+            }
+
             var v = Validate(db, facts, page, ownerType, ownerId, title, blocksJson, vis, allowPersonalNumber, out var content);
             if (v != null) return v;
 
@@ -275,9 +294,71 @@ namespace HpskSite.Services.SitePages
             RebuildRefs(db, facts, page, ownerType, ownerId, vis, includeDraft: true);
             if (allowPersonalNumber && SitePersonalNumberGuard.FindInAny(TextOf(title, content!)) != null)
                 Audit(db, ownerType, ownerId, actor, "page", pageId, "personal-number-override", SitePageStore.Hash(title, json), now);
+            var raised = 0;
             if (vis != page.VisibilityLevel)
+            {
                 Audit(db, ownerType, ownerId, actor, "page", pageId, "page-visibility", null, now);
-            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, saved.Revision);
+                // Gör man en förälder strängare får undersidorna samma nivå (de kan inte vara öppnare än den). Klienten har frågat först; servern gör det alltid så att trädet aldrig bryter regeln.
+                if (page.IsFree && SitePageStore.ChildCount(db, pageId) > 0)
+                {
+                    raised = SitePageStore.RaiseChildren(db, ownerType, ownerId, pageId, vis, actor.MemberId, now);
+                    if (raised > 0) Audit(db, ownerType, ownerId, actor, "page", pageId, "children-visibility", null, now);
+                }
+            }
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, saved.Revision, Affected: raised);
+        }
+
+        /// <summary>
+        /// Lägger en egen sida under en annan egen sida (<paramref name="newParentId"/>), eller gör den till egen nivå (null). Reglerna i <see cref="SitePageTree.ParentError"/>. Sidan läggs sist bland
+        /// sina nya syskon; är den öppnare än den nya föräldern får den förälderns nivå (en undersida är aldrig öppnare), och ligger den i menyn men inte föräldern tas den ur menyn.
+        /// Adressen rörs aldrig. <see cref="SiteWriteResult.Affected"/> = 1 när sidans nivå eller menyplats ändrades.
+        /// </summary>
+        public static SiteWriteResult SetParent(IDatabase db, int pageId, string ownerType, int ownerId, int? newParentId, SiteActor actor, DateTime now)
+        {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (!SitePageStore.LockOwner(db, ownerType, ownerId)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (newParentId == page.ParentPageId) return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision);
+
+            var affected = 0;
+            if (newParentId != null)
+            {
+                var parent = SitePageStore.GetPage(db, newParentId.Value, ownerType, ownerId);
+                var error = SitePageTree.ParentError(page, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id, exceptPageId: pageId), SitePageStore.ChildCount(db, pageId) > 0);
+                if (error != null) return Invalid("parent", error);
+                if (!SitePageTree.ChildLevelOk(page.VisibilityLevel, parent!.VisibilityLevel))
+                {
+                    db.Execute("UPDATE dbo.SitePage SET Visibility = @3 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2", pageId, ownerType, ownerId, (byte)parent.Visibility);
+                    Audit(db, ownerType, ownerId, actor, "page", pageId, "page-visibility", null, now);
+                    affected++;
+                }
+                if (!SitePageStore.IsInMenu(db, ownerType, ownerId, parent.Id) && SitePageStore.IsInMenu(db, ownerType, ownerId, pageId))
+                {
+                    SitePageStore.SetInMenu(db, pageId, ownerType, ownerId, false, now);
+                    Audit(db, ownerType, ownerId, actor, "menu", pageId, "menu-remove", null, now);
+                    affected++;
+                }
+            }
+            // Till egen nivå går alltid: sidan är då en undersida (utan egna undersidor), och dess nivå och menyplats kan stå kvar som de är.
+            SitePageStore.SetParent(db, pageId, ownerType, ownerId, newParentId, actor.MemberId, now);
+            Audit(db, ownerType, ownerId, actor, "page", pageId, "page-move", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision + 1, Affected: affected);
+        }
+
+        /// <summary>Flyttar sidan ett steg upp (<paramref name="direction"/> -1) eller ner (+1) bland sina syskon (samma förälder). Ligger den redan först eller sist ändras inget.</summary>
+        public static SiteWriteResult MoveInOrder(IDatabase db, int pageId, string ownerType, int ownerId, int direction, SiteActor actor, DateTime now)
+        {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (!SitePageStore.LockOwner(db, ownerType, ownerId)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            var ids = SitePageStore.Siblings(db, ownerType, ownerId, page.ParentPageId).Select(s => s.Id).ToList();
+            var at = ids.IndexOf(pageId);
+            var to = at + Math.Sign(direction);
+            if (at < 0 || to < 0 || to >= ids.Count) return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision);
+            (ids[at], ids[to]) = (ids[to], ids[at]);
+            SitePageStore.SetOrder(db, ownerType, ownerId, ids, now);
+            Audit(db, ownerType, ownerId, actor, "page", pageId, "page-order", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision);
         }
 
         /// <summary>Publicera utkastet (valideras om mot sidans aktuella synlighet).</summary>
@@ -362,9 +443,16 @@ namespace HpskSite.Services.SitePages
         /// <summary>Lägg en egen sida i menyn eller ta bort den därifrån (loggas). Sidan måste höra till ägaren.</summary>
         public static SiteWriteResult SetInMenu(IDatabase db, int pageId, string ownerType, int ownerId, bool inMenu, SiteActor actor, DateTime now)
         {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            // En undersida kan bara ligga i menyn om sidan den ligger under gör det (annars vore den onåbar i menyn).
+            if (inMenu && page.ParentPageId is int parentId && !SitePageStore.IsInMenu(db, ownerType, ownerId, parentId))
+                return Invalid("menu", "Lägg först sidan den ligger under i menyn.");
             if (!SitePageStore.SetInMenu(db, pageId, ownerType, ownerId, inMenu, now)) return new SiteWriteResult(SiteWriteStatus.NotFound);
             Audit(db, ownerType, ownerId, actor, "menu", pageId, inMenu ? "menu-add" : "menu-remove", null, now);
-            return new SiteWriteResult(SiteWriteStatus.Ok, pageId);
+            // Tas en förälder ur menyn tas dess undersidor ur den med (de hänger på föräldern i menyn).
+            var removed = inMenu ? 0 : SitePageStore.RemoveChildrenFromMenu(db, ownerType, ownerId, pageId);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, Affected: removed);
         }
 
         public static SiteWriteResult SoftDelete(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, SiteActor actor, DateTime now)
@@ -372,6 +460,11 @@ namespace HpskSite.Services.SitePages
             // En mallkopia (egen text på en systemsida) raderas aldrig: tömmer man den är systemsidan som förut. Bara fria sidor går att radera.
             var existing = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
             if (existing == null || !existing.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            // En sida med undersidor raderas inte förrän undersidorna är flyttade eller raderade (inget försvinner tyst med sin förälder).
+            var kids = SitePageStore.ChildCount(db, pageId);
+            if (kids > 0)
+                return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, existing.Revision, Errors: new[] { new SiteContentError("children", "Sidan har undersidor.") },
+                    Message: $"Sidan har {kids} undersid{(kids == 1 ? "a" : "or")}. Flytta eller radera {(kids == 1 ? "den" : "dem")} först, så kan du radera sidan.", Affected: kids);
             var r = SitePageStore.SoftDelete(db, pageId, ownerType, ownerId, expectedRevision, actor.MemberId, now);
             if (r.Outcome == SiteStoreOutcome.Ok) Audit(db, ownerType, ownerId, actor, "page", pageId, "page-delete", null, now);
             return From(r);

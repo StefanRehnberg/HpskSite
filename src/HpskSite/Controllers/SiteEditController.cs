@@ -119,6 +119,7 @@ namespace HpskSite.Controllers
             message = r.Ok ? null : r.Message ?? StatusMessage(r.Status),
             errors = r.Errors?.Select(e => new { path = e.Path, message = e.Message }),
             match = r.Match,
+            affected = r.Affected,
         });
 
         private static string StatusMessage(SiteWriteStatus s) => s switch
@@ -153,6 +154,7 @@ namespace HpskSite.Controllers
             {
                 id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu, suspended = p.SuspendedDate != null,
                 url = p.Slug == null ? null : g.OwnerUrl + p.Slug + "/", updated = p.UpdatedDate, deleted = p.DeletedDate,
+                parentId = p.ParentPageId, sortOrder = p.SortOrder, childCount = p.ChildCount,
             };
             return Json(new
             {
@@ -198,11 +200,15 @@ namespace HpskSite.Controllers
                           ?? SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId);
             if (version == null) return Fail("Sidan saknar innehåll.");
             var slug = scope.Database.FirstOrDefault<string>("SELECT TOP 1 Slug FROM dbo.PageAddress WHERE TargetKind = 'sitepage' AND TargetId = @0 AND IsCurrent = 1", pageId);
+            // Sidor under sidor: en undersida har sin förälders nivå som golv (aldrig öppnare), och en förälder vet hur många undersidor den har.
+            var parentRow = page.IsFree && page.ParentPageId is int parentId ? SitePageStore.GetPage(scope.Database, parentId, g.OwnerType, g.OwnerId) : null;
+            var childCount = page.IsFree ? SitePageStore.ChildCount(scope.Database, pageId) : 0;
             return Json(new
             {
                 success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug,
+                parentId = parentRow?.Id, parentTitle = parentRow == null ? null : (parentRow.PublishedTitle ?? parentRow.Title), childCount,
                 kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) switch { SiteContentKind.FreePage => "free", SiteContentKind.ConvertedPage => "converted", _ => "slots" }, templateKey = page.TemplateKey,
-                minVisibility = page.IsFree ? 0 : (int)(SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) == SiteContentKind.ConvertedPage ? SiteConversion.PageFloor(g.OwnerType, page.TemplateKey!) : SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value), inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
+                minVisibility = page.IsFree ? (int?)parentRow?.Visibility ?? 0 : (int)(SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) == SiteContentKind.ConvertedPage ? SiteConversion.PageFloor(g.OwnerType, page.TemplateKey!) : SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value), inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
                 url = slug == null ? null : g.OwnerUrl + slug + "/", hasUnpublishedChanges = page.HasUnpublishedChanges, published = page.PublishedVersionId != null,
                 blocksJson = version.BlocksJson, savedDate = version.SavedDate,
                 // En omgjord sida: alla paneler som får finnas på den (namn, regler, nivå), och om omvandlingen redan är publicerad (då ångras den med Lägg tillbaka, annars med Avbryt).
@@ -537,7 +543,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
-        public async Task<IActionResult> CreatePage(string ownerType, int ownerId, string title, string? slug, int visibility)
+        public async Task<IActionResult> CreatePage(string ownerType, int ownerId, string title, string? slug, int visibility, int? parentPageId = null)
         {
             var g = await Gate(ownerType, ownerId, write: true);
             if (g.Error != null) return g.Error;
@@ -548,7 +554,46 @@ namespace HpskSite.Controllers
             SiteWriteResult r;
             using (var scope = _scopes.CreateScope())
             {
-                r = SitePageWriter.CreatePage(scope.Database, _facts, g.OwnerType, g.OwnerId, title, slug, (SiteVisibility)visibility, g.Actor!, DateTime.Now);
+                r = SitePageWriter.CreatePage(scope.Database, _facts, g.OwnerType, g.OwnerId, title, slug, (SiteVisibility)visibility, g.Actor!, DateTime.Now, parentPageId is > 0 ? parentPageId : null);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Lägger en egen sida under en annan egen sida (<c>parentPageId</c>), eller gör den till egen nivå (utan <c>parentPageId</c>). Reglerna prövas i <see cref="SitePageTree"/>.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SetParent(string ownerType, int ownerId, int pageId, int? parentPageId)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.SetParent(scope.Database, pageId, g.OwnerType, g.OwnerId, parentPageId is > 0 ? parentPageId : null, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Flyttar en egen sida ett steg upp (<c>direction</c> -1) eller ner (+1) bland sina syskon.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> MovePage(string ownerType, int ownerId, int pageId, int direction)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (direction is not (-1 or 1)) return Fail("Okänd riktning.");
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.MoveInOrder(scope.Database, pageId, g.OwnerType, g.OwnerId, direction, g.Actor!, DateTime.Now);
                 if (r.Ok) scope.Complete();
             }
             return Map(r);

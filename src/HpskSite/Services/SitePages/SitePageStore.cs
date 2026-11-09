@@ -25,6 +25,10 @@ namespace HpskSite.Services.SitePages
         public DateTime? DeletedDate { get; set; }
         /// <summary>Nödbromsen: satt av sajtadmin. Sidan visas inte och kan inte publiceras förrän den hävs.</summary>
         public DateTime? SuspendedDate { get; set; }
+        /// <summary>Den egna sida den här sidan ligger under (null = egen nivå). Två nivåer: se <see cref="SitePageTree"/>.</summary>
+        public int? ParentPageId { get; set; }
+        /// <summary>Ordningen bland syskon (samma förälder). Lägre först.</summary>
+        public int SortOrder { get; set; }
 
         public SiteVisibility VisibilityLevel => (SiteVisibility)Visibility;
         public bool IsFree => TemplateKey == null;
@@ -63,6 +67,10 @@ namespace HpskSite.Services.SitePages
         public DateTime? SuspendedDate { get; set; }
         public string? Slug { get; set; }
         public bool InMenu { get; set; }
+        public int? ParentPageId { get; set; }
+        public int SortOrder { get; set; }
+        /// <summary>Antal undersidor (ej raderade). Bara <see cref="SitePageStore.ListFree"/> fyller det.</summary>
+        public int ChildCount { get; set; }
         /// <summary>Schemat i den publicerade respektive utkastversionen (1 = vanlig, 2 = omgjord sida); null = ingen sådan version. Bara <see cref="SitePageStore.ListTemplateCopies"/> fyller dem.</summary>
         public int? PublishedSchema { get; set; }
         public int? DraftSchema { get; set; }
@@ -79,6 +87,7 @@ namespace HpskSite.Services.SitePages
         public string Slug { get; set; } = "";
         public byte Visibility { get; set; }
         public int SortOrder { get; set; }
+        public int? ParentPageId { get; set; }
     }
 
     public enum SiteStoreOutcome
@@ -125,7 +134,7 @@ namespace HpskSite.Services.SitePages
 
         private const string PageColumns =
             "Id, OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, PublishedTitle, Visibility, PublishedVersionId, DraftVersionId, " +
-            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate, SuspendedDate";
+            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate, SuspendedDate, ParentPageId, SortOrder";
 
         private const string VersionColumns =
             "Id, PageId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedByMemberId, SavedAsSupport, SavedDate";
@@ -146,7 +155,7 @@ namespace HpskSite.Services.SitePages
         /// Synligheten måste vara en av 0–4. Adressen (sluggen) sätts av anroparen i samma transaktion.
         /// </summary>
         public static SiteStoreResult Create(IDatabase db, string ownerType, int ownerId, string title, SiteVisibility visibility,
-            string? templateKey, int? templateVersion, int? byMemberId, bool asSupport, DateTime now)
+            string? templateKey, int? templateVersion, int? byMemberId, bool asSupport, DateTime now, int? parentPageId = null)
         {
             if (!SiteAccess.IsSelectable(visibility) || visibility > SiteVisibility.Dold)
                 throw new ArgumentOutOfRangeException(nameof(visibility), visibility, "Ogiltig synlighet");
@@ -160,11 +169,13 @@ namespace HpskSite.Services.SitePages
                 if (n >= MaxFreePagesPerOwner) return new SiteStoreResult(SiteStoreOutcome.TooManyPages);
             }
 
+            // En ny egen sida läggs sist bland sina syskon (egen nivå eller under samma förälder); en mallkopia har ingen ordning.
+            var sort = templateKey == null ? NextSortOrder(db, ownerType, ownerId, parentPageId) : 0;
             var pageId = db.ExecuteScalar<int>(
-                @"INSERT INTO dbo.SitePage (OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, Visibility, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate)
-                  VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @7, @7);
+                @"INSERT INTO dbo.SitePage (OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, Visibility, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, ParentPageId, SortOrder)
+                  VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @7, @7, @8, @9);
                   SELECT CAST(SCOPE_IDENTITY() AS int)",
-                ownerType, ownerId, templateKey, templateVersion, title.Trim(), (byte)visibility, byMemberId, now);
+                ownerType, ownerId, templateKey, templateVersion, title.Trim(), (byte)visibility, byMemberId, now, parentPageId, sort);
 
             var content = EmptyContent(templateKey != null);
             var versionId = InsertVersion(db, pageId, ownerType, ownerId, 1, title.Trim(), content, isBaseline: true, isPublish: false, byMemberId, asSupport, now);
@@ -316,11 +327,61 @@ namespace HpskSite.Services.SitePages
             db.Fetch<SitePageListItem>(
                 @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.SuspendedDate,
                          (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug,
-                         CASE WHEN EXISTS (SELECT 1 FROM dbo.SiteMenuItem m WHERE m.Kind = 1 AND m.PageId = p.Id AND m.IsRemoved = 0) THEN 1 ELSE 0 END AS InMenu
+                         CASE WHEN EXISTS (SELECT 1 FROM dbo.SiteMenuItem m WHERE m.Kind = 1 AND m.PageId = p.Id AND m.IsRemoved = 0) THEN 1 ELSE 0 END AS InMenu,
+                         p.ParentPageId, p.SortOrder,
+                         (SELECT COUNT(*) FROM dbo.SitePage c WHERE c.ParentPageId = p.Id AND c.DeletedDate IS NULL) AS ChildCount
                   FROM dbo.SitePage p
                   WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NULL AND p.DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + @"
-                  ORDER BY p.Title",
+                  ORDER BY p.SortOrder, p.Title",
                 ownerType, ownerId);
+
+        /// <summary>Nästa ordningstal bland syskon: sist, i steg om 10 så att en flytt kan lägga en sida emellan utan att numrera om.</summary>
+        public static int NextSortOrder(IDatabase db, string ownerType, int ownerId, int? parentPageId) =>
+            (db.ExecuteScalar<int?>(
+                @"SELECT MAX(SortOrder) FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1 AND TemplateKey IS NULL AND DeletedDate IS NULL
+                    AND ((@2 IS NULL AND ParentPageId IS NULL) OR ParentPageId = @2)", ownerType, ownerId, parentPageId) ?? 0) + 10;
+
+        /// <summary>Antal undersidor (ej raderade). <paramref name="exceptPageId"/> räknas inte med (sidan som flyttas).</summary>
+        public static int ChildCount(IDatabase db, int parentPageId, int exceptPageId = 0) =>
+            db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SitePage WHERE ParentPageId = @0 AND DeletedDate IS NULL AND Id <> @1", parentPageId, exceptPageId);
+
+        /// <summary>Syskonen (samma förälder, ägare och sort) i ordning, för att byta plats. Bara egna, ej raderade sidor.</summary>
+        public static List<(int Id, int SortOrder)> Siblings(IDatabase db, string ownerType, int ownerId, int? parentPageId) =>
+            db.Fetch<SiblingRow>(
+                @"SELECT Id, SortOrder FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1 AND TemplateKey IS NULL AND DeletedDate IS NULL
+                    AND ((@2 IS NULL AND ParentPageId IS NULL) OR ParentPageId = @2) ORDER BY SortOrder, Title, Id", ownerType, ownerId, parentPageId)
+              .Select(r => (r.Id, r.SortOrder)).ToList();
+
+        private sealed class SiblingRow { public int Id { get; set; } public int SortOrder { get; set; } }
+
+        /// <summary>Skriver ordningen: sidorna i listan får 10, 20, 30 … (bara de som ändras). Ägarprövat i frågan.</summary>
+        public static void SetOrder(IDatabase db, string ownerType, int ownerId, IReadOnlyList<int> orderedIds, DateTime now)
+        {
+            for (var i = 0; i < orderedIds.Count; i++)
+                db.Execute("UPDATE dbo.SitePage SET SortOrder = @3 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND TemplateKey IS NULL AND SortOrder <> @3",
+                    orderedIds[i], ownerType, ownerId, (i + 1) * 10);
+        }
+
+        /// <summary>Lägger en sida under en förälder (null = egen nivå) sist bland sina nya syskon. Revisionen höjs så att en öppen redigerare ser att något hänt. Prövningen gör anroparen (<see cref="SitePageTree"/>).</summary>
+        public static void SetParent(IDatabase db, int pageId, string ownerType, int ownerId, int? parentPageId, int? byMemberId, DateTime now)
+        {
+            var sort = NextSortOrder(db, ownerType, ownerId, parentPageId);
+            db.Execute("UPDATE dbo.SitePage SET ParentPageId = @3, SortOrder = @4, Revision = Revision + 1, UpdatedDate = @5, UpdatedByMemberId = @6 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND TemplateKey IS NULL",
+                pageId, ownerType, ownerId, parentPageId, sort, now, byMemberId);
+        }
+
+        /// <summary>Gör varje undersida till minst nivån <paramref name="level"/> (en undersida är aldrig öppnare än sin förälder). Returnerar antal ändrade. Revisionen höjs.</summary>
+        public static int RaiseChildren(IDatabase db, string ownerType, int ownerId, int parentPageId, SiteVisibility level, int? byMemberId, DateTime now) =>
+            db.Execute("UPDATE dbo.SitePage SET Visibility = @3, Revision = Revision + 1, UpdatedDate = @4, UpdatedByMemberId = @5 WHERE OwnerType = @0 AND OwnerId = @1 AND ParentPageId = @2 AND DeletedDate IS NULL AND Visibility < @3",
+                ownerType, ownerId, parentPageId, (byte)level, now, byMemberId);
+
+        public static bool IsInMenu(IDatabase db, string ownerType, int ownerId, int pageId) =>
+            db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2 AND IsRemoved = 0", ownerType, ownerId, pageId) > 0;
+
+        /// <summary>Tar undersidorna ur menyn (när föräldern tas ur den): en undersida i menyn kräver en förälder i menyn. Returnerar antal.</summary>
+        public static int RemoveChildrenFromMenu(IDatabase db, string ownerType, int ownerId, int parentPageId) =>
+            db.Execute(@"DELETE m FROM dbo.SiteMenuItem m JOIN dbo.SitePage c ON c.Id = m.PageId
+                         WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND c.ParentPageId = @2", ownerType, ownerId, parentPageId);
 
         /// <summary>
         /// Ägarens egna sidor som ligger i menyn, i menyns ordning. Bara PUBLICERADE sidor utan raderingsdatum med en aktuell adress: en sida som
@@ -328,12 +389,12 @@ namespace HpskSite.Services.SitePages
         /// </summary>
         public static List<SiteMenuPageRow> MenuPages(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<SiteMenuPageRow>(
-                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, m.SortOrder AS SortOrder
+                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, p.SortOrder AS SortOrder, p.ParentPageId AS ParentPageId
                   FROM dbo.SiteMenuItem m
                   JOIN dbo.SitePage p ON p.Id = m.PageId AND p.OwnerType = m.OwnerType AND p.OwnerId = m.OwnerId
                   JOIN dbo.PageAddress a ON a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1
                   WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND m.IsRemoved = 0 AND p.DeletedDate IS NULL AND p.SuspendedDate IS NULL AND p.PublishedVersionId IS NOT NULL
-                  ORDER BY m.SortOrder, p.Id",
+                  ORDER BY p.SortOrder, p.Id",
                 ownerType, ownerId);
 
         /// <summary>
@@ -509,9 +570,12 @@ namespace HpskSite.Services.SitePages
             var rows = db.Execute(
                 "UPDATE dbo.SitePage SET Revision = Revision + 1, DeletedDate = NULL, LastVisibleLevel = NULL, UpdatedDate = @3, UpdatedByMemberId = @4 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND Revision = @5 AND DeletedDate IS NOT NULL",
                 pageId, ownerType, ownerId, now, byMemberId, expectedRevision);
-            return rows == 0
-                ? new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision)
-                : new SiteStoreResult(SiteStoreOutcome.Ok, pageId, expectedRevision + 1);
+            if (rows == 0) return new SiteStoreResult(SiteStoreOutcome.Conflict, pageId, page.Revision);
+            // En undersida vars förälder är raderad kommer tillbaka som egen sida (sist bland sidorna på egen nivå), aldrig under en raderad sida.
+            if (page.ParentPageId != null)
+                db.Execute(@"UPDATE c SET ParentPageId = NULL, SortOrder = @1 FROM dbo.SitePage c JOIN dbo.SitePage p ON p.Id = c.ParentPageId
+                             WHERE c.Id = @0 AND p.DeletedDate IS NOT NULL", pageId, NextSortOrder(db, ownerType, ownerId, null));
+            return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, expectedRevision + 1);
         }
     }
 }

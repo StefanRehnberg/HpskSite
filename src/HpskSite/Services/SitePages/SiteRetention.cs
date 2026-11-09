@@ -76,6 +76,7 @@ namespace HpskSite.Services.SitePages
                     db.Execute("DELETE FROM dbo.SiteMenuItem WHERE PageId = @0", id);
                     db.Execute("DELETE FROM dbo.PageAddress WHERE TargetKind = @0 AND TargetId = @1", PageAddressKinds.SitePage, id);
                     db.Execute("UPDATE dbo.SitePage SET PublishedVersionId = NULL, DraftVersionId = NULL WHERE Id = @0", id);
+                    db.Execute("UPDATE dbo.SitePage SET ParentPageId = NULL WHERE ParentPageId = @0", id);   // undersidor (raderade eller inte) pekar inte på en rad som försvinner (ingen ON DELETE-regel på en självrefererande nyckel)
                     total += db.Execute("DELETE FROM dbo.SitePage WHERE Id = @0", id);
                 }
                 if (ids.Count < Batch) break;
