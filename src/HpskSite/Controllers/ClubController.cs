@@ -794,7 +794,7 @@ namespace HpskSite.Controllers
         /// lika fält för fält. Egenskapsnamn och värdeformer är oförändrade mot nodtiden.
         /// </summary>
         private object EventEditListRow(HpskSite.Models.Events.ClubEventRecord evt,
-            IReadOnlyDictionary<int, HpskSite.Models.ClubEventRange> eventRanges)
+            IReadOnlyDictionary<int, HpskSite.Models.ClubEventRange> eventRanges, bool includeContacts)
         {
             var support = _events.Support;
             var displayName = evt.DisplayName;
@@ -813,15 +813,16 @@ namespace HpskSite.Controllers
                 // med klubbens förval och nästa sparning flyttar händelsen till den banan.
                 rangeId = evRange?.RangeId ?? 0,
                 rangeSectionId = evRange?.RangeSectionId,
-                contactPerson = evt.ContactPerson,
-                contactEmail = evt.ContactEmail,
+                // ⚠️ Personuppgifter bara för ägarens administratör (EventRowPrivacy, S2). Listan svarar utan inloggningskrav.
+                contactPerson = HpskSite.Services.Events.EventRowPrivacy.Contact(evt.ContactPerson, includeContacts),
+                contactEmail = HpskSite.Services.Events.EventRowPrivacy.Contact(evt.ContactEmail, includeContacts),
                 // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
                 // `eventContactPhone` ur den här projektionen; utan raden fylldes den
                 // med tomt, och sparningen skriver kontakttelefonen villkorslöst.
                 // Alltså försvann kontakttelefonen varje gång någon redigerade en händelse
                 // från klubb- eller kretspanelen — tyst. Samma fältlista-som-glömmer som
                 // Luleå PK rapporterade om lånevapen, fjärde instansen på den här ytan.
-                contactPhone = evt.ContactPhone,
+                contactPhone = HpskSite.Services.Events.EventRowPrivacy.Contact(evt.ContactPhone, includeContacts),
                 isActive = evt.IsActive,
                 url = evt.Url,
                 // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
@@ -843,7 +844,7 @@ namespace HpskSite.Controllers
                 audiencePropertyExists = support.Audience,
                 // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
                 // läsning i ClubEventParticipationService, inte här.
-                eventSwishNumber = support.Swish ? evt.SwishNumber : "",
+                eventSwishNumber = support.Swish ? HpskSite.Services.Events.EventRowPrivacy.Contact(evt.SwishNumber, includeContacts) : "",
                 swishPropertyExists = support.Swish,
                 mandatoryPropertyExists = support.Mandatory,
                 // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
@@ -893,10 +894,12 @@ namespace HpskSite.Controllers
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
+                    // Kontaktuppgifterna bara för klubbens administratör (S2): listan svarar utan inloggningskrav.
+                    var includeContacts = await _authorizationService.IsClubAdminForClub(clubId);
                     var eventRanges = _rangeCalendar.GetEventRanges(allEvents.Select(e => e.Id));
                     foreach (var evt in allEvents)
                     {
-                        events.Add(EventEditListRow(evt, eventRanges));
+                        events.Add(EventEditListRow(evt, eventRanges, includeContacts));
                     }
                 }
 
@@ -908,7 +911,9 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Ok(new { success = false, message = "Error loading events: " + ex.Message });
+                // Aldrig ex.Message till en anonym läsare (S2): loggen får detaljerna.
+                _logger.LogError(ex, "Klubbens händelser kunde inte läsas (klubb {Club})", clubId);
+                return Ok(new { success = false, message = "Händelserna kunde inte läsas." });
             }
         }
 
@@ -1976,10 +1981,13 @@ namespace HpskSite.Controllers
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
+                    // Kontaktuppgifterna bara för kretsens administratör (S2): listan svarar utan inloggningskrav.
+                    var includeContacts = await _authorizationService.IsRegionalAdminForRegion(
+                        regionNode.Value<string>("regionCode") ?? "");
                     var eventRanges = _rangeCalendar.GetEventRanges(allEvents.Select(e => e.Id));
                     foreach (var evt in allEvents)
                     {
-                        events.Add(EventEditListRow(evt, eventRanges));
+                        events.Add(EventEditListRow(evt, eventRanges, includeContacts));
                     }
                 }
 
@@ -1991,7 +1999,9 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Ok(new { success = false, message = "Error loading region events: " + ex.Message });
+                // Aldrig ex.Message till en anonym läsare (S2): loggen får detaljerna.
+                _logger.LogError(ex, "Kretsens händelser kunde inte läsas (krets {Region})", regionId);
+                return Ok(new { success = false, message = "Händelserna kunde inte läsas." });
             }
         }
 

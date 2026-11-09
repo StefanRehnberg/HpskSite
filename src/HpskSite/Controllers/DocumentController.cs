@@ -419,9 +419,10 @@ namespace HpskSite.Controllers
             if (document.AccessLevel == DocumentAccessLevel.Public)
                 return true;
 
-            // Quick link documents are intentionally exposed on public pages
-            if (document.ShowInQuickLinks)
-                return true;
+            // ⚠️ Snabblänken styr bara VAR ett dokument visas, aldrig vem som får läsa det (expertgruppen 2026-11-09, S5).
+            // Förut släppte `ShowInQuickLinks` in vem som helst, även utloggad, oavsett åtkomstnivå: ett
+            // ClubAdmins-dokument som en admin snabblänkat gick att ladda ned genom att gissa id. Listan
+            // (GetQuickLinkDocuments) filtrerar redan på nivå, så ingen som ska se dokumentet förlorar något.
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null)
