@@ -395,28 +395,50 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// "Så ser besökaren sidan" för en vanlig sida som INTE är omgjord: standardinnehållet ritas som en omgjord sida (en omgjord standardsida ser ut som standardsidan
-        /// för varje tittare — golden master), så beslutet och vilka paneler tittaren ser stämmer med den riktiga sidan. Ingen sidrad behövs och inget skrivs.
+        /// "Vem ser sidan?": en tabell över vad Utloggad, Inloggad, Medlem och Styrelse ser av sidan (sidan i menyn, varje panel och varje eget block), ur samma regler som besökarna
+        /// möter (<see cref="SitePagePreview.Matrix"/>). Läser utkastet, annars den publicerade versionen (<c>basis</c> säger vilket). <c>pageId</c> = en fri eller omgjord sida,
+        /// annars <c>templateKey</c> = en vanlig sida som inte är omgjord. Inget ritas och inget skrivs, så inga personuppgifter eller paneldata lämnar servern.
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
-        public async Task<IActionResult> PreviewStandard(string ownerType, int ownerId, string templateKey, string persona, [FromServices] SiteBlockDataFactory blockData)
+        public async Task<IActionResult> Visibility(string ownerType, int ownerId, int pageId, string? templateKey)
         {
             var g = await Gate(ownerType, ownerId, write: false);
             if (g.Error != null) return g.Error;
             Response.Headers["Cache-Control"] = "private, no-store";
-            if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förhandsvisningar på kort tid.", "rate");
-            var who = SitePagePreview.Persona(g.OwnerType, persona);
-            if (who == null) return Fail("Okänd tittare.");
-            var def = SiteTemplates.For(g.OwnerType).PageByKey(templateKey ?? "");
-            if (def == null || def.IsAdmin || PanelCatalog.Standard(g.OwnerType, def.Key, true).Count == 0) return Fail("Den sidan går inte att förhandsvisa.");
+            if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förfrågningar på kort tid.", "rate");
+            var template = SiteTemplates.For(g.OwnerType);
 
-            var content = SiteConversion.Build(g.OwnerType, def.Key, null);
-            var node = UmbracoContext.Content?.GetById(g.OwnerId);
-            var r = SitePagePreview.BuildConverted(g.OwnerType, def.Label, def.Key, SiteConversion.PageVisibility(g.OwnerType, def.Key), content, who,
-                blockData.For(g.OwnerType, g.OwnerId, node, who.Viewer), g.OwnerUrl);
-            return Json(new { success = true, decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, persona = who.Key });
+            if (pageId <= 0)
+            {
+                var def = template.PageByKey(templateKey ?? "");
+                if (def == null || def.IsAdmin || PanelCatalog.Standard(g.OwnerType, def.Key, true).Count == 0) return Fail("Den sidan går inte att granska.");
+                var std = SitePagePreview.Matrix(g.OwnerType, def.Label, def.Key, SiteConversion.PageVisibility(g.OwnerType, def.Key), SiteConversion.Build(g.OwnerType, def.Key, null));
+                return Json(new { success = true, basis = "standard", columns = std.Columns, rows = std.Rows, summary = std.Summary, publicUrl = g.OwnerUrl + (def.IsHome ? "" : def.Slug + "/") });
+            }
+
+            SitePageRow? page; SitePageVersionRow? version; bool isDraft;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+            {
+                page = SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId);
+                var draft = page == null ? null : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId);
+                version = draft ?? (page == null ? null : SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId));
+                isDraft = draft != null;
+            }
+            if (page == null || version == null) return Fail("Sidan finns inte.");
+            var kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson);
+            if (kind == SiteContentKind.TemplateCopy) return Fail("Sidan finns inte.");
+            var content = SiteBlockSchema.Parse(version.BlocksJson, kind, page.VisibilityLevel, template, page.TemplateKey);
+            if (!content.Ok) return Fail("Sidan kan inte granskas ännu: " + content.Errors[0].Message);
+            var m = SitePagePreview.Matrix(g.OwnerType, version.Title, kind == SiteContentKind.ConvertedPage ? page.TemplateKey : null, page.VisibilityLevel, content);
+            string? url = null;
+            if (kind == SiteContentKind.ConvertedPage && page.TemplateKey != null)
+            {
+                var d = template.PageByKey(page.TemplateKey);
+                if (d != null) url = g.OwnerUrl + (d.IsHome ? "" : d.Slug + "/");
+            }
+            return Json(new { success = true, basis = isDraft ? "draft" : "published", published = page.PublishedVersionId != null, columns = m.Columns, rows = m.Rows, summary = m.Summary, publicUrl = url });
         }
 
         /// <summary>Tittarna man kan förhandsvisa som, för den här ägarens typ.</summary>

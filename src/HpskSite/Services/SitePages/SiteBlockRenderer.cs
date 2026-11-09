@@ -74,13 +74,22 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>Blockets verkliga nivå: striktast av blockets och sidans, personblock aldrig Alla. EN beräkning för alla block, även paneler.</summary>
-        private static SiteVisibility Effective(SiteBlock block, SiteVisibility pageVisibility, SiteRenderContext ctx)
+        private static SiteVisibility Effective(SiteBlock block, SiteVisibility pageVisibility, SiteRenderContext ctx) => Effective(block, pageVisibility, ctx.Template.OwnerType);
+
+        private static SiteVisibility Effective(SiteBlock block, SiteVisibility pageVisibility, string ownerType)
         {
             var effective = SiteAccess.Strictest(block.Visibility, pageVisibility);
-            if (SiteBlockSchema.IsPersonalBlock(block.Type, ctx.Template.OwnerType, block.Data))
+            if (SiteBlockSchema.IsPersonalBlock(block.Type, ownerType, block.Data))
                 effective = SiteAccess.CapPersonal(effective);
             return effective;
         }
+
+        /// <summary>
+        /// Får tittaren se blocket (vilket block som helst, även en panel)? Samma beräkning som ritningen, men utan att rita: underlaget för "Vem ser sidan?" i Hemsidan.
+        /// Sidans egen åtkomst prövas separat (<see cref="SitePageAccessRules"/>).
+        /// </summary>
+        public static bool BlockVisible(SiteBlock block, SiteVisibility pageVisibility, string ownerType, SiteViewer viewer) =>
+            SiteAccess.CanSee(Effective(block, pageVisibility, ownerType), viewer);
 
         /// <summary>
         /// Får tittaren se panelblocket? Vyn som ritar en omvandlad sida frågar HIT före varje panel (aldrig en egen prövning), så panelerna följer

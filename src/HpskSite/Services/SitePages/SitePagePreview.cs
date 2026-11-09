@@ -98,6 +98,76 @@ namespace HpskSite.Services.SitePages
             return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan. Rutor med automatiskt innehåll visas här bara med namn.", Document(title, sb.ToString()));
         }
 
+        /// <summary>En kolumn i "Vem ser sidan?": en av de fasta tittarna.</summary>
+        public sealed record VisibilityColumn(string Key, string Label);
+
+        /// <summary>En rad: sidan i menyn, en panel eller ett eget block. <c>States</c> har ett tillstånd per kolumn: "see" (ser), "lock" (ser menyvalet men får en låsruta) eller "no" (ser inte).</summary>
+        public sealed record VisibilityRow(string Kind, string Label, string Detail, IReadOnlyList<string> States);
+
+        public sealed record VisibilityMatrix(IReadOnlyList<VisibilityColumn> Columns, IReadOnlyList<VisibilityRow> Rows, string Summary);
+
+        private static readonly Dictionary<string, string> BlockLabels = new()
+        {
+            ["text"] = "Text", ["heading"] = "Rubrik", ["links"] = "Länkar", ["documents"] = "Dokument", ["contact"] = "Kontaktuppgifter",
+            ["events"] = "Kommande händelser", ["news"] = "Nyheter", ["pagelink"] = "Länk till en sida", ["image"] = "Bild",
+            ["region-clubs"] = "Klubbar i kretsen", ["region-ranges"] = "Skjutbanor", ["region-series"] = "Serier", ["region-stats"] = "Kretsen i siffror",
+        };
+
+        private static string BlockDetail(SiteBlock b)
+        {
+            string? s = b.Type switch
+            {
+                "heading" => b.Data["text"]?.GetValue<string>(),
+                "text" => System.Text.RegularExpressions.Regex.Replace(b.Data["html"]?.GetValue<string>() ?? "", "<[^>]+>", " "),
+                "image" => b.Data["caption"]?.GetValue<string>() ?? b.Data["alt"]?.GetValue<string>(),
+                _ => null,
+            };
+            s = System.Text.RegularExpressions.Regex.Replace(s ?? "", @"\s+", " ").Trim();
+            return s.Length > 48 ? s[..48].TrimEnd() + "…" : s;
+        }
+
+        /// <summary>
+        /// "Vem ser sidan?" (ersätter förhandsvisningen med namnkort): för varje fast tittare, vad hen får se av sidan. Sidans egen rad kommer ur
+        /// <see cref="SitePageAccessRules.Decide"/> och varje block/panel ur <see cref="SiteBlockRenderer.BlockVisible"/> — samma regler som besökarna möter, utan att rita något.
+        /// <paramref name="templateKey"/> satt = en vanlig sida (omgjord eller standard); null = en fri sida. Ren kod.
+        /// </summary>
+        public static VisibilityMatrix Matrix(string ownerType, string title, string? templateKey, SiteVisibility pageVisibility, SiteContentResult content)
+        {
+            var personas = Personas(ownerType);
+            SiteTemplate template; SitePageDef def;
+            if (templateKey != null)
+            {
+                var converted = new ConvertedPage(templateKey, ConvertedState.Ok, pageVisibility, false, content);
+                template = SiteConvertedPages.Apply(SiteTemplates.For(ownerType), new Dictionary<string, ConvertedPage> { [templateKey] = converted });
+                def = template.PageByKey(templateKey) ?? throw new ArgumentException("Okänd sida: " + templateKey, nameof(templateKey));
+            }
+            else
+            {
+                template = SiteTemplates.For(ownerType);
+                def = new SitePageDef(SitePageRequest.FreePageKey, "x", title, 0, new[] { new SiteBlockDef("page", pageVisibility) });
+            }
+            var decisions = personas.Select(p => SitePageAccessRules.Decide(template, def, p.Viewer)).ToArray();
+            var rows = new List<VisibilityRow>
+            {
+                new("page", "Sidan i menyn", "", decisions.Select(d => d switch { SitePageDecision.Serve => "see", SitePageDecision.Locked => "lock", _ => "no" }).ToList()),
+            };
+            foreach (var b in content.Blocks)
+            {
+                var isPanel = b.Type == "panel";
+                var label = isPanel ? (PanelCatalog.Find(ownerType, SiteBlockSchema.PanelKeyOf(b.Data) ?? "")?.Name ?? "Del av sidan") : BlockLabels.GetValueOrDefault(b.Type, b.Type);
+                rows.Add(new(isPanel ? "panel" : "block", label, isPanel ? "" : BlockDetail(b),
+                    personas.Select((p, i) => decisions[i] == SitePageDecision.Serve && SiteBlockRenderer.BlockVisible(b, pageVisibility, ownerType, p.Viewer) ? "see" : "no").ToList()));
+            }
+            var anon = decisions[0];
+            var summary = anon switch
+            {
+                SitePageDecision.Serve => "Utloggade kan öppna sidan.",
+                SitePageDecision.Locked => "Utloggade ser sidan i menyn med ett hänglås och en ruta med Logga in i stället för innehållet.",
+                _ => "Utloggade ser inte sidan alls.",
+            };
+            return new VisibilityMatrix(personas.Select(p => new VisibilityColumn(p.Key, p.Label)).ToList(), rows, summary);
+        }
+
         /// <summary>
         /// Ett komplett dokument för en <c>&lt;iframe sandbox srcdoc&gt;</c>. Titeln kodas; brödtexten är redan renderarens (kodad och sanerad). Bara bootstrap-stilen laddas utifrån;
         /// inga skript. Iframen har <c>sandbox=""</c>, så inget skript kan köras i den ändå.
