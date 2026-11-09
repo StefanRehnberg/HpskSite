@@ -244,7 +244,7 @@ namespace HpskSite.Services.SitePages
         {
             var levels = new List<SiteVisibility>();
             foreach (var (pageVis, content) in publishedPages)
-                foreach (var b in content.AllBlocks.Where(b => b.Type == "image" && SiteBlockSchema.FileIdOf(b) == fileId))
+                foreach (var b in content.AllBlocks.Where(b => SiteBlockSchema.FileIdsOf(b).Contains(fileId)))
                     levels.Add(SiteAccess.Strictest(b.Visibility, pageVis));
             if (!levels.Any(l => SiteAccess.CanSee(l, viewer))) return SiteImageDecision.NotFound;
             return levels.All(l => l == SiteVisibility.Alla) ? SiteImageDecision.ServePublic : SiteImageDecision.ServePrivate;

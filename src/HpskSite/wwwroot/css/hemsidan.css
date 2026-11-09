@@ -13,7 +13,10 @@
 #hemsidan-app .hs-status.err { color: var(--bs-danger); }
 #hemsidan-app .btn, #hemsidan-app .form-select, #hemsidan-app .form-control { min-height: 2.5rem; }
 #hemsidan-app .hs-bar { position: sticky; top: 0; z-index: 5; background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color); padding: .5rem 0; margin-bottom: 1rem; }
-#hemsidan-app .ck-editor__editable { min-height: 9rem; }
+/* Textrutan: mörk text på ljus botten även i mörkt läge (annars ärvs sidans ljusa textfärg och texten syns knappt), och höjden går att dra ut. */
+#hemsidan-app .ck-editor__editable { min-height: 14rem; resize: vertical; overflow: auto; }
+#hemsidan-app .ck.ck-editor__editable:not(.ck-focused), #hemsidan-app .ck.ck-editor__editable.ck-focused { color: #212529; background: #fff; }
+#hemsidan-app .ck-editor__editable.ck-content a { color: #0d6efd; }
 #hemsidan-app .hs-badge-0 { background: var(--bs-success); }
 #hemsidan-app .hs-badge-1, #hemsidan-app .hs-badge-2 { background: var(--bs-primary); }
 #hemsidan-app .hs-badge-3 { background: var(--bs-warning); color: #000; }

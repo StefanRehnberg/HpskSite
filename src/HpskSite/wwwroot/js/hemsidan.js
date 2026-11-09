@@ -951,12 +951,39 @@
       toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList', 'blockQuote', 'insertTable', '|', 'undo', 'redo'],
       heading: { options: [{ model: 'paragraph', title: 'Vanlig text', class: 'ck-heading_paragraph' }, { model: 'heading2', view: 'h2', title: 'Rubrik', class: 'ck-heading_heading2' },
                            { model: 'heading3', view: 'h3', title: 'Underrubrik', class: 'ck-heading_heading3' }] },
-      removePlugins: ['Image', 'ImageCaption', 'ImageStyle', 'ImageToolbar', 'ImageUpload', 'ImageResize', 'EasyImage', 'CKFinder', 'CKFinderUploadAdapter', 'CKBox', 'CKBoxUI', 'CKBoxEditing', 'CKBoxUtils', 'CKBoxImageEdit', 'MediaEmbed'],
+      // Bilder: bara ur föreningens egna bilder (knappen Infoga bild nedan). Ingen uppladdning direkt i texten, ingen bildtext eller storleksändring
+      // (saneraren släpper bara igenom en bild med sajtens egen adress och en beskrivning). Klick på en bild ger knappen för beskrivningen.
+      removePlugins: ['ImageCaption', 'ImageStyle', 'ImageUpload', 'ImageResize', 'EasyImage', 'CKFinder', 'CKFinderUploadAdapter', 'CKBox', 'CKBoxUI', 'CKBoxEditing', 'CKBoxUtils', 'CKBoxImageEdit', 'MediaEmbed'],
+      image: { toolbar: ['imageTextAlternative'] },
     }).then(ed => {
       ed.setData(block.data.html || '');
+      node.parentNode.insertBefore(h('div', { class: 'mb-2' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: () => insertImage(ed) },
+        h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild')), node);
       ed.model.document.on('change:data', () => { block.data.html = ed.getData(); markDirty(); });
       S.editors.push(ed);
     }).catch(err => { console.error('CKEditor kunde inte startas:', err && (err.message || err)); node.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte startas.')); });
+  }
+
+  // Infoga en av föreningens bilder i texten. Beskrivningen (eller "bara dekoration") krävs, som för bildblocket.
+  async function insertImage(ed) {
+    const f = await pickImage(); if (!f) return;
+    let err = '';
+    for (;;) {
+      const alt = h('input', { class: 'form-control', maxlength: '200', placeholder: 'Till exempel: Skyttar på 25-metersbanan under årsmötet', 'aria-label': 'Beskriv bilden' });
+      const deco = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsInlineDeco' });
+      deco.addEventListener('change', () => { alt.disabled = deco.checked; });
+      const r = await modal('Beskriv bilden', [
+        err ? h('div', { class: 'alert alert-danger py-2' }, err) : null,
+        h('p', { class: 'small text-muted' }, 'Läses upp för den som inte ser bilden. Skriv vad bilden visar, inte "bild på…".'), alt,
+        h('div', { class: 'form-check mt-2' }, deco, h('label', { class: 'form-check-label', for: 'hsInlineDeco' }, 'Bara dekoration, ingen beskrivning behövs'))],
+        [{ label: 'Avbryt', value: false }, { label: 'Infoga bilden', value: true, cls: 'btn-primary' }]);
+      if (r !== true) return;
+      const text = alt.value.trim();
+      if (!deco.checked && !text) { err = 'Beskriv bilden, eller välj att den bara är dekoration.'; continue; }
+      ed.model.change(w => { ed.model.insertContent(w.createElement('imageBlock', { src: imgUrl('file:' + f.id), alt: deco.checked ? '' : text })); });
+      ed.editing.view.focus();
+      return;
+    }
   }
 
   function blockCard(b, i) {

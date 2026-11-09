@@ -93,6 +93,14 @@ namespace HpskSite.Services.SitePages
         private static readonly Regex FileRefRx = new(@"^file:[1-9]\d{0,8}$", RegexOptions.Compiled);
 
         /// <summary>Bildblockets fil-id (<c>file:12</c> → 12), eller null om blocket inte är ett giltigt bildblock.</summary>
+        /// <summary>Alla bildfiler ett block visar: ett bildblocks fil, eller de bilder en text bäddar in.</summary>
+        public static IReadOnlyList<int> FileIdsOf(SiteBlock b)
+        {
+            if (b.Type == "image") return FileIdOf(b) is int id ? new[] { id } : Array.Empty<int>();
+            if (b.Type == "text") return SiteHtmlSanitizer.InlineFileIds(b.Data["html"]?.GetValue<string>());
+            return Array.Empty<int>();
+        }
+
         public static int? FileIdOf(SiteBlock b) =>
             b.Type == "image" && b.Data["ref"] is JsonValue v && v.TryGetValue<string>(out var r) && FileRefRx.IsMatch(r) ? int.Parse(r["file:".Length..]) : null;
 
@@ -465,8 +473,8 @@ namespace HpskSite.Services.SitePages
             foreach (var b in content.AllBlocks.Where(b => b.Type == "documents"))
                 foreach (var r in b.Data["refs"]!.AsArray())
                     refs.Add(("doc", int.Parse(r!.GetValue<string>()["doc:".Length..])));
-            foreach (var b in content.AllBlocks.Where(b => b.Type == "image"))
-                if (FileIdOf(b) is int fid) refs.Add(("file", fid));
+            foreach (var b in content.AllBlocks)
+                foreach (var fid in FileIdsOf(b)) refs.Add(("file", fid));
             return refs.OrderBy(r => r.Item1).ThenBy(r => r.Item2).ToList();
         }
 

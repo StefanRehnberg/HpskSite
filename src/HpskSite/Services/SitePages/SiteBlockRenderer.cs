@@ -130,6 +130,9 @@ namespace HpskSite.Services.SitePages
             // Tabeller görs rörliga på telefon (saneraren tar bort class, så servern lägger omslaget).
             html = TableOpen.Replace(html, "<div class=\"table-responsive\"><table class=\"table table-sm\"");
             html = TableClose.Replace(html, "</table></div>");
+            // Bilder i texten: aldrig bredare än sidan, och en figur utan webbläsarens inbyggda sidomarginal.
+            html = html.Replace("<img ", "<img class=\"img-fluid\" loading=\"lazy\" ", StringComparison.Ordinal)
+                       .Replace("<figure>", "<figure class=\"mb-3\">", StringComparison.Ordinal);
             return Section(b.Id, $"<div class=\"site-text\">{html}</div>");
         }
 
