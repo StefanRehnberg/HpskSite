@@ -939,6 +939,15 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid club ID" });
                 }
 
+                // Blockets egen nivå gäller också dess data: ställer klubben in Medlemskatalogen som Klubbmedlemmar får en annan inloggad inte listan
+                // ens genom att anropa adressen direkt. Standard (ej omgjord sida) = Inloggade, som förut.
+                if (!await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePanelReadGate>()
+                        .CanReadPanelAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "members", "member-directory"))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden,
+                        new { success = false, message = "Klubben visar inte medlemskatalogen för dig." });
+                }
+
                 // Check if current user is club admin for this club
                 var isClubAdmin = false;
                 {

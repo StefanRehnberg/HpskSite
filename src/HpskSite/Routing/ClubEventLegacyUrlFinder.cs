@@ -100,6 +100,7 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<SiteConvertedSource>();
             builder.Services.AddScoped<SiteConvertedRenderer>();
             builder.Services.AddScoped<SitePaneGate>();   // "Visa publikt": dataanropen frågar om panelen är öppen för alla
+            builder.Services.AddScoped<SitePanelReadGate>();   // blockets egen nivå gäller också dess data (medlemskatalogen, styrelsen)
             builder.Services.AddSingleton<SitePreviewTickets>();   // förhandsläget i Hemsidan: signerade biljetter (SitePreviewMiddleware läser dem)
             builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
