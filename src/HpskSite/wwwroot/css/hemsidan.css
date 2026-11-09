@@ -17,6 +17,12 @@
 #hemsidan-app .ck-editor__editable { min-height: 14rem; resize: vertical; overflow: auto; }
 #hemsidan-app .ck.ck-editor__editable:not(.ck-focused), #hemsidan-app .ck.ck-editor__editable.ck-focused { color: #212529; background: #fff; }
 #hemsidan-app .ck-editor__editable.ck-content a { color: #0d6efd; }
+/* Vem ser sidan?: hopfällbar sektion. Rubrikraden är hela klickytan; pilen vänder sig när den är öppen. */
+#hemsidan-app .hs-who > summary { cursor: pointer; list-style: none; min-height: 2.5rem; }
+#hemsidan-app .hs-who > summary::-webkit-details-marker { display: none; }
+#hemsidan-app .hs-who > summary:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: .375rem; }
+#hemsidan-app .hs-who .hs-chev { transition: transform .15s; }
+#hemsidan-app .hs-who[open] .hs-chev { transform: rotate(180deg); }
 #hemsidan-app .hs-badge-0 { background: var(--bs-success); }
 #hemsidan-app .hs-badge-1, #hemsidan-app .hs-badge-2 { background: var(--bs-primary); }
 #hemsidan-app .hs-badge-3 { background: var(--bs-warning); color: #000; }

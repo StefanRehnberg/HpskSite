@@ -693,7 +693,7 @@
     const blocksEl = h('div', { id: 'hsBlocks' });
     // Inställningen och resultatet är EN sektion, "Vem ser sidan?" (egen text på en vanlig sida har bara inställningen).
     const who = slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), {
-      beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null,
+      beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null, hint: visLabel(S.visibility),
       setting: [
         h('label', { class: 'form-label small text-muted mb-1', for: 'hsVisSel' }, 'Vem får läsa sidan?'), visSel, consequence,
         !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null,
@@ -785,14 +785,24 @@
     };
     const run = () => load().finally(() => { ready = true; });
     run();
-    const el = h('div', { class: 'hs-card p-3 mb-3', id: 'hsWhoSees' },
-      h('h2', { class: 'h5 mb-2' }, 'Vem ser sidan?'),
-      opts.setting
-        ? h('div', {}, opts.setting)
-        : h('div', {}, h('p', { class: 'text-muted mb-1' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'),
-            opts.change ? h('p', { class: 'mb-0' }, opts.change.intro + ' ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', onclick: opts.change.run }, opts.change.label))
-              : opts.note ? h('p', { class: 'text-muted mb-0' }, opts.note) : null),
-      out, msg);
+    // Hopfällbar (som "Mer"-kortet): öppen som förval, och valet ligger kvar mellan sidor och omritningar i den här webbläsaren. Hopfälld syns rubriken, ikonen och nuvarande val.
+    const OPEN_KEY = 'hsWhoSeesOpen';
+    let isOpen = true;
+    try { isOpen = localStorage.getItem(OPEN_KEY) !== '0'; } catch { /* ingen lagring: öppen */ }
+    const el = h('details', { class: 'hs-card hs-who p-3 mb-3', id: 'hsWhoSees', open: isOpen ? true : null },
+      h('summary', { class: 'd-flex align-items-center gap-2' },
+        h('i', { class: 'bi bi-eye text-primary', 'aria-hidden': 'true' }),
+        h('h2', { class: 'h5 mb-0' }, 'Vem ser sidan?'),
+        opts.hint ? h('span', { class: 'text-muted small' }, '· ' + opts.hint) : null,
+        h('i', { class: 'bi bi-chevron-down hs-chev ms-auto text-body-secondary', 'aria-hidden': 'true' })),
+      h('div', { class: 'mt-2' },
+        opts.setting
+          ? h('div', {}, opts.setting)
+          : h('div', {}, h('p', { class: 'text-muted mb-1' }, 'Så här är sidan inställd. Innehållet hämtas när besökaren öppnar sidan.'),
+              opts.change ? h('p', { class: 'mb-0' }, opts.change.intro + ' ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', onclick: opts.change.run }, opts.change.label))
+                : opts.note ? h('p', { class: 'text-muted mb-0' }, opts.note) : null),
+        out, msg));
+    el.addEventListener('toggle', () => { try { localStorage.setItem(OPEN_KEY, el.open ? '1' : '0'); } catch { /* ingen lagring */ } });
     // Uppdatera tabellen en kort stund efter en ändring som styr åtkomst (sidans nivå, ett blocks nivå, ett block som läggs till eller tas bort). Inte före första ritningen.
     el._refresh = () => { if (!ready) return; clearTimeout(timer); timer = setTimeout(load, 500); };
     return el;
