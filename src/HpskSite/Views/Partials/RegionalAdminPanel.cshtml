@@ -222,13 +222,11 @@
          other. Both drive the SAME Bootstrap tabs below; every button id and data-bs-target is
          UNCHANGED so the existing lazy-loaders keep working — they bind by button id, not by the
          old <ul> structure. -->
-    <div class="hpsk-admin-back mb-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-hpsk-back-to-pages><i class="bi bi-arrow-left me-1"></i>Tillbaka till kretsens sidor</button>
-    </div>
     <div class="row g-3 admin-nav-layout">
 
         <!-- Small screens (< lg): full-width grouped section picker -->
         <div class="col-12 d-lg-none">
+            <a href="#" class="hpsk-admin-back d-block mb-2" data-hpsk-back-to-pages>← Tillbaka till kretsens sidor</a>
             <label for="regionAdminTabMobileSelect" class="form-label small text-muted mb-1">Välj sektion</label>
             <select class="form-select" id="regionAdminTabMobileSelect" aria-label="Välj adminsektion">
                 <optgroup label="Kalender &amp; tävlingar">
@@ -263,6 +261,7 @@
         <!-- Large screens (≥ lg): grouped vertical rail -->
         <div class="col-lg-auto d-none d-lg-block">
             <nav class="nav nav-pills flex-column admin-rail" id="regionAdminTabs" role="tablist" aria-orientation="vertical">
+                <a href="#" class="hpsk-admin-back" data-hpsk-back-to-pages>← Tillbaka till kretsens sidor</a>
                 <div class="admin-rail-group">Kalender &amp; tävlingar</div>
                 <button class="nav-link" id="regionEvents-tab" data-bs-toggle="tab" data-bs-target="#regionEventsTab" type="button" role="tab" aria-controls="regionEventsTab" aria-selected="false">
                     <i class="bi bi-calendar-event me-2"></i>Händelser

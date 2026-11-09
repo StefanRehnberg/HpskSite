@@ -81,6 +81,8 @@
     }
     .hpsk-sidelayout.hpsk-admin-open > .hpsk-sidemenu { display: none; }
     .hpsk-admin-back { display: none; }
+    a.hpsk-admin-back { color: var(--bs-secondary-color); font-size: .9rem; padding: 6px 12px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); text-decoration: none; }
+    a.hpsk-admin-back:hover { color: var(--bs-link-color); }
     .hpsk-sidelayout .hpsk-admin-back { display: block; }
     .hpsk-sidemenu .nav-link { display: flex; align-items: center; width: 100%; text-align: left; color: var(--bs-body-color); border-radius: 8px; padding: 8px 12px; border-left: 3px solid transparent; }
     .hpsk-sidemenu .nav-link:hover { background-color: var(--bs-secondary-bg); }
@@ -113,6 +115,7 @@
         document.addEventListener('click', function (e) {
             var b = e.target && e.target.closest ? e.target.closest('[data-hpsk-back-to-pages]') : null;
             if (!b) return;
+            e.preventDefault();
             var home = list.querySelector('button[data-bs-toggle="tab"]:not([id$="Admin-tab"])');
             if (home) home.click();
         });
