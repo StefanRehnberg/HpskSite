@@ -59,6 +59,13 @@ namespace HpskSite.Tests
         [InlineData("/halland/ankeborg-pistolklubb/..%2fekonomi")]
         [InlineData("/halland/ankeborg-pistolklubb/\\..\\ekonomi")]
         [InlineData("/halland/ankeborg-pistolklubb//ekonomi")]
+        [InlineData("/halland/ankeborg-pistolklubb/../varbergs-pk/")]   // lämnar föreningen bara genom bakåtsteget
+        [InlineData("/halland/ankeborg-pistolklubb/./../../halland/")]
+        [InlineData("/halland/ankeborg-pistolklubb/kalender/../../varbergs-pk")]
+        [InlineData("/halland/ankeborg-pistolklubb/%2e%2e/varbergs-pk/")]
+        [InlineData("/halland/ankeborg-pistolklubb/foo\\..\\varbergs-pk/")]
+        [InlineData("/halland/ankeborg-pistolklubb/foo\\bar/")]        // ett bakstreck tolkas som snedstreck av vissa servrar
+        [InlineData("/halland/ankeborg-pistolklubb//kalender/")]       // dubbla snedstreck slås ihop av vissa servrar
         [InlineData("//evil.example/halland/ankeborg-pistolklubb/")]
         [InlineData("")]
         [InlineData(null)]

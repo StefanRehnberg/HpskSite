@@ -401,8 +401,9 @@
     const r = await api('POST', 'CreateSlotPage', { templateKey: x.key, visibility: vis });
     if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Det gick inte att skapa.' }; renderList(); return; }
     await reloadState();
+    // Meddelandet följer med in i redigeraren (en kort stund, eftersom adressbytet laddar om den en gång till).
+    S.nextBanner = { until: Date.now() + 6000, banner: { cls: 'info', text: 'Texten är ett utkast och syns för ' + visLabel(vis).toLowerCase() + ' när du publicerar. Ändra det under "Vem ser texten?" om du vill.' } };
     await openEditor(r.pageId);
-    setBanner('info', 'Texten är ett utkast och syns för ' + visLabel(vis).toLowerCase() + ' när du publicerar. Ändra det under "Vem ser texten?" om du vill.');
   }
 
   // "Vad som hänt": vem gjorde vad och när (senaste 100). Bara föreningens egna administratörer läser loggen, så den visas inte i stödläge.
@@ -554,7 +555,7 @@
     // En omgjord sida (schema 2) är en lista block där paneler (hämtas automatiskt) och egna block blandas; panelkatalogen kommer med svaret.
     Object.assign(S, { kind: r.kind || 'free', minVis: r.minVisibility || 0, templateKey: r.templateKey || null, pageKey: r.pageKey || null, panelCat: r.panels || null, convertedLive: !!r.convertedLive });
     Object.assign(S, { page: r, blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
-      dirty: false, editVersion: 0, banner: null, statusText: 'Sparat', statusErr: false });
+      dirty: false, editVersion: 0, banner: S.nextBanner && S.nextBanner.until > Date.now() ? S.nextBanner.banner : null, statusText: 'Sparat', statusErr: false });   // setHash utlöser en andra laddning som annars nollställer meddelandet
     if (!S.docs) { const d = await api('GET', 'Documents'); S.docs = d.success ? d.documents : []; }
     renderEditor();
   }
@@ -754,7 +755,7 @@
         : r.basis === 'published' ? 'Tabellen visar den publicerade sidan.' : 'Tabellen visar sidan som den är idag.';
       const hasPanels = r.rows.some(x => x.kind === 'panel');
       const isFree = r.kind === 'free';
-      const published = r.kind === 'standard' || r.published !== false;   // en egen sida måste vara publicerad för att finnas för besökarna
+      const published = r.kind !== 'free' || r.published !== false;   // en egen sida måste vara publicerad för att finnas för besökarna
       // Den riktiga sidan finns för utloggad alltid, och för en annan besökare bara på en publicerad egen sida utan delar ur systemet.
       const canFor = c => !!pageUrl && published && (c.key === 'anon' || (isFree && !hasPanels));
       const previewLink = c => h('button', { type: 'button', class: 'btn btn-link btn-sm p-0 d-block mx-auto',
