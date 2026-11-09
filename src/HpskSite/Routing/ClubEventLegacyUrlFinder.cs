@@ -99,6 +99,7 @@ namespace HpskSite.Routing
             // Omvandlade sidor (konvertera-planen K3/K4): läses en gång per begäran och delas av menyn, åtkomstfiltret och ritningen.
             builder.Services.AddScoped<SiteConvertedSource>();
             builder.Services.AddScoped<SiteConvertedRenderer>();
+            builder.Services.AddScoped<SitePaneGate>();   // "Visa publikt": dataanropen frågar om panelen är öppen för alla
             builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }

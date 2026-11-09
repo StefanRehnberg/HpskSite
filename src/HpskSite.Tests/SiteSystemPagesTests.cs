@@ -144,7 +144,7 @@ namespace HpskSite.Tests
                 foreach (var page in template.Pages.Where(p => !p.IsAdmin))
                 foreach (var def in PanelCatalog.For(owner).Where(d => PanelCatalog.AllowedOn(owner, page.Key, d.Key) && !template.IsLoggedOutOnly(page.Key, d.Key)))
                 {
-                    var floor = (int)SiteConversion.PanelVisibility(owner, page.Key, def.Key);
+                    var floor = (int)SiteConversion.PanelFloor(owner, page.Key, def.Key);   // mallens nivå, utom "Visa publikt"-panelerna (Alla)
                     for (var level = 0; level <= 4; level++)
                     {
                         var r = SiteBlockSchema.Parse(PanelOnly(def.Key, level), SiteContentKind.ConvertedPage, SiteVisibility.Alla, template, page.Key);

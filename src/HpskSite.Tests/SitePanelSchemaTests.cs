@@ -80,7 +80,9 @@ namespace HpskSite.Tests
             // Kalendern är inte en personpanel (den tas inte ner av personuppgiftstaket), men den får aldrig vara öppnare än mallens nivå (K5c).
             var calendarFloor = (int)SiteConversion.PanelVisibility("Club", "calendar", "calendar");
             Assert.True(Converted(Page(2, Panel("abcd1", "calendar", calendarFloor)), "calendar", SiteVisibility.Alla).Ok);
-            Assert.False(calendarFloor > 0 && Converted(Page(2, Panel("abcd1", "calendar", 0)), "calendar", SiteVisibility.Alla).Ok);
+            // "Visa publikt" (steg 2d): kalendern får väljas som Alla (ett aktivt val), men dokumentarkivet saknar det undantaget.
+            Assert.True(Converted(Page(2, Panel("abcd1", "calendar", 0)), "calendar", SiteVisibility.Alla).Ok);
+            Assert.False(Converted(Page(2, Panel("abcd1", "document-archive", 0)), "documents", SiteVisibility.Alla).Ok);
             Assert.False(Converted(Page(2, Panel("abcd1", "board", 0)), "board", SiteVisibility.Alla, Region).Ok);
         }
 

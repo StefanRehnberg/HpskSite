@@ -226,17 +226,19 @@
     </div>
     }
 
-    @if (isLoggedIn)
+    @* Rekord: för en inloggad som förut; en utloggad ser den bara när kretsen publicerat den för alla ("Visa publikt", bara med nya sidstrukturen PÅ, där ShowsPane prövar tittaren). *@
+    @if ((isLoggedIn || sp.Enabled) && sp.ShowsPane("regionRecords"))
     {
         <!-- Records (Hall of Fame) Tab -->
-        if (sp.ShowsPane("regionRecords"))
-        {
         <div class="tab-pane fade @sp.PaneClass("regionRecords")" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
             @await Html.PartialAsync("_SitePageSlots", ("records", "before"))
             @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "records" })
             @await Html.PartialAsync("_SitePageSlots", ("records", "after"))
         </div>
-        }
+    }
+
+    @if (isLoggedIn)
+    {
 
         <!-- Documents Tab -->
         if (sp.ShowsPane("regionDocuments"))

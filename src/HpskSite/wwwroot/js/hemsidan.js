@@ -521,15 +521,24 @@
       h('p', { class: 'text-muted small mt-2 mb-0' }, CONSEQUENCE[current]));
   }
 
-  async function confirmPublic() {
+  async function confirmPublic(panel) {
     const ok = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsPubOk' });
-    const res = await modal('Synlig för alla?', [
-      h('p', {}, 'Alla som besöker pistol.nu kan läsa den här sidan, även utan inloggning. Den kan också hittas via sökmotorer.'),
+    const res = await modal(panel ? 'Visa ' + panel.name + ' för alla?' : 'Synlig för alla?', [
+      h('p', {}, panel ? 'Alla som besöker pistol.nu kan se den här delen av sidan, även utan inloggning. Den kan också hittas via sökmotorer.' : 'Alla som besöker pistol.nu kan läsa den här sidan, även utan inloggning. Den kan också hittas via sökmotorer.'),
+      panel && PUBLIC_WHAT[panel.key] ? h('p', {}, 'Det som då visas för alla: ' + PUBLIC_WHAT[panel.key]) : null,
       h('p', { class: 'fw-semibold' }, 'Skriv inga personuppgifter: inga namn på enskilda medlemmar, inga personnummer, telefonnummer eller adresser till privatpersoner.'),
-      h('div', { class: 'form-check' }, ok, h('label', { class: 'form-check-label', for: 'hsPubOk' }, 'Jag har kontrollerat att sidan inte innehåller personuppgifter.'))],
+      h('div', { class: 'form-check' }, ok, h('label', { class: 'form-check-label', for: 'hsPubOk' }, panel ? 'Jag förstår att innehållet blir synligt för alla.' : 'Jag har kontrollerat att sidan inte innehåller personuppgifter.'))],
       [{ label: 'Avbryt', value: false }, { label: 'Ja, gör den synlig för alla', value: true, cls: 'btn-primary' }]);
     return res === true && ok.checked;
   }
+
+  // "Visa publikt": vad en panel visar för en utloggad när ägaren öppnar den (servern avgör samma sak; texten är den ärliga beskrivningen).
+  const PUBLIC_WHAT = {
+    ranges: 'klubbens banor med adress, karta och fasta tider. Banor med begränsad plats visas aldrig.',
+    calendar: 'klubbens kalender med öppna händelser, träningar och tävlingar. Inga namn på personer och inga interna tävlingar.',
+    competitions: 'klubbens tävlingar. Interna tävlingar visas aldrig.',
+    records: IS_REGION ? 'kretsens rekord, med namn på rekordhållarna.' : 'klubbens rekord, med namn på rekordhållarna.',
+  };
 
   // ── Redigeraren ─────────────────────────────────────────────────────────────
   async function openEditor(pageId) {
@@ -906,10 +915,19 @@
     const c = catOf(b.data.key), isHome = S.pageKey === 'home';
     // Aldrig öppnare än panelen är idag, än sidan, och aldrig "Alla" för personuppgifter (servern prövar samma sak).
     const min = Math.max(c.level, S.visibility, c.personalData ? 1 : 0);
-    const levels = visOptions().filter(o => o.v >= min);
+    // "Visa publikt": en panel som får visas för alla kan väljas som Alla även när sidan inte är det än (då öppnas sidan också, efter en bekräftelse).
+    const levels = visOptions().filter(o => o.v >= min || (c.publicAllowed && o.v === 0));
     const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser ' + c.name },
-      levels.map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.t)));
-    visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); });
+      levels.map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.v === 0 && c.publicAllowed ? 'Alla, även utloggade' : o.t)));
+    visSel.addEventListener('change', async () => {
+      const v = parseInt(visSel.value, 10);
+      if (v === 0) {
+        if (!await confirmPublic(c)) { visSel.value = b.visibility; return; }
+        if (S.visibility > 0) { S.visibility = 0; }   // sidan måste själv vara öppen för alla, annars syns panelen inte
+        b.visibility = 0; markDirty(); renderEditor(); return;
+      }
+      b.visibility = v; markDirty(); renderEditor();
+    });
     const menu = rowMenu([
       ['Flytta upp', () => move(i, -1), { disabled: neighbour(i, -1) < 0 }],
       ['Flytta ner', () => move(i, 1), { disabled: neighbour(i, 1) < 0 }],
@@ -923,6 +941,7 @@
         menu),
       h('div', { class: 'hs-block-body' },
         h('div', {}, c.description || ''),
+        b.visibility === 0 ? h('div', { class: 'small mt-1 text-warning-emphasis' }, h('i', { class: 'bi bi-globe2 me-1', 'aria-hidden': 'true' }), 'Visas publikt: alla på internet kan se den här delen.') : null,
         h('div', { class: 'text-muted small mt-1' }, 'Hämtas automatiskt vid varje besök.' + (isHome ? ' Plats: ' + (ZONE_LABEL[b.data.zone] || ZONE_LABEL.full) + '.' : '') + (c.mustKeep ? ' Kan flyttas men inte tas bort.' : ''))));
   }
 

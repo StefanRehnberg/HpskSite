@@ -262,7 +262,7 @@ namespace HpskSite.Services.SitePages
             if (title.Length is 0 or > 120) return Invalid("title", "Titeln måste vara 1–120 tecken.");
             var vis = visibility ?? page.VisibilityLevel;
             if (!SiteAccess.IsSelectable(vis) || vis > SiteVisibility.Dold) return Invalid("visibility", "Ogiltig synlighet.");
-            if (!page.IsFree && SiteTemplates.For(ownerType).MostOpenLevel(page.TemplateKey!) is { } floor && vis < floor)
+            if (!page.IsFree && (SiteBlockSchema.KindOf(false, blocksJson) == SiteContentKind.ConvertedPage ? SiteConversion.PageFloor(ownerType, page.TemplateKey!) : SiteTemplates.For(ownerType).MostOpenLevel(page.TemplateKey!)) is { } floor && vis < floor)
                 return Invalid("visibility", "Texten får inte vara öppnare än sidan själv.");   // ett slot kan aldrig vara bredare än systemsidan
 
             var v = Validate(db, facts, page, ownerType, ownerId, title, blocksJson, vis, allowPersonalNumber, out var content);

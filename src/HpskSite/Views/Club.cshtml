@@ -136,6 +136,15 @@ window.currentClubId = clubId;
             {
                 @await Html.PartialAsync("_SiteLocked", ("Club", clubName, lockedNeeds.Value, false, loginUrl.TrimEnd('/') + "/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
             }
+            else if (sp.Enabled && !sp.IsRoot)
+            {
+                @* "Visa publikt": en omgjord systemsida som klubben publicerat för alla (Banor, Kalender, Tävlingar, Rekord). Samma flikpanel som för en inloggad, så panelernas skript fungerar likadant. *@
+                <div class="tab-content mt-3" id="clubTabContent">
+                    <div class="tab-pane fade show active" id="@HpskSite.Services.SitePages.SiteTemplates.LegacyPaneId(HpskSite.Services.SitePages.SiteTemplates.Club, sp.PageKey)" role="tabpanel">
+                        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = sp.PageKey })
+                    </div>
+                </div>
+            }
             else
             {
                 @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })

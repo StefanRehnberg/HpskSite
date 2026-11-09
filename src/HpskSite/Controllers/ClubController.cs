@@ -209,6 +209,11 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid club ID" });
                 }
 
+                // Kalendern är ett medlemsflöde: en utloggad får den bara när klubben publicerat panelen Kalender för alla ("Visa publikt"), och då utan namn på personer.
+                var publicView = await _memberManager.GetCurrentMemberAsync() == null;
+                if (publicView && !HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePaneGate>().IsPublic(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "calendar", "calendar"))
+                    return Ok(new { success = false, message = "Inloggning krävs." });
+
                 var events = new List<dynamic>();
                 DateTime startDate, endDate;
 
@@ -265,7 +270,7 @@ namespace HpskSite.Controllers
                                 scope,
                                 description = evt.Description,
                                 venue = evt.Venue,
-                                contactPerson = evt.ContactPerson,
+                                contactPerson = publicView ? "" : evt.ContactPerson,
                                 url = evt.Url,
                                 // Kalendern badgar obligatoriska händelser — deltagandet påverkar
                                 // medlemmens Föreningsintyg, så det ska synas där man planerar,
@@ -312,7 +317,7 @@ namespace HpskSite.Controllers
                                 scope = CalendarScopeTraining,
                                 description = t.Description ?? "",
                                 venue = t.Venue ?? "",
-                                contactPerson = t.SkjutledareName,
+                                contactPerson = publicView ? "" : t.SkjutledareName,
                                 url = $"#training-{t.Id}",
                                 isMandatory = false, // en träning är aldrig obligatorisk för alla
                                 registrationRequired = t.RegistrationRequired,
@@ -373,8 +378,8 @@ namespace HpskSite.Controllers
                             bool include;
                             if (compClubId == clubId)
                             {
-                                // This club's own competition — always relevant.
-                                include = true;
+                                // This club's own competition — always relevant (men en klubbintern tävling syns aldrig i en publik kalender).
+                                include = !(publicView && isClubOnly);
                             }
                             else if (isClubOnly)
                             {
@@ -438,7 +443,7 @@ namespace HpskSite.Controllers
                             owner = regionNode.Name,
                             description = evt.Description,
                             venue = evt.Venue,
-                            contactPerson = evt.ContactPerson,
+                            contactPerson = publicView ? "" : evt.ContactPerson,
                             url = evt.Url,
                             isMandatory = evt.IsMandatory,
                             registrationRequired = evt.RegistrationRequired,

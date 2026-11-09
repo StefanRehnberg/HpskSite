@@ -55,6 +55,31 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>
+        /// Det öppnaste en panel får vara: mallens nivå, utom för en panel ägaren får visa publikt (<see cref="PanelDef.PublicAllowed"/>), som får vara Alla. Standardnivån är alltid mallens (<see cref="PanelVisibility"/>);
+        /// "Visa publikt" är ett aktivt val och ett uttryckligt undantag från "aldrig öppnare än förut". Okänd panel = Dold.
+        /// </summary>
+        public static SiteVisibility PanelFloor(string ownerType, string pageKey, string panelKey)
+        {
+            var def = PanelCatalog.Find(ownerType, panelKey);
+            if (def is { PublicAllowed: true, PersonalData: false, HostedBy: null } && PanelCatalog.AllowedOn(ownerType, pageKey, panelKey)) return SiteVisibility.Alla;
+            return PanelVisibility(ownerType, pageKey, panelKey);
+        }
+
+        /// <summary>Kan ägaren välja "Visa publikt" för panelen? Ja när golvet är Alla men standardnivån inte är det.</summary>
+        public static bool CanShowPublicly(string ownerType, string pageKey, string panelKey) =>
+            PanelFloor(ownerType, pageKey, panelKey) == SiteVisibility.Alla && PanelVisibility(ownerType, pageKey, panelKey) != SiteVisibility.Alla;
+
+        /// <summary>Det öppnaste en OMGJORD sida får vara: den öppnaste av panelernas golv. En sida utan publicerbar panel har samma golv som förut (<see cref="SiteTemplate.MostOpenLevel"/>).</summary>
+        public static SiteVisibility PageFloor(string ownerType, string pageKey)
+        {
+            var template = SiteTemplates.For(ownerType);
+            var min = (int)(template.MostOpenLevel(pageKey) ?? SiteVisibility.Dold);
+            foreach (var p in Panels(ownerType, pageKey))
+                if (!template.IsLoggedOutOnly(pageKey, p.Key)) min = Math.Min(min, (int)PanelFloor(ownerType, pageKey, p.Key));
+            return (SiteVisibility)min;
+        }
+
+        /// <summary>
         /// Sidans nivå efter omvandlingen: den öppnaste nivån mallens block hade (samma regel som en mallkopia). Ingenting blir öppnare än förut:
         /// varje panel bär sin egen mallnivå och en egen text bär den nivå ägaren gav den.
         /// </summary>

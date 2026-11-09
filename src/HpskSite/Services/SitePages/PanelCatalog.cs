@@ -16,8 +16,9 @@ namespace HpskSite.Services.SitePages
     /// <param name="PersonalData">Visar personuppgifter (kan aldrig bli öppnare än Inloggade).</param>
     /// <param name="Required">Kan flyttas men aldrig tas bort av klubben när sidan blir en blocksida.</param>
     /// <param name="HostedBy">Panelen ritas inuti en annan panel (snabblänkdokumenten i Snabblänkar).</param>
+/// <param name="PublicAllowed">Ägaren får välja "Visa publikt" (Alla, även utloggade) för panelen, ett uttryckligt undantag från "aldrig öppnare än förut" (Stefans beslut, steg 2d). Aldrig en personpanel.</param>
     public sealed record PanelDef(string Key, string Name, string Description, string? Partial, PanelZone Zone = PanelZone.Full,
-        bool PersonalData = false, bool Required = false, string? HostedBy = null);
+        bool PersonalData = false, bool Required = false, string? HostedBy = null, bool PublicAllowed = false);
 
     /// <summary>En panel på en sida, i ordning, med sin zon.</summary>
     public sealed record PanelPlacement(string Key, PanelZone Zone);
@@ -43,8 +44,8 @@ namespace HpskSite.Services.SitePages
         private const string Dir = "~/Views/Partials/Panels/";
 
         private static PanelDef D(string key, string name, string description, string? partial, PanelZone zone = PanelZone.Full,
-            bool personal = false, bool required = false, string? hostedBy = null) =>
-            new(key, name, description, partial == null ? null : Dir + partial + ".cshtml", zone, personal, required, hostedBy);
+            bool personal = false, bool required = false, string? hostedBy = null, bool publicAllowed = false) =>
+            new(key, name, description, partial == null ? null : Dir + partial + ".cshtml", zone, personal, required, hostedBy, publicAllowed);
 
         public static readonly IReadOnlyList<PanelDef> Club = new[]
         {
@@ -56,13 +57,13 @@ namespace HpskSite.Services.SitePages
             D("upcoming-events", "Kommande händelser", "Klubbens kommande händelser. Hämtas automatiskt.", "_PanelUpcomingEvents", PanelZone.Main),
             D("motions", "Motioner och styrelsens ärenden", "Medlemmarnas motioner och styrelsens ärenden.", "_PanelClubMotions", PanelZone.Side, required: true),
             D("quicklinks", "Snabblänkar", "Genvägar till klubbens andra sidor.", "_PanelClubQuickLinks", PanelZone.Side),
-            D("ranges", "Banor", "Klubbens banor med karta och fasta tider. Hämtas automatiskt.", "_PanelClubRanges"),
-            D("calendar", "Kalender", "Klubbens kalender med händelser och träningar.", "_PanelClubCalendar", required: true),
-            D("competitions", "Tävlingar", "Tävlingar som klubben arrangerar.", "_PanelClubCompetitions", required: true),
+            D("ranges", "Banor", "Klubbens banor med karta och fasta tider. Hämtas automatiskt.", "_PanelClubRanges", publicAllowed: true),
+            D("calendar", "Kalender", "Klubbens kalender med händelser och träningar.", "_PanelClubCalendar", required: true, publicAllowed: true),
+            D("competitions", "Tävlingar", "Tävlingar som klubben arrangerar.", "_PanelClubCompetitions", required: true, publicAllowed: true),
             D("instructors", "Instruktörer", "Klubbens instruktörer.", "_PanelClubInstructors", personal: true),
             D("guldserie", "Guldserien", "Klubbens ställning i Guldserien.", "_PanelClubGuldserie", personal: true),
             D("member-directory", "Medlemskatalogen", "Klubbens medlemmar. Bara namn och bild; e-post ser bara administratören.", "_PanelClubMemberDirectory", personal: true, required: true),
-            D("records", "Klubbrekord", "Klubbens rekord.", "_PanelClubRecords"),
+            D("records", "Klubbrekord", "Klubbens rekord.", "_PanelClubRecords", publicAllowed: true),
             D("document-archive", "Dokumentarkivet", "Klubbens dokument. Varje dokument har sin egen synlighet.", "_PanelClubDocuments", required: true),
         };
 
@@ -83,7 +84,7 @@ namespace HpskSite.Services.SitePages
             D("region-instructors", "Instruktörer", "Kretsens instruktörer.", "_PanelRegionInstructors", personal: true),
             D("competitions", "Tävlingar", "Tävlingar i kretsen.", "_PanelRegionCompetitions", required: true),
             D("calendar", "Kalender", "Kretsens kalender.", "_PanelRegionCalendar", required: true),
-            D("records", "Kretsrekord", "Kretsens rekord.", "_PanelRegionRecords"),
+            D("records", "Kretsrekord", "Kretsens rekord.", "_PanelRegionRecords", publicAllowed: true),
             D("document-archive", "Dokumentarkivet", "Kretsens dokument. Varje dokument har sin egen synlighet.", "_PanelRegionDocuments", required: true),
             D("board", "Styrelsen", "Kretsens styrelse.", "_PanelRegionBoard", personal: true, required: true),
         };

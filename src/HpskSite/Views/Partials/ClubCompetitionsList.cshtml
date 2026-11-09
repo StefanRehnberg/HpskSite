@@ -5,9 +5,11 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
+    var publicView = await MemberManager.GetCurrentMemberAsync() == null;
     var today = DateTime.Today;
 
     // Single tree traversal — same pattern as CompetitionsHub.cshtml.
@@ -17,6 +19,8 @@
     var allCompetitions = clubId > 0
         ? Competitions.List()
             .Where(p => p.ClubId == clubId)
+            // "Visa publikt": en utloggad ser aldrig en klubbintern tävling.
+            .Where(p => publicView ? !p.IsClubOnly : true)
             // Trädets ordning bland syskon, så tävlingar med samma datum står som förut.
             .OrderBy(p => p.ParentId).ThenBy(p => p.SortOrder)
             // Tabelläget har inga riktiga noder (Umbraco.Content ger null) — den virtuella noden ur lagringen.

@@ -44,6 +44,13 @@ namespace HpskSite.Services.SitePages
             return def with { Blocks = blocks };
         }
 
+        /// <summary>
+        /// Är panelen öppen för ALLA på den omgjorda sidan? Sidan måste vara tolkbar och själv vara öppen för alla, och panelens egen nivå (efter sidan och personuppgiftstaket) vara Alla.
+        /// </summary>
+        public static bool IsPanelPublic(ConvertedPage page, string ownerType, string panelKey) =>
+            page.State == ConvertedState.Ok && page.Content != null && page.PageVisibility == SiteVisibility.Alla
+            && page.Content.Blocks.Any(b => b.Type == "panel" && SiteBlockSchema.PanelKeyOf(b.Data) == panelKey && Effective(b, page.PageVisibility, ownerType) == SiteVisibility.Alla);
+
         /// <summary>Mallen med de omvandlade sidorna utbytta. Inga omvandlade sidor = samma mall (inget kopieras).</summary>
         public static SiteTemplate Apply(SiteTemplate template, IReadOnlyDictionary<string, ConvertedPage> pages)
         {
@@ -117,6 +124,44 @@ namespace HpskSite.Services.SitePages
         }
 
         public SiteTemplate Template(string ownerType, int ownerId) => SiteConvertedPages.Apply(SiteTemplates.For(ownerType), Pages(ownerType, ownerId));
+    }
+
+    /// <summary>
+    /// Grinden för "Visa publikt" (steg 2d): är panelen <paramref name="panelKey"/> på ägarens sida PUBLICERAD för alla, även utloggade? En panels dataanrop (banor, kalender, rekord)
+    /// frågar HIT innan den svarar en utloggad; svaret är nej om egen redigering är AV, sidan inte är omgjord, inte går att tolka, eller panelen inte är öppen för alla. Aldrig ett undantag: fel = nej.
+    /// </summary>
+    public sealed class SitePaneGate
+    {
+        private readonly SiteConvertedSource _source;
+        private readonly Umbraco.Cms.Core.Services.IContentService _content;
+
+        public SitePaneGate(SiteConvertedSource source, Umbraco.Cms.Core.Services.IContentService content)
+        {
+            _source = source;
+            _content = content;
+        }
+
+        public bool IsPublic(string ownerType, int ownerId, string pageKey, string panelKey)
+        {
+            if (ownerId <= 0) return false;
+            try { return _source.Pages(ownerType, ownerId).TryGetValue(pageKey, out var page) && SiteConvertedPages.IsPanelPublic(page, ownerType, panelKey); }
+            catch { return false; }
+        }
+
+        /// <summary>Samma fråga för en krets, som anropen pekar ut med kretskoden.</summary>
+        public bool IsPublicForRegionCode(string regionCode, string pageKey, string panelKey)
+        {
+            if (string.IsNullOrWhiteSpace(regionCode)) return false;
+            try
+            {
+                var root = _content.GetRootContent().FirstOrDefault();
+                if (root == null) return false;
+                var region = _content.GetPagedChildren(root.Id, 0, int.MaxValue, out _)
+                    .FirstOrDefault(c => c.ContentType.Alias == "regionalPage" && (c.GetValue<string>("regionCode") ?? "").Equals(regionCode, StringComparison.OrdinalIgnoreCase));
+                return region != null && IsPublic(SiteTemplates.Region, region.Id, pageKey, panelKey);
+            }
+            catch { return false; }
+        }
     }
 
     /// <summary>Ritar en omvandlad sida ur sina block (efter att <c>_SitePanels</c> frågat). Null = sidan är inte omvandlad: standardlistan ritas.</summary>

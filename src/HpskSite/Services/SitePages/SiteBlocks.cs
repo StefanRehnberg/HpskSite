@@ -259,7 +259,7 @@ namespace HpskSite.Services.SitePages
                     // En panel visar data som klubben redan har valt hur öppen den är (mallen): ägaren kan göra den slutnare, aldrig öppnare än förut.
                     if (panelDef != null && pageKey != null && !outOnly)
                     {
-                        var floor = SiteConversion.PanelVisibility(template.OwnerType, pageKey, panelDef.Key);
+                        var floor = SiteConversion.PanelFloor(template.OwnerType, pageKey, panelDef.Key);
                         if (SiteAccess.Strictest(visibility, floor) != visibility)
                             errors.Add(new($"{p}.visibility", $"\"{panelDef.Name}\" kan inte vara öppnare än den är idag."));
                     }

@@ -57,7 +57,7 @@ namespace HpskSite.Services.SitePages
         public static IReadOnlyList<object> PanelsFor(string ownerType, string pageKey) =>
             InPageOrder(ownerType, pageKey).Select(d => (object)new
             {
-                key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), required = d.Required, personalData = d.PersonalData, hostedBy = d.HostedBy,
+                key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), required = d.Required, personalData = d.PersonalData, hostedBy = d.HostedBy, publicAllowed = SiteConversion.CanShowPublicly(ownerType, pageKey, d.Key),
             }).ToList();
 
         /// <summary>
@@ -76,6 +76,7 @@ namespace HpskSite.Services.SitePages
                 {
                     key = d.Key, name = d.Name, description = d.Description, zone = ZoneWord(d.Zone), mustKeep = must.Contains(d.Key), systemOnly = template.IsLoggedOutOnly(pageKey, d.Key),
                     personalData = d.PersonalData, hostedBy = d.HostedBy, level = (int)SiteConversion.PanelVisibility(ownerType, pageKey, d.Key),
+                    publicAllowed = SiteConversion.CanShowPublicly(ownerType, pageKey, d.Key),
                 }).ToList();
         }
 
