@@ -453,10 +453,28 @@
           p.panels.map(x => h('div', { class: 'hs-panelrow' }, h('div', {}, h('strong', {}, x.name), h('div', { class: 'text-muted small' }, x.description)),
             h('span', { class: 'text-muted small' }, 'Hämtas automatiskt'))))
       : null;
+    // En omgjord sida: vad som finns på den (paneler och egna block) med nivå, och en knapp till redigeraren. Läses ur den sparade sidan.
+    let ownCard = null;
+    if (p.mode !== 'asBefore' && p.pageId) {
+      const list = h('div', { 'data-own-list': '1' }, h('p', { class: 'text-muted mb-0' }, 'Laddar …'));
+      ownCard = h('div', { class: 'hs-card p-3 mb-3', id: 'hsOwnCard' }, h('h2', { class: 'h5 mb-2' }, 'Det här visas på sidan'), list,
+        h('div', { class: 'mt-3' }, h('button', { type: 'button', class: 'btn btn-primary', id: 'hsOwnEdit', onclick: () => go('#redigera=' + p.pageId) }, p.mode === 'draft' ? 'Fortsätt ändra utkastet' : 'Ändra sidan')));
+      api('GET', 'Page', { pageId: p.pageId }).then(r => {
+        if (!r.success) { list.replaceChildren(h('p', { class: 'text-muted mb-0' }, 'Det gick inte att läsa sidan.')); return; }
+        let blocks = []; try { blocks = JSON.parse(r.blocksJson).blocks || []; } catch { /* visas som tom lista */ }
+        const names = new Map((r.panels || []).map(c => [c.key, c.name]));
+        if (!blocks.length) { list.replaceChildren(h('p', { class: 'text-muted mb-0' }, 'Sidan har inget innehåll än.')); return; }
+        list.replaceChildren(...blocks.map(b => {
+          const isPanel = b.type === 'panel', label = isPanel ? (names.get(b.data && b.data.key) || (b.data && b.data.key) || 'Panel') : typeInfo(b.type).label;
+          return h('div', { class: 'hs-panelrow', 'data-own-block': b.type }, h('div', {}, h('strong', {}, label), isPanel ? h('div', { class: 'text-muted small' }, 'Hämtas automatiskt') : null),
+            h('span', { class: 'text-muted small' }, 'Syns för: ' + visLabel(b.visibility)));
+        }));
+      });
+    }
     view(shell('sys:' + key,
       pageHead(p.label, [modePill(p), ' ', intro], actions),
       h('div', { id: 'hsBanner' }),
-      panelsCard, p.mode === 'asBefore' ? whoSeesCard(() => ({ templateKey: p.key }), p.canConvert
+      ownCard, panelsCard,p.mode === 'asBefore' ? whoSeesCard(() => ({ templateKey: p.key }), p.canConvert
         ? { change: { intro: 'Vill du bestämma vem som ser delarna av sidan?', label: 'Ändra den här sidan', run: () => convertFlow(p) } }
         : { note: 'Vem som ser den här sidan går inte att ändra.' }) : null, p.mode === 'asBefore' ? slotCard(slot) : null));
     renderBanner();
