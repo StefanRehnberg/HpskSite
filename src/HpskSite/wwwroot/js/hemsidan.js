@@ -776,9 +776,7 @@
     const usedText = x => x.usedBy > 0 ? 'Används på ' + x.usedBy + (x.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte';
     const tile = x => h('div', { class: 'hs-imgtile', 'data-file': x.id },
       h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=640', alt: '', loading: 'lazy' })),
-      h('span', { class: 'hs-imgname', title: x.name }, x.name),
-      h('span', { class: 'small text-muted' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size)),
-      h('span', { class: 'small ' + (x.usedBy > 0 ? '' : 'text-muted') }, usedText(x)),
+      h('span', { class: 'hs-imgname', title: x.name }, x.name),   // storlek, mått och användning visas i listvyn
       actions(x));
     // Klassisk lista: miniatyr, namn, mått, storlek, uppladdad, användning och Åtgärder. Mått och datum göms på telefon.
     const listRow = x => h('tr', { 'data-file': x.id },
