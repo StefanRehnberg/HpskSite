@@ -307,6 +307,7 @@ namespace HpskSite.Composers
             // Klubbsidorna steg 1: brytaren per klubb/krets för den nya sidstrukturen. Singleton (mängden av påslagna
             // ägare ligger i minnet); saknad tabell = AV för alla (dagens vy).
             builder.Services.AddSingleton<HpskSite.Services.SitePages.SiteOwnerService>();
+            builder.Services.AddSingleton<HpskSite.Services.SitePages.SiteAppearanceService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentDeletedNotification,
                 HpskSite.Services.SitePages.SiteOwnerCleanupHandler>();
             builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteOwnerSchemaGuardHostedService>();

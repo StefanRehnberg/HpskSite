@@ -57,6 +57,7 @@ namespace HpskSite.Services.SitePages
             "link-edit" => "ändrade en länk i menyn",
             "link-remove" => "tog bort en länk i menyn",
             "link-move" => "ändrade ordningen på länkarna i menyn",
+            "appearance-set" => "ändrade sidornas utseende (design och färg)",
             "album-create" => "skapade ett bildalbum",
             "album-rename" => "bytte namn på ett bildalbum",
             "album-delete" => "tog bort ett bildalbum",

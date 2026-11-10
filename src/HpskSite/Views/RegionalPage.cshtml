@@ -9,6 +9,7 @@
 @inject HpskSite.Services.BoardRoleService BoardRoles
 @inject HpskSite.Services.SitePages.SiteViewerResolver SiteViewers
 @inject HpskSite.Services.SitePages.SiteOwnerService SiteOwners
+@inject HpskSite.Services.SitePages.SiteAppearanceService SiteAppearanceSvc
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -38,6 +39,13 @@
 
 
     ViewBag.Title = regionName;
+    ViewBag.siteOwnerType = HpskSite.Services.SitePages.SiteTemplates.Region;
+    ViewBag.siteOwnerId = Model.Id;
+    var regionLook = SiteAppearanceSvc.Get(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id);
+    // Standardfärgen behåller dagens blå överlägg ord för ord; en vald färg läser sidans primärfärg.
+    var heroOverlay = regionLook.HasCustomColor
+        ? "linear-gradient(135deg, rgba(var(--bs-primary-rgb),0.6) 0%, rgba(var(--bs-primary-rgb),0.65) 100%)"
+        : "linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%)";
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: region logo → site default
@@ -85,12 +93,17 @@
 <!-- Hero Banner Section -->
 <div class="row mb-4">
     <div class="col-12">
-        @if (bannerImage != null)
+        @if (regionLook.Header != HpskSite.Services.SitePages.SiteAppearance.DefaultHeader)
+        {
+            @await Html.PartialAsync("_SiteHeaderVariant", new HpskSite.Services.SitePages.SiteHeaderModel(
+                regionLook.Header, regionLook.Palette, welcomeTitle, null, welcomeText, logo?.Url(), bannerImage?.Url()))
+        }
+        else if (bannerImage != null)
         {
             <div class="position-relative rounded overflow-hidden" style="height: 300px;">
                 <img src="@bannerImage.Url()" alt="@regionName" class="w-100 h-100" style="object-fit: cover;">
                 <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-                     style="background: linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%);">
+                     style="background: @Html.Raw(heroOverlay);">
                     <div class="text-center text-white p-4">
                         @if (logo != null)
                         {

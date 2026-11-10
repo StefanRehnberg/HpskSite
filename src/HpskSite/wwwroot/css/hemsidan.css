@@ -104,3 +104,25 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 /* K5c: panel cards on a converted page and a grey row for a removed panel. */
 #hemsidan-app .hs-panelcard .hs-block-head { background: var(--bs-body-bg); }
 #hemsidan-app .hs-removed { background: var(--bs-tertiary-bg); border-style: dashed; }
+
+/* Utseende: grunddesign (korten med en liten skiss) och grundfarg (farg-rutor). */
+#hemsidan-app .hs-ap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .75rem; }
+#hemsidan-app .hs-ap-card { display: block; border: 2px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem; cursor: pointer; background: var(--bs-body-bg); }
+#hemsidan-app .hs-ap-card:hover { border-color: var(--bs-primary); }
+#hemsidan-app .hs-ap-card.on { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+#hemsidan-app .hs-ap-card:has(input:focus-visible), #hemsidan-app .hs-ap-sw:has(input:focus-visible) { outline: 3px solid var(--bs-primary); outline-offset: 2px; }
+#hemsidan-app .hs-ap-mini { display: block; position: relative; height: 86px; border-radius: .35rem; background: var(--bs-tertiary-bg); overflow: hidden; padding: 8px; }
+#hemsidan-app .hs-ap-mini .m-banner { display: block; height: 34px; border-radius: .25rem; background: var(--bs-secondary-color); opacity: .45; }
+#hemsidan-app .hs-ap-mini .m-logo { display: block; width: 20px; height: 20px; border-radius: .25rem; background: var(--bs-primary); }
+#hemsidan-app .hs-ap-mini .m-line { display: block; height: 8px; width: 55%; border-radius: 4px; background: var(--bs-secondary-color); opacity: .6; }
+#hemsidan-app .hs-ap-mini .m-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+#hemsidan-app .hs-ap-mini.m-standard .m-logo { position: absolute; left: 14px; top: 44px; width: 26px; height: 26px; outline: 2px solid var(--bs-tertiary-bg); }
+#hemsidan-app .hs-ap-mini.m-standard .m-line { position: absolute; left: 48px; top: 52px; background: #fff; opacity: .9; }
+#hemsidan-app .hs-ap-mini.m-utan-banner-vanster .m-row { margin-top: 22px; }
+#hemsidan-app .hs-ap-mini.m-utan-banner-mitten .m-row { flex-direction: column; margin-top: 10px; }
+#hemsidan-app .hs-ap-mini.m-utan-banner-mitten .m-line { width: 45%; }
+#hemsidan-app .hs-ap-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
+#hemsidan-app .hs-ap-sw { display: flex; align-items: center; gap: .5rem; border: 2px solid var(--bs-border-color); border-radius: .5rem; padding: .4rem .6rem; cursor: pointer; background: var(--bs-body-bg); }
+#hemsidan-app .hs-ap-sw:hover { border-color: var(--bs-secondary-color); }
+#hemsidan-app .hs-ap-sw.on { border-color: var(--bs-body-color); }
+#hemsidan-app .hs-ap-sw .sw { width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.2); }

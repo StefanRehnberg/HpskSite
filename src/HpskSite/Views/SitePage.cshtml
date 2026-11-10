@@ -38,6 +38,8 @@
         // Menyn: samma flikrad som ägarens övriga sidor, med den här sidan som aktuell (SitePageView känner igen en egen sida av begäran).
         ViewBag.sitePageView = SitePages.For(req.OwnerType, req.OwnerId, Model.Url(), viewer);
         ViewBag.clubId = req.OwnerId;
+        ViewBag.siteOwnerType = req.OwnerType;
+        ViewBag.siteOwnerId = req.OwnerId;
         ViewBag.isClubAdmin = viewer.IsOwnerAdmin;
         ViewBag.isRegionalAdmin = viewer.IsOwnerAdmin;
         ViewBag.isLoggedIn = viewer.LoggedIn;

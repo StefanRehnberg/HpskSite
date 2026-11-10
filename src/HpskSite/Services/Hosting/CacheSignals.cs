@@ -32,6 +32,8 @@ namespace HpskSite.Services.Hosting
         public const string SeriesResults = "series-results";
         /// <summary>Brytaren per klubb/krets för den nya sidstrukturen (<c>SiteOwnerService</c>, klubbsidorna steg 1).</summary>
         public const string SiteOwners = "site-owners";
+        /// <summary>Klubbens/kretsens utseende (grunddesign + färg, <c>SiteAppearanceService</c>).</summary>
+        public const string SiteAppearance = "site-appearance";
 
         /// <summary>Namn → lokal tömning (körs på de andra instanserna).</summary>
         public static readonly IReadOnlyDictionary<string, Action<IServiceProvider>> Invalidators =
@@ -44,6 +46,7 @@ namespace HpskSite.Services.Hosting
                 [PageAddresses] = sp => Addresses.PageAddressService.InvalidateLocal(sp.GetRequiredService<Umbraco.Cms.Core.Cache.AppCaches>()),
                 [SeriesResults] = sp => SeriesCalculationService.ClearLocal(sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>()),
                 [SiteOwners] = sp => sp.GetRequiredService<SitePages.SiteOwnerService>().ClearLocal(),
+                [SiteAppearance] = sp => sp.GetRequiredService<SitePages.SiteAppearanceService>().ClearLocal(),
             };
 
         private static CacheSignals? _current;

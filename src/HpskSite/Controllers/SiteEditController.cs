@@ -43,15 +43,66 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly SiteViewerResolver _viewers;
         private readonly ISiteSupportNotifier _notifier;
+        private readonly SiteAppearanceService _appearance;
 
         public SiteEditController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, ISiteOwnerFacts facts, RateCounterService rate,
-            IContentService content, IMemberManager members, IMemberService memberService, SiteViewerResolver viewers, ISiteSupportNotifier notifier)
+            IContentService content, IMemberManager members, IMemberService memberService, SiteViewerResolver viewers, ISiteSupportNotifier notifier,
+            SiteAppearanceService appearance)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth; _scopes = scopes; _owners = owners; _facts = facts; _rate = rate;
             _content = content; _members = members; _memberService = memberService; _viewers = viewers; _notifier = notifier;
+            _appearance = appearance;
+        }
+
+        /// <summary>Utseendet och valen (vitlistan ur <see cref="SiteAppearance"/>). Samma sak ritas av sidorna, så editorn har inga egna listor.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör (läsning), brytare 2 PÅ")]
+        public async Task<IActionResult> Appearance(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            var look = _appearance.Get(g.OwnerType, g.OwnerId);
+            return Json(new
+            {
+                success = true,
+                header = look.Header,
+                palette = look.Palette,
+                headers = SiteAppearance.Headers.Select(h => new { key = h.Key, label = h.Label, help = h.Help }),
+                // css = exakt det sidorna får (ur vitlistan), så att förhandsvisningen i editorn och den publika sidan inte kan skilja sig.
+                palettes = SiteAppearance.Palette.Select(p => new { key = p.Key, label = p.Label, hex = p.Hex, css = SiteAppearance.Css(p.Key) }),
+            });
+        }
+
+        /// <summary>Sparar grunddesign och färg. Okänd nyckel vägras med ett meddelande. Ren presentation: påverkar aldrig vem som ser vad.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SaveAppearance(string ownerType, int ownerId, string? header, string? palette)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:appearance", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            if (!SiteAppearance.IsValidHeader(header)) return Fail("Välj en av grunddesignerna i listan.", "invalid");
+            if (!SiteAppearance.IsValidPalette(palette)) return Fail("Välj en av färgerna i listan.", "invalid");
+            SiteAppearance.Look look;
+            try
+            {
+                look = _appearance.Set(g.OwnerType, g.OwnerId, header!, palette!, g.Actor!.MemberId);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is Microsoft.Data.SqlClient.SqlException)
+            {
+                return Fail("Utseendet kunde inte sparas just nu.", "unavailable");
+            }
+            using (var scope = _scopes.CreateScope())
+            {
+                SitePageWriter.Audit(scope.Database, g.OwnerType, g.OwnerId, g.Actor!, "appearance", g.OwnerId, "appearance-set", null, DateTime.Now);
+                scope.Complete();
+            }
+            return Json(new { success = true, header = look.Header, palette = look.Palette });
         }
 
         /// <summary>Resultatet av ägarprövningen: ett felsvar, eller ägarens uppgifter och den som skriver.</summary>

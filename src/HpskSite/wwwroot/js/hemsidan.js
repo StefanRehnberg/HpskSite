@@ -131,7 +131,12 @@
 
   // ── Vyer ───────────────────────────────────────────────────────────────────
   function clearEditors() { for (const e of S.editors) { try { e.destroy(); } catch { /* redan borta */ } } S.editors = []; }
-  function view(nodes) { clearEditors(); clearTimeout(S.timer); S.refreshWho = null; body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
+  // Förhandsvisningen av en färg (Utseende) lever bara medan Utseende-vyn visas: varje annan vy städar bort den.
+  function clearAppearancePreview() {
+    const el = document.getElementById('hsApPreview'); if (el) el.remove();
+    if (S.apBodyAdded) { document.body.classList.remove('owner-themed'); S.apBodyAdded = false; }
+  }
+  function view(nodes) { clearEditors(); clearAppearancePreview(); clearTimeout(S.timer); S.refreshWho = null; body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
   const header = (sub) => h('div', { class: 'mb-3' },
     h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)),
     h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null, supportBanner());
@@ -181,6 +186,7 @@
     if ((m = /^#redigera=(\d+)$/.exec(hsh))) return openEditor(parseInt(m[1], 10));
     if (hsh === '#raderade') return renderTrash();
     if (hsh === '#lankar') return renderLinks();
+    if (hsh === '#utseende') return renderAppearance();
     if (hsh === '#bilder') return renderLibrary();
     if (hsh === '#anmalningar') return renderSignups();
     if (hsh === '#logg') return renderAudit();
@@ -204,7 +210,7 @@
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
       onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
     const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Anpassad') : null;
-    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'bilder' ? 'Bilder' : active === 'anmalningar' ? 'Anmälningar' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
+    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'utseende' ? 'Utseende' : active === 'bilder' ? 'Bilder' : active === 'anmalningar' ? 'Anmälningar' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
     return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
       h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
       h('div', { class: 'hs-org' }, 'Hemsidan'),
@@ -218,6 +224,7 @@
         sys.map(p => nav('sys:' + p.key, p.label, '#sida=' + p.key, pill(p))),
         h('div', { class: 'hs-railh' }, 'Mer'),
         st.support ? null : nav('anmalningar', 'Anmälningar', '#anmalningar', st.signupNew ? h('span', { class: 'hs-pill warn' }, st.signupNew + ' nya') : null),   // personuppgifter: aldrig i stödläge
+        nav('utseende', 'Utseende', '#utseende'),
         nav('bilder', 'Bilder', '#bilder'),
         nav('lankar', 'Länkar i menyn', '#lankar', (st.menuLinks || []).length ? h('span', { class: 'hs-pill' }, st.menuLinks.length) : null),
         st.trash.length ? nav('raderade', 'Raderade sidor', '#raderade', h('span', { class: 'hs-pill' }, st.trash.length)) : null,
@@ -659,6 +666,69 @@
         : h('div', { class: 'hs-card p-3 mb-3 text-muted' }, 'Ni har inga länkar i menyn än. Välj Åtgärder → Ny länk.'),
       h('p', { class: 'text-muted small' }, links.length + ' av högst ' + (st.maxLinks || 15) + ' länkar. Menyn visas bara för dem som får se den, och varje länk har sin egen nivå.')));
     renderBanner();
+  }
+
+  // ── Utseende: grunddesign för sidhuvudet och grundfärg. Ren presentation; valen och färg-CSS:en kommer från servern (vitlistan i SiteAppearance). ──
+  async function renderAppearance() {
+    setHash('#utseende');
+    view(shell('utseende', pageHead('Utseende', 'Välj hur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' sidhuvud ser ut och vilken färg sidorna har. Det påverkar bara utseendet, aldrig vem som ser vad.'),
+      h('div', { id: 'hsBanner' }), h('div', { class: 'hs-card p-3 text-muted' }, 'Hämtar utseendet…')));
+    const r = await api('GET', 'Appearance');
+    if (!r.success) { view(shell('utseende', pageHead('Utseende'), h('div', { class: 'hs-card p-3' }, alertBox('danger', r.message || 'Utseendet kunde inte hämtas.')))); return; }
+    const sel = { header: r.header, palette: r.palette };
+    const saved = { header: r.header, palette: r.palette };
+    const miniOf = key => {
+      const logo = h('span', { class: 'm-logo' }), line = h('span', { class: 'm-line' }), banner = h('span', { class: 'm-banner' });
+      return h('span', { class: 'hs-ap-mini m-' + key, 'aria-hidden': 'true' }, key === 'standard' ? [banner, logo, line] : key === 'banner-utan-logo' ? [banner, h('span', { class: 'm-row' }, logo, line)] : [h('span', { class: 'm-row' }, logo, line)]);
+    };
+    const save = h('button', { type: 'button', class: 'btn btn-primary', disabled: true }, 'Spara utseendet');
+    const msg = h('div', { id: 'hsApMsg', role: 'status' });
+    const dirty = () => sel.header !== saved.header || sel.palette !== saved.palette;
+    const refresh = () => {
+      save.disabled = !dirty();
+      body.querySelectorAll('[data-ap-header]').forEach(l => l.classList.toggle('on', l.dataset.apHeader === sel.header));
+      body.querySelectorAll('[data-ap-palette]').forEach(l => l.classList.toggle('on', l.dataset.apPalette === sel.palette));
+      // Färgen förhandsvisas live på hela den här sidan (samma CSS som de publika sidorna får). Städas bort av nästa vy.
+      let st = document.getElementById('hsApPreview');
+      const pal = (r.palettes || []).find(p => p.key === sel.palette);
+      if (!st) { st = document.createElement('style'); st.id = 'hsApPreview'; document.head.appendChild(st); }
+      st.textContent = pal && pal.css ? pal.css : '';
+      if (pal && pal.css) { if (!document.body.classList.contains('owner-themed')) { document.body.classList.add('owner-themed'); S.apBodyAdded = true; } }
+      else if (S.apBodyAdded) { document.body.classList.remove('owner-themed'); S.apBodyAdded = false; }
+    };
+    const headerCards = (r.headers || []).map(o => {
+      const id = 'hsApH_' + o.key;
+      return h('label', { class: 'hs-ap-card', for: id, 'data-ap-header': o.key },
+        h('input', { type: 'radio', name: 'hsApHeader', id, value: o.key, checked: o.key === sel.header ? true : null, class: 'visually-hidden', onchange: () => { sel.header = o.key; refresh(); } }),
+        miniOf(o.key), h('span', { class: 'fw-semibold d-block mt-2' }, o.label), h('span', { class: 'small text-muted d-block' }, o.help));
+    });
+    const swatches = (r.palettes || []).map(p => {
+      const id = 'hsApP_' + p.key;
+      return h('label', { class: 'hs-ap-sw', for: id, 'data-ap-palette': p.key },
+        h('input', { type: 'radio', name: 'hsApPalette', id, value: p.key, checked: p.key === sel.palette ? true : null, class: 'visually-hidden', onchange: () => { sel.palette = p.key; refresh(); } }),
+        h('span', { class: 'sw', style: 'background:' + p.hex }), h('span', { class: 'small' }, p.label));
+    });
+    save.addEventListener('click', async () => {
+      save.disabled = true; msg.replaceChildren();
+      const res = await api('POST', 'SaveAppearance', { header: sel.header, palette: sel.palette });
+      if (!res.success) { msg.replaceChildren(alertBox('danger', res.message || 'Utseendet kunde inte sparas.')); save.disabled = !dirty(); return; }
+      saved.header = res.header; saved.palette = res.palette;
+      msg.replaceChildren(alertBox('success', 'Utseendet är sparat.', [' ', h('a', { href: OWNER.url, target: '_blank', rel: 'noopener' }, 'Se ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' sida')]));
+      refresh();
+    });
+    view(shell('utseende', pageHead('Utseende', 'Välj hur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' sidhuvud ser ut och vilken färg sidorna har. Det påverkar bara utseendet, aldrig vem som ser vad.'),
+      h('div', { id: 'hsBanner' }),
+      h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5' }, 'Grunddesign för sidhuvudet'),
+        h('p', { class: 'text-muted small' }, 'Standard är hur sidan ser ut idag. De andra visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' namn och logo utan bannerbild eller med logon under bilden.'),
+        h('div', { class: 'hs-ap-grid' }, headerCards)),
+      h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5' }, 'Grundfärg'),
+        h('p', { class: 'text-muted small' }, 'Färgen används för knappar, länkar och markeringar på ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' sidor. Alla färger är provade så att texten är läsbar, också i mörkt läge. Förhandsvisningen visas direkt här på sidan.'),
+        h('div', { class: 'hs-ap-swatches' }, swatches),
+        h('div', { class: 'd-flex flex-wrap gap-2 align-items-center mt-3' },
+          h('button', { type: 'button', class: 'btn btn-primary btn-sm' }, 'Knapp'), h('button', { type: 'button', class: 'btn btn-outline-primary btn-sm' }, 'Knapp med ram'),
+          h('a', { href: '#utseende', onclick: e => e.preventDefault() }, 'En länk'), h('span', { class: 'badge text-bg-primary' }, 'Märke'))),
+      h('div', { class: 'd-flex flex-wrap gap-3 align-items-center' }, save, msg)));
+    refresh();
   }
 
   // ── Anmälningar: det som kommit in via formulär (blocket Anmälan/ansökan). Personuppgifter: bara föreningens egen administratör. ──
