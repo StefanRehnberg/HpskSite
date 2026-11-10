@@ -292,7 +292,7 @@
     helpRow(h('strong', {}, 'Standard'), 'pistol.nu:s färdiga sida. Innehållet hämtas automatiskt ur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' uppgifter. Ni kan lägga egen text före eller efter.'),
     helpRow(h('strong', {}, 'Anpassad'), 'Ni har gjort om standardsidan: flyttat, tagit bort eller lagt till egna delar. Besökarna ser er version.'),
     helpRow(h('strong', {}, 'Anpassad (utkast)'), 'Ni har börjat anpassa sidan men inte publicerat. Besökarna ser fortfarande standardsidan.'),
-    helpRow(h('strong', {}, 'Egen sida'), 'En sida ni har skapat helt själva. Märket visar om den är Publicerad eller ett Utkast, och ett utkast ser bara ni. Undersidor är egna sidor som ligger under Om ' + (IS_REGION ? 'kretsen' : 'Klubben') + '.'));
+    helpRow(h('strong', {}, 'Egen sida'), 'En sida ni har skapat helt själva. Alla sidor i listan är publicerade, utom en egen sida som har märket Utkast, Publicerad, med osparade ändringar eller Stoppad av pistol.nu. Ett utkast ser bara ni. Undersidor är egna sidor som ligger under Om ' + (IS_REGION ? 'kretsen' : 'Klubben') + '.'));
   const levelHelp = () => h('div', {},
     h('p', { class: 'text-muted' }, 'Nivån säger vem som får läsa sidan. Den som inte får se en sida får beskedet att den inte finns (en låst medlemssida visas med ett hänglås).'),
     ...VIS.map(o => helpRow(h('span', {}, h('strong', {}, o.t), h('span', { class: 'text-muted' }, ' – ' + o.s.charAt(0).toLowerCase() + o.s.slice(1))), CONSEQUENCE[o.v])),
@@ -395,7 +395,7 @@
           h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title),
           depth ? h('span', { class: 'visually-hidden' }, ' (undersida)') : null,
           p.childCount ? h('span', { class: 'text-muted small ms-2' }, p.childCount + (p.childCount === 1 ? ' undersida' : ' undersidor')) : null),
-        h('td', {}, h('span', { class: 'hs-state own' }, depth ? 'Undersida' : 'Egen sida'), ' ', statusBadge(p)),
+        h('td', {}, h('span', { class: 'hs-state own' }, depth ? 'Undersida' : 'Egen sida'), p.status === 'Publicerad' ? null : [' ', statusBadge(p)]),   // en publicerad sida är det normala och får inget märke, annars ser de andra raderna ut som opublicerade
         h('td', {}, visBadge(p.visibility)),
         h('td', { class: 'text-end' }, rowMenu([
           ['Ändra', () => go('#redigera=' + p.id)],
