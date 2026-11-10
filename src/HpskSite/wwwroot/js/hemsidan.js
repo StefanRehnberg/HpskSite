@@ -569,16 +569,25 @@
       next = () => { if (!w.title.trim()) { err.replaceChildren(alertBox('warning', 'Skriv ett namn på sidan.')); return; } w.step = 2; renderNew(w); };
       setTimeout(() => inp.focus(), 0);
     } else if (w.step === 2) {
-      const tpls = [
-        ['text', 'Textsida', 'En sida där du skriver fri text. Passar det mesta.'],
+      // Färdiga sidor = sidor som redan är byggda av blocken (och hämtar sitt innehåll live); Egen sida = börja med text eller tomt.
+      const ready = [
+        ['welcome', 'Välkomstsida', 'Presentationstext, kommande händelser, nyheter och tävlingar. Allt utom texten hämtas automatiskt.'],
+        ['aboutus', 'Om oss och kontakt', 'Föreningens presentation och kontaktuppgifter, hämtade ur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' uppgifter.'],
+        ['competitions', 'Tävlingar och resultat', 'Kommande tävlingar, ' + (IS_REGION ? 'kretsrekord' : 'klubbrekord') + ' och regerande mästare.'],
+        ['ranges', 'Skjutbanor', IS_REGION ? 'Text och en lista över banorna kretsens klubbar använder.' : 'Text och en lista över klubbens banor, utan karta.'],
         ['docs', 'Sida med dokument', 'Text och dokument som medlemmarna kan ladda ned, till exempel blanketter.'],
         ['contact', 'Hitta hit & kontakt', 'Text om hur man hittar, och föreningens kontaktuppgifter.'],
         ['meetings', 'Möten och kallelser', 'Kommande möten från kalendern, och plats för kallelser och protokoll.'],
         ...(IS_REGION ? [['overview', 'Klubbar, banor och serier', 'Kretsens klubbar, skjutbanor och serier i en lista, hämtade ur kretsens data.']] : []),
+      ];
+      const own = [
+        ['text', 'Textsida', 'En sida där du skriver fri text. Passar det mesta.'],
         ['empty', 'Tom sida', 'Börja helt utan innehåll.'],
       ];
-      content = tpls.map(([k, t, s]) => h('label', { class: 'hs-choice ' + (w.template === k ? 'active' : '') },
-        h('input', { type: 'radio', name: 'tpl', checked: w.template === k, onchange: () => { w.template = k; renderNew(w); } }), h('strong', {}, t), h('span', { class: 'hs-sub' }, s)));
+      const choice = ([k, t, s]) => h('label', { class: 'hs-choice ' + (w.template === k ? 'active' : ''), 'data-template': k },
+        h('input', { type: 'radio', name: 'tpl', checked: w.template === k, onchange: () => { w.template = k; renderNew(w); } }), h('strong', {}, t), h('span', { class: 'hs-sub' }, s));
+      content = [h('p', { class: 'text-muted small fw-semibold mb-1' }, 'Färdiga sidor'), ...ready.map(choice),
+        h('p', { class: 'text-muted small fw-semibold mb-1 mt-3' }, 'Egen sida'), ...own.map(choice)];
       back = () => { w.step = 1; renderNew(w); };
       next = () => { w.step = 3; renderNew(w); };
     } else {
@@ -612,6 +621,13 @@
     if (tpl === 'empty') return [];
     if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, 1), data: { title: 'Kontakt' } }];
     if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }];
+    // Färdiga sidor ur biblioteket. Personblock (kontakt, mästare) får aldrig vara öppnare än Inloggade, och ett block aldrig öppnare än sidan.
+    const blk = (type, data, minVis) => ({ id: newId(), type, visibility: Math.max(vis, minVis || 0), data });
+    const noun = IS_REGION ? 'Kretsrekord' : 'Klubbrekord';
+    if (tpl === 'welcome') return [blk('about', { title: '' }), blk('events', { title: 'Kommande händelser', count: 5 }), blk('news', { title: 'Nyheter', count: 3 }), blk('competitions', { title: 'Kommande tävlingar', count: 3 })];
+    if (tpl === 'aboutus') return [blk('about', { title: '' }), blk('contact', { title: 'Kontakt' }, 1)];
+    if (tpl === 'competitions') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('records', { title: noun }), blk('champions', { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' }, 1)];
+    if (tpl === 'ranges') return [text(), blk('ranges', { title: 'Skjutbanor' })];
     if (tpl === 'overview') return [text(),
       { id: newId(), type: 'region-clubs', visibility: vis, data: { title: 'Klubbar i kretsen' } },
       { id: newId(), type: 'region-ranges', visibility: vis, data: { title: 'Skjutbanor' } },
