@@ -110,5 +110,19 @@ namespace HpskSite.Tests
             Assert.True(terms.IndexOf("SitePanelReadGate", StringComparison.Ordinal) is > 0 and var g2 && g2 < terms.IndexOf("_boardRoleService.GetExpiringRoles", StringComparison.Ordinal));
             Assert.Contains("SiteVisibility.Styrelse", terms);
         }
+
+        [Fact]
+        public void Instruktörerna_och_Guldserien_frågar_grinden_före_de_läser()
+        {
+            var ins = Method(Src("Controllers/CertificationController.cs"), "PublicListForClub");
+            Assert.True(ins.IndexOf("SitePanelReadGate", StringComparison.Ordinal) is > 0 and var g1 && g1 < ins.IndexOf("GetMemberIdsInGroupsAsync", StringComparison.Ordinal),
+                "PublicListForClub måste fråga SitePanelReadGate före den läser grupper");
+            Assert.Contains("\"members\", \"instructors\"", ins);
+
+            var gs = Method(Src("Controllers/MarkenController.cs"), "GetClubGuldserieLeaderboard");
+            Assert.True(gs.IndexOf("SitePanelReadGate", StringComparison.Ordinal) is > 0 and var g2 && g2 < gs.IndexOf("GetVerifiedSeriesForClubAsync", StringComparison.Ordinal),
+                "GetClubGuldserieLeaderboard måste fråga SitePanelReadGate före den läser serier");
+            Assert.Contains("\"members\", \"guldserie\"", gs);
+        }
     }
 }

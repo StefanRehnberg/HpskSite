@@ -322,6 +322,9 @@ namespace HpskSite.Controllers
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current == null) return Json(new { success = false, message = "Login required." });
+            if (!await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePanelReadGate>()
+                    .CanReadPanelAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "members", "instructors"))
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Klubben visar inte instruktörerna för dig." });
 
             var foreningsRole = $"Foreningsinstruktor_{clubId}";
             var groups = await GetMemberIdsInGroupsAsync(new[] { foreningsRole, "Vapenkontrollant", "Banlaggare" });
