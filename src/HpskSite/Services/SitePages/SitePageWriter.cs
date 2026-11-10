@@ -338,7 +338,7 @@ namespace HpskSite.Services.SitePages
                     Audit(db, ownerType, ownerId, actor, "page", pageId, "page-visibility", null, now);
                     affected++;
                 }
-                if (!SitePageStore.IsInMenu(db, ownerType, ownerId, parent.Id) && SitePageStore.IsInMenu(db, ownerType, ownerId, pageId))
+                if (!ParentIsInMenu(db, ownerType, ownerId, parent) && SitePageStore.IsInMenu(db, ownerType, ownerId, pageId))
                 {
                     SitePageStore.SetInMenu(db, pageId, ownerType, ownerId, false, now);
                     Audit(db, ownerType, ownerId, actor, "menu", pageId, "menu-remove", null, now);
@@ -446,13 +446,17 @@ namespace HpskSite.Services.SitePages
             return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision, newSlug);
         }
 
+        /// <summary>Ligger föräldern i menyn? En omgjord systemsida (Om) är alltid med i menyn (mallen äger den); en egen sida ligger där bara om ägaren lagt den dit.</summary>
+        private static bool ParentIsInMenu(IDatabase db, string ownerType, int ownerId, SitePageRow parent) =>
+            !parent.IsFree || SitePageStore.IsInMenu(db, ownerType, ownerId, parent.Id);
+
         /// <summary>Lägg en egen sida i menyn eller ta bort den därifrån (loggas). Sidan måste höra till ägaren.</summary>
         public static SiteWriteResult SetInMenu(IDatabase db, int pageId, string ownerType, int ownerId, bool inMenu, SiteActor actor, DateTime now)
         {
             var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
             if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
             // En undersida kan bara ligga i menyn om sidan den ligger under gör det (annars vore den onåbar i menyn).
-            if (inMenu && page.ParentPageId is int parentId && !SitePageStore.IsInMenu(db, ownerType, ownerId, parentId))
+            if (inMenu && page.ParentPageId is int parentId && SitePageStore.GetPage(db, parentId, ownerType, ownerId) is { } menuParent && !ParentIsInMenu(db, ownerType, ownerId, menuParent))
                 return Invalid("menu", "Lägg först sidan den ligger under i menyn.");
             if (!SitePageStore.SetInMenu(db, pageId, ownerType, ownerId, inMenu, now)) return new SiteWriteResult(SiteWriteStatus.NotFound);
             Audit(db, ownerType, ownerId, actor, "menu", pageId, inMenu ? "menu-add" : "menu-remove", null, now);

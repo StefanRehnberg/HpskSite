@@ -123,6 +123,13 @@ namespace HpskSite.Tests
             var child = SitePageWriter.CreatePage(f.Db, F, Club, Owner, "Historia", null, SiteVisibility.Klubbmedlemmar, Admin, Now, about.Id);
             Assert.True(child.Ok, child.Status + " " + child.Message);
             Assert.Equal(about.Id, Row(f.Db, child.PageId).ParentPageId);
+            var inMenu = SitePageWriter.SetInMenu(f.Db, child.PageId, Club, Owner, true, Admin, Now);
+            Assert.True(inMenu.Ok, inMenu.Message);                                                                      // Om ligger alltid i menyn, så undersidan får göra det
+            var menuPage = New(f.Db, "Regler");
+            Assert.True(SitePageWriter.SetInMenu(f.Db, menuPage, Club, Owner, true, Admin, Now).Ok);
+            Assert.True(SitePageWriter.SetParent(f.Db, menuPage, Club, Owner, about.Id, Admin, Now).Ok);
+            Assert.True(SitePageStore.IsInMenu(f.Db, Club, Owner, menuPage));                                            // flytten under Om tar den inte ur menyn
+            Assert.True(SitePageWriter.SetParent(f.Db, menuPage, Club, Owner, null, Admin, Now).Ok);
             // Hem kan aldrig vara förälder, en vanlig sida kan flyttas in under Om
             var other = New(f.Db, "Bli medlem");
             Assert.True(SitePageWriter.SetParent(f.Db, other, Club, Owner, about.Id, Admin, Now).Ok);

@@ -284,6 +284,16 @@
     return null;
   }
 
+  // En omgjord Om-sida kan vara förälder (Stefans väg A, 2026-11-09). Den har en egen rad i servern (pageId) men står i systemsidorna, inte bland de egna: här får den samma form som en egen sida.
+  const aboutParent = () => {
+    const p = ((S.st && S.st.systemPages) || []).find(x => x.key === 'about' && x.mode === 'converted' && x.pageId);
+    return p ? { id: p.pageId, title: p.label, visibility: p.level, parentId: null, system: true } : null;
+  };
+  // Sidorna som kan vara förälder: egna sidor på egen nivå, och en omgjord Om-sida.
+  const parentCandidatesOf = () => [].concat(aboutParent() || [], (S.st.pages || []).filter(x => !x.parentId));
+  const findParent = id => id ? parentCandidatesOf().find(x => x.id === id) || null : null;
+  const childrenOfAbout = () => { const a = aboutParent(); return a ? (S.st.pages || []).filter(x => x.parentId === a.id) : []; };
+
   // Sidor under sidor: trädordningen (sidor på egen nivå i sin ordning, var och en följd av sina undersidor). Samma regel som servern (SitePageTree.Flatten): en undersida vars förälder saknas
   // räknas som egen nivå, och ingen sida får försvinna ur listan.
   function treeRows(pages) {
@@ -309,7 +319,7 @@
 
   // Flytta en sida under en annan egen sida (eller till egen nivå). En undersida kan inte vara öppnare än sin förälder, så sidan får förälderns nivå om den var öppnare.
   async function chooseParent(p) {
-    const candidates = S.st.pages.filter(x => !x.parentId && x.id !== p.id);
+    const candidates = parentCandidatesOf().filter(x => x.id !== p.id);
     let chosen = p.parentId || 0;
     const box = h('div');
     const draw = () => box.replaceChildren(
@@ -338,18 +348,15 @@
     const total = sys.length + st.pages.length, shown = sys.length + own.length;
     const full = st.pages.length >= st.maxPages;
 
-    const sysRows = sys.map(p => {
-      const slot = slotByKey[p.key];
-      return h('tr', {},
-        h('td', {}, h('a', { href: '#sida=' + p.key, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#sida=' + p.key); } }, p.label)),
-        h('td', {}, modePill(p), slot && slot.page && p.mode === 'asBefore' ? h('span', { class: 'text-muted small ms-2' }, 'med egen text') : null),
-        h('td', {}, visBadge(p.level)),
-        h('td', { class: 'text-end' }, rowMenu([['Öppna', () => go('#sida=' + p.key)]])));
-    });
+    const aboutP = aboutParent();
+    const bySort = (a, b) => (a.sortOrder - b.sortOrder) || a.title.localeCompare(b.title, 'sv') || (a.id - b.id);
     // Egna sidor som träd: sidor på egen nivå i sin ordning, var och en följd av sina undersidor (indragna). Dolda sidor filtreras bort efteråt så att ordningen alltid är hela trädets.
-    const tree = treeRows(st.pages);
-    const siblingsOf = p => tree.filter(t => (t.p.parentId || 0) === (p.parentId || 0) && t.depth === (p.parentId ? 1 : 0)).map(t => t.p);
-    const ownRows = tree.filter(t => S.showHidden || t.p.visibility !== 4).map(({ p, depth }) => {
+    // Undersidorna till Om klubben ligger under Om-raden bland de vanliga sidorna, inte i trädet.
+    const tree = treeRows(st.pages.filter(x => !(aboutP && x.parentId === aboutP.id)));
+    const aboutKids = childrenOfAbout().sort(bySort);
+    const siblingsOf = p => aboutP && p.parentId === aboutP.id ? aboutKids
+      : tree.filter(t => (t.p.parentId || 0) === (p.parentId || 0) && t.depth === (p.parentId ? 1 : 0)).map(t => t.p);
+    const ownRow = (p, depth) => {
       const sibs = siblingsOf(p), at = sibs.findIndex(x => x.id === p.id);
       return h('tr', {},
         h('td', { class: depth ? 'ps-4' : '' },
@@ -375,9 +382,23 @@
             S.banner = r.success ? { cls: 'success', text: 'Sidan är raderad. Du kan ångra under "Raderade sidor".' } : { cls: 'danger', text: r.message };
             await reloadState();
           }, { danger: true }]])));
+    };
+    const visibleKids = () => aboutKids.filter(p => S.showHidden || p.visibility !== 4);
+    const sysRows = sys.flatMap(p => {
+      const slot = slotByKey[p.key];
+      const canParent = aboutP && p.key === 'about' && p.pageId === aboutP.id;
+      const row = h('tr', {},
+        h('td', {}, h('a', { href: '#sida=' + p.key, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#sida=' + p.key); } }, p.label),
+          canParent && aboutKids.length ? h('span', { class: 'text-muted small ms-2' }, aboutKids.length + (aboutKids.length === 1 ? ' undersida' : ' undersidor')) : null),
+        h('td', {}, modePill(p), slot && slot.page && p.mode === 'asBefore' ? h('span', { class: 'text-muted small ms-2' }, 'med egen text') : null),
+        h('td', {}, visBadge(p.level)),
+        h('td', { class: 'text-end' }, rowMenu([['Öppna', () => go('#sida=' + p.key)],
+          canParent ? ['Ny undersida', () => go('#ny=' + p.pageId), full ? { disabled: true } : null] : null])));
+      return canParent ? [row, ...visibleKids().map(c => ownRow(c, 1))] : [row];
     });
+    const ownRows = tree.filter(t => S.showHidden || t.p.visibility !== 4).map(({ p, depth }) => ownRow(p, depth));
 
-    const filter = h('div', { class: 'd-flex flex-wrap gap-3 align-items-center px-3 pt-3 pb-1' },
+    const filter =h('div', { class: 'd-flex flex-wrap gap-3 align-items-center px-3 pt-3 pb-1' },
       hiddenCount ? h('label', { class: 'd-flex gap-2 align-items-center' }, h('input', { type: 'checkbox', class: 'form-check-input mt-0', checked: !!S.showHidden,
         onchange: e => { S.showHidden = e.target.checked; renderList(); } }), 'Visa dolda (' + hiddenCount + ')') : null,
       h('span', { class: 'text-muted ms-auto' }, shown + ' av ' + total));
@@ -405,8 +426,12 @@
       : p.mode === 'draft' ? 'Det finns ett utkast till en egen version. Besökarna ser fortfarande den vanliga sidan.'
       : 'Sidan är er egen version.' + (p.pendingChanges ? ' Det finns ändringar som inte är publicerade.' : '');
     const actions = p.mode === 'asBefore' ? [p.canConvert ? ['Ändra den här sidan', () => convertFlow(p)] : null]
-      : p.mode === 'draft' ? [['Fortsätt ändra utkastet', () => go('#redigera=' + p.pageId)], '-', ['Avbryt omvandlingen', () => cancelConversionFlow(p.key, p.pageId, p.revision, false)]]
-      : [['Ändra sidan', () => go('#redigera=' + p.pageId)], '-', ['Gå tillbaka till den vanliga sidan', () => revertFlow(p)]];
+      : p.mode === 'draft' ? [['Fortsätt ändra utkastet', () => go('#redigera=' + p.pageId)], '-', ['Avbryt omvandlingen', () => cancelConversionFlow(p.key, p.pageId, p.revision, false)]]   // ingen undersida förrän omvandlingen är publicerad (menyn visar den vanliga sidan)
+      : [['Ändra sidan', () => go('#redigera=' + p.pageId)],
+         p.key === 'about' && p.pageId ? ['Ny undersida', () => go('#ny=' + p.pageId), (st.pages || []).length >= st.maxPages ? { disabled: true } : null] : null, '-',
+         p.key === 'about' && (st.pages || []).some(x => x.parentId === p.pageId)
+           ? ['Gå tillbaka till den vanliga sidan (flytta undersidorna först)', null, { disabled: true }]
+           : ['Gå tillbaka till den vanliga sidan', () => revertFlow(p)]];
     const panelsCard = p.mode === 'asBefore' && p.panels.length
       ? h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-2' }, 'Det här visas på sidan'),
           p.panels.map(x => h('div', { class: 'hs-panelrow' }, h('div', {}, h('strong', {}, x.name), h('div', { class: 'text-muted small' }, x.description)),
@@ -521,7 +546,7 @@
   // ── Ny sida i tre steg ──────────────────────────────────────────────────────
   function renderNew(w, parentId) {
     // En ny undersida (parentId): föräldern måste vara en egen sida på egen nivå, och undersidan får aldrig vara öppnare än den.
-    const parentRow = (w ? w.parentId : parentId) ? (S.st.pages || []).find(x => x.id === (w ? w.parentId : parentId) && !x.parentId) : null;
+    const parentRow = findParent(w ? w.parentId : parentId);
     const minV = parentRow ? parentRow.visibility : 0;
     w = w || { step: 1, title: '', template: 'text', visibility: Math.max(OWNER.type === 'Region' ? 1 : 2, minV), parentId: parentRow ? parentRow.id : null };
     setHash('#ny' + (parentRow ? '=' + parentRow.id : ''));
