@@ -43,7 +43,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             return SitePageStore.MenuPages(scope.Database, ownerType, ownerId)
-                .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder, r.ParentPageId)).ToList();
+                .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder, r.ParentPageId, r.ParentTemplateKey)).ToList();
         }
 
         /// <summary>Sidans rad (för filtret efter inloggningen: synligheten läses färskt), eller null.</summary>

@@ -37,7 +37,7 @@ namespace HpskSite.Services.SitePages
 
     /// <summary>En egen sida i menyn: sidan, etiketten (publicerad titel), adressen, synligheten och ordningen.</summary>
     /// <param name="ParentPageId">Sidan den ligger under i menyn (null = egen nivå).</param>
-    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort, int? ParentPageId = null);
+    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort, int? ParentPageId = null, string? ParentTemplateKey = null);
 
     /// <summary>En post i den nya menyn.</summary>
     /// <param name="Page">Mallsidan.</param>
@@ -48,7 +48,7 @@ namespace HpskSite.Services.SitePages
     /// <param name="Locked">Sidan finns men tittaren får inte se den (en vanlig medlem skulle): raden visas med hänglås och leder till en ruta, aldrig till sidans innehåll.</param>
     /// <param name="FreePageId">Id:t på en egen sida (null för en systemsida).</param>
     /// <param name="ParentPageId">Posten är en undersida till den egna sidan med det id:t; den följer direkt efter sin förälder i listan.</param>
-    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false, int? FreePageId = null, int? ParentPageId = null);
+    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false, int? FreePageId = null, int? ParentPageId = null, string? ParentKey = null);
 
     /// <summary>Vad vänstermenyn (<c>_SiteSideMenu</c>) ritas ur: posterna, ägarens adress, om Hemsidan-knappen och Guide ska visas och en eventuell extern länk längst ned.</summary>
     /// <param name="ListId">Menylistans id (<c>clubPageTabs</c>/<c>regionPageTabs</c>): dagens skript och djuplänkar slår upp flikarna i den.</param>
@@ -171,7 +171,12 @@ namespace HpskSite.Services.SitePages
                 // Hem och Admin är flikar på rotadressen. En utloggad hos en KLUBB har ingen flikpanel att växla till (startsidan ritas utan flikar): Hem är då en vanlig länk.
                 var tabButton = IsRoot && (Viewer.LoggedIn || _template.OwnerType == SiteTemplates.Region) && !locked && (p.IsHome || p.IsAdmin);
                 var entry = new SiteMenuEntry(p, pane, href, Current: _freePageId == null && p.Key == _page!.Key && !p.IsAdmin, tabButton, locked);
-                if (p.IsAdmin) admin = entry; else result.Add(entry);
+                if (p.IsAdmin) { admin = entry; continue; }
+                result.Add(entry);
+                // Undersidor till en omgjord systemsida (Om): direkt efter systemposten, i sin ordning. Aldrig under en låst post, och bara de tittaren får se.
+                if (locked || p.Key != SitePageTree.ParentableTemplate) continue;
+                foreach (var child in _extra.Where(x => x.ParentTemplateKey == p.Key).OrderBy(x => x.Sort).ThenBy(x => x.PageId))
+                    if (EntryFor(child) is { } childEntry) result.Add(childEntry with { ParentKey = p.Key });
             }
             // Ägarens egna sidor som träd: sidor på egen nivå i sin ordning, var och en följd av sina undersidor. En undersida visas bara när dess förälder visas, och aldrig under en
             // LÅST förälder (en låst sida visar bara sitt eget namn med ett hänglås, inga etiketter under den). En undersida vars förälder inte finns i menyn (inte publicerad, inte i menyn) visas inte.

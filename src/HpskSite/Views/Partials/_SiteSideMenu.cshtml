@@ -18,9 +18,11 @@
     <ul class="nav nav-pills flex-column collapse d-md-flex hpsk-sidemenu-list" id="@listId" role="tablist">
         @* Sidor under sidor: en undersida ritas inuti sin förälders post (en grupp som fälls ut), aldrig som egen post på första nivån. Gruppen är utfälld när sidan eller en av
            undersidorna är den aktuella. Pilen är en egen knapp, så att själva sidnamnet fortfarande är en länk. *@
-        @foreach (var item in Model.Items.Where(i => i.ParentPageId == null))
+        @foreach (var item in Model.Items.Where(i => i.ParentPageId == null && i.ParentKey == null))
         {
-            var children = item.FreePageId == null ? new List<HpskSite.Services.SitePages.SiteMenuEntry>()
+            @* En egen sida har undersidor via ParentPageId; en omgjord systemsida (Om) via ParentKey = dess mallnyckel. *@
+            var children = item.FreePageId == null
+                ? Model.Items.Where(c => c.ParentKey != null && c.ParentKey == item.Page.Key).ToList()
                 : Model.Items.Where(c => c.ParentPageId == item.FreePageId).ToList();
             var groupOpen = item.Current || children.Any(c => c.Current);
             var subId = "sub-" + item.PaneId;

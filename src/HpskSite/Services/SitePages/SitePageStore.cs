@@ -88,6 +88,8 @@ namespace HpskSite.Services.SitePages
         public byte Visibility { get; set; }
         public int SortOrder { get; set; }
         public int? ParentPageId { get; set; }
+        /// <summary>Mallnyckeln när föräldern är en omgjord systemsida (Om klubben), annars null: undersidan ritas då under systemposten i menyn.</summary>
+        public string? ParentTemplateKey { get; set; }
     }
 
     public enum SiteStoreOutcome
@@ -389,9 +391,10 @@ namespace HpskSite.Services.SitePages
         /// </summary>
         public static List<SiteMenuPageRow> MenuPages(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<SiteMenuPageRow>(
-                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, p.SortOrder AS SortOrder, p.ParentPageId AS ParentPageId
+                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, p.SortOrder AS SortOrder, p.ParentPageId AS ParentPageId, pp.TemplateKey AS ParentTemplateKey
                   FROM dbo.SiteMenuItem m
                   JOIN dbo.SitePage p ON p.Id = m.PageId AND p.OwnerType = m.OwnerType AND p.OwnerId = m.OwnerId
+                  LEFT JOIN dbo.SitePage pp ON pp.Id = p.ParentPageId AND pp.OwnerType = p.OwnerType AND pp.OwnerId = p.OwnerId
                   JOIN dbo.PageAddress a ON a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1
                   WHERE m.OwnerType = @0 AND m.OwnerId = @1 AND m.Kind = 1 AND m.IsRemoved = 0 AND p.DeletedDate IS NULL AND p.SuspendedDate IS NULL AND p.PublishedVersionId IS NOT NULL
                   ORDER BY p.SortOrder, p.Id",

@@ -153,6 +153,29 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Undersidor_till_Om_ligger_direkt_efter_systemposten_Om_och_bär_dess_nyckel()
+        {
+            var pages = Tree(new(2, "Historia", "historia", SiteVisibility.Klubbmedlemmar, 20, ParentPageId: 900, ParentTemplateKey: "about"),
+                             new(1, "Bli medlem", "bli-medlem", SiteVisibility.Klubbmedlemmar, 10, ParentPageId: 900, ParentTemplateKey: "about"),
+                             new(3, "Egen sida", "egen", SiteVisibility.Klubbmedlemmar, 10));
+            var all = Club(Member, pages).Menu().ToList();
+            var i = all.FindIndex(e => e.Page.Key == "about");
+            Assert.True(i >= 0, "Om-posten finns");
+            Assert.Equal(new[] { "page:1", "page:2" }, all.Skip(i + 1).Take(2).Select(e => e.Page.Key));                     // i sin ordning, direkt efter Om
+            Assert.All(all.Skip(i + 1).Take(2), e => Assert.Equal("about", e.ParentKey));
+            Assert.Null(all.Single(e => e.Page.Key == "page:3").ParentKey);                                                    // en vanlig egen sida är inte under Om
+        }
+
+        [Fact]
+        public void Undersidor_till_Om_visas_inte_under_en_låst_Om_eller_för_den_som_inte_får_se_dem()
+        {
+            var pages = Tree(new(1, "Stadgar", "stadgar", SiteVisibility.Styrelse, 10, ParentPageId: 900, ParentTemplateKey: "about"),
+                             new(2, "Historia", "historia", SiteVisibility.Klubbmedlemmar, 20, ParentPageId: 900, ParentTemplateKey: "about"));
+            Assert.Equal(new[] { "page:2" }, Keys(Club(Member, pages)));                                                       // styrelsesidan syns inte för en medlem
+            Assert.Empty(Keys(Club(SiteViewer.Anonymous, pages)));                                                              // utloggad ser ingen etikett
+        }
+
+        [Fact]
         public void Den_aktuella_undersidan_är_aktuell_och_föräldern_är_det_inte()
         {
             var pages = Tree(new(1, "Om oss", "om-oss", SiteVisibility.Alla, 10), new(2, "Historia", "historia", SiteVisibility.Alla, 10, ParentPageId: 1));
