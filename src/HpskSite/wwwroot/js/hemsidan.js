@@ -80,6 +80,7 @@
     { group: 0, type: 'gallery', label: 'Bildgalleri', icon: 'bi-images', desc: 'Flera bilder som miniatyrer. Ett klick öppnar bilden i full storlek.' },
     { group: 0, type: 'about', label: IS_REGION ? 'Om kretsen' : 'Om klubben', icon: 'bi-info-circle', desc: 'Presentationstexten. Den skrivs under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och hämtas vid varje besök.' },
     { group: 1, type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill', desc: 'Kontaktperson, e-post och telefon. Visas aldrig för alla.' },
+    { group: 1, type: 'signup', label: 'Anmälan / ansökan', icon: 'bi-clipboard-check', desc: 'Ett formulär där besökare anmäler sig till en kurs eller ansöker om medlemskap. Ni hanterar anmälningarna under Anmälningar.' },
     { group: 2, type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event', desc: 'De närmaste händelserna i kalendern.' },
     { group: 2, type: 'news', label: 'Nyheter', icon: 'bi-newspaper', desc: 'De senaste nyheterna.' },
     { group: 3, type: 'links', label: 'Länkar', icon: 'bi-link-45deg', desc: 'Knappar som leder till andra webbplatser.' },
@@ -181,6 +182,7 @@
     if (hsh === '#raderade') return renderTrash();
     if (hsh === '#lankar') return renderLinks();
     if (hsh === '#bilder') return renderLibrary();
+    if (hsh === '#anmalningar') return renderSignups();
     if (hsh === '#logg') return renderAudit();
     if ((m = /^#ny(?:=(\d+))?$/.exec(hsh))) return renderNew(null, m[1] ? parseInt(m[1], 10) : null);   // #ny=12 = en ny undersida till sidan 12
     return renderList();
@@ -202,7 +204,7 @@
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
       onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
     const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Egen version') : null;
-    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'bilder' ? 'Bilder' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
+    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'bilder' ? 'Bilder' : active === 'anmalningar' ? 'Anmälningar' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
     return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
       h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
       h('div', { class: 'hs-org' }, 'Hemsidan'),
@@ -215,6 +217,7 @@
         h('div', { class: 'hs-railh' }, IS_REGION ? 'Kretsens vanliga sidor' : 'Klubbens vanliga sidor'),
         sys.map(p => nav('sys:' + p.key, p.label, '#sida=' + p.key, pill(p))),
         h('div', { class: 'hs-railh' }, 'Mer'),
+        st.support ? null : nav('anmalningar', 'Anmälningar', '#anmalningar', st.signupNew ? h('span', { class: 'hs-pill warn' }, st.signupNew + ' nya') : null),   // personuppgifter: aldrig i stödläge
         nav('bilder', 'Bilder', '#bilder'),
         nav('lankar', 'Länkar i menyn', '#lankar', (st.menuLinks || []).length ? h('span', { class: 'hs-pill' }, st.menuLinks.length) : null),
         st.trash.length ? nav('raderade', 'Raderade sidor', '#raderade', h('span', { class: 'hs-pill' }, st.trash.length)) : null,
@@ -621,6 +624,119 @@
         : h('div', { class: 'hs-card p-3 mb-3 text-muted' }, 'Ni har inga länkar i menyn än. Välj Åtgärder → Ny länk.'),
       h('p', { class: 'text-muted small' }, links.length + ' av högst ' + (st.maxLinks || 15) + ' länkar. Menyn visas bara för dem som får se den, och varje länk har sin egen nivå.')));
     renderBanner();
+  }
+
+  // ── Anmälningar: det som kommit in via formulär (blocket Anmälan/ansökan). Personuppgifter: bara föreningens egen administratör. ──
+  const SG_STATUS = [{ v: 0, k: 'new', t: 'Ny', cls: 'bg-primary' }, { v: 1, k: 'queued', t: 'Köande', cls: 'bg-warning text-dark' }, { v: 3, k: 'approved', t: 'Godkänd', cls: 'bg-success' }, { v: 2, k: 'denied', t: 'Nekad', cls: 'bg-secondary' }];
+  const sgBadge = v => { const s = SG_STATUS.find(x => x.v === v) || SG_STATUS[0]; return h('span', { class: 'badge ' + s.cls }, s.t); };
+  const sgDate = iso => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleDateString('sv-SE') + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+  S.sg = { status: 'new', form: '', q: '', archived: false };
+
+  function signupParams() {
+    const sg = S.sg, [pid, bid] = (sg.form || '').split(':');
+    return { status: sg.archived ? undefined : (sg.status || undefined), pageId: pid || undefined, blockId: bid || undefined, q: sg.q || undefined, archived: sg.archived ? 'true' : undefined };
+  }
+
+  async function renderSignups(banner) {
+    setHash('#anmalningar');
+    if (S.st.support) return renderList();   // personuppgifter: aldrig i stödläge
+    view(shell('anmalningar', pageHead('Anmälningar', 'Laddar …'), h('p', { class: 'text-muted' }, 'Laddar …')));
+    if (S.st.signupReady === false) { view(shell('anmalningar', pageHead('Anmälningar'), alertBox('warning', 'Anmälningar är inte tillgängliga just nu. Kontakta pistol.nu om det fortsätter.'))); return; }
+    const sg = S.sg;
+    const r = await api('GET', 'SignupEntries', { ...signupParams(), skip: 0 });
+    if (!r.success) { view(shell('anmalningar', pageHead('Anmälningar'), alertBox('danger', r.message || 'Anmälningarna kan inte läsas.'))); return; }
+    S.st.signupNew = r.counts.new;
+    let items = r.items;
+    const total = () => r.total;
+    const act = async (action, params, okText) => {
+      const res = await api('POST', action, params);
+      await renderSignups(res.success ? { cls: 'success', text: okText } : { cls: 'danger', text: res.message || 'Det gick inte.' });
+    };
+    const exportHref = '/umbraco/surface/SiteEdit/ExportSignups?' + new URLSearchParams({ ownerType: OWNER.type, ownerId: OWNER.id, ...Object.fromEntries(Object.entries(signupParams()).filter(([, v]) => v !== undefined)) }).toString();
+    const counts = r.counts, all = counts.new + counts.queued + counts.denied + counts.approved;
+    const tabs = [['', 'Alla', all], ['new', 'Nya', counts.new], ['queued', 'Köande', counts.queued], ['approved', 'Godkända', counts.approved], ['denied', 'Nekade', counts.denied]];
+    const search = h('input', { type: 'search', class: 'form-control', placeholder: 'Sök namn eller e-post', 'aria-label': 'Sök anmälningar', value: sg.q || '' });
+    search.addEventListener('keydown', e => { if (e.key === 'Enter') { sg.q = search.value.trim(); renderSignups(); } });
+    const formSel = r.forms.length > 1 ? h('select', { class: 'form-select', 'aria-label': 'Visa ett formulär' },
+      h('option', { value: '' }, 'Alla formulär'), r.forms.map(f => h('option', { value: f.pageId + ':' + f.blockId, selected: sg.form === f.pageId + ':' + f.blockId ? true : null }, f.title + ' (' + f.total + ')'))) : null;
+    if (formSel) formSel.addEventListener('change', () => { sg.form = formSel.value; renderSignups(); });
+
+    const rowFor = it => h('tr', { 'data-entry': it.id },
+      h('td', { class: 'ps-3 text-nowrap small' }, sgDate(it.created)),
+      h('td', {}, h('a', { href: '#', class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); showEntry(it.id); } }, it.name),
+        h('div', { class: 'text-muted small text-break' }, it.email + (it.phone ? ' · ' + it.phone : '')), it.hasNote ? h('span', { class: 'badge text-bg-light border ms-0 mt-1' }, 'Anteckning') : null),
+      h('td', {}, it.choice || it.formTitle, it.choice ? h('div', { class: 'text-muted small' }, it.formTitle) : null),
+      h('td', {}, sgBadge(it.status), it.handled ? h('div', { class: 'text-muted small' }, new Date(it.handled).toLocaleDateString('sv-SE')) : null),
+      h('td', { class: 'text-end pe-3' }, rowMenu([
+        ['Visa', () => showEntry(it.id)],
+        '-',
+        it.status !== 3 ? ['Godkänn', () => act('SetSignupStatus', { id: it.id, status: 3 }, 'Anmälan är godkänd.')] : null,
+        it.status !== 1 ? ['Sätt som köande', () => act('SetSignupStatus', { id: it.id, status: 1 }, 'Anmälan står nu i kö.')] : null,
+        it.status !== 2 ? ['Neka', () => act('SetSignupStatus', { id: it.id, status: 2 }, 'Anmälan är nekad.')] : null,
+        it.status !== 0 ? ['Sätt som ny', () => act('SetSignupStatus', { id: it.id, status: 0 }, 'Anmälan är satt som ny.')] : null,
+        '-',
+        ['Skriv till sökanden', () => { window.location.href = 'mailto:' + it.email + '?subject=' + encodeURIComponent('Din anmälan till ' + OWNER.name); }],
+        '-',
+        sg.archived ? ['Ta fram ur arkivet', () => act('ArchiveSignup', { id: it.id, archive: 'false' }, 'Anmälan är tillbaka bland de aktuella.')] : ['Arkivera', () => act('ArchiveSignup', { id: it.id, archive: 'true' }, 'Anmälan är arkiverad.')],
+        ['Ta bort', async () => {
+          if (!await confirmDialog('Ta bort anmälan?', 'Anmälan från ' + it.name + ' och alla uppgifter i den tas bort för gott. Det går inte att ångra.', 'Ta bort', true)) return;
+          await act('DeleteSignup', { id: it.id }, 'Anmälan är borttagen.');
+        }, { danger: true }]])));
+
+    const moreBtn = h('button', { type: 'button', class: 'btn btn-outline-secondary', onclick: async () => {
+      moreBtn.disabled = true;
+      const m = await api('GET', 'SignupEntries', { ...signupParams(), skip: items.length });
+      if (m.success) { items = items.concat(m.items); tbody.append(...m.items.map(rowFor)); moreWrap.hidden = items.length >= total(); count.textContent = items.length + ' av ' + total(); }
+      moreBtn.disabled = false;
+    } }, 'Visa fler');
+    const moreWrap = h('div', { class: 'text-center mb-3', hidden: items.length >= total() }, moreBtn);
+    const count = h('span', { class: 'text-muted small ms-auto' }, items.length + ' av ' + total());
+    const tbody = h('tbody', {}, items.map(rowFor));
+
+    view(shell('anmalningar',
+      pageHead('Anmälningar', 'Anmälningar och ansökningar som kommit in via formulär på ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' sidor. Ni godkänner, köar eller nekar dem här. Uppgifterna är personuppgifter: dela dem inte vidare i onödan.', [
+        ['Exportera till Excel (CSV)', null, { href: exportHref }],
+        [sg.archived ? 'Visa aktuella anmälningar' : 'Visa arkiverade (' + counts.archived + ')', () => { sg.archived = !sg.archived; sg.status = sg.archived ? '' : 'new'; renderSignups(); }]]),
+      h('div', { id: 'hsBanner' }),
+      sg.archived ? h('p', { class: 'fw-semibold' }, 'Arkiverade anmälningar (raderas automatiskt 90 dagar efter att de arkiverats)') : h('div', { class: 'd-flex flex-wrap gap-2 mb-3', role: 'group', 'aria-label': 'Filtrera på status' },
+        tabs.map(([k, t, n]) => h('button', { type: 'button', class: 'btn btn-sm ' + ((sg.status || '') === k ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': (sg.status || '') === k ? 'true' : 'false',
+          onclick: () => { sg.status = k; renderSignups(); } }, t + ' (' + n + ')'))),
+      h('div', { class: 'd-flex flex-wrap gap-2 mb-3' }, h('div', { style: 'min-width:14rem;flex:1 1 14rem' }, search), formSel ? h('div', { style: 'min-width:12rem' }, formSel) : null, count),
+      items.length ? h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, h('div', { class: 'table-responsive' }, h('table', { class: 'table align-middle hs-list mb-0' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, 'Inkom'), h('th', {}, 'Namn'), h('th', {}, 'Gäller'), h('th', {}, 'Status'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))), tbody)))
+        : h('div', { class: 'hs-card p-3 mb-3 text-muted' }, sg.q || sg.form || (!sg.archived && sg.status) ? 'Inga anmälningar matchar urvalet.' : 'Inga anmälningar än. Lägg blocket "Anmälan / ansökan" på en sida så kommer anmälningarna hit.'),
+      moreWrap,
+      h('p', { class: 'text-muted small' }, 'Personnummer tas bort automatiskt 30 dagar efter att ni avgjort en anmälan. Avgjorda anmälningar raderas efter 12 månader, andra efter 24 månader.')));
+    if (banner) { S.banner = banner; renderBanner(); S.banner = null; }
+  }
+
+  async function showEntry(id) {
+    const r = await api('GET', 'SignupEntry', { id });
+    if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Anmälan kan inte läsas.' }; renderBanner(); return; }
+    const e = r.entry;
+    const row = (label, value, mono) => value ? [h('dt', { class: 'col-sm-4' }, label), h('dd', { class: 'col-sm-8' + (mono ? ' font-monospace' : ''), style: 'white-space:pre-wrap' }, value)] : [];
+    const note = h('textarea', { class: 'form-control', rows: '3', maxlength: '500', 'aria-label': 'Anteckning (syns bara för administratörer)' }, e.adminNote || '');
+    const statusBtns = SG_STATUS.map(s => h('button', { type: 'button', class: 'btn btn-sm ' + (e.status === s.v ? 'btn-primary' : 'btn-outline-secondary'), onclick: async () => {
+      const res = await api('POST', 'SetSignupStatus', { id: e.id, status: s.v });
+      if (res.success) { e.status = s.v; statusBtns.forEach((b, i) => { b.className = 'btn btn-sm ' + (SG_STATUS[i].v === s.v ? 'btn-primary' : 'btn-outline-secondary'); }); renderSignups(); }   // listan bakom dialogen följer med
+    } }, s.t));
+    formDialog('Anmälan från ' + e.name, [
+      h('dl', { class: 'row mb-3' },
+        row('Inkom', sgDate(e.created)), row('Formulär', e.formTitle), row('Gäller', e.choice), row('Namn', e.name),
+        [h('dt', { class: 'col-sm-4' }, 'E-post'), h('dd', { class: 'col-sm-8 text-break' }, h('a', { href: 'mailto:' + e.email }, e.email))],
+        row('Telefon', e.phone), row('Kön', e.gender), row('Personnummer', e.personalNumber, true),
+        row('Adress', [e.address, [e.postalCode, e.city].filter(Boolean).join(' ')].filter(Boolean).join('\n')), row('Meddelande', e.message),
+        e.handled ? row('Avgjord', sgDate(e.handled)) : []),
+      e.personalNumber ? h('p', { class: 'small text-muted' }, 'Personnumret tas bort automatiskt 30 dagar efter att anmälan avgjorts. Skriv in det i medlemsregistret före dess.') : null,
+      h('p', { class: 'form-label small fw-semibold mb-1' }, 'Status'), h('div', { class: 'd-flex flex-wrap gap-1 mb-3' }, statusBtns),
+      h('label', { class: 'form-label small fw-semibold mb-1' }, 'Anteckning (syns bara för administratörer)'), note], 'Spara anteckning', async () => {
+      if ((note.value || '').trim() !== (e.adminNote || '')) {
+        const res = await api('POST', 'SaveSignupNote', { id: e.id, note: note.value });
+        if (!res.success) return res.message || 'Det gick inte att spara anteckningen.';
+      }
+      renderSignups();
+      return null;
+    });
   }
 
   // ── Bilder: föreningens bildbibliotek. Här laddar ni upp, ser vad som används och tar bort. Bilderna väljs sedan i bildblock, galleri och text. ──
@@ -1140,7 +1256,7 @@
   function addBlockBar() {
     const retired = new Set((S.st && S.st.retiredBlocks) || []);   // en utgången typ erbjuds inte, men en sida som har den ritas som förut
     const groups = BLOCK_GROUPS.map((title, gi) => {
-      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type));
+      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type) && !(t.type === 'signup' && S.kind !== 'free'));   // formuläret postar med sidans id: bara på en egen sida
       if (!items.length) return null;
       return h('div', { class: 'mb-3' }, h('p', { class: 'text-muted small fw-semibold mb-1' }, title),
         h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2', 'data-add-block': t.type, onclick: () => addBlock(t.type) },
@@ -1165,7 +1281,7 @@
       markDirty(); drawBlocks(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'signup' ? { title: 'Anmälan', intro: '', choices: [] } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
@@ -1405,6 +1521,7 @@
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
       case 'image': return imageEditor(b);
       case 'gallery': return galleryEditor(b);
+      case 'signup': return signupEditor(b);
       case 'region-clubs': case 'region-ranges': case 'region-stats': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, b.type === 'region-clubs' ? 'Listar kretsens klubbar med länk till deras sidor. Listan hämtas vid varje besök.'
           : b.type === 'region-ranges' ? 'Listar skjutbanorna som kretsens klubbar använder (namn och ort). Banor som är markerade som begränsade visas aldrig här.'
@@ -1444,6 +1561,39 @@
           markDirty(); draw();
         } }, '＋ Lägg till bilder'),
         h('p', { class: 'text-muted small mt-2 mb-0' }, d.items.length + ' av högst 24 bilder. Besökaren ser miniatyrer; ett klick öppnar bilden i full storlek i en ny flik.'));
+    };
+    draw(); return wrap;
+  }
+
+  // Anmälan/ansökan: vad formuläret frågar efter, vilka val besökaren har och när det är öppet. Namn och e-post krävs alltid.
+  function signupEditor(b) {
+    const d = b.data;
+    if (!Array.isArray(d.choices)) d.choices = [];
+    const wrap = h('div');
+    const flag = (key, label, help) => {
+      const cb = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsSg' + b.id + key, checked: d[key] === true });
+      cb.addEventListener('change', () => { if (cb.checked) d[key] = true; else delete d[key]; markDirty(); });
+      return h('div', { class: 'form-check mb-1' }, cb, h('label', { class: 'form-check-label', for: 'hsSg' + b.id + key }, label), help ? h('div', { class: 'form-text mt-0 mb-1' }, help) : null);
+    };
+    const draw = () => {
+      wrap.replaceChildren(
+        field('Rubrik', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        field('Text ovanför formuläret (valfri)', bind(h('input', { class: 'form-control', maxlength: '600', value: d.intro || '' }), d, 'intro'), 'Till exempel vad kursen innehåller och vad den kostar.'),
+        h('p', { class: 'form-label small fw-semibold mb-1 mt-3' }, 'Vad gäller anmälan? (valfritt)'),
+        ...d.choices.map((c, i) => h('div', { class: 'd-flex gap-2 mb-2' },
+          bind(h('input', { class: 'form-control form-control-sm', maxlength: '80', value: c, 'aria-label': 'Val ' + (i + 1), placeholder: 'Till exempel: Grundkurs pistol' }), d.choices, i),
+          h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', 'aria-label': 'Ta bort valet ' + (c || (i + 1)), onclick: () => { d.choices.splice(i, 1); markDirty(); draw(); } }, 'Ta bort'))),
+        h('button', { type: 'button', class: 'btn btn-sm btn-outline-primary', disabled: d.choices.length >= 10, onclick: () => { d.choices.push(''); markDirty(); draw(); } }, '＋ Lägg till ett val'),
+        h('p', { class: 'text-muted small mt-1' }, 'Besökaren väljer ett av valen. Lämna tomt om ni inte behöver val. Exempel: "Grundkurs pistol" och "Jag är skytt sedan tidigare och vill bli medlem".'),
+        h('p', { class: 'form-label small fw-semibold mb-1 mt-3' }, 'Vad ska besökaren fylla i?'),
+        h('p', { class: 'text-muted small mb-2' }, 'Namn och e-post krävs alltid. Det ni kryssar i nedan krävs också, utom kön och meddelande som är frivilliga.'),
+        flag('phone', 'Mobilnummer'), flag('address', 'Adress (adress, postnummer och ort)'), flag('gender', 'Kön (frivilligt)'), flag('message', 'Meddelande (frivilligt)'),
+        flag('pnr', 'Personnummer', 'Personnummer är en känslig personuppgift. Be bara om det om ni behöver det för att registrera personen. Det tas bort automatiskt 30 dagar efter att ni har avgjort anmälan.'),
+        h('div', { class: 'row g-2 mt-2' },
+          h('div', { class: 'col-12 col-md-6' }, field('Öppnar (valfritt)', bind(h('input', { class: 'form-control', type: 'date', value: d.opens || '' }), d, 'opens'), 'Tomt = öppen direkt.')),
+          h('div', { class: 'col-12 col-md-6' }, field('Stänger (valfritt)', bind(h('input', { class: 'form-control', type: 'date', value: d.closes || '' }), d, 'closes'), 'Sista dagen som går att anmäla sig. Tomt = alltid öppen.'))),
+        field('Svar efter anmälan (valfritt)', bind(h('input', { class: 'form-control', maxlength: '300', value: d.thanks || '', placeholder: 'Tack! Vi har tagit emot din anmälan och hör av oss.' }), d, 'thanks')),
+        h('div', { class: 'alert alert-info small mt-3 mb-0' }, 'Anmälningarna kommer in under ', h('strong', {}, 'Anmälningar'), ' i Hemsidan. Där godkänner, köar eller nekar ni dem. Formuläret kan fyllas i av alla som får se blocket, även den som inte är inloggad om blocket visas för alla.'));
     };
     draw(); return wrap;
   }

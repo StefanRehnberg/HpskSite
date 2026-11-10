@@ -67,18 +67,18 @@ namespace HpskSite.Services.SitePages
                 var id = SiteMenuLinkStore.Add(db, ownerType, ownerId, c.Label, c.Url, visibility, now, out var full);
                 if (full) return new(false, $"Ni har nått taket på {SiteMenuLinkRules.MaxLinks} länkar i menyn. Ta bort en länk först.");
                 if (id == null) return NotFound;
-                SitePageWriter.Audit(db, ownerType, ownerId, actor, "menu", id.Value, "link-add", null, now);
+                SitePageWriter.Audit(db, ownerType, ownerId, actor, "menulink", id.Value, "link-add", null, now);
                 return new(true, Id: id);
             }
             if (!SiteMenuLinkStore.Update(db, linkId.Value, ownerType, ownerId, c.Label, c.Url, visibility, now)) return NotFound;
-            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menu", linkId.Value, "link-edit", null, now);
+            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menulink", linkId.Value, "link-edit", null, now);
             return new(true, Id: linkId);
         }
 
         public static SiteLinkWriteResult Remove(IDatabase db, string ownerType, int ownerId, int linkId, SiteActor actor, DateTime now)
         {
             if (!SiteMenuLinkStore.Remove(db, linkId, ownerType, ownerId)) return NotFound;
-            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menu", linkId, "link-remove", null, now);
+            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menulink", linkId, "link-remove", null, now);
             return new(true, Id: linkId);
         }
 
@@ -87,7 +87,7 @@ namespace HpskSite.Services.SitePages
             if (direction is not (-1 or 1)) return new(false, "Okänd riktning.");
             if (SiteMenuLinkStore.Get(db, linkId, ownerType, ownerId) == null) return NotFound;
             if (!SiteMenuLinkStore.Move(db, linkId, ownerType, ownerId, direction, now)) return new(true, Id: linkId);   // redan ytterst: inget att göra, inget fel
-            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menu", linkId, "link-move", null, now);
+            SitePageWriter.Audit(db, ownerType, ownerId, actor, "menulink", linkId, "link-move", null, now);
             return new(true, Id: linkId);
         }
     }

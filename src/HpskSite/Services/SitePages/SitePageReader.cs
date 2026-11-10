@@ -144,14 +144,19 @@ namespace HpskSite.Services.SitePages
 
         private readonly IScopeProvider _scopes;
         private readonly ClubRosterService _roster;
+        private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _http;
+        private readonly Microsoft.AspNetCore.Antiforgery.IAntiforgery _antiforgery;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
         public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.ICompetitionSeriesStore series,
-            HpskSite.Services.Competitions.CompetitionLinks links, ClubRosterService roster)
+            HpskSite.Services.Competitions.CompetitionLinks links, ClubRosterService roster,
+            Microsoft.AspNetCore.Http.IHttpContextAccessor http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery)
         {
+            _http = http;
+            _antiforgery = antiforgery;
             _roster = roster;
             _competitions = competitions;
             _series = series;
@@ -162,8 +167,9 @@ namespace HpskSite.Services.SitePages
             _urls = urls;
         }
 
-        public ISiteBlockData For(string ownerType, int ownerId, IPublishedContent? ownerNode, SiteViewer viewer) =>
-            new Data(this, ownerType, ownerId, ownerNode, viewer);
+        /// <param name="pageId">Sidan som ritas (en egen sida): anmälningsblocken postar med den. 0 = ingen sida (förhandsvisning, systemsida): formulär visas då utan att gå att skicka.</param>
+        public ISiteBlockData For(string ownerType, int ownerId, IPublishedContent? ownerNode, SiteViewer viewer, int pageId = 0) =>
+            new Data(this, ownerType, ownerId, ownerNode, viewer, pageId);
 
         /// <summary>Dokumentarkivets nivå som synlighet: Publik = Alla, Inloggade, Klubbmedlemmar, Klubbadministratörer = Dold.</summary>
         internal static SiteVisibility VisibilityOf(int accessLevel) => accessLevel switch
@@ -182,8 +188,31 @@ namespace HpskSite.Services.SitePages
             private readonly IPublishedContent? _node;
             private readonly SiteViewer _viewer;
 
-            public Data(SiteBlockDataFactory f, string ownerType, int ownerId, IPublishedContent? node, SiteViewer viewer)
-            { _f = f; _ownerType = ownerType; _ownerId = ownerId; _node = node; _viewer = viewer; }
+            private readonly int _pageId;
+
+            public Data(SiteBlockDataFactory f, string ownerType, int ownerId, IPublishedContent? node, SiteViewer viewer, int pageId = 0)
+            { _f = f; _ownerType = ownerType; _ownerId = ownerId; _node = node; _viewer = viewer; _pageId = pageId; }
+
+            private static readonly string[] KnownFlashCodes = { "closed", "rate", "invalid", "full", "error" };
+
+            /// <summary>Sidans id, skyddstoken (antiforgery, som också hindrar att sidan cachas) och beskedet efter en inskickning. Ur adressen läses bara blockets id och en känd kod: ingen text därifrån skrivs någonsin ut.</summary>
+            public SiteFormContext? Form()
+            {
+                if (_pageId <= 0) return null;
+                var http = _f._http.HttpContext;
+                if (http == null) return null;
+                string? token = null;
+                try { token = _f._antiforgery.GetAndStoreTokens(http).RequestToken; } catch { /* utan token ritas formuläret avstängt */ }
+                SiteFormFlash? flash = null;
+                var bid = http.Request.Query["anmalan"].ToString();
+                if (bid.Length is > 0 and <= 12 && bid.All(c => char.IsAsciiLetterOrDigit(c)))
+                {
+                    var r = http.Request.Query["r"].ToString();
+                    if (r == "ok") flash = new SiteFormFlash(bid, true, null);
+                    else if (r == "err") { var e = http.Request.Query["e"].ToString(); flash = new SiteFormFlash(bid, false, KnownFlashCodes.Contains(e) ? e : "error"); }
+                }
+                return new SiteFormContext(_pageId, token, flash);
+            }
 
             public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids)
             {

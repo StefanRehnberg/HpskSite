@@ -62,7 +62,7 @@ namespace HpskSite.Tests
         {
             AssertRejected(ParseFree(Free(B("abcd1", "embed", 2, "{\"provider\":\"youtube\",\"id\":\"x\"}"))), "type");
             AssertRejected(ParseFree(Free(B("abcd1", "feed", 2, "{}"))), "type");
-            AssertRejected(ParseFree(Free(B("abcd1", "gallery", 2, "{}"))), "type");
+            AssertRejected(ParseFree(Free(B("abcd1", "carousel", 2, "{}"))), "type");   // (ett bildgalleri finns sedan bildbiblioteket: "gallery" är en känd typ)
             AssertRejected(ParseFree(Free(B("abcd1", "script", 2, "{}"))), "type");
         }
 

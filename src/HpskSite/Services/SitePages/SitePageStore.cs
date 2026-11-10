@@ -377,6 +377,15 @@ namespace HpskSite.Services.SitePages
             db.Execute("UPDATE dbo.SitePage SET Visibility = @3, Revision = Revision + 1, UpdatedDate = @4, UpdatedByMemberId = @5 WHERE OwnerType = @0 AND OwnerId = @1 AND ParentPageId = @2 AND DeletedDate IS NULL AND Visibility < @3",
                 ownerType, ownerId, parentPageId, (byte)level, now, byMemberId);
 
+        private sealed class OwnerRef { public string OwnerType { get; set; } = ""; public int OwnerId { get; set; } }
+
+        /// <summary>Vem en egen (fri) sida hör till, bara på id: för en publik inskickning som bara känner sidans id. Null om sidan inte finns, är en mallkopia eller är raderad.</summary>
+        public static (string OwnerType, int OwnerId)? OwnerOfFreePage(IDatabase db, int pageId)
+        {
+            var r = db.FirstOrDefault<OwnerRef>("SELECT OwnerType, OwnerId FROM dbo.SitePage WHERE Id = @0 AND TemplateKey IS NULL AND DeletedDate IS NULL", pageId);
+            return r == null ? null : (r.OwnerType, r.OwnerId);
+        }
+
         public static bool IsInMenu(IDatabase db, string ownerType, int ownerId, int pageId) =>
             db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2 AND IsRemoved = 0", ownerType, ownerId, pageId) > 0;
 

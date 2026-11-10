@@ -64,6 +64,9 @@ namespace HpskSite.Services.SitePages
         /// <summary>Ägarens regerande mästare (namn på personer: bara för inloggade, se blockets personflagga). Standard: inga.</summary>
         IReadOnlyList<SiteChampionInfo> Champions() => Array.Empty<SiteChampionInfo>();
 
+        /// <summary>Vad ett anmälningsblock behöver veta om begäran (sidans id, skyddstoken, besked efter en inskickning). Null = en förhandsvisning: formuläret visas men går inte att skicka. Standard: null.</summary>
+        SiteFormContext? Form() => null;
+
         /// <summary>Ägarens siffror: klubbens medlemmar, banor och kommande tävlingar, eller kretsens klubbar, banor, serier och tävlingar. Standard: inga.</summary>
         IReadOnlyList<SiteStatItem> Stats() => Array.Empty<SiteStatItem>();
     }
@@ -149,6 +152,7 @@ namespace HpskSite.Services.SitePages
                 "news" => News(block, ctx),
                 "about" => About(block, ctx),
                 "gallery" => Gallery(block, ctx),
+                "signup" => Signup(block, ctx),
                 "competitions" => Competitions(block, ctx),
                 "records" => Records(block, ctx),
                 "ranges" => Ranges(block, ctx),
@@ -347,6 +351,76 @@ namespace HpskSite.Services.SitePages
                           (string.IsNullOrWhiteSpace(e.Location) ? "" : $" <span class=\"text-muted\">{E(e.Location)}</span>") + "</li>");
             }
             return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        /// <summary>
+        /// Anmälan/ansökan: ett vanligt HTML-formulär (inget JS) som postar till <c>SiteForm/Submit</c> med skyddstoken, blockets och sidans id och ett dolt honungsfält.
+        /// Det som skrivs ut är alltid kodat. Före öppningsdagen och efter stängningsdagen visas ett besked i stället för formuläret, och efter en inskickning visas tacket (bara
+        /// för detta block). Allt innehåll i formuläret kommer ur blockets inställningar; servern läser dem om från den PUBLICERADE sidan när något skickas in.
+        /// </summary>
+        private static string Signup(SiteBlock b, SiteRenderContext ctx)
+        {
+            var cfg = SiteSignupConfig.FromBlock(b);
+            var form = ctx.Data.Form();
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            string Id(string f) => E(b.Id) + "-" + f;
+            var sb = new StringBuilder($"<div id=\"{Id("anmalan")}\" class=\"site-signup\">");
+            sb.Append($"<h3>{E(cfg.Title)}</h3>");
+            if (cfg.Intro != null) sb.Append($"<p>{E(cfg.Intro)}</p>");
+
+            var flash = form?.Flash is { } f && f.BlockId == b.Id ? f : null;
+            if (flash is { Success: true })
+            {
+                sb.Append($"<div class=\"alert alert-success\" role=\"status\">{E(cfg.Thanks ?? SiteSignupConfig.DefaultThanks)}</div>");
+                return Section(b.Id, sb.Append("</div>").ToString());
+            }
+            if (flash != null) sb.Append($"<div class=\"alert alert-danger\" role=\"alert\">{E(SiteSignupRules.ErrorText(flash.ErrorCode) ?? "Det gick inte att ta emot anmälan.")}</div>");
+
+            var state = cfg.StateOn(DateTime.Today);
+            if (state == SiteSignupOpenState.NotYet) { sb.Append($"<div class=\"alert alert-info\">Anmälan öppnar {E(cfg.Opens!.Value.ToString("d MMMM yyyy", sv))}.</div>"); return Section(b.Id, sb.Append("</div>").ToString()); }
+            if (state == SiteSignupOpenState.Closed) { sb.Append("<div class=\"alert alert-info\">Anmälan har stängt.</div>"); return Section(b.Id, sb.Append("</div>").ToString()); }
+
+            var live = form?.Token != null && form.PageId > 0;
+            sb.Append(live ? "<form method=\"post\" action=\"/umbraco/surface/SiteForm/Submit\" class=\"mt-2\">" : "<form class=\"mt-2\"><fieldset disabled>");   // förhandsvisning: en avstängd fieldset gör att inget kan skickas (inget JS)
+            if (live)
+            {
+                sb.Append($"<input type=\"hidden\" name=\"__RequestVerificationToken\" value=\"{E(form!.Token)}\">")
+                  .Append($"<input type=\"hidden\" name=\"PageId\" value=\"{form.PageId}\"><input type=\"hidden\" name=\"BlockId\" value=\"{E(b.Id)}\">")
+                  // Honungsfält: osynligt för en människa, ifyllt av en robot (ett tyst tack, ingen lagring).
+                  .Append("<div style=\"position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden\" aria-hidden=\"true\"><label>Lämna detta fält tomt<input type=\"text\" name=\"Website\" tabindex=\"-1\" autocomplete=\"off\"></label></div>");
+            }
+            else sb.Append("<p class=\"text-muted small\">Förhandsvisning: så här ser formuläret ut för besökaren. Det går inte att skicka härifrån.</p>");
+
+            void Field(string name, string label, string input, string? help = null) =>
+                sb.Append($"<div class=\"mb-3\"><label class=\"form-label\" for=\"{Id(name)}\">{E(label)}</label>{input}{(help == null ? "" : $"<div class=\"form-text\">{E(help)}</div>")}</div>");
+
+            if (cfg.Choices.Count > 0)
+            {
+                sb.Append("<fieldset class=\"mb-3\"><legend class=\"form-label fs-6\">Vad gäller din anmälan? <span class=\"text-danger\" aria-hidden=\"true\">*</span></legend>");
+                for (var i = 0; i < cfg.Choices.Count; i++)
+                    sb.Append($"<div class=\"form-check\"><input class=\"form-check-input\" type=\"radio\" name=\"Choice\" id=\"{Id("val" + i)}\" value=\"{E(cfg.Choices[i])}\" required><label class=\"form-check-label\" for=\"{Id("val" + i)}\">{E(cfg.Choices[i])}</label></div>");
+                sb.Append("</fieldset>");
+            }
+            Field("name", "Namn *", $"<input class=\"form-control\" type=\"text\" name=\"Name\" id=\"{Id("name")}\" maxlength=\"120\" autocomplete=\"name\" required>");
+            Field("email", "E-post *", $"<input class=\"form-control\" type=\"email\" name=\"Email\" id=\"{Id("email")}\" maxlength=\"200\" autocomplete=\"email\" required>");
+            if (cfg.Phone) Field("phone", "Mobilnummer *", $"<input class=\"form-control\" type=\"tel\" name=\"Phone\" id=\"{Id("phone")}\" maxlength=\"20\" autocomplete=\"tel\" required>");
+            if (cfg.PersonalNumber)
+                Field("pnr", "Personnummer *", $"<input class=\"form-control\" type=\"text\" name=\"PersonalNumber\" id=\"{Id("pnr")}\" maxlength=\"13\" inputmode=\"numeric\" pattern=\"[0-9]{{8}}-?[0-9]{{4}}\" placeholder=\"ÅÅÅÅMMDD-NNNN\" autocomplete=\"off\" required>",
+                    "Föreningen använder personnumret för att kunna registrera dig. Det tas bort automatiskt 30 dagar efter att din anmälan har avgjorts.");
+            if (cfg.Address)
+            {
+                Field("address", "Adress *", $"<input class=\"form-control\" type=\"text\" name=\"Address\" id=\"{Id("address")}\" maxlength=\"200\" autocomplete=\"street-address\" required>");
+                sb.Append($"<div class=\"row\"><div class=\"col-5 col-md-3 mb-3\"><label class=\"form-label\" for=\"{Id("postal")}\">Postnummer *</label><input class=\"form-control\" type=\"text\" name=\"PostalCode\" id=\"{Id("postal")}\" maxlength=\"6\" inputmode=\"numeric\" pattern=\"[0-9]{{3}} ?[0-9]{{2}}\" autocomplete=\"postal-code\" required></div>")
+                  .Append($"<div class=\"col-7 col-md-9 mb-3\"><label class=\"form-label\" for=\"{Id("city")}\">Ort *</label><input class=\"form-control\" type=\"text\" name=\"City\" id=\"{Id("city")}\" maxlength=\"80\" autocomplete=\"address-level2\" required></div></div>");
+            }
+            if (cfg.Gender)
+                Field("gender", "Kön", $"<select class=\"form-select\" name=\"Gender\" id=\"{Id("gender")}\"><option value=\"\"></option>{string.Concat(SiteSignupRules.Genders.Select(g => $"<option value=\"{E(g)}\">{E(g)}</option>"))}</select>");
+            if (cfg.Message) Field("message", "Meddelande", $"<textarea class=\"form-control\" name=\"Message\" id=\"{Id("message")}\" rows=\"4\" maxlength=\"1000\"></textarea>");
+
+            sb.Append($"<div class=\"form-check mb-3\"><input class=\"form-check-input\" type=\"checkbox\" name=\"Consent\" value=\"true\" id=\"{Id("consent")}\" required><label class=\"form-check-label\" for=\"{Id("consent")}\">Jag godkänner att uppgifterna sparas hos föreningen för att hantera min anmälan. De raderas när ärendet är avslutat. <a href=\"/integritetspolicy\" target=\"_blank\" rel=\"noopener\">Integritetspolicy</a></label></div>")
+              .Append("<button type=\"submit\" class=\"btn btn-primary\">Skicka anmälan</button>")
+              .Append(live ? "</form>" : "</fieldset></form>");
+            return Section(b.Id, sb.Append("</div>").ToString());
         }
 
         /// <summary>

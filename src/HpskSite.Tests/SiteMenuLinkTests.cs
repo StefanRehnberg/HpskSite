@@ -195,7 +195,7 @@ namespace HpskSite.Tests
             var id = Add(f.Db, "Logg");
             SiteMenuLinkWriter.Save(f.Db, Club, Owner, id, "Logg2", "https://exempel.se/", 0, Actor, Now);
             SiteMenuLinkWriter.Remove(f.Db, Club, Owner, id, Actor, Now);
-            var actions = f.Db.Fetch<string>("SELECT Action FROM dbo.SiteAudit WHERE OwnerType = 'Club' AND OwnerId = @0 AND ObjectKind = 'menu' ORDER BY Id", Owner);
+            var actions = f.Db.Fetch<string>("SELECT Action FROM dbo.SiteAudit WHERE OwnerType = 'Club' AND OwnerId = @0 AND ObjectKind = 'menulink' ORDER BY Id", Owner);
             Assert.Equal(new[] { "link-add", "link-edit", "link-remove" }, actions.ToArray());
             // En egen sida i menyn (Kind = 1) syns inte som länk och tvärtom.
             var page = SitePageStore.Create(f.Db, Club, Owner, "Sida", SiteVisibility.Alla, null, null, 7, false, Now);

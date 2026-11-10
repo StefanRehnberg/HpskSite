@@ -31,7 +31,7 @@
     {
         var regionCode = req.OwnerType == SiteTemplates.Region ? Model.Value<string>("regionCode") : null;
         var viewer = await Viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
-        var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model, viewer));
+        var ctx = new SiteRenderContext(viewer, Model.Url(), SiteTemplates.For(req.OwnerType), BlockData.For(req.OwnerType, req.OwnerId, Model, viewer, loaded.Value.Page.Id));
         body = SiteBlockRenderer.RenderAll(loaded.Value.Content.Blocks, loaded.Value.Page.VisibilityLevel, ctx);
         title = loaded.Value.Page.PublishedTitle ?? loaded.Value.Page.Title;
         if (lockedNeeds != null) { title = ""; body = ""; }

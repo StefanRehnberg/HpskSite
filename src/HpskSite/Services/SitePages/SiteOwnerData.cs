@@ -48,6 +48,7 @@ namespace HpskSite.Services.SitePages
             db.Execute("DELETE FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             db.Execute("DELETE FROM dbo.SiteSupportGrant WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             SiteFiles.DeleteAllForOwner(db, ownerType, ownerId);   // filerna i lagringen tas bort av SiteOwnerCleanupHandler
+            db.Execute("DELETE FROM dbo.SiteFormEntry WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);   // anmälningarna är personuppgifter: de följer med ägaren
             return db.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
         }
     }

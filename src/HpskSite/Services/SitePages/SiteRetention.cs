@@ -6,9 +6,10 @@ using Umbraco.Cms.Infrastructure.Scoping;
 namespace HpskSite.Services.SitePages
 {
     /// <summary>Vad en gallringskörning tog bort.</summary>
-    public sealed record SiteRetentionResult(int PagesPurged, int VersionsDeleted, int DraftsDiscarded, int GrantsDeleted, int AuditDeleted, int IpHashesCleared)
+    public sealed record SiteRetentionResult(int PagesPurged, int VersionsDeleted, int DraftsDiscarded, int GrantsDeleted, int AuditDeleted, int IpHashesCleared,
+        int PersonalNumbersCleared = 0, int FormEntriesDeleted = 0)
     {
-        public int Total => PagesPurged + VersionsDeleted + DraftsDiscarded + GrantsDeleted + AuditDeleted + IpHashesCleared;
+        public int Total => PagesPurged + VersionsDeleted + DraftsDiscarded + GrantsDeleted + AuditDeleted + IpHashesCleared + PersonalNumbersCleared + FormEntriesDeleted;
     }
 
     /// <summary>
@@ -47,7 +48,30 @@ namespace HpskSite.Services.SitePages
             var grants = Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SiteSupportGrant WHERE ExpiresDate < @0", now.AddDays(-GrantDays)));
             var audit = Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SiteAudit WHERE CreatedDate < @0", now.AddMonths(-AuditMonths)));
             var ip = db.Execute("UPDATE dbo.SiteAudit SET IpHash = NULL WHERE IpHash IS NOT NULL AND CreatedDate < @0", now.AddDays(-IpHashDays));
-            return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip);
+            var (pnr, entries) = PurgeFormEntries(db, now);
+            return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip, pnr, entries);
+        }
+
+        public const int PersonalNumberDays = 30;
+        public const int DecidedEntryMonths = 12;
+        public const int OpenEntryMonths = 24;
+        public const int ArchivedEntryDays = 90;
+
+        /// <summary>
+        /// Anmälningarna (blocket Anmälan/ansökan): personnumret nollas 30 dagar efter att anmälan avgjorts; en avgjord anmälan raderas 12 månader efter avgörandet, en som aldrig avgjordes
+        /// 24 månader efter att den kom in, och en arkiverad 90 dagar efter arkiveringen. Körs bara när tabellen finns (en migrering som inte körts får inte stoppa övrig gallring).
+        /// </summary>
+        public static (int PersonalNumbers, int Entries) PurgeFormEntries(IDatabase db, DateTime now)
+        {
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.SiteFormEntry', N'U') IS NULL THEN 0 ELSE 1 END") == 0) return (0, 0);
+            var pnr = db.Execute("UPDATE dbo.SiteFormEntry SET PersonalNumber = NULL WHERE PersonalNumber IS NOT NULL AND Status IN (2, 3) AND HandledDate IS NOT NULL AND HandledDate < @0", now.AddDays(-PersonalNumberDays));
+            var entries = Repeat(() => db.Execute(
+                $@"DELETE TOP ({Batch}) FROM dbo.SiteFormEntry
+                   WHERE (Status IN (2, 3) AND HandledDate IS NOT NULL AND HandledDate < @0)
+                      OR (Status IN (0, 1) AND CreatedDate < @1)
+                      OR (ArchivedDate IS NOT NULL AND ArchivedDate < @2)",
+                now.AddMonths(-DecidedEntryMonths), now.AddMonths(-OpenEntryMonths), now.AddDays(-ArchivedEntryDays)));
+            return (pnr, entries);
         }
 
         private static int Repeat(Func<int> step)

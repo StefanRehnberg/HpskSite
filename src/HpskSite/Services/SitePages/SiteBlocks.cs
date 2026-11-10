@@ -176,6 +176,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("champions", Personal: true, false, Set("title")),   // regerande mästare (live): namn på personer, aldrig Alla (som mästarpanelen, bara inloggade)
             new BlockType("stats", false, false, Set("title")),   // föreningens siffror (live): klubbens medlemmar, banor och tävlingar, eller kretsens klubbar, banor, serier och tävlingar
             new BlockType("gallery", false, false, Set("title", "items")),   // bildgalleri: bilder ur ägarens bildbibliotek (file:N), miniatyrer som länkar till originalet; ren server-HTML utan JS
+            new BlockType("signup", false, false, Set("title", "intro", "choices", "phone", "address", "gender", "pnr", "message", "opens", "closes", "thanks")),   // anmälan/ansökan: ett formulär som vem som helst som får se blocket kan fylla i; anmälningarna hanteras under Hemsidan → Anmälningar
             new BlockType("about", false, false, Set("title")),   // föreningens presentationstext (live ur nodens uppgifter, lagras inte): första biblioteksblocket, samma text som Om-panelen
             new BlockType("panel", Personal: false, AllowedInSlot: false, Set("key", "zone"), ConvertedOnly: true),   // en systempanel på en omvandlad sida (schema 2); ritas av vyn ur registret, personnivån ur registret
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -283,6 +284,8 @@ namespace HpskSite.Services.SitePages
                 errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" får inte ligga före eller efter en systemsida."));
             else if (type.ConvertedOnly && kind != SiteContentKind.ConvertedPage)
                 errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" finns bara på en omvandlad systemsida."));
+            else if (type.Name == "signup" && kind != SiteContentKind.FreePage)
+                errors.Add(new($"{p}.type", "Anmälan går bara att lägga på en egen sida."));   // formuläret postar med sidans id: en systemsida har ingen sådan
 
             // Panelens registerpost avgör personnivå och om den är en systempanel (login-prompt: lagringsbar, aldrig valbar).
             var bData = b["data"] as JsonObject;
@@ -441,6 +444,53 @@ namespace HpskSite.Services.SitePages
                 {
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     if (title != null) o["title"] = title;
+                    break;
+                }
+                case "signup":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    var intro = Short(d["intro"], $"{p}.intro", 600, required: false, errors);
+                    var thanks = Short(d["thanks"], $"{p}.thanks", 300, required: false, errors);
+                    if (title != null) o["title"] = title;
+                    if (intro != null) o["intro"] = intro;
+                    if (thanks != null) o["thanks"] = thanks;
+                    // Valen ("Vad gäller anmälan?"): högst tio, 1–80 tecken, inga dubbletter.
+                    if (d["choices"] != null)
+                    {
+                        if (d["choices"] is not JsonArray ch) errors.Add(new($"{p}.choices", "Förväntade en lista med val."));
+                        else if (ch.Count > SiteSignupRules.MaxChoices) errors.Add(new($"{p}.choices", $"Högst {SiteSignupRules.MaxChoices} val."));
+                        else
+                        {
+                            var outCh = new JsonArray(); var seenCh = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+                            for (var ci = 0; ci < ch.Count; ci++)
+                            {
+                                if (Str(ch[ci]) == null) { errors.Add(new($"{p}.choices[{ci}]", "Ett val ska vara text.")); continue; }
+                                var c = Short(ch[ci], $"{p}.choices[{ci}]", SiteSignupRules.MaxChoiceLength, required: false, errors);
+                                if (c == null) continue;   // ett tomt val (ett nyss tillagt fält i editorn) släpps tyst; ett ogiltigt har redan fått sitt fel
+                                if (!seenCh.Add(c)) { errors.Add(new($"{p}.choices[{ci}]", "Samma val finns två gånger.")); continue; }
+                                outCh.Add(c);
+                            }
+                            if (outCh.Count > 0) o["choices"] = outCh;
+                        }
+                    }
+                    foreach (var flag in new[] { "phone", "address", "gender", "pnr", "message" })
+                    {
+                        if (d[flag] == null) continue;
+                        if (d[flag] is JsonValue fv && fv.TryGetValue<bool>(out var on)) { if (on) o[flag] = true; }
+                        else errors.Add(new($"{p}.{flag}", "Ska vara ja eller nej."));
+                    }
+                    DateTime? opens = null, closes = null;
+                    foreach (var (key, slot) in new[] { ("opens", 0), ("closes", 1) })
+                    {
+                        if (d[key] == null) continue;
+                        var raw = Str(d[key])?.Trim();
+                        if (string.IsNullOrEmpty(raw)) continue;
+                        if (!DateTime.TryParseExact(raw, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+                        { errors.Add(new($"{p}.{key}", "Datumet ska vara på formen ÅÅÅÅ-MM-DD.")); continue; }
+                        o[key] = dt.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                        if (slot == 0) opens = dt; else closes = dt;
+                    }
+                    if (opens != null && closes != null && closes < opens) errors.Add(new($"{p}.closes", "Anmälan kan inte stänga före den öppnar."));
                     break;
                 }
                 case "gallery":

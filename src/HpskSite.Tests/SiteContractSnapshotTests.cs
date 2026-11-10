@@ -38,6 +38,7 @@ namespace HpskSite.Tests
                 "champions|Y|n|n|n|title",
                 "stats|n|n|n|n|title",
                 "gallery|n|n|n|n|items,title",
+                "signup|n|n|n|n|address,choices,closes,gender,intro,message,opens,phone,pnr,thanks,title",
                 "about|n|n|n|n|title",
                 "panel|n|n|n|Y|key,zone",
             };

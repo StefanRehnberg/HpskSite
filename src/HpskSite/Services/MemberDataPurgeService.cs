@@ -196,6 +196,7 @@ namespace HpskSite.Services
             ("SiteAudit",                            "ActorMemberId",     "CreatedDate = CreatedDate"),
             ("SiteSupportGrant",                     "MemberId",          "CreatedDate = CreatedDate"),
             ("SiteFile",                             "UploadedByMemberId", "UploadedDate = UploadedDate"),   // bilden står kvar, uppladdaren släpps
+            ("SiteFormEntry",                        "HandledByMemberId", "CreatedDate = CreatedDate"),      // anmälan står kvar (den hör till föreningen), bara vem som avgjorde släpps
         };
 
         /// <summary>

@@ -156,9 +156,12 @@ namespace HpskSite.Controllers
                 url = p.Slug == null ? null : g.OwnerUrl + p.Slug + "/", updated = p.UpdatedDate, deleted = p.DeletedDate,
                 parentId = p.ParentPageId, sortOrder = p.SortOrder, childCount = p.ChildCount,
             };
+            // Antal nya anmälningar (märket vid Anmälningar i rälsen). Saknas tabellen (migreringen inte körd) faller inte Hemsidan: platsen visar ett fel i stället.
+            int signupNew = 0; var signupReady = true;
+            try { signupNew = SiteSignupStore.NewCount(scope.Database, g.OwnerType, g.OwnerId); } catch (Microsoft.Data.SqlClient.SqlException) { signupReady = false; }
             return Json(new
             {
-                success = true, ownerName = g.OwnerName, ownerUrl = g.OwnerUrl, termsAccepted = accepted,
+                success = true, signupNew, signupReady, ownerName = g.OwnerName, ownerUrl = g.OwnerUrl, termsAccepted = accepted,
                 support = g.Grant == null ? null : new { reason = g.Grant.Reason, expires = g.Grant.ExpiresDate, minutes = SiteSupport.Minutes }, termsVersion = SiteOwnerData.CurrentTermsVersion,
                 maxPages = SitePageStore.MaxFreePagesPerOwner,
                 // Systemsidorna som ett länkblock får peka på (aldrig Admin, som saknar adress).
@@ -830,6 +833,147 @@ namespace HpskSite.Controllers
                 if (r.Ok) scope.Complete();
             }
             return Map(r);
+        }
+
+        // ── Anmälningar (blocket Anmälan/ansökan). Personuppgifter: bara föreningens EGEN administratör (GateMode.OwnOnly), aldrig stödläget. ──────────
+        private static byte? StatusFilter(string? s) => s switch { "new" => 0, "queued" => 1, "denied" => 2, "approved" => 3, _ => null };
+
+        private static SiteSignupStore.Filter FilterOf(string? status, int? pageId, string? blockId, string? q, bool archived) =>
+            new(StatusFilter(status), pageId, blockId is { Length: > 0 and <= 12 } ? blockId : null, q is { Length: > 0 } ? (q.Length > 100 ? q[..100] : q) : null, archived);
+
+        /// <summary>Anmälningarna, en sida i taget (50), med antal per status och formulären att filtrera på. Personnumret ingår inte i listan, bara i en enskild anmälan.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ")]
+        public async Task<IActionResult> SignupEntries(string ownerType, int ownerId, string? status, int? pageId, string? blockId, string? q, bool archived = false, int skip = 0)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            try
+            {
+                using var scope = _scopes.CreateScope(autoComplete: true);
+                var f = FilterOf(status, pageId, blockId, q, archived);
+                var rows = SiteSignupStore.List(scope.Database, g.OwnerType, g.OwnerId, f, Math.Max(0, skip), SiteSignupStore.PageSize);
+                var (byStatus, archivedCount) = SiteSignupStore.Counts(scope.Database, g.OwnerType, g.OwnerId);
+                return Json(new
+                {
+                    success = true,
+                    items = rows.Select(r => new
+                    {
+                        id = r.Id, pageId = r.PageId, blockId = r.BlockId, formTitle = r.FormTitle, choice = r.Choice, status = (int)r.Status, name = r.Name, email = r.Email, phone = r.Phone,
+                        created = r.CreatedDate, handled = r.HandledDate, hasNote = r.AdminNote != null, hasPersonalNumber = r.PersonalNumber != null,
+                    }),
+                    total = SiteSignupStore.Count(scope.Database, g.OwnerType, g.OwnerId, f), pageSize = SiteSignupStore.PageSize,
+                    counts = new { @new = byStatus[0], queued = byStatus[1], denied = byStatus[2], approved = byStatus[3], archived = archivedCount },
+                    forms = SiteSignupStore.Forms(scope.Database, g.OwnerType, g.OwnerId).Select(x => new { pageId = x.PageId, blockId = x.BlockId, title = x.FormTitle, total = x.Total, newCount = x.NewCount }),
+                });
+            }
+            catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException)
+            {
+                return Fail("Anmälningarna kan inte läsas just nu. Kontakta pistol.nu om det fortsätter.", "schema");
+            }
+        }
+
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ")]
+        public async Task<IActionResult> SignupEntry(string ownerType, int ownerId, int id)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            var r = SiteSignupStore.Get(scope.Database, id, g.OwnerType, g.OwnerId);
+            if (r == null) return Fail("Anmälan finns inte.");
+            return Json(new
+            {
+                success = true,
+                entry = new
+                {
+                    id = r.Id, formTitle = r.FormTitle, choice = r.Choice, status = (int)r.Status, name = r.Name, email = r.Email, phone = r.Phone, gender = r.Gender, personalNumber = r.PersonalNumber,
+                    address = r.Address, postalCode = r.PostalCode, city = r.City, message = r.Message, adminNote = r.AdminNote, created = r.CreatedDate, handled = r.HandledDate, archived = r.ArchivedDate,
+                },
+            });
+        }
+
+        /// <summary>Själva skrivningen, EFTER att Gate prövat ägaren: tak per minut, en transaktion, ett svar. Tar emot det redan prövade GateResult.</summary>
+        private IActionResult SignupWrite(GateResult g, Func<NPoco.IDatabase, DateTime, bool> act, string notFound)
+        {
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:signup", WritesPerMinute * 3, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            bool ok;
+            using (var scope = _scopes.CreateScope())
+            {
+                ok = act(scope.Database, DateTime.Now);
+                if (ok) scope.Complete();
+            }
+            return ok ? Json(new { success = true }) : Fail(notFound);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SetSignupStatus(string ownerType, int ownerId, int id, int status)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            if (status is < 0 or > 3) return Fail("Okänd status.");
+            return SignupWrite(g, (db, now) => SiteSignupWriter.Status(db, g.OwnerType, g.OwnerId, id, (SiteSignupStatus)status, g.Actor!, now), "Anmälan finns inte.");
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SaveSignupNote(string ownerType, int ownerId, int id, string? note)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            if ((note?.Length ?? 0) > 500) return Fail("Anteckningen får vara högst 500 tecken.");
+            return SignupWrite(g, (db, now) => SiteSignupWriter.Note(db, g.OwnerType, g.OwnerId, id, note, g.Actor!, now), "Anmälan finns inte.");
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> ArchiveSignup(string ownerType, int ownerId, int id, bool archive)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            return SignupWrite(g, (db, now) => SiteSignupWriter.Archive(db, g.OwnerType, g.OwnerId, id, archive, g.Actor!, now), "Anmälan finns inte.");
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> DeleteSignup(string ownerType, int ownerId, int id)
+        {
+            var g = await Gate(ownerType, ownerId, write: true, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            return SignupWrite(g, (db, now) => SiteSignupWriter.Delete(db, g.OwnerType, g.OwnerId, id, g.Actor!, now), "Anmälan finns inte.");
+        }
+
+        /// <summary>Anmälningarna som en CSV-fil för Excel (samma filter som listan, alla sidor). Exporten loggas.</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens EGEN administratör (inte stödläge), brytare 2 PÅ")]
+        public async Task<IActionResult> ExportSignups(string ownerType, int ownerId, string? status, int? pageId, string? blockId, string? q, bool archived = false)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.OwnOnly);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:export", 20, TimeSpan.FromHours(1))) return Fail("För många exporter på kort tid. Vänta en stund.", "rate");
+            string csv;
+            using (var scope = _scopes.CreateScope())
+            {
+                var f = FilterOf(status, pageId, blockId, q, archived);
+                var rows = new List<SiteSignupRow>();
+                for (var skip = 0; skip < SiteSignupStore.MaxPerOwner; skip += 500)   // alla sidor: en export får aldrig tyst kapas
+                {
+                    var part = SiteSignupStore.List(scope.Database, g.OwnerType, g.OwnerId, f, skip, 500);
+                    rows.AddRange(part);
+                    if (part.Count < 500) break;
+                }
+                csv = SiteSignupStore.ToCsv(rows);
+                SitePageWriter.Audit(scope.Database, g.OwnerType, g.OwnerId, g.Actor!, "form", 0, "entry-export", null, DateTime.Now);
+                scope.Complete();
+            }
+            Response.Headers["Cache-Control"] = "private, no-store";
+            return File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "text/csv; charset=utf-8", $"anmalningar-{DateTime.Now:yyyy-MM-dd}.csv");
         }
 
         // ── Externa länkar i menyn (Hemsidan → Länkar i menyn) ───────────────────────────────────────────────
