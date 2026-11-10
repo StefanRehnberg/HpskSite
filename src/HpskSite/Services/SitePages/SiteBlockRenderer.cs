@@ -51,7 +51,22 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Föreningens presentationstext som HTML (klubbens aboutClub, kretsens aboutRegion, annars beskrivningen), eller null när den saknas. Standard: ingen.</summary>
         string? AboutHtml() => null;
+
+        /// <summary>Ägarens kommande tävlingar som tittaren får se (klubbens egna, kretsens egna och klubbarnas icke klubbinterna). Standard: inga.</summary>
+        IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count) => Array.Empty<SiteCompetitionInfo>();
+
+        /// <summary>Ägarens gällande rekord (klubbens respektive kretsens). Standard: inga.</summary>
+        IReadOnlyList<SiteRecordInfo> Records() => Array.Empty<SiteRecordInfo>();
+
+        /// <summary>Skjutbanor: klubbens egna eller, för en krets, banorna kretsens klubbar använder. Begränsade banor ingår aldrig. Standard: inga.</summary>
+        IReadOnlyList<SiteRangeInfo> OwnerRanges() => Array.Empty<SiteRangeInfo>();
     }
+
+    /// <summary>En kommande tävling i tävlingsblocket.</summary>
+    public sealed record SiteCompetitionInfo(string Title, DateTime Date, string Url);
+
+    /// <summary>Ett gällande rekord: gren, klass, resultat, innehavare och datum.</summary>
+    public sealed record SiteRecordInfo(string Discipline, string Class, bool IsTeam, int Score, string Holder, DateTime Date);
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
     public sealed record SiteRenderContext(SiteViewer Viewer, string OwnerUrl, SiteTemplate Template, ISiteBlockData Data);
@@ -120,6 +135,9 @@ namespace HpskSite.Services.SitePages
                 "image" => Image(block, ctx),
                 "news" => News(block, ctx),
                 "about" => About(block, ctx),
+                "competitions" => Competitions(block, ctx),
+                "records" => Records(block, ctx),
+                "ranges" => Ranges(block, ctx),
                 "region-clubs" => RegionClubs(block, ctx),
                 "region-ranges" => RegionRanges(block, ctx),
                 "region-series" => RegionSeries(block, ctx),
@@ -312,6 +330,46 @@ namespace HpskSite.Services.SitePages
                 sb.Append($"<li class=\"mb-2\"><strong>{E(e.Start.ToString("d MMM yyyy HH:mm", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))}</strong> {href}" +
                           (string.IsNullOrWhiteSpace(e.Location) ? "" : $" <span class=\"text-muted\">{E(e.Location)}</span>") + "</li>");
             }
+            return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        private static string Competitions(SiteBlock b, SiteRenderContext ctx)
+        {
+            var count = Math.Clamp(b.Data["count"]?.GetValue<int>() ?? 5, 1, 10);
+            var items = ctx.Data.UpcomingCompetitions(count).Take(count).ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<ul class=\"list-unstyled\">");
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            foreach (var c in items)
+                sb.Append($"<li class=\"mb-2\"><strong>{E(c.Date.ToString("d MMM yyyy", sv))}</strong> {LinkOrText(c.Title, c.Url)}</li>");
+            return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        private static string Records(SiteBlock b, SiteRenderContext ctx)
+        {
+            var items = ctx.Data.Records().ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<div class=\"table-responsive\"><table class=\"table table-sm align-middle\"><thead><tr><th>Gren</th><th>Klass</th><th class=\"text-end\">Poäng</th><th>Innehavare</th><th>Datum</th></tr></thead><tbody>");
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            foreach (var r in items)
+                sb.Append($"<tr><td>{E(r.Discipline)}{(r.IsTeam ? " <span class=\"text-muted small\">(lag)</span>" : "")}</td><td>{E(r.Class)}</td><td class=\"text-end\">{r.Score}</td><td>{E(r.Holder)}</td><td>{E(r.Date.ToString("d MMM yyyy", sv))}</td></tr>");
+            return Section(b.Id, sb.Append("</tbody></table></div>").ToString());
+        }
+
+        private static string Ranges(SiteBlock b, SiteRenderContext ctx)
+        {
+            var items = ctx.Data.OwnerRanges().ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder($"<h3>{E(string.IsNullOrWhiteSpace(title) ? "Skjutbanor" : title)}</h3><ul class=\"list-unstyled mb-0\">");
+            foreach (var r in items)
+                sb.Append("<li class=\"mb-1\">").Append(LinkOrText(r.Name, r.Url)).Append(string.IsNullOrWhiteSpace(r.City) ? "" : $" <span class=\"text-muted\">{E(r.City)}</span>").Append("</li>");
             return Section(b.Id, sb.Append("</ul>").ToString());
         }
 

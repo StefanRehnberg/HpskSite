@@ -137,6 +137,9 @@ namespace HpskSite.Services.SitePages
             new BlockType("region-series", false, false, Set("title", "count"), RegionOnly: true),   // kretsens egna serier (live)
             new BlockType("region-stats", false, false, Set("title"), RegionOnly: true),   // kretsens siffror: klubbar, banor, serier, kommande tävlingar
             new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
+            new BlockType("competitions", false, false, Set("title", "count")),   // föreningens kommande tävlingar (live ur tävlingslagringen, lagras inte)
+            new BlockType("records", false, false, Set("title")),   // föreningens gällande rekord (live ur rekordtabellen, lagras inte)
+            new BlockType("ranges", false, false, Set("title")),   // skjutbanor (klubbens egna respektive kretsens klubbars), utan karta; begränsade banor utelämnas
             new BlockType("about", false, false, Set("title")),   // föreningens presentationstext (live ur nodens uppgifter, lagras inte): första biblioteksblocket, samma text som Om-panelen
             new BlockType("panel", Personal: false, AllowedInSlot: false, Set("key", "zone"), ConvertedOnly: true),   // en systempanel på en omvandlad sida (schema 2); ritas av vyn ur registret, personnivån ur registret
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -399,6 +402,22 @@ namespace HpskSite.Services.SitePages
                 case "region-clubs":
                 case "region-ranges":
                 case "region-stats":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    if (title != null) o["title"] = title;
+                    break;
+                }
+                case "competitions":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
+                    if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet tävlingar är 1 till 10."));
+                    if (title != null) o["title"] = title;
+                    o["count"] = count;
+                    break;
+                }
+                case "records":
+                case "ranges":
                 {
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     if (title != null) o["title"] = title;

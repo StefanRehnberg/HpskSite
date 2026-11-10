@@ -277,6 +277,53 @@ namespace HpskSite.Services.SitePages
                 return string.IsNullOrWhiteSpace(markup) ? HpskSite.Extensions.RteHelper.SafeMarkup(_node.Value<string>("description")) : markup;   // samma ordning som Om-panelen: presentationen, annars beskrivningen
             }
 
+            // ── Biblioteksblocken tävlingar, rekord och banor. Alla frågor gäller DENNA ägare (ur begäran), aldrig ett id ur blocket.
+            public IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count)
+            {
+                var today = DateTime.Today;
+                IEnumerable<HpskSite.Models.Competitions.CompetitionInfo> own;
+                if (_ownerType == SiteTemplates.Club)
+                    // En klubbintern tävling visas bara för klubbens medlemmar (strängare än tävlingslistan, som släpper in alla inloggade).
+                    own = _f._competitions.List().Where(c => c.ClubId == _ownerId && (!c.IsClubOnly || _viewer.IsOwnerMember));
+                else
+                {
+                    if (!IsRegion || RegionCode.Length == 0) return Array.Empty<SiteCompetitionInfo>();
+                    var clubIds = SiteRegion.Clubs(_node).Select(c => c.Id).ToHashSet();
+                    own = _f._competitions.List().Where(c =>
+                        (c.ClubId <= 0 && string.Equals(c.RegionalFederation ?? "", RegionCode, StringComparison.OrdinalIgnoreCase))
+                        || (c.ClubId > 0 && clubIds.Contains(c.ClubId) && !c.IsClubOnly));
+                }
+                return own.Where(c => c.IsVisible && c.CompetitionDate.HasValue && c.CompetitionDate.Value >= today)
+                    .OrderBy(c => c.CompetitionDate)
+                    .Select(c => new SiteCompetitionInfo(c.DisplayName, c.CompetitionDate!.Value, _f._links.Url(c.Id)))
+                    .Take(count).ToList();
+            }
+
+            public IReadOnlyList<SiteRecordInfo> Records()
+            {
+                var level = _ownerType == SiteTemplates.Club ? HpskSite.Models.RecordLevels.Club : HpskSite.Models.RecordLevels.Region;
+                var scopeId = _ownerType == SiteTemplates.Club ? _ownerId.ToString() : RegionCode;
+                if (scopeId.Length == 0) return Array.Empty<SiteRecordInfo>();
+                using var scope = _f._scopes.CreateScope(autoComplete: true);
+                return scope.Database.Fetch<HpskSite.Models.CompetitionRecord>(
+                        "WHERE Level = @0 AND ScopeId = @1 AND IsCurrent = 1 ORDER BY Discipline, RecordType, ClassCode", level, scopeId)
+                    .Select(r => new SiteRecordInfo(HpskSite.Models.RecordDisciplines.DisplayName(r.Discipline),
+                        HpskSite.Models.RecordClassRegistry.GetClassDisplayName(r.ClassCode), r.RecordType == HpskSite.Models.RecordTypes.Team,
+                        r.TotalScore, string.IsNullOrWhiteSpace(r.TeamName) ? r.HolderName : r.TeamName!, r.RecordDate))
+                    .ToList();
+            }
+
+            public IReadOnlyList<SiteRangeInfo> OwnerRanges()
+            {
+                if (_ownerType == SiteTemplates.Region) return RegionRanges();
+                using var scope = _f._scopes.CreateScope(autoComplete: true);
+                // Begränsade banor (militära/diskreta) tas aldrig med: en öppen sida är inte platsen där de avslöjas.
+                return scope.Database.Fetch<RangeRow>(
+                        "SELECT r.Id, r.Name, r.City FROM ShootingRange r WHERE r.LocationSensitivity <> @0 AND r.Id IN (SELECT RangeId FROM ClubRangeLink WHERE ClubId = @1) ORDER BY r.Name",
+                        RangeConstants.SensRestricted, _ownerId)
+                    .Select(r => new SiteRangeInfo(r.Id, r.Name, r.City, $"/skjutbana/{r.Id}")).ToList();
+            }
+
             public SiteContactInfo? Contact() => _node == null ? null : new SiteContactInfo(
                 _node.Value<string>("contactPerson"), _node.Value<string>("contactEmail"), _node.Value<string>("contactPhone"));
         }

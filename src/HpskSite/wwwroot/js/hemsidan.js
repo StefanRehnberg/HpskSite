@@ -71,22 +71,27 @@
     3: IS_REGION ? 'Bara kretsstyrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara styrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.',
     4: IS_REGION ? 'Bara kretsens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara klubbens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.',
   };
+  // Grupperna följer besökarens vy: vad besökaren ser, inte hur blocket är byggt. `desc` = en rad som säger vad blocket visar.
+  const BLOCK_GROUPS = ['Text och bilder', 'Kontakt', 'Händelser', 'Länkar och dokument', 'Tävlingar och resultat', IS_REGION ? 'Kretsen' : 'Klubben'];
   const BLOCK_TYPES = [
-    { type: 'text', label: 'Text', icon: 'bi-text-paragraph' },
-    { type: 'heading', label: 'Rubrik', icon: 'bi-type-h2' },
-    { type: 'links', label: 'Länkar', icon: 'bi-link-45deg' },
-    { type: 'documents', label: 'Dokument', icon: 'bi-file-earmark-text' },
-    { type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill' },
-    { type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event' },
-    { type: 'news', label: 'Nyheter', icon: 'bi-newspaper' },
-    { type: 'about', label: IS_REGION ? 'Om kretsen (presentationstexten)' : 'Om klubben (presentationstexten)', icon: 'bi-info-circle' },
-    { type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right' },
-    { type: 'image', label: 'Bild', icon: 'bi-image' },
+    { group: 0, type: 'text', label: 'Text', icon: 'bi-text-paragraph', desc: 'Egen text med rubriker, listor och bilder.' },
+    { group: 0, type: 'heading', label: 'Rubrik', icon: 'bi-type-h2', desc: 'En mellanrubrik som delar upp sidan.' },
+    { group: 0, type: 'image', label: 'Bild', icon: 'bi-image', desc: 'En bild med bildtext.' },
+    { group: 0, type: 'about', label: IS_REGION ? 'Om kretsen' : 'Om klubben', icon: 'bi-info-circle', desc: 'Presentationstexten. Den skrivs under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och hämtas vid varje besök.' },
+    { group: 1, type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill', desc: 'Kontaktperson, e-post och telefon. Visas aldrig för alla.' },
+    { group: 2, type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event', desc: 'De närmaste händelserna i kalendern.' },
+    { group: 2, type: 'news', label: 'Nyheter', icon: 'bi-newspaper', desc: 'De senaste nyheterna.' },
+    { group: 3, type: 'links', label: 'Länkar', icon: 'bi-link-45deg', desc: 'Knappar som leder till andra webbplatser.' },
+    { group: 3, type: 'documents', label: 'Dokument', icon: 'bi-file-earmark-text', desc: 'Utvalda dokument ur dokumentarkivet.' },
+    { group: 3, type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right', desc: 'En knapp till en av ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' andra sidor.' },
+    { group: 4, type: 'competitions', label: 'Kommande tävlingar', icon: 'bi-trophy', desc: 'De närmaste tävlingarna med datum och länk.' },
+    { group: 4, type: 'records', label: IS_REGION ? 'Kretsrekord' : 'Klubbrekord', icon: 'bi-award', desc: 'Gällande rekord per gren och klass.' },
+    { group: 5, type: 'ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', desc: IS_REGION ? 'Banorna kretsens klubbar använder.' : 'Klubbens banor, utan karta.' },
     // Kretsens egna block (2d): läses live ur kretsens data, lagrar inget i sidan.
-    { type: 'region-clubs', label: 'Klubbar i kretsen', icon: 'bi-people', region: true },
-    { type: 'region-ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', region: true },
-    { type: 'region-series', label: 'Serier', icon: 'bi-trophy', region: true },
-    { type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true },
+    { group: 5, type: 'region-clubs', label: 'Klubbar i kretsen', icon: 'bi-people', region: true, desc: 'Kretsens klubbar med länk till deras sidor.' },
+    { group: -1, type: 'region-ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', region: true, desc: '' },   // äldre block: nya sidor väljer Skjutbanor ovan; typen finns kvar så att befintliga block ritas
+    { group: 5, type: 'region-series', label: 'Serier', icon: 'bi-trophy', region: true, desc: 'Kretsens egna serier.' },
+    { group: 5, type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true, desc: 'Antal klubbar, banor, serier och kommande tävlingar.' },
   ].filter(t => !t.region || IS_REGION);
   const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
   const minVisFor = type => Math.max(S.visibility, type === 'contact' ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
@@ -977,9 +982,16 @@
       h('div', { class: 'form-text' }, 'Länken syns i menyn när sidan är publicerad, och bara för dem som får läsa sidan.'));
   }
 
+  // Väljaren: blocken grupperade efter vad besökaren ser, med en rad om vad varje block visar. Ingen ny design: samma kort och knappar som resten av sidan.
   function addBlockBar() {
-    return h('div', { class: 'hs-card p-3' }, h('p', { class: 'fw-semibold mb-2' }, 'Lägg till'),
-      h('div', { class: 'd-flex flex-wrap gap-2' }, BLOCK_TYPES.map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t.type) }, h('i', { class: 'bi ' + t.icon + ' me-1' }), t.label))));
+    const groups = BLOCK_GROUPS.map((title, gi) => {
+      const items = BLOCK_TYPES.filter(t => t.group === gi);
+      if (!items.length) return null;
+      return h('div', { class: 'mb-3' }, h('p', { class: 'text-muted small fw-semibold mb-1' }, title),
+        h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2', 'data-add-block': t.type, onclick: () => addBlock(t.type) },
+          h('i', { class: 'bi ' + t.icon + ' mt-1' }), h('span', {}, h('span', { class: 'fw-semibold d-block' }, t.label), h('span', { class: 'small text-muted' }, t.desc))))));
+    }).filter(Boolean);
+    return h('div', { class: 'hs-card p-3', id: 'hsAddBlocks' }, h('p', { class: 'fw-semibold mb-2' }, 'Lägg till'), ...groups);
   }
 
   async function addBlock(type, pos) {
@@ -991,7 +1003,7 @@
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
@@ -1219,6 +1231,12 @@
         field('Så många händelser', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           'Visar de närmaste kommande händelserna i kalendern.'),
         field('Vilka händelser?', bind(h('select', { class: 'form-select w-auto' }, h('option', { value: '', selected: !d.type ? true : null }, 'Alla händelser'), h('option', { value: 'Möte', selected: d.type === 'Möte' ? true : null }, 'Bara möten')), d, 'type', v => v || undefined))];
+      case 'competitions': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        field('Så många tävlingar', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
+          IS_REGION ? 'Visar de närmaste kommande tävlingarna i kretsen. Klubbinterna tävlingar visas aldrig här.' : 'Visar de närmaste kommande tävlingarna där klubben är arrangör. Klubbinterna tävlingar ser bara klubbens medlemmar.')];
+      case 'records': case 'ranges': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        h('p', { class: 'text-muted small mb-0' }, b.type === 'records' ? 'Visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' gällande rekord per gren och klass. Listan hämtas vid varje besök.'
+          : (IS_REGION ? 'Listar skjutbanorna som kretsens klubbar använder.' : 'Listar klubbens skjutbanor (namn och ort), utan karta.') + ' Banor som är markerade som begränsade visas aldrig här.')];
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
       case 'image': return imageEditor(b);

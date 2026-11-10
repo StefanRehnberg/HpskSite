@@ -32,6 +32,9 @@ namespace HpskSite.Tests
                 "region-series|n|n|Y|n|count,title",
                 "region-stats|n|n|Y|n|title",
                 "news|n|Y|n|n|count,title",
+                "competitions|n|n|n|n|count,title",
+                "records|n|n|n|n|title",
+                "ranges|n|n|n|n|title",
                 "about|n|n|n|n|title",
                 "panel|n|n|n|Y|key,zone",
             };
