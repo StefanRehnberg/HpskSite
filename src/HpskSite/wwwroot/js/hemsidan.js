@@ -740,6 +740,10 @@
   }
 
   // ── Bilder: föreningens bildbibliotek. Här laddar ni upp, ser vad som används och tar bort. Bilderna väljs sedan i bildblock, galleri och text. ──
+  // Vyvalet (kort eller lista) är en bekvämlighet per webbläsare; utan lagring blir det kort.
+  const libView = () => { try { return localStorage.getItem('hsLibView') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } };
+  const setLibView = v => { try { localStorage.setItem('hsLibView', v); } catch { /* ingen lagring: valet gäller bara den här visningen */ } };
+
   async function renderLibrary(banner) {   // banner = { cls, text }: ett besked som ska stå kvar i den nya vyn
     setHash('#bilder');
     view(shell('bilder', pageHead('Bilder', 'Laddar …'), h('p', { class: 'text-muted' }, 'Laddar …')));
@@ -760,19 +764,35 @@
       await renderLibrary({ cls: lastErr ? 'danger' : 'success', text: lastErr ? (okCount ? okCount + ' uppladdade. ' : '') + lastErr : okCount === 1 ? 'Bilden är uppladdad.' : okCount + ' bilder är uppladdade.' });
     });
     const pct = f.maxBytes ? Math.min(100, Math.round((f.bytes || 0) * 100 / f.maxBytes)) : 0;
+    // Samma radmeny i kort- och listvyn.
+    const actions = x => rowMenu([
+      ['Öppna bilden', null, { href: x.url }],
+      '-',
+      x.usedBy > 0 ? ['Ta bort (används på en sida)', null, { disabled: true }] : ['Ta bort', async () => {
+        if (!await confirmDialog('Ta bort bilden?', 'Bilden "' + x.name + '" tas bort från biblioteket. Det går inte att ångra.', 'Ta bort', true)) return;
+        const r = await api('POST', 'DeleteFile', { fileId: x.id });
+        await renderLibrary({ cls: r.success ? 'success' : 'danger', text: r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.') });
+      }, { danger: true }]]);
+    const usedText = x => x.usedBy > 0 ? 'Används på ' + x.usedBy + (x.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte';
     const tile = x => h('div', { class: 'hs-imgtile', 'data-file': x.id },
-      h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=320', alt: '', loading: 'lazy' })),
+      h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=640', alt: '', loading: 'lazy' })),
       h('span', { class: 'hs-imgname', title: x.name }, x.name),
       h('span', { class: 'small text-muted' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size)),
-      h('span', { class: 'small ' + (x.usedBy > 0 ? '' : 'text-muted') }, x.usedBy > 0 ? 'Används på ' + x.usedBy + (x.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte'),
-      rowMenu([
-        ['Öppna bilden', null, { href: x.url }],
-        '-',
-        x.usedBy > 0 ? ['Ta bort (används på en sida)', null, { disabled: true }] : ['Ta bort', async () => {
-          if (!await confirmDialog('Ta bort bilden?', 'Bilden "' + x.name + '" tas bort från biblioteket. Det går inte att ångra.', 'Ta bort', true)) return;
-          const r = await api('POST', 'DeleteFile', { fileId: x.id });
-          await renderLibrary({ cls: r.success ? 'success' : 'danger', text: r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.') });
-        }, { danger: true }]]));
+      h('span', { class: 'small ' + (x.usedBy > 0 ? '' : 'text-muted') }, usedText(x)),
+      actions(x));
+    // Klassisk lista: miniatyr, namn, mått, storlek, uppladdad, användning och Åtgärder. Mått och datum göms på telefon.
+    const listRow = x => h('tr', { 'data-file': x.id },
+      h('td', { class: 'ps-3', style: 'width:5.5rem' }, h('a', { href: x.url, target: '_blank', rel: 'noopener', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { class: 'hs-imgthumb', src: x.url + '&w=320', alt: '', loading: 'lazy' }))),
+      h('td', { class: 'text-break' }, h('div', { class: 'fw-semibold' }, x.name), h('div', { class: 'small text-muted d-md-none' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size))),
+      h('td', { class: 'd-none d-md-table-cell text-nowrap' }, x.width + ' × ' + x.height),
+      h('td', { class: 'd-none d-md-table-cell text-nowrap' }, fmtSize(x.size)),
+      h('td', { class: 'd-none d-lg-table-cell text-nowrap' }, x.uploaded ? new Date(x.uploaded).toLocaleDateString('sv-SE') : ''),
+      h('td', { class: x.usedBy > 0 ? '' : 'text-muted' }, usedText(x)),
+      h('td', { class: 'text-end pe-3' }, actions(x)));
+    const mode = libView();
+    const viewToggle = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'Visa bilderna som' },
+      h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'cards' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'cards' ? 'true' : 'false', 'data-lib-view': 'cards', onclick: () => { setLibView('cards'); renderLibrary(); } }, h('i', { class: 'bi bi-grid-3x2-gap me-1', 'aria-hidden': 'true' }), 'Kort'),
+      h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'list' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'list' ? 'true' : 'false', 'data-lib-view': 'list', onclick: () => { setLibView('list'); renderLibrary(); } }, h('i', { class: 'bi bi-list-ul me-1', 'aria-hidden': 'true' }), 'Lista'));
     view(shell('bilder',
       pageHead('Bilder', 'Föreningens bilder. De väljs i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
         ['Ladda upp bilder', () => fileInp.click()]]),
@@ -780,7 +800,14 @@
       f.failed ? alertBox('danger', f.failed) : h('div', { class: 'hs-card p-3 mb-3' },
         h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används (bilder ' + fmtSize(f.imageBytes || 0) + ', dokument ' + fmtSize(f.documentBytes || 0) + ') · högst ' + (f.maxFiles || 0) + ' bilder')),
         h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Använt utrymme', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', style: 'height:.5rem' }, h('div', { class: 'progress-bar' + (pct >= 90 ? ' bg-warning' : ''), style: 'width:' + pct + '%' }))),
-      files.length ? h('div', { class: 'hs-imggrid mb-3' }, files.map(tile)) : h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.'),
+      files.length ? h('div', { class: 'd-flex justify-content-end mb-2' }, viewToggle) : null,
+      !files.length ? h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.')
+        : mode === 'list'
+          ? h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, h('div', { class: 'table-responsive' }, h('table', { class: 'table align-middle hs-list mb-0' },
+              h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, h('span', { class: 'visually-hidden' }, 'Bild')), h('th', {}, 'Namn'), h('th', { class: 'd-none d-md-table-cell' }, 'Mått'), h('th', { class: 'd-none d-md-table-cell' }, 'Storlek'),
+                h('th', { class: 'd-none d-lg-table-cell' }, 'Uppladdad'), h('th', {}, 'Används'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
+              h('tbody', {}, files.map(listRow)))))
+          : h('div', { class: 'hs-imggrid hs-imggrid-wide mb-3' }, files.map(tile)),
       h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.')));
     if (banner) show(banner.cls, banner.text);
   }
