@@ -48,6 +48,9 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Kretsens siffror, eller null utanför en krets.</summary>
         SiteRegionStats? RegionStats() => null;
+
+        /// <summary>Föreningens presentationstext som HTML (klubbens aboutClub, kretsens aboutRegion, annars beskrivningen), eller null när den saknas. Standard: ingen.</summary>
+        string? AboutHtml() => null;
     }
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
@@ -116,6 +119,7 @@ namespace HpskSite.Services.SitePages
                 "contact" => Contact(block, ctx),
                 "image" => Image(block, ctx),
                 "news" => News(block, ctx),
+                "about" => About(block, ctx),
                 "region-clubs" => RegionClubs(block, ctx),
                 "region-ranges" => RegionRanges(block, ctx),
                 "region-series" => RegionSeries(block, ctx),
@@ -143,6 +147,21 @@ namespace HpskSite.Services.SitePages
             html = html.Replace("<img ", "<img class=\"img-fluid\" loading=\"lazy\" ", StringComparison.Ordinal)
                        .Replace("<figure>", "<figure class=\"mb-3\">", StringComparison.Ordinal);
             return Section(b.Id, $"<div class=\"site-text\">{html}</div>");
+        }
+
+        /// <summary>Föreningens presentationstext, live ur noden. Saneras igen här (texten kommer ur en RTE-egenskap, inte ur en betrodd källa). Tom text ger inget block.</summary>
+        private static string About(SiteBlock b, SiteRenderContext ctx)
+        {
+            var html = SiteHtmlSanitizer.Sanitize(ctx.Data.AboutHtml());
+            // Tom text (bara taggar och blanksteg, till exempel <p> </p> ur en RTE) ger inget block, och aldrig en ensam rubrik.
+            if (html.Length == 0 || (string.IsNullOrWhiteSpace(Regex.Replace(html, "<[^>]+>", "")) && !html.Contains("<img", StringComparison.OrdinalIgnoreCase))) return "";
+            html = TableOpen.Replace(html, "<div class=\"table-responsive\"><table class=\"table table-sm\"");
+            html = TableClose.Replace(html, "</table></div>");
+            html = html.Replace("<img ", "<img class=\"img-fluid\" loading=\"lazy\" ", StringComparison.Ordinal)
+                       .Replace("<figure>", "<figure class=\"mb-3\">", StringComparison.Ordinal);
+            var title = b.Data["title"]?.GetValue<string>();
+            var head = string.IsNullOrWhiteSpace(title) ? "" : $"<h2 class=\"h4\">{E(title)}</h2>";
+            return Section(b.Id, head + $"<div class=\"site-text\">{html}</div>");
         }
 
         private static string Heading(SiteBlock b)

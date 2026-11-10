@@ -79,6 +79,7 @@
     { type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill' },
     { type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event' },
     { type: 'news', label: 'Nyheter', icon: 'bi-newspaper' },
+    { type: 'about', label: IS_REGION ? 'Om kretsen (presentationstexten)' : 'Om klubben (presentationstexten)', icon: 'bi-info-circle' },
     { type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right' },
     { type: 'image', label: 'Bild', icon: 'bi-image' },
     // Kretsens egna block (2d): läses live ur kretsens data, lagrar inget i sidan.
@@ -990,7 +991,7 @@
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
@@ -1209,6 +1210,8 @@
       case 'documents': return documentsEditor(b);
       case 'contact': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, 'Visar föreningens kontaktuppgifter. De hämtas vid varje besök och visas aldrig för den som inte är inloggad.')];
+      case 'about': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        h('p', { class: 'text-muted small mb-0' }, 'Visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' presentationstext. Texten skriver ni under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och den hämtas vid varje besök, så ändrar ni den där ändras den här också.')];
       case 'news': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många nyheter', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           'Visar de senaste nyheterna ni publicerat som händelsetypen Nyhet. Varje nyhet har sin egen nivå (vem som får läsa den); den som inte får läsa en nyhet ser den inte i listan.')];

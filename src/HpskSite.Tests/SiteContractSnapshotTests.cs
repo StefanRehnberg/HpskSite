@@ -32,6 +32,7 @@ namespace HpskSite.Tests
                 "region-series|n|n|Y|n|count,title",
                 "region-stats|n|n|Y|n|title",
                 "news|n|Y|n|n|count,title",
+                "about|n|n|n|n|title",
                 "panel|n|n|n|Y|key,zone",
             };
             var actual = SiteBlockSchema.Types.Values

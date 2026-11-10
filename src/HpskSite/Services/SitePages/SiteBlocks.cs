@@ -137,6 +137,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("region-series", false, false, Set("title", "count"), RegionOnly: true),   // kretsens egna serier (live)
             new BlockType("region-stats", false, false, Set("title"), RegionOnly: true),   // kretsens siffror: klubbar, banor, serier, kommande tävlingar
             new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
+            new BlockType("about", false, false, Set("title")),   // föreningens presentationstext (live ur nodens uppgifter, lagras inte): första biblioteksblocket, samma text som Om-panelen
             new BlockType("panel", Personal: false, AllowedInSlot: false, Set("key", "zone"), ConvertedOnly: true),   // en systempanel på en omvandlad sida (schema 2); ritas av vyn ur registret, personnivån ur registret
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
@@ -394,6 +395,7 @@ namespace HpskSite.Services.SitePages
                     o["count"] = count;
                     break;
                 }
+                case "about":
                 case "region-clubs":
                 case "region-ranges":
                 case "region-stats":

@@ -180,7 +180,7 @@ namespace HpskSite.Services.SitePages
                 {
                     case "text": yield return b.Data["html"]?.GetValue<string>(); break;
                     case "heading": yield return b.Data["text"]?.GetValue<string>(); break;
-                    case "documents": case "contact": case "events": case "news": yield return b.Data["title"]?.GetValue<string>(); break;
+                    case "documents": case "contact": case "events": case "news": case "about": yield return b.Data["title"]?.GetValue<string>(); break;
                     case "pagelink": yield return b.Data["label"]?.GetValue<string>(); break;
                     case "image": yield return b.Data["alt"]?.GetValue<string>(); yield return b.Data["caption"]?.GetValue<string>(); break;
                     case "links":

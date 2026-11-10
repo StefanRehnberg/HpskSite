@@ -269,6 +269,14 @@ namespace HpskSite.Services.SitePages
                 return new SiteRegionStats(clubs.Count, RegionRanges().Count, OwnSeries().Count(), upcoming);
             }
 
+            public string? AboutHtml()
+            {
+                if (_node == null) return null;
+                var about = _ownerType == SiteTemplates.Region ? _node.Value<string>("aboutRegion") : _node.Value<string>("aboutClub");
+                var markup = HpskSite.Extensions.RteHelper.SafeMarkup(about);
+                return string.IsNullOrWhiteSpace(markup) ? HpskSite.Extensions.RteHelper.SafeMarkup(_node.Value<string>("description")) : markup;   // samma ordning som Om-panelen: presentationen, annars beskrivningen
+            }
+
             public SiteContactInfo? Contact() => _node == null ? null : new SiteContactInfo(
                 _node.Value<string>("contactPerson"), _node.Value<string>("contactEmail"), _node.Value<string>("contactPhone"));
         }

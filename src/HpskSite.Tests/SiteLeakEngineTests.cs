@@ -59,6 +59,7 @@ namespace HpskSite.Tests
             public IReadOnlyList<SiteRangeInfo> RegionRanges() => new[] { new SiteRangeInfo(1, "KANARIE-BANA-X", "Ort", "/skjutbana/1") };
             public IReadOnlyList<SiteSeriesInfo> RegionSeries(int count) => new[] { new SiteSeriesInfo("KANARIE-SERIE-X", "/serie/", null, null) };
             public SiteRegionStats? RegionStats() => new(7777, 2, 3, 4);
+            public string? AboutHtml() => "<p>KANARIE-OM-X</p>";
         }
 
         /// <summary>Ett block av varje typ med ett unikt märke i det som skrivs ut. Märket för dokument ligger i dokumentens titlar (per nivå).</summary>
@@ -74,13 +75,14 @@ namespace HpskSite.Tests
                 "events" => new JsonObject { ["title"] = canary, ["count"] = 3 },
                 "pagelink" => new JsonObject { ["key"] = "records", ["label"] = canary },
                 "news" => new JsonObject { ["title"] = canary, ["count"] = 3 },
+                "about" => new JsonObject { ["title"] = canary },
                 "image" => new JsonObject { ["ref"] = "file:5", ["alt"] = canary, ["decorative"] = false },
                 _ => new JsonObject(),
             };
             return new SiteBlock("abcd1", type, (SiteVisibility)vis, data);
         }
 
-        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image", "news" };
+        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image", "news", "about" };
         private static readonly string[] RegionTypes = { "region-clubs", "region-ranges", "region-series", "region-stats" };
         private static bool IsPersonal(string type) => type == "contact";
 
@@ -119,7 +121,7 @@ namespace HpskSite.Tests
                 }
                 if (type == "pagelink")
                     blockVisible = blockVisible && Oracle(1, persona.Viewer);              // länken går till Rekord (kräver inloggning) och visas bara för den som får se den
-                var marker = type switch { "contact" => "KANARIE-KONTAKT-X", "events" => "KANARIE-EVENT-X", "news" => "KANARIE-NYHET-X", _ => canary };
+                var marker = type switch { "contact" => "KANARIE-KONTAKT-X", "events" => "KANARIE-EVENT-X", "news" => "KANARIE-NYHET-X", "about" => "KANARIE-OM-X", _ => canary };
                 var seesMarker = html.Contains(marker);
                 if (blockVisible != seesMarker) failures.Add($"{(seesMarker ? "LÄCKA" : "SAKNAS")}: {persona.Name} / sida {pageVis} / {type} block {blockVis}");
                 if (!blockVisible && html.Length != 0) failures.Add($"TOM SAKNAS: {persona.Name} / sida {pageVis} / {type} block {blockVis}: ett dolt block ska ge tomt svar, inte en tom ruta");
