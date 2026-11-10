@@ -81,6 +81,7 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 #hemsidan-app .hs-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 #hemsidan-app .hs-state.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); border: 1px solid var(--bs-border-color); }
 #hemsidan-app .hs-state.wait { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+#hemsidan-app .hs-state.own { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
 #hemsidan-app .hs-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
 #hemsidan-app .hs-panelrow { display: flex; gap: .75rem; justify-content: space-between; align-items: baseline; padding: .6rem 0; border-top: 1px solid var(--bs-border-color); flex-wrap: wrap; }
 #hemsidan-app .hs-panelrow:first-of-type { border-top: 0; }

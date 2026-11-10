@@ -395,7 +395,7 @@
           h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title),
           depth ? h('span', { class: 'visually-hidden' }, ' (undersida)') : null,
           p.childCount ? h('span', { class: 'text-muted small ms-2' }, p.childCount + (p.childCount === 1 ? ' undersida' : ' undersidor')) : null),
-        h('td', {}, (depth ? 'Undersida ' : 'Egen sida '), statusBadge(p)),
+        h('td', {}, h('span', { class: 'hs-state own' }, depth ? 'Undersida' : 'Egen sida'), ' ', statusBadge(p)),
         h('td', {}, visBadge(p.visibility)),
         h('td', { class: 'text-end' }, rowMenu([
           ['Ändra', () => go('#redigera=' + p.id)],
