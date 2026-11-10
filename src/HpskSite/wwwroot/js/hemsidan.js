@@ -203,7 +203,7 @@
     const st = S.st, sys = st.systemPages || [];
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
       onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
-    const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Egen version') : null;
+    const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Anpassad') : null;
     const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'bilder' ? 'Bilder' : active === 'anmalningar' ? 'Anmälningar' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
     return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
       h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
@@ -282,6 +282,21 @@
 
   function statusBadge(p) { return h('span', { class: 'badge ' + (p.status === 'Utkast' ? 'bg-secondary' : p.status === 'Publicerad' ? 'bg-success' : 'bg-warning text-dark') }, p.status); }
   const visBadge = v => h('span', { class: 'badge hs-badge-' + v }, visLabel(v));
+
+  // Kolumnrubrik med en (i)-knapp som öppnar en förklaring. Knappen har en egen etikett så att den går att nå och förstå med tangentbord och skärmläsare.
+  const infoBtn = (label, title, body, extra) => h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline hs-info ' + (extra || 'ms-1'), 'aria-label': 'Förklaring av ' + label, 'data-info': label,
+    onclick: () => modal(title, body, [{ label: 'Stäng', value: true, cls: 'btn-primary' }]) }, h('i', { class: 'bi bi-info-circle', 'aria-hidden': 'true' }));
+  const infoTh = (label, title, body) => h('th', {}, label, infoBtn(label, title, body));
+  const helpRow = (head, text) => h('div', { class: 'mb-3' }, h('div', { class: 'mb-1' }, head), h('div', { class: 'text-muted' }, text));
+  const typeHelp = () => h('div', {},
+    helpRow(h('strong', {}, 'Standard'), 'pistol.nu:s färdiga sida. Innehållet hämtas automatiskt ur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' uppgifter. Ni kan lägga egen text före eller efter.'),
+    helpRow(h('strong', {}, 'Anpassad'), 'Ni har gjort om standardsidan: flyttat, tagit bort eller lagt till egna delar. Besökarna ser er version.'),
+    helpRow(h('strong', {}, 'Anpassad (utkast)'), 'Ni har börjat anpassa sidan men inte publicerat. Besökarna ser fortfarande standardsidan.'),
+    helpRow(h('strong', {}, 'Egen sida'), 'En sida ni har skapat helt själva. Märket visar om den är Publicerad eller ett Utkast, och ett utkast ser bara ni. Undersidor är egna sidor som ligger under Om ' + (IS_REGION ? 'kretsen' : 'Klubben') + '.'));
+  const levelHelp = () => h('div', {},
+    h('p', { class: 'text-muted' }, 'Nivån säger vem som får läsa sidan. Den som inte får se en sida får beskedet att den inte finns (en låst medlemssida visas med ett hänglås).'),
+    ...VIS.map(o => helpRow(h('span', {}, h('strong', {}, o.t), h('span', { class: 'text-muted' }, ' – ' + o.s.charAt(0).toLowerCase() + o.s.slice(1))), CONSEQUENCE[o.v])),
+    h('p', { class: 'small text-muted mb-0' }, 'För en standardsida visas den öppnaste nivån av dess delar. Ett block på en sida kan aldrig vara öppnare än sidan, och block med personuppgifter kan aldrig vara öppna för alla.'));
 
   async function copyLink(url) {
     const full = location.origin + url;
@@ -423,9 +438,11 @@
         ['Ny sida', () => go('#ny'), full ? { disabled: true } : null],
         st.trash.length ? ['Raderade sidor (' + st.trash.length + ')', () => go('#raderade')] : null]),
       h('div', { id: 'hsBanner' }),
+      h('div', { class: 'd-md-none d-flex flex-wrap gap-3 mb-2 small', 'data-phone-help': '1' },
+        h('span', {}, 'Typ ', infoBtn('Typ', 'Vilken typ av sida det är', typeHelp(), 'ms-0')), h('span', {}, 'Vem ser den ', infoBtn('Vem ser den', 'Vem ser sidan?', levelHelp(), 'ms-0'))),
       h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, filter,
         h('table', { class: 'table align-middle hs-list mb-0' },
-          h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, 'Sida'), h('th', {}, 'Vad är det'), h('th', {}, 'Vem ser den'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
+          h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, 'Sida'), infoTh('Typ', 'Vilken typ av sida det är', typeHelp()), infoTh('Vem ser den', 'Vem ser sidan?', levelHelp()), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
           h('tbody', {}, sysRows, ownRows))),
       st.pages.length ? null : h('p', { class: 'text-muted' }, 'Ni har inga egna sidor än. Skapa en för till exempel banregler, klubbens historia eller hitta hit.'),
       h('p', { class: 'text-muted small' }, st.pages.length + ' av högst ' + st.maxPages + ' egna sidor.')));
@@ -438,16 +455,16 @@
     if (!p) return renderList();
     setHash('#sida=' + key);
     const slot = (st.slots || []).find(x => x.key === key);
-    const intro = p.mode === 'asBefore' ? 'Den här sidan visas som den alltid har gjort. Innehållet hämtas automatiskt.' + (p.canConvert ? ' Vill ni ändra hur sidan ser ut? Välj Åtgärder → Ändra den här sidan.' : '')
-      : p.mode === 'draft' ? 'Det finns ett utkast till en egen version. Besökarna ser fortfarande den vanliga sidan.'
-      : 'Sidan är er egen version.' + (p.pendingChanges ? ' Det finns ändringar som inte är publicerade.' : '');
-    const actions = p.mode === 'asBefore' ? [p.canConvert ? ['Ändra den här sidan', () => convertFlow(p)] : null]
+    const intro = p.mode === 'asBefore' ? 'Det här är standardsidan. Innehållet hämtas automatiskt.' + (p.canConvert ? ' Vill ni ändra hur sidan ser ut? Välj Åtgärder → Anpassa den här sidan.' : '')
+      : p.mode === 'draft' ? 'Det finns ett utkast till en anpassad version. Besökarna ser fortfarande standardsidan.'
+      : 'Sidan är anpassad: det är er version som besökarna ser.' + (p.pendingChanges ? ' Det finns ändringar som inte är publicerade.' : '');
+    const actions = p.mode === 'asBefore' ? [p.canConvert ? ['Anpassa den här sidan', () => convertFlow(p)] : null]
       : p.mode === 'draft' ? [['Fortsätt ändra utkastet', () => go('#redigera=' + p.pageId)], '-', ['Avbryt omvandlingen', () => cancelConversionFlow(p.key, p.pageId, p.revision, false)]]   // ingen undersida förrän omvandlingen är publicerad (menyn visar den vanliga sidan)
       : [['Ändra sidan', () => go('#redigera=' + p.pageId)],
          p.key === 'about' && p.pageId ? ['Ny undersida', () => go('#ny=' + p.pageId), (st.pages || []).length >= st.maxPages ? { disabled: true } : null] : null, '-',
          p.key === 'about' && (st.pages || []).some(x => x.parentId === p.pageId)
-           ? ['Gå tillbaka till den vanliga sidan (flytta undersidorna först)', null, { disabled: true }]
-           : ['Gå tillbaka till den vanliga sidan', () => revertFlow(p)]];
+           ? ['Gå tillbaka till standardsidan (flytta undersidorna först)', null, { disabled: true }]
+           : ['Gå tillbaka till standardsidan', () => revertFlow(p)]];
     const panelsCard = p.mode === 'asBefore' && p.panels.length
       ? h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-2' }, 'Det här visas på sidan'),
           p.panels.map(x => h('div', { class: 'hs-panelrow' }, h('div', {}, h('strong', {}, x.name), h('div', { class: 'text-muted small' }, x.description)),
@@ -475,7 +492,7 @@
       pageHead(p.label, [modePill(p), ' ', intro], actions),
       h('div', { id: 'hsBanner' }),
       ownCard, panelsCard,p.mode === 'asBefore' ? whoSeesCard(() => ({ templateKey: p.key }), p.canConvert
-        ? { change: { intro: 'Vill du bestämma vem som ser delarna av sidan?', label: 'Ändra den här sidan', run: () => convertFlow(p) } }
+        ? { change: { intro: 'Vill du bestämma vem som ser delarna av sidan?', label: 'Anpassa den här sidan', run: () => convertFlow(p) } }
         : { note: 'Vem som ser den här sidan går inte att ändra.' }) : null, p.mode === 'asBefore' ? slotCard(slot) : null));
     renderBanner();
   }
@@ -487,7 +504,7 @@
     go('#sida=' + key);
   }
   async function convertFlow(p) {
-    const ok = await confirmDialog('Ändra den här sidan?', 'Vi gör en kopia av hur "' + p.label + '" ser ut i dag. I kopian kan ni flytta och ta bort innehåll och lägga till eget. Besökarna ser inte kopian förrän ni publicerar den. Tills dess ser de er vanliga sida, och ni kan ångra när ni vill.', 'Ändra sidan', false);
+    const ok = await confirmDialog('Anpassa den här sidan?', 'Vi gör en kopia av hur "' + p.label + '" ser ut i dag. I kopian kan ni flytta och ta bort innehåll och lägga till eget. Besökarna ser inte kopian förrän ni publicerar den. Tills dess ser de standardsidan, och ni kan ångra när ni vill.', 'Anpassa sidan', false);
     if (!ok) return;
     const r = await api('POST', 'ConvertPage', { templateKey: p.key });
     if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Sidan kunde inte göras om.' }; renderSystemPage(p.key); return; }
@@ -495,26 +512,26 @@
     go('#redigera=' + r.pageId);
   }
   async function cancelConversionFlow(key, pageId, revision, fromEditor) {
-    const ok = await confirmDialog('Avbryta?', 'Utkastet kastas. Besökarna ser som förut den vanliga sidan, och den ändras inte.', 'Kasta utkastet', true);
+    const ok = await confirmDialog('Avbryta?', 'Utkastet kastas. Besökarna ser fortfarande standardsidan, och den ändras inte.', 'Kasta utkastet', true);
     if (!ok) return;
     if (fromEditor) { clearTimeout(S.timer); S.dirty = false; }
     const r = await api('POST', 'CancelConversion', { pageId, expectedRevision: revision });
     if (!r.success) { setBanner('danger', r.message || 'Det gick inte att avbryta.'); return; }
-    afterChange(key, { cls: 'success', text: 'Utkastet är kastat. Sidan är som förut.' });
+    afterChange(key, { cls: 'success', text: 'Utkastet är kastat. Besökarna ser standardsidan.' });
   }
   async function revertFlow(p) {
-    const ok = await confirmDialog('Gå tillbaka till den vanliga sidan?', 'Besökarna ser den vanliga sidan direkt. Det ni har ändrat på "' + p.label + '" försvinner från sajten. Ni kan göra om sidan igen, men då börjar ni från den vanliga sidan.', 'Gå tillbaka till den vanliga sidan', true);
+    const ok = await confirmDialog('Gå tillbaka till standardsidan?', 'Besökarna ser standardsidan direkt. Det ni har ändrat på "' + p.label + '" försvinner från sajten. Ni kan anpassa sidan igen, men då börjar ni från standardsidan.', 'Gå tillbaka till standardsidan', true);
     if (!ok) return;
     const r = await api('POST', 'RevertConversion', { pageId: p.pageId, expectedRevision: p.revision });
     if (!r.success) { S.banner = { cls: 'danger', text: r.message || 'Det gick inte att gå tillbaka.' }; renderSystemPage(p.key); return; }
-    afterChange(p.key, { cls: 'success', text: 'Sidan är som förut. Besökarna ser den vanliga sidan.' });
+    afterChange(p.key, { cls: 'success', text: 'Sidan är standardsidan igen. Besökarna ser den.' });
   }
 
   // Egen text före/efter en vanlig sida: en mallkopia per sida. Sidan är exakt som förut utan den.
   function slotCard(x) {
     if (!x) return null;
     return h('div', { class: 'hs-card p-3 mb-3' }, h('h2', { class: 'h5 mb-1' }, 'Egen text på sidan'),
-      h('p', { class: 'text-muted mb-2' }, 'Skriv egen text före eller efter innehållet. Sidan är som förut tills ni lägger till något.'),
+      h('p', { class: 'text-muted mb-2' }, 'Skriv egen text före eller efter innehållet. Sidan är oförändrad tills ni lägger till något.'),
       h('div', { class: 'd-flex flex-wrap gap-2 align-items-center' },
         x.page ? [visBadge(x.page.visibility), statusBadge({ status: x.page.status })] : h('span', { class: 'text-muted' }, 'Ingen egen text'),
         h('button', { class: 'btn btn-sm btn-outline-secondary ms-auto', onclick: () => x.page ? go('#redigera=' + x.page.id) : createSlot(x) }, x.page ? 'Ändra' : 'Lägg till egen text')));
@@ -1194,8 +1211,8 @@
     const el = document.getElementById('hsBanner'); if (!el) return;
     const kids = [];
     if (S.banner) kids.push(h('div', { class: 'alert alert-' + S.banner.cls + ' d-flex flex-wrap gap-2 align-items-center' }, h('span', { class: 'me-auto' }, S.banner.text), S.banner.extra || null));
-    else if (S.kind === 'converted' && !S.convertedLive) kids.push(h('div', { class: 'alert alert-secondary d-flex flex-wrap gap-2 align-items-center' }, h('span', { class: 'me-auto' }, 'Utkast. Besökarna ser fortfarande er vanliga sida.'),
-      h('a', { href: OWNER.url, target: '_blank', rel: 'noopener' }, 'Se den vanliga sidan')));
+    else if (S.kind === 'converted' && !S.convertedLive) kids.push(h('div', { class: 'alert alert-secondary d-flex flex-wrap gap-2 align-items-center' }, h('span', { class: 'me-auto' }, 'Utkast. Besökarna ser fortfarande standardsidan.'),
+      h('a', { href: OWNER.url, target: '_blank', rel: 'noopener' }, 'Se standardsidan')));
     else if (S.published && (S.dirty || S.hasUnpublished)) kids.push(h('div', { class: 'alert alert-info' }, 'Du har ändringar som inte är publicerade. Besökarna ser fortfarande den publicerade versionen.'));
     else if (!S.published) kids.push(h('div', { class: 'alert alert-secondary' }, 'Sidan är inte publicerad än. Ingen annan kan se den förrän du publicerar.'));
     // En omgjord sida där varje block är för styrelsen eller högre: ingen annan ser något, och fliken försvinner för dem.

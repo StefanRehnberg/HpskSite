@@ -247,7 +247,7 @@ namespace HpskSite.Tests
             // En vanlig sparning kan inte tyst göra tillbaka sidan.
             var silent = SitePageWriter.SaveDraft(f.Db, facts, a.PageId, Club, Owner, p.Revision + 1, "Rekord", Slots(), null, Admin, Now);
             Assert.Equal(SiteWriteStatus.Invalid, silent.Status);
-            Assert.Contains("Lägg tillbaka", silent.Message);
+            Assert.Contains("Gå tillbaka till standardsidan", silent.Message);
         }
 
         [SqlFact]

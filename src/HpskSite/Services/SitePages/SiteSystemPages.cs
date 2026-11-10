@@ -5,7 +5,7 @@ namespace HpskSite.Services.SitePages
 
     /// <summary>
     /// En vanlig sida så som Hemsidan visar den. <see cref="PageId"/>/<see cref="Revision"/> finns när ägaren har en rad för sidan (mallkopia), annars null.
-    /// <see cref="PendingChanges"/> = en omgjord sida med ändringar som inte är publicerade. <see cref="CanConvert"/> = knappen "Ändra den här sidan" får visas.
+    /// <see cref="PendingChanges"/> = en omgjord sida med ändringar som inte är publicerade. <see cref="CanConvert"/> = knappen "Anpassa den här sidan" får visas.
     /// </summary>
     public sealed record SystemPageState(string Key, string Label, SystemPageMode Mode, int? PageId, int? Revision, bool PendingChanges, bool CanConvert, int Level = 0);
 
@@ -32,14 +32,14 @@ namespace HpskSite.Services.SitePages
         /// <summary>Orden användaren ser för läget.</summary>
         public static string Word(SystemPageMode mode) => mode switch
         {
-            SystemPageMode.Converted => "Egen version",
-            SystemPageMode.Draft => "Utkast, syns inte än",
-            _ => "Som förut",
+            SystemPageMode.Converted => "Anpassad",
+            SystemPageMode.Draft => "Anpassad (utkast)",
+            _ => "Standard",
         };
 
         /// <summary>
         /// Alla vanliga sidor (aldrig Admin) med sitt läge. <paramref name="canWrite"/> = ägarens EGEN admin (inte stödläge) och <paramref name="convertEnabled"/> = brytare 3:
-        /// bara då får "Ändra den här sidan" visas, och bara för en sida som inte redan är omgjord eller på väg att bli det. Servern prövar allt på nytt vid skrivning.
+        /// bara då får "Anpassa den här sidan" visas, och bara för en sida som inte redan är omgjord eller på väg att bli det. Servern prövar allt på nytt vid skrivning.
         /// </summary>
         public static IReadOnlyList<SystemPageState> Describe(string ownerType, IReadOnlyList<SitePageListItem> copies, bool convertEnabled, bool canWrite) =>
             SiteTemplates.For(ownerType).Pages.Where(p => !p.IsAdmin).OrderBy(p => p.Order).Select(p =>

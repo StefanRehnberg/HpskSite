@@ -49,7 +49,7 @@ namespace HpskSite.Tests
         [Fact]
         public void Läget_har_ett_ord_och_en_kod_som_klienten_kan_lita_på()
         {
-            Assert.Equal(new[] { "Som förut", "Utkast, syns inte än", "Egen version" }, new[] { SystemPageMode.AsBefore, SystemPageMode.Draft, SystemPageMode.Converted }.Select(SiteSystemPages.Word));
+            Assert.Equal(new[] { "Standard", "Anpassad (utkast)", "Anpassad" }, new[] { SystemPageMode.AsBefore, SystemPageMode.Draft, SystemPageMode.Converted }.Select(SiteSystemPages.Word));
             Assert.Equal(new[] { "asBefore", "draft", "converted" }, new[] { SystemPageMode.AsBefore, SystemPageMode.Draft, SystemPageMode.Converted }.Select(SiteSystemPages.Code));
         }
 

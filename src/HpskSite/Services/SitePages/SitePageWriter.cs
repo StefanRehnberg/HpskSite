@@ -125,7 +125,7 @@ namespace HpskSite.Services.SitePages
             var draft = SitePageStore.GetDraft(db, pageId, ownerType, ownerId);
             var published = SitePageStore.GetPublished(db, pageId, ownerType, ownerId);
             if (published != null && published.SchemaVersion == SiteBlockSchema.ConvertedSchemaVersion)
-                return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Sidan är redan omgjord. Använd Lägg tillbaka för att gå tillbaka till den vanliga sidan.");
+                return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Sidan är redan omgjord. Använd Gå tillbaka till standardsidan.");
             if (draft == null || draft.SchemaVersion != SiteBlockSchema.ConvertedSchemaVersion)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Ingen omvandling pågår.");
             if (SitePageStore.ChildCount(db, pageId) > 0)
@@ -505,8 +505,8 @@ namespace HpskSite.Services.SitePages
                         Errors: new[] { new SiteContentError("schema", "Sidan har inte gjorts om.") }, Message: "Sidan har inte gjorts om.");
                 if (kind != SiteContentKind.ConvertedPage && converted)
                     return new SiteWriteResult(SiteWriteStatus.Invalid, page.Id, page.Revision,
-                        Errors: new[] { new SiteContentError("schema", "Sidan är omgjord. Använd Lägg tillbaka för att gå tillbaka till den vanliga sidan.") },
-                        Message: "Sidan är omgjord. Använd Lägg tillbaka för att gå tillbaka till den vanliga sidan.");
+                        Errors: new[] { new SiteContentError("schema", "Sidan är omgjord. Använd Gå tillbaka till standardsidan.") },
+                        Message: "Sidan är omgjord. Använd Gå tillbaka till standardsidan.");
             }
             content = SiteBlockSchema.Parse(blocksJson, kind, vis, SiteTemplates.For(ownerType), page.TemplateKey);
             if (!content.Ok)
