@@ -244,16 +244,112 @@ namespace HpskSite.Controllers
             var documentBytes = docs.GetDocumentBytes(docType, g.OwnerId);
             var limitBytes = docs.GetStorageLimitBytes(docType, g.OwnerId);
             var bytes = imageBytes + documentBytes;
+            // Bilder med beskrivning, och albumen (id, namn och bildernas ordning). Är albummigreringen inte körd faller biblioteket tillbaka på den vanliga listan utan album.
+            List<SiteLibraryFile> files; object albums; var albumsReady = true;
+            try
+            {
+                files = SiteImageAlbumStore.Files(scope.Database, g.OwnerType, g.OwnerId);
+                var links = SiteImageAlbumStore.Links(scope.Database, g.OwnerType, g.OwnerId).GroupBy(l => l.AlbumId).ToDictionary(x => x.Key, x => x.Select(l => l.FileId).ToList());
+                albums = SiteImageAlbumStore.Albums(scope.Database, g.OwnerType, g.OwnerId).Select(a => new { id = a.Id, name = a.Name, fileIds = links.GetValueOrDefault(a.Id) ?? new List<int>() }).ToList();
+            }
+            catch (Microsoft.Data.SqlClient.SqlException)
+            {
+                albumsReady = false; albums = Array.Empty<object>();
+                files = SiteFiles.List(scope.Database, g.OwnerType, g.OwnerId).Select(f => new SiteLibraryFile { Id = f.Id, FileName = f.FileName, Size = f.Size, Width = f.Width, Height = f.Height, UploadedDate = f.UploadedDate, UsedBy = f.UsedBy }).ToList();
+            }
             return Json(new
             {
                 success = true,
-                files = SiteFiles.List(scope.Database, g.OwnerType, g.OwnerId).Select(f => new
+                files = files.Select(f => new
                 {
-                    id = f.Id, name = f.FileName, size = f.Size, width = f.Width, height = f.Height, uploaded = f.UploadedDate, usedBy = f.UsedBy,
+                    id = f.Id, name = f.FileName, description = f.Description, size = f.Size, width = f.Width, height = f.Height, uploaded = f.UploadedDate, usedBy = f.UsedBy,
                     url = SiteImages.UrlFor(f.Id),
                 }),
+                albums, albumsReady, maxAlbums = SiteImageAlbumRules.MaxAlbums,
                 count, bytes, imageBytes, documentBytes, maxBytes = limitBytes, maxFiles = SiteImages.MaxFilesPerOwner,   // bytes = bilder + dokument, mot samma gräns
             });
+        }
+
+        // ── Album i bildbiblioteket (Hemsidan → Bilder). Skrivningar prövas mot ägaren; ett album- eller bild-id utifrån slås alltid upp mot ägaren. ──
+        private IActionResult AlbumWrite(GateResult g, Func<NPoco.IDatabase, DateTime, SiteImageAlbumWriter.Result> act, bool withId = false)
+        {
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:albums", WritesPerMinute * 3, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteImageAlbumWriter.Result r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = act(scope.Database, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return r.Ok ? Json(new { success = true, id = r.Id, count = r.Count }) : Fail(r.Message ?? "Det gick inte.");
+        }
+
+        /// <summary>Skapar ett album (<c>albumId</c> utelämnad) eller byter namn på ett.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SaveAlbum(string ownerType, int ownerId, int? albumId, string? name)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.Save(db, g.OwnerType, g.OwnerId, albumId, name, g.Actor!, now));
+        }
+
+        /// <summary>Tar bort ett album. Bilderna i det finns kvar i biblioteket.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> DeleteAlbum(string ownerType, int ownerId, int albumId)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.Delete(db, g.OwnerType, g.OwnerId, albumId, g.Actor!, now));
+        }
+
+        /// <summary>Lägger bilderna (kommaseparerade id:n) sist i albumet.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> AlbumAdd(string ownerType, int ownerId, int albumId, string? fileIds)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            var ids = SiteImageAlbumRules.ParseIds(fileIds);
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.Add(db, g.OwnerType, g.OwnerId, albumId, ids, g.Actor!, now));
+        }
+
+        /// <summary>Tar bilderna ur albumet (de finns kvar i biblioteket).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> AlbumRemove(string ownerType, int ownerId, int albumId, string? fileIds)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            var ids = SiteImageAlbumRules.ParseIds(fileIds);
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.Remove(db, g.OwnerType, g.OwnerId, albumId, ids, g.Actor!, now));
+        }
+
+        /// <summary>Flyttar en bild i albumet: up, down, first eller last.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> AlbumMove(string ownerType, int ownerId, int albumId, int fileId, string? to)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.Move(db, g.OwnerType, g.OwnerId, albumId, fileId, to, g.Actor!, now));
+        }
+
+        /// <summary>Byter bildens namn och beskrivning i biblioteket (filen på disk rörs inte).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> UpdateImage(string ownerType, int ownerId, int fileId, string? name, string? description)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            return AlbumWrite(g, (db, now) => SiteImageAlbumWriter.UpdateImage(db, g.OwnerType, g.OwnerId, fileId, name, description, g.Actor!, now));
         }
 
         /// <summary>Laddar upp en bild. Bilden avkodas och skrivs om (metadata bort, förminskas), lagras privat och får en rad; kvoten prövas under lås.</summary>

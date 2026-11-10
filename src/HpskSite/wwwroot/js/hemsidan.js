@@ -739,74 +739,273 @@
     });
   }
 
-  // ── Bilder: föreningens bildbibliotek. Här laddar ni upp, ser vad som används och tar bort. Bilderna väljs sedan i bildblock, galleri och text. ──
+  // ── Bilder: föreningens bildbibliotek. Här laddar ni upp, sorterar in i album, söker, ser vad som används och tar bort. Bilderna väljs sedan i bildblock, galleri och text. ──
   // Vyvalet (kort eller lista) är en bekvämlighet per webbläsare; utan lagring blir det kort.
   const libView = () => { try { return localStorage.getItem('hsLibView') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } };
   const setLibView = v => { try { localStorage.setItem('hsLibView', v); } catch { /* ingen lagring: valet gäller bara den här visningen */ } };
+  // Bibliotekets val (album, sökning, sortering, markerade) lever så länge sidan är öppen.
+  const libState = () => (S.lib = S.lib || { album: 'all', q: '', sort: 'new', sel: new Set() });
+  const menuBtn = (label, items, cls, attrs) => h('div', { class: 'dropdown' },
+    h('button', Object.assign({ class: 'btn btn-sm dropdown-toggle ' + (cls || 'btn-outline-primary'), type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, attrs || {}), label),
+    menuList(items));
+  const sortByName = (a, b) => a.name.localeCompare(b.name, 'sv');
+  const swCount = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
   async function renderLibrary(banner) {   // banner = { cls, text }: ett besked som ska stå kvar i den nya vyn
     setHash('#bilder');
     view(shell('bilder', pageHead('Bilder', 'Laddar …'), h('p', { class: 'text-muted' }, 'Laddar …')));
     await loadFiles();
-    const f = S.files, files = f.files || [];
+    const f = S.files, files = f.files || [], albums = f.albums || [], L = libState();
+    const albumsOn = f.albumsReady !== false;
+    const byId = new Map(albums.map(a => [a.id, a]));
+    const byFile = new Map(files.map(x => [x.id, x]));
+    const memberOf = new Map();
+    for (const a of albums) for (const id of a.fileIds) { if (!memberOf.has(id)) memberOf.set(id, []); memberOf.get(id).push(a.id); }
+    if (typeof L.album === 'number' && !byId.has(L.album)) L.album = 'all';
+    if (L.sort === 'manual' && typeof L.album !== 'number') L.sort = 'new';
+    for (const id of [...L.sel]) if (!byFile.has(id)) L.sel.delete(id);
+    const albumNames = x => (memberOf.get(x.id) || []).map(i => byId.get(i).name);
     const msg = h('div', { id: 'hsBanner' });
     const show = (cls, text) => msg.replaceChildren(text ? alertBox(cls, text) : '');
+    const again = async (cls, text) => { await renderLibrary(cls ? { cls, text } : undefined); };
+
+    // ── Uppladdning ──
     const fileInp = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', multiple: true, class: 'd-none', 'aria-label': 'Välj bilder att ladda upp' });
     fileInp.addEventListener('change', async () => {
       const list = [...fileInp.files]; fileInp.value = ''; if (!list.length) return;
-      let okCount = 0, lastErr = null;
+      let okCount = 0, lastErr = null; const added = [];
       for (let i = 0; i < list.length; i++) {
         show('info', list.length > 1 ? 'Laddar upp ' + (i + 1) + ' av ' + list.length + ' …' : 'Laddar upp …');
         const r = await uploadImage(list[i]);
         if (!r.success) { lastErr = list[i].name + ': ' + (r.message || 'Det gick inte att ladda upp bilden.'); if (r.code === 'quota' || r.code === 'rate') break; continue; }
-        okCount++;
+        okCount++; added.push(r.id);
       }
-      await renderLibrary({ cls: lastErr ? 'danger' : 'success', text: lastErr ? (okCount ? okCount + ' uppladdade. ' : '') + lastErr : okCount === 1 ? 'Bilden är uppladdad.' : okCount + ' bilder är uppladdade.' });
+      // Är ett album öppet hamnar de nya bilderna direkt i det.
+      let note = '';
+      if (typeof L.album === 'number' && added.length) {
+        const r = await api('POST', 'AlbumAdd', { albumId: L.album, fileIds: added.join(',') });
+        note = r.success ? ' De ligger i albumet.' : ' De kunde inte läggas i albumet: ' + (r.message || '');
+      }
+      await again(lastErr ? 'danger' : 'success', lastErr ? (okCount ? okCount + ' uppladdade. ' : '') + lastErr : (okCount === 1 ? 'Bilden är uppladdad.' : okCount + ' bilder är uppladdade.') + note);
     });
     const pct = f.maxBytes ? Math.min(100, Math.round((f.bytes || 0) * 100 / f.maxBytes)) : 0;
-    // Samma radmeny i kort- och listvyn.
-    const actions = x => rowMenu([
-      ['Öppna bilden', null, { href: x.url }],
-      '-',
-      x.usedBy > 0 ? ['Ta bort (används på en sida)', null, { disabled: true }] : ['Ta bort', async () => {
-        if (!await confirmDialog('Ta bort bilden?', 'Bilden "' + x.name + '" tas bort från biblioteket. Det går inte att ångra.', 'Ta bort', true)) return;
-        const r = await api('POST', 'DeleteFile', { fileId: x.id });
-        await renderLibrary({ cls: r.success ? 'success' : 'danger', text: r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.') });
-      }, { danger: true }]]);
+
+    // ── Album: skapa, byta namn, ta bort, lägga i och ta ur ──
+    const askName = (title, initial, saveLabel, run) => {
+      const inp = h('input', { class: 'form-control', maxlength: '80', value: initial || '', placeholder: 'Till exempel: Klubbmästerskap 2025', 'data-album-name': '1' });
+      formDialog(title, [field('Albumets namn', inp)], saveLabel, async () => {
+        const name = inp.value.trim();
+        if (!name) return 'Skriv ett namn på albumet.';
+        const r = await run(name);
+        if (r) return r;
+        return null;
+      });
+    };
+    const newAlbum = ids => askName('Nytt album', '', 'Skapa albumet', async name => {
+      const r = await api('POST', 'SaveAlbum', { name });
+      if (!r.success) return r.message || 'Det gick inte att skapa albumet.';
+      let text = 'Albumet "' + name + '" är skapat.';
+      if (ids && ids.length) {
+        const a = await api('POST', 'AlbumAdd', { albumId: r.id, fileIds: ids.join(',') });
+        text = a.success ? 'Albumet "' + name + '" är skapat med ' + swCount(a.count, 'bild', 'bilder') + '.' : text + ' Bilderna kunde inte läggas i det: ' + (a.message || '');
+        L.sel.clear();
+      }
+      L.album = r.id; L.sort = 'manual'; L.q = '';
+      await again('success', text);
+      return null;
+    });
+    const renameAlbum = a => askName('Byt namn på albumet', a.name, 'Spara', async name => {
+      const r = await api('POST', 'SaveAlbum', { albumId: a.id, name });
+      if (!r.success) return r.message || 'Det gick inte att byta namn.';
+      await again('success', 'Albumet heter nu "' + name + '".');
+      return null;
+    });
+    const deleteAlbum = async a => {
+      if (!await confirmDialog('Ta bort albumet?', 'Albumet "' + a.name + '" tas bort. Bilderna finns kvar i biblioteket och på de sidor där de används.', 'Ta bort albumet', true)) return;
+      const r = await api('POST', 'DeleteAlbum', { albumId: a.id });
+      if (r.success) L.album = 'all';
+      await again(r.success ? 'success' : 'danger', r.success ? 'Albumet är borttaget.' : (r.message || 'Det gick inte att ta bort albumet.'));
+    };
+    const addTo = async (a, ids) => {
+      const r = await api('POST', 'AlbumAdd', { albumId: a.id, fileIds: ids.join(',') });
+      if (r.success) L.sel.clear();
+      await again(r.success ? 'success' : 'danger', r.success ? (r.count ? swCount(r.count, 'bild lades', 'bilder lades') + ' i albumet "' + a.name + '".' : 'Bilderna låg redan i albumet "' + a.name + '".') : (r.message || 'Det gick inte att lägga bilderna i albumet.'));
+    };
+    const removeFrom = async (a, ids) => {
+      const r = await api('POST', 'AlbumRemove', { albumId: a.id, fileIds: ids.join(',') });
+      if (r.success) L.sel.clear();
+      await again(r.success ? 'success' : 'danger', r.success ? swCount(r.count, 'bild togs', 'bilder togs') + ' ur albumet. De finns kvar i biblioteket.' : (r.message || 'Det gick inte att ta bilderna ur albumet.'));
+    };
+    const addMenu = ids => [...albums.map(a => ['Till ' + a.name, () => addTo(a, ids)]), albums.length ? '-' : null, ['Nytt album …', () => newAlbum(ids)]];
+
+    // ── En bilds egen dialog: namn, beskrivning och vilka album den ligger i ──
+    const editImage = x => {
+      const name = h('input', { class: 'form-control', maxlength: '200', value: x.name });
+      const desc = h('textarea', { class: 'form-control', rows: '2', maxlength: '200', placeholder: 'Till exempel: Prisutdelningen efter finalen' }, x.description || '');
+      const mine = new Set(memberOf.get(x.id) || []);
+      const boxes = albums.map(a => {
+        const cb = h('input', { type: 'checkbox', class: 'form-check-input me-2', checked: mine.has(a.id), 'data-album-box': a.id });
+        return [a, cb, h('label', { class: 'list-group-item d-flex align-items-center' }, cb, a.name)];
+      });
+      const fresh = h('input', { class: 'form-control', maxlength: '80', placeholder: 'Nytt album (valfritt)', 'aria-label': 'Lägg även i ett nytt album' });
+      formDialog('Bilden: namn, beskrivning och album', [
+        field('Namn', name), field('Beskrivning (valfri)', desc, 'Syns i listan och går att söka på. Bildtext och beskrivning för den som lyssnar skriver du där bilden används.'),
+        albums.length ? h('p', { class: 'form-label small fw-semibold mb-1 mt-2' }, 'Ligger i albumen') : null,
+        albums.length ? h('div', { class: 'list-group mb-2' }, boxes.map(b => b[2])) : null, field('', fresh)], 'Spara', async () => {
+        const r = await api('POST', 'UpdateImage', { fileId: x.id, name: name.value, description: desc.value });
+        if (!r.success) return r.message || 'Det gick inte att spara.';
+        for (const [a, cb] of boxes) {
+          if (cb.checked === mine.has(a.id)) continue;
+          const m = await api('POST', cb.checked ? 'AlbumAdd' : 'AlbumRemove', { albumId: a.id, fileIds: String(x.id) });
+          if (!m.success) return m.message || 'Det gick inte att ändra albumen.';
+        }
+        const nn = fresh.value.trim();
+        if (nn) {
+          const c = await api('POST', 'SaveAlbum', { name: nn });
+          if (!c.success) return c.message || 'Det gick inte att skapa albumet.';
+          const m = await api('POST', 'AlbumAdd', { albumId: c.id, fileIds: String(x.id) });
+          if (!m.success) return m.message || 'Det gick inte att lägga bilden i albumet.';
+        }
+        await again('success', 'Ändringen är sparad.');
+        return null;
+      });
+    };
+
+    // ── Vad som visas just nu: album, sökning, sortering ──
+    const visible = () => {
+      let list = files;
+      const inAlbum = typeof L.album === 'number' ? byId.get(L.album) : null;
+      if (L.album === 'none') list = list.filter(x => !memberOf.has(x.id));
+      else if (inAlbum) list = inAlbum.fileIds.map(id => byFile.get(id)).filter(Boolean);
+      const q = L.q.trim().toLowerCase();
+      if (q) list = list.filter(x => (x.name + ' ' + (x.description || '') + ' ' + albumNames(x).join(' ')).toLowerCase().includes(q));
+      list = list.slice();
+      if (L.sort === 'manual' && inAlbum) return list;
+      if (L.sort === 'old') return list.sort((a, b) => a.id - b.id);
+      if (L.sort === 'name') return list.sort(sortByName);
+      return list.sort((a, b) => b.id - a.id);
+    };
+
     const usedText = x => x.usedBy > 0 ? 'Används på ' + x.usedBy + (x.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte';
-    const tile = x => h('div', { class: 'hs-imgtile', 'data-file': x.id },
-      h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=640', alt: '', loading: 'lazy' })),
-      h('span', { class: 'hs-imgname', title: x.name }, x.name),   // storlek, mått och användning visas i listvyn
-      actions(x));
-    // Klassisk lista: miniatyr, namn, mått, storlek, uppladdad, användning och Åtgärder. Mått och datum göms på telefon.
-    const listRow = x => h('tr', { 'data-file': x.id },
-      h('td', { class: 'ps-3', style: 'width:5.5rem' }, h('a', { href: x.url, target: '_blank', rel: 'noopener', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { class: 'hs-imgthumb', src: x.url + '&w=320', alt: '', loading: 'lazy' }))),
-      h('td', { class: 'text-break' }, h('div', { class: 'fw-semibold' }, x.name), h('div', { class: 'small text-muted d-md-none' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size))),
-      h('td', { class: 'd-none d-md-table-cell text-nowrap' }, x.width + ' × ' + x.height),
-      h('td', { class: 'd-none d-md-table-cell text-nowrap' }, fmtSize(x.size)),
-      h('td', { class: 'd-none d-lg-table-cell text-nowrap' }, x.uploaded ? new Date(x.uploaded).toLocaleDateString('sv-SE') : ''),
+    const toggleSel = (x, on) => { if (on) L.sel.add(x.id); else L.sel.delete(x.id); paint(); };
+    const checkbox = x => h('input', { type: 'checkbox', class: 'form-check-input hs-imgcheck', checked: L.sel.has(x.id), 'aria-label': 'Markera ' + x.name, 'data-sel': x.id, onchange: e => toggleSel(x, e.target.checked) });
+    // Samma radmeny i kort- och listvyn.
+    const actions = (x, list) => {
+      const inAlbum = typeof L.album === 'number' ? byId.get(L.album) : null;
+      const manual = !!inAlbum && L.sort === 'manual' && !L.q.trim();
+      const i = list.indexOf(x);
+      const mv = to => async () => { const r = await api('POST', 'AlbumMove', { albumId: inAlbum.id, fileId: x.id, to }); await again(r.success ? '' : 'danger', r.success ? '' : (r.message || 'Det gick inte att flytta bilden.')); };
+      return rowMenu([
+        ['Öppna bilden', null, { href: x.url }],
+        albumsOn ? ['Byt namn, beskrivning och album …', () => editImage(x)] : ['Byt namn och beskrivning …', () => editImage(x)],
+        manual ? '-' : null,
+        manual ? ['Flytta först', mv('first'), { disabled: i === 0 }] : null,
+        manual ? ['Flytta upp', mv('up'), { disabled: i === 0 }] : null,
+        manual ? ['Flytta ner', mv('down'), { disabled: i === list.length - 1 }] : null,
+        manual ? ['Flytta sist', mv('last'), { disabled: i === list.length - 1 }] : null,
+        inAlbum ? '-' : null,
+        inAlbum ? ['Ta ur albumet', () => removeFrom(inAlbum, [x.id])] : null,
+        '-',
+        x.usedBy > 0 ? ['Ta bort (används på en sida)', null, { disabled: true }] : ['Ta bort', async () => {
+          if (!await confirmDialog('Ta bort bilden?', 'Bilden "' + x.name + '" tas bort från biblioteket och från alla album. Det går inte att ångra.', 'Ta bort', true)) return;
+          const r = await api('POST', 'DeleteFile', { fileId: x.id });
+          L.sel.delete(x.id);
+          await again(r.success ? 'success' : 'danger', r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.'));
+        }, { danger: true }]]);
+    };
+    const tile = (x, list) => h('div', { class: 'hs-imgtile' + (L.sel.has(x.id) ? ' sel' : ''), 'data-file': x.id },
+      h('div', { class: 'hs-imgwrap' }, checkbox(x),
+        h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=640', alt: '', loading: 'lazy' }))),
+      h('span', { class: 'hs-imgname', title: x.name + (x.description ? ' – ' + x.description : '') }, x.name),   // storlek, mått och användning visas i listvyn
+      actions(x, list));
+    // Klassisk lista: val, miniatyr, namn och beskrivning, album, mått, storlek, uppladdad, användning och Åtgärder. Mått och datum göms på telefon.
+    const listRow = (x, list) => h('tr', { 'data-file': x.id, class: L.sel.has(x.id) ? 'table-active' : '' },
+      h('td', { class: 'ps-3', style: 'width:2.5rem' }, checkbox(x)),
+      h('td', { style: 'width:5.5rem' }, h('a', { href: x.url, target: '_blank', rel: 'noopener', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { class: 'hs-imgthumb', src: x.url + '&w=320', alt: '', loading: 'lazy' }))),
+      h('td', { class: 'text-break' }, h('div', { class: 'fw-semibold' }, x.name), x.description ? h('div', { class: 'small text-muted' }, x.description) : null,
+        h('div', { class: 'small text-muted d-md-none' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size))),
+      albumsOn ? h('td', { class: 'd-none d-md-table-cell small' }, albumNames(x).join(', ') || h('span', { class: 'text-muted' }, '–')) : null,
+      h('td', { class: 'd-none d-lg-table-cell text-nowrap' }, x.width + ' × ' + x.height),
+      h('td', { class: 'd-none d-lg-table-cell text-nowrap' }, fmtSize(x.size)),
+      h('td', { class: 'd-none d-xl-table-cell text-nowrap' }, x.uploaded ? new Date(x.uploaded).toLocaleDateString('sv-SE') : ''),
       h('td', { class: x.usedBy > 0 ? '' : 'text-muted' }, usedText(x)),
-      h('td', { class: 'text-end pe-3' }, actions(x)));
+      h('td', { class: 'text-end pe-3' }, actions(x, list)));
+
+    // ── Verktygsrad: sök, sortera, kort eller lista ──
     const mode = libView();
+    const search = h('input', { type: 'search', class: 'form-control', placeholder: 'Sök på namn, beskrivning eller album', 'aria-label': 'Sök bland bilderna', value: L.q, id: 'hsLibSearch' });
+    search.addEventListener('input', () => { L.q = search.value; paint(); });
+    const sortSel = h('select', { class: 'form-select w-auto', 'aria-label': 'Sortera bilderna', id: 'hsLibSort' });
+    sortSel.addEventListener('change', () => { L.sort = sortSel.value; paint(); });
     const viewToggle = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'Visa bilderna som' },
       h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'cards' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'cards' ? 'true' : 'false', 'data-lib-view': 'cards', onclick: () => { setLibView('cards'); renderLibrary(); } }, h('i', { class: 'bi bi-grid-3x2-gap me-1', 'aria-hidden': 'true' }), 'Kort'),
       h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'list' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'list' ? 'true' : 'false', 'data-lib-view': 'list', onclick: () => { setLibView('list'); renderLibrary(); } }, h('i', { class: 'bi bi-list-ul me-1', 'aria-hidden': 'true' }), 'Lista'));
+    const toolbar = h('div', { class: 'd-flex flex-wrap gap-2 align-items-center mb-2' }, h('div', { class: 'flex-grow-1', style: 'min-width:12rem;max-width:26rem' }, search), sortSel, h('div', { class: 'ms-auto' }, viewToggle));
+
+    const navBox = h('div'), mainBox = h('div');
+    const pick = v => { L.album = v; L.sel.clear(); L.sort = typeof v === 'number' ? 'manual' : (L.sort === 'manual' ? 'new' : L.sort); paint(); };
+    const paint = () => {
+      const inAlbum = typeof L.album === 'number' ? byId.get(L.album) : null;
+      const list = visible();
+      // sortering: "Egen ordning" finns bara i ett album
+      sortSel.replaceChildren(...[['new', 'Nyast först'], ['old', 'Äldst först'], ['name', 'Namn A–Ö'], inAlbum ? ['manual', 'Egen ordning'] : null].filter(Boolean).map(([v, t]) => h('option', { value: v, selected: L.sort === v ? true : null }, t)));
+      sortSel.value = L.sort;
+      // vänster: albumlistan (dator) och en rullgardin (telefon)
+      if (albumsOn) {
+        const none = files.filter(x => !memberOf.has(x.id)).length;
+        const item = (key, label, n) => h('button', { type: 'button', class: 'list-group-item list-group-item-action d-flex justify-content-between align-items-center' + (L.album === key ? ' active' : ''), 'aria-current': L.album === key ? 'true' : null, 'data-album': String(key), onclick: () => pick(key) }, h('span', { class: 'text-truncate' }, label), h('span', { class: 'badge text-bg-light border ms-2' }, String(n)));
+        const sel = h('select', { class: 'form-select', 'aria-label': 'Visa album', id: 'hsAlbumSel' },
+          h('option', { value: 'all', selected: L.album === 'all' ? true : null }, 'Alla bilder (' + files.length + ')'), h('option', { value: 'none', selected: L.album === 'none' ? true : null }, 'Utan album (' + none + ')'),
+          albums.map(a => h('option', { value: String(a.id), selected: L.album === a.id ? true : null }, a.name + ' (' + a.fileIds.length + ')')));
+        sel.addEventListener('change', () => pick(sel.value === 'all' || sel.value === 'none' ? sel.value : parseInt(sel.value, 10)));
+        navBox.replaceChildren(
+          h('div', { class: 'd-none d-md-block' }, h('div', { class: 'list-group mb-2', role: 'group', 'aria-label': 'Album' }, item('all', 'Alla bilder', files.length), item('none', 'Utan album', none), albums.map(a => item(a.id, a.name, a.fileIds.length)))),
+          h('div', { class: 'd-md-none mb-2' }, sel),
+          h('button', { type: 'button', class: 'btn btn-sm btn-outline-primary mb-3', id: 'hsNewAlbum', disabled: albums.length >= (f.maxAlbums || 50), onclick: () => newAlbum([]) }, h('i', { class: 'bi bi-plus-lg me-1', 'aria-hidden': 'true' }), 'Nytt album'));
+      } else navBox.replaceChildren();
+      // höger: albumrubrik, markeringsrad och bilderna
+      const ids = [...L.sel];
+      const head = inAlbum ? h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-2' }, h('h2', { class: 'h5 mb-0' }, inAlbum.name), h('span', { class: 'text-muted small' }, swCount(inAlbum.fileIds.length, 'bild', 'bilder')),
+        h('div', { class: 'ms-auto d-flex gap-2' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', 'data-album-rename': '1', onclick: () => renameAlbum(inAlbum) }, 'Byt namn'), h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', 'data-album-delete': '1', onclick: () => deleteAlbum(inAlbum) }, 'Ta bort albumet'))) : null;
+      const bulk = ids.length ? h('div', { class: 'hs-card p-2 mb-2 d-flex flex-wrap align-items-center gap-2', role: 'region', 'aria-label': 'Markerade bilder', id: 'hsBulk' },
+        h('strong', { class: 'me-1' }, swCount(ids.length, 'bild vald', 'bilder valda')),
+        albumsOn ? menuBtn('Lägg i album …', addMenu(ids), 'btn-primary', { 'data-bulk': 'add' }) : null,
+        inAlbum ? h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', 'data-bulk': 'remove', onclick: () => removeFrom(inAlbum, ids) }, 'Ta ur albumet') : null,
+        h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', 'data-bulk': 'delete', onclick: async () => {
+          const del = ids.filter(id => (byFile.get(id) || {}).usedBy === 0), keep = ids.length - del.length;
+          if (!del.length) { show('warning', 'Bilderna du markerat används på sidor och kan inte tas bort.'); return; }
+          if (!await confirmDialog('Ta bort ' + swCount(del.length, 'bild', 'bilder') + '?', 'De tas bort från biblioteket och från alla album. Det går inte att ångra.' + (keep ? ' ' + swCount(keep, 'markerad bild används', 'markerade bilder används') + ' på sidor och tas inte bort.' : ''), 'Ta bort', true)) return;
+          let ok = 0, last = null;
+          for (const id of del) { const r = await api('POST', 'DeleteFile', { fileId: id }); if (r.success) ok++; else last = r.message; }
+          L.sel.clear();
+          await again(last ? 'danger' : 'success', swCount(ok, 'bild är borttagen', 'bilder är borttagna') + (last ? '. ' + last : '.'));
+        } }, 'Ta bort'),
+        h('button', { type: 'button', class: 'btn btn-sm btn-link', 'data-bulk': 'clear', onclick: () => { L.sel.clear(); paint(); } }, 'Avmarkera')) : null;
+      const selectAll = list.length ? h('button', { type: 'button', class: 'btn btn-sm btn-link px-0', 'data-select-all': '1', onclick: () => { list.forEach(x => L.sel.add(x.id)); paint(); } }, 'Markera alla ' + list.length + ' som visas') : null;
+      const count = h('div', { class: 'd-flex flex-wrap justify-content-between align-items-center mb-1' }, h('span', { class: 'small text-muted', id: 'hsLibCount', 'aria-live': 'polite' }, 'Visar ' + list.length + ' av ' + swCount(files.length, 'bild', 'bilder')), selectAll);
+      const manualHint = inAlbum && L.sort === 'manual' && !L.q.trim() ? h('p', { class: 'small text-muted mb-2' }, 'Bilderna ligger i den ordning du valt. Ändra med Åtgärder → Flytta på varje bild.') : null;
+      let body;
+      if (!files.length) body = h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.');
+      else if (!list.length) body = h('div', { class: 'hs-card p-3 text-muted', id: 'hsLibEmpty' }, L.q.trim() ? 'Inga bilder matchar "' + L.q.trim() + '".' : inAlbum ? 'Albumet är tomt. Gå till Alla bilder, markera bilder och välj Lägg i album.' : 'Alla bilder ligger i något album.');
+      else if (mode === 'list') body = h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, h('div', { class: 'table-responsive' }, h('table', { class: 'table align-middle hs-list mb-0' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, h('span', { class: 'visually-hidden' }, 'Markera')), h('th', {}, h('span', { class: 'visually-hidden' }, 'Bild')), h('th', {}, 'Namn'), albumsOn ? h('th', { class: 'd-none d-md-table-cell' }, 'Album') : null,
+          h('th', { class: 'd-none d-lg-table-cell' }, 'Mått'), h('th', { class: 'd-none d-lg-table-cell' }, 'Storlek'), h('th', { class: 'd-none d-xl-table-cell' }, 'Uppladdad'), h('th', {}, 'Används'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
+        h('tbody', {}, list.map(x => listRow(x, list))))));
+      else body = h('div', { class: 'hs-imggrid hs-imggrid-wide mb-3' }, list.map(x => tile(x, list)));
+      mainBox.replaceChildren(...[head, bulk, count, manualHint, body].filter(Boolean));
+    };
+
     view(shell('bilder',
-      pageHead('Bilder', 'Föreningens bilder. De väljs i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
-        ['Ladda upp bilder', () => fileInp.click()]]),
+      pageHead('Bilder', 'Föreningens bilder. Sortera dem i album, sök, och välj dem i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
+        ['Ladda upp bilder', () => fileInp.click()], albumsOn ? ['Nytt album …', () => newAlbum([])] : null]),
       msg, fileInp,
       f.failed ? alertBox('danger', f.failed) : h('div', { class: 'hs-card p-3 mb-3' },
         h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används (bilder ' + fmtSize(f.imageBytes || 0) + ', dokument ' + fmtSize(f.documentBytes || 0) + ') · högst ' + (f.maxFiles || 0) + ' bilder')),
         h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Använt utrymme', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', style: 'height:.5rem' }, h('div', { class: 'progress-bar' + (pct >= 90 ? ' bg-warning' : ''), style: 'width:' + pct + '%' }))),
-      files.length ? h('div', { class: 'd-flex justify-content-end mb-2' }, viewToggle) : null,
-      !files.length ? h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.')
-        : mode === 'list'
-          ? h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, h('div', { class: 'table-responsive' }, h('table', { class: 'table align-middle hs-list mb-0' },
-              h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, h('span', { class: 'visually-hidden' }, 'Bild')), h('th', {}, 'Namn'), h('th', { class: 'd-none d-md-table-cell' }, 'Mått'), h('th', { class: 'd-none d-md-table-cell' }, 'Storlek'),
-                h('th', { class: 'd-none d-lg-table-cell' }, 'Uppladdad'), h('th', {}, 'Används'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
-              h('tbody', {}, files.map(listRow)))))
-          : h('div', { class: 'hs-imggrid hs-imggrid-wide mb-3' }, files.map(tile)),
+      files.length ? toolbar : null,
+      h('div', { class: 'row g-3' }, albumsOn ? h('div', { class: 'col-12 col-md-4 col-lg-3' }, navBox) : null, h('div', { class: albumsOn ? 'col-12 col-md-8 col-lg-9' : 'col-12' }, mainBox)),
       h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.')));
+    paint();
     if (banner) show(banner.cls, banner.text);
   }
 
@@ -1671,9 +1870,37 @@
       const upBtn = h('button', { type: 'button', class: 'btn btn-outline-primary', onclick: () => fileInp.click() }, h('i', { class: 'bi bi-upload me-1' }), 'Ladda upp en bild');
       const show = (cls, text) => msg.replaceChildren(text ? h('div', { class: 'alert alert-' + cls + ' py-2' }, text) : '');
 
+      // Album och sökning i väljaren: filtret är bara ett urval, valda bilder följer med mellan album. "Markera hela albumet" kopierar bilderna (albumet följs inte efteråt).
+      let pAlbum = 'all', pQ = '';
+      const pAlbums = (S.files.albums || []);
+      const albumSel = h('select', { class: 'form-select w-auto', 'aria-label': 'Visa album', id: 'hsPickAlbum' },
+        h('option', { value: 'all' }, 'Alla bilder'), h('option', { value: 'none' }, 'Utan album'), pAlbums.map(a => h('option', { value: String(a.id) }, a.name + ' (' + a.fileIds.length + ')')));
+      const searchInp = h('input', { type: 'search', class: 'form-control', placeholder: 'Sök på namn, beskrivning eller album', 'aria-label': 'Sök bland bilderna', id: 'hsPickSearch' });
+      const wholeBtn = h('button', { type: 'button', class: 'btn btn-outline-primary btn-sm d-none', id: 'hsPickWhole' }, 'Markera hela albumet');
+      const filtered = () => {
+        const all = S.files.files || [], albs = S.files.albums || [];
+        const inAlb = new Set(); albs.forEach(a => a.fileIds.forEach(i => inAlb.add(i)));
+        const names = new Map(); albs.forEach(a => a.fileIds.forEach(i => { if (!names.has(i)) names.set(i, []); names.get(i).push(a.name); }));
+        let list = all;
+        if (pAlbum === 'none') list = all.filter(x => !inAlb.has(x.id));
+        else if (pAlbum !== 'all') { const a = albs.find(z => String(z.id) === pAlbum); const m = new Map(all.map(x => [x.id, x])); list = a ? a.fileIds.map(i => m.get(i)).filter(Boolean) : []; }
+        const q = pQ.trim().toLowerCase();
+        if (q) list = list.filter(x => (x.name + ' ' + (x.description || '') + ' ' + (names.get(x.id) || []).join(' ')).toLowerCase().includes(q));
+        return list;
+      };
+      albumSel.addEventListener('change', () => { pAlbum = albumSel.value; paint(); });
+      searchInp.addEventListener('input', () => { pQ = searchInp.value; paint(); });
+      wholeBtn.addEventListener('click', () => {
+        const room = 24; let added = 0;
+        for (const x of filtered()) { if (picked.size >= room) break; if (!picked.has(x.id)) { picked.set(x.id, x); added++; } }
+        show('info', picked.size >= room ? 'Galleriet rymmer högst 24 bilder. De första är valda.' : added + ' bilder är valda.'); paint();
+      });
+
       const paint = () => {
-        const fs = S.files.files || [];
-        info.textContent = S.files.failed ? '' : fs.length + ' bilder, ' + fmtSize(S.files.bytes || 0) + ' av ' + fmtSize(S.files.maxBytes || 0) + ' används.';
+        const fs = filtered();
+        const total = (S.files.files || []).length;
+        wholeBtn.classList.toggle('d-none', !(multi && pAlbum !== 'all' && pAlbum !== 'none' && fs.length));
+        info.textContent = S.files.failed ? '' : (fs.length === total ? total + ' bilder' : 'Visar ' + fs.length + ' av ' + total + ' bilder') + ', ' + fmtSize(S.files.bytes || 0) + ' av ' + fmtSize(S.files.maxBytes || 0) + ' används.';
         if (S.files.failed) show('danger', S.files.failed);
         grid.replaceChildren(...(fs.length ? fs.map(f => h('div', { class: 'hs-imgtile' + (isSel(f) ? ' sel' : '') },
           h('button', { type: 'button', class: 'hs-imgpick', 'aria-pressed': isSel(f) ? 'true' : 'false', 'aria-label': 'Välj ' + f.name, onclick: () => { if (multi) { if (picked.has(f.id)) picked.delete(f.id); else picked.set(f.id, f); } else chosen = f; paint(); } },
@@ -1686,7 +1913,7 @@
             picked.delete(f.id);
             await loadFiles(); show('', ''); paint();
           } }, 'Ta bort') : null))
-          : [h('p', { class: 'text-muted' }, 'Ni har inga bilder än. Ladda upp den första.')]));
+          : [h('p', { class: 'text-muted' }, total ? 'Inga bilder matchar urvalet.' : 'Ni har inga bilder än. Ladda upp den första.')]));
         useBtn.disabled = multi ? picked.size === 0 : !chosen;
         if (multi) useBtn.textContent = picked.size ? 'Lägg till ' + picked.size + (picked.size === 1 ? ' bild' : ' bilder') : 'Lägg till bilder';
       };
@@ -1712,7 +1939,8 @@
           h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, multi ? 'Välj bilder' : 'Välj bild'), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
           h('div', { class: 'modal-body' },
             h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.'),
-            h('div', { class: 'mb-3' }, upBtn, fileInp), msg, info, grid),
+            h('div', { class: 'mb-3 d-flex flex-wrap gap-2 align-items-center' }, upBtn, fileInp,
+              (S.files.albums || []).length ? albumSel : null, h('div', { class: 'flex-grow-1', style: 'min-width:10rem' }, searchInp), wholeBtn), msg, info, grid),
           h('div', { class: 'modal-footer' }, h('button', { type: 'button', class: 'btn btn-secondary', 'data-bs-dismiss': 'modal' }, 'Avbryt'), useBtn))));
       document.body.append(el);
       const bsm = new bootstrap.Modal(el);

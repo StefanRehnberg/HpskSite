@@ -249,6 +249,8 @@ namespace HpskSite.Services.SitePages
                   WHERE r.RefKind = N'file' AND r.RefId = @0 AND p.OwnerType = @1 AND p.OwnerId = @2 AND p.DeletedDate IS NULL", id, ownerType, ownerId);
             if (inUse > 0) return SiteFileStatus.InUse;
             db.Execute("UPDATE dbo.SiteFile SET DeletedDate = @3 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2", id, ownerType, ownerId, now);
+            // En raderad bild ligger inte kvar i något album (tabellen finns inte förrän albummigreringen körts).
+            db.Execute("IF OBJECT_ID(N'dbo.SiteImageAlbumItem', N'U') IS NOT NULL DELETE FROM dbo.SiteImageAlbumItem WHERE FileId = @0 AND OwnerType = @1 AND OwnerId = @2", id, ownerType, ownerId);
             db.Execute(
                 @"INSERT INTO dbo.SiteAudit (OwnerType, OwnerId, ActorMemberId, ActedAsSupport, ObjectKind, ObjectId, Action, CreatedDate) VALUES (@0, @1, @2, @3, N'file', @4, N'file-delete', @5)",
                 ownerType, ownerId, actor.MemberId, actor.AsSupport, id, now);
