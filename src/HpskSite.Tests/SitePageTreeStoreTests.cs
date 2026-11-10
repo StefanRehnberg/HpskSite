@@ -111,6 +111,32 @@ namespace HpskSite.Tests
         }
 
         [SqlFact]
+        public void En_omgjord_Om_sida_kan_ha_undersidor_och_kan_inte_läggas_tillbaka_förrän_de_är_borta()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            f.Db.Execute("UPDATE dbo.SiteOwner SET EditingEnabled = 1, ConvertEnabled = 1 WHERE OwnerType = 'Club' AND OwnerId = @0", Owner);
+            var notYet =SitePageStore.GetTemplateCopy(f.Db, Club, Owner, "about");
+            Assert.Null(notYet);                                                                                         // ingen rad = inget att peka på
+            var conv = SitePageWriter.ConvertTemplatePage(f.Db, F, Club, Owner, "about", Admin, Now);
+            Assert.True(conv.Ok, conv.Status + " " + conv.Message);
+            var about = SitePageStore.GetTemplateCopy(f.Db, Club, Owner, "about")!;
+            var child = SitePageWriter.CreatePage(f.Db, F, Club, Owner, "Historia", null, SiteVisibility.Klubbmedlemmar, Admin, Now, about.Id);
+            Assert.True(child.Ok, child.Status + " " + child.Message);
+            Assert.Equal(about.Id, Row(f.Db, child.PageId).ParentPageId);
+            // Hem kan aldrig vara förälder, en vanlig sida kan flyttas in under Om
+            var other = New(f.Db, "Bli medlem");
+            Assert.True(SitePageWriter.SetParent(f.Db, other, Club, Owner, about.Id, Admin, Now).Ok);
+            // spärren: varken Avbryt eller Lägg tillbaka medan undersidor finns
+            var cancel = SitePageWriter.CancelConversion(f.Db, F, about.Id, Club, Owner, Row(f.Db, about.Id).Revision, Admin, Now);
+            Assert.Equal(SiteWriteStatus.Invalid, cancel.Status);
+            Assert.Contains("undersidor", cancel.Message);
+            Assert.True(SitePageWriter.SetParent(f.Db, child.PageId, Club, Owner, null, Admin, Now).Ok);
+            Assert.True(SitePageWriter.SetParent(f.Db, other, Club, Owner, null, Admin, Now).Ok);
+            var cancelled = SitePageWriter.CancelConversion(f.Db, F, about.Id, Club, Owner, Row(f.Db, about.Id).Revision, Admin, Now);
+            Assert.True(cancelled.Ok, cancelled.Status + " " + cancelled.Message);                                        // utan undersidor går det
+        }
+
+        [SqlFact]
         public void Taket_på_undersidor_per_sida_gäller()
         {
             using var f = new SiteSqlFixture(); SeedOwners(f.Db);

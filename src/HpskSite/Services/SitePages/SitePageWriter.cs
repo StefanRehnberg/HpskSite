@@ -112,6 +112,8 @@ namespace HpskSite.Services.SitePages
             return new SiteWriteResult(SiteWriteStatus.Ok, open.Id, saved.Revision);
         }
 
+        private const string HasChildrenMessage = "Sidan har undersidor och kan inte läggas tillbaka förrän de är flyttade eller raderade.";
+
         /// <summary>
         /// Avbryt omvandlingen: kastar utkastet i schema 2 på en sida vars omvandling inte är publicerad. Den levande sidan rörs inte.
         /// En publicerad omvandling ångras med <see cref="RevertConversion"/>.
@@ -126,6 +128,8 @@ namespace HpskSite.Services.SitePages
                 return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Sidan är redan omgjord. Använd Lägg tillbaka för att gå tillbaka till den vanliga sidan.");
             if (draft == null || draft.SchemaVersion != SiteBlockSchema.ConvertedSchemaVersion)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Ingen omvandling pågår.");
+            if (SitePageStore.ChildCount(db, pageId) > 0)
+                return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: HasChildrenMessage);
 
             var r = published != null
                 ? SitePageStore.DiscardDraft(db, pageId, ownerType, ownerId, expectedRevision, actor.MemberId, now)
@@ -149,6 +153,8 @@ namespace HpskSite.Services.SitePages
             var published = SitePageStore.GetPublished(db, pageId, ownerType, ownerId);
             if (published == null || published.SchemaVersion != SiteBlockSchema.ConvertedSchemaVersion)
                 return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: "Omvandlingen är inte publicerad. Använd Avbryt.");
+            if (SitePageStore.ChildCount(db, pageId) > 0)
+                return new SiteWriteResult(SiteWriteStatus.Invalid, pageId, page.Revision, Message: HasChildrenMessage);
 
             var template = SiteTemplates.For(ownerType);
             var json = SitePageStore.EmptyContent(templateCopy: true);
@@ -200,7 +206,7 @@ namespace HpskSite.Services.SitePages
             if (parentPageId != null)
             {
                 var parent = SitePageStore.GetPage(db, parentPageId.Value, ownerType, ownerId);
-                var parentError = SitePageTree.NewChildError(ownerType, ownerId, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id));
+                var parentError = SitePageTree.NewChildError(ownerType, ownerId, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id), parent != null && SitePageStore.IsConverted(db, parent.Id));
                 if (parentError != null) return Invalid("parent", parentError);
                 if (!SitePageTree.ChildLevelOk(visibility, parent!.VisibilityLevel))
                     return Invalid("visibility", $"Sidan får inte vara öppnare än sidan den ligger under ({SlotLevelLabel(parent.VisibilityLevel)} eller strängare).");
@@ -299,7 +305,7 @@ namespace HpskSite.Services.SitePages
             {
                 Audit(db, ownerType, ownerId, actor, "page", pageId, "page-visibility", null, now);
                 // Gör man en förälder strängare får undersidorna samma nivå (de kan inte vara öppnare än den). Klienten har frågat först; servern gör det alltid så att trädet aldrig bryter regeln.
-                if (page.IsFree && SitePageStore.ChildCount(db, pageId) > 0)
+                if (SitePageStore.ChildCount(db, pageId) > 0)   // en fri sida eller en omgjord Om-sida
                 {
                     raised = SitePageStore.RaiseChildren(db, ownerType, ownerId, pageId, vis, actor.MemberId, now);
                     if (raised > 0) Audit(db, ownerType, ownerId, actor, "page", pageId, "children-visibility", null, now);
@@ -324,7 +330,7 @@ namespace HpskSite.Services.SitePages
             if (newParentId != null)
             {
                 var parent = SitePageStore.GetPage(db, newParentId.Value, ownerType, ownerId);
-                var error = SitePageTree.ParentError(page, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id, exceptPageId: pageId), SitePageStore.ChildCount(db, pageId) > 0);
+                var error = SitePageTree.ParentError(page, parent, parent == null ? 0 : SitePageStore.ChildCount(db, parent.Id, exceptPageId: pageId), SitePageStore.ChildCount(db, pageId) > 0, parent != null && SitePageStore.IsConverted(db, parent.Id));
                 if (error != null) return Invalid("parent", error);
                 if (!SitePageTree.ChildLevelOk(page.VisibilityLevel, parent!.VisibilityLevel))
                 {

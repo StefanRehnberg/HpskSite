@@ -38,6 +38,23 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void En_omgjord_Om_sida_kan_vara_förälder_men_ingen_annan_systemsida()
+        {
+            var about = Page(1, template: "about");
+            Assert.Null(SitePageTree.ParentError(Page(2), about, 0, false, parentConverted: true));
+            Assert.Null(SitePageTree.NewChildError("Club", 1, about, 0, parentConverted: true));
+            Assert.NotNull(SitePageTree.ParentError(Page(2), about, 0, false, parentConverted: false));              // Om som inte är omgjord har ingen rad att peka på
+            Assert.NotNull(SitePageTree.NewChildError("Club", 1, about, 0));
+            foreach (var key in new[] { "home", "admin", "calendar", "documents", "members" })                         // bara Om först (Stefans väg A)
+            {
+                Assert.NotNull(SitePageTree.ParentError(Page(2), Page(1, template: key), 0, false, parentConverted: true));
+                Assert.NotNull(SitePageTree.NewChildError("Club", 1, Page(1, template: key), 0, parentConverted: true));
+            }
+            Assert.NotNull(SitePageTree.ParentError(Page(3), Page(2, parent: 1, template: "about"), 0, false, parentConverted: true));   // två nivåer gäller även här
+            Assert.NotNull(SitePageTree.ParentError(Page(2), about, SitePageTree.MaxChildrenPerParent, false, parentConverted: true));
+        }
+
+        [Fact]
         public void En_sida_har_högst_så_många_undersidor_som_taket()
         {
             Assert.Null(SitePageTree.ParentError(Page(2), Page(1), SitePageTree.MaxChildrenPerParent - 1, false));

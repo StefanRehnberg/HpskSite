@@ -14,24 +14,31 @@ namespace HpskSite.Services.SitePages
         /// Får <paramref name="page"/> läggas under <paramref name="parent"/>? Null = ja, annars förklaringen på svenska. <paramref name="parentChildCount"/> = antal undersidor föräldern
         /// redan har (utan <paramref name="page"/> själv); <paramref name="pageHasChildren"/> = sidan har egna undersidor (då kan den inte själv bli en undersida: tre nivåer finns inte).
         /// </summary>
-        public static string? ParentError(SitePageRow page, SitePageRow? parent, int parentChildCount, bool pageHasChildren)
+        public static string? ParentError(SitePageRow page, SitePageRow? parent, int parentChildCount, bool pageHasChildren, bool parentConverted = false)
         {
             if (!page.IsFree) return "Bara egna sidor kan ligga under en annan sida.";
             if (parent == null || parent.DeletedDate != null) return "Sidan du valde finns inte.";
             if (parent.OwnerType != page.OwnerType || parent.OwnerId != page.OwnerId) return "Sidan du valde finns inte hos den här föreningen.";
             if (parent.Id == page.Id) return "En sida kan inte ligga under sig själv.";
-            if (!parent.IsFree) return "Bara en egen sida kan ha undersidor.";
+            if (!CanHaveChildren(parent, parentConverted)) return "Bara en egen sida eller en omgjord Om-sida kan ha undersidor.";
             if (parent.ParentPageId != null) return "Det går bara att ha två nivåer: sidan du valde ligger redan under en annan sida.";
             if (pageHasChildren) return "Sidan har egna undersidor och kan inte själv bli en undersida. Flytta undersidorna först.";
             if (parentChildCount >= MaxChildrenPerParent && page.ParentPageId != parent.Id) return $"En sida kan ha högst {MaxChildrenPerParent} undersidor.";
             return null;
         }
 
+        /// <summary>Mallnyckeln för systemsidan som får undersidor (Om klubben och kretsens Om). Fler öppnas när Om är bevisad (Stefans väg A, 2026-11-09).</summary>
+        public const string ParentableTemplate = "about";
+
+        /// <summary>En egen sida, eller en OMGJORD Om-sida (den har en rad och innehåll i schema 2), kan vara förälder. Hem, Admin och övriga systemsidor kan det aldrig.</summary>
+        public static bool CanHaveChildren(SitePageRow parent, bool parentConverted) =>
+            parent.IsFree || (parentConverted && parent.TemplateKey == ParentableTemplate);
+
         /// <summary>Samma prövning för en sida som ännu inte finns (skapas som undersida): bara föräldern prövas.</summary>
-        public static string? NewChildError(string ownerType, int ownerId, SitePageRow? parent, int parentChildCount)
+        public static string? NewChildError(string ownerType, int ownerId, SitePageRow? parent, int parentChildCount, bool parentConverted = false)
         {
             if (parent == null || parent.DeletedDate != null || parent.OwnerType != ownerType || parent.OwnerId != ownerId) return "Sidan du valde finns inte.";
-            if (!parent.IsFree) return "Bara en egen sida kan ha undersidor.";
+            if (!CanHaveChildren(parent, parentConverted)) return "Bara en egen sida eller en omgjord Om-sida kan ha undersidor.";
             if (parent.ParentPageId != null) return "Det går bara att ha två nivåer: sidan du valde ligger redan under en annan sida.";
             if (parentChildCount >= MaxChildrenPerParent) return $"En sida kan ha högst {MaxChildrenPerParent} undersidor.";
             return null;
