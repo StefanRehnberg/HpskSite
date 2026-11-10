@@ -940,9 +940,9 @@
     const viewToggle = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'Visa bilderna som' },
       h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'cards' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'cards' ? 'true' : 'false', 'data-lib-view': 'cards', onclick: () => { setLibView('cards'); renderLibrary(); } }, h('i', { class: 'bi bi-grid-3x2-gap me-1', 'aria-hidden': 'true' }), 'Kort'),
       h('button', { type: 'button', class: 'btn btn-sm ' + (mode === 'list' ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': mode === 'list' ? 'true' : 'false', 'data-lib-view': 'list', onclick: () => { setLibView('list'); renderLibrary(); } }, h('i', { class: 'bi bi-list-ul me-1', 'aria-hidden': 'true' }), 'Lista'));
-    const toolbar = h('div', { class: 'd-flex flex-wrap gap-2 align-items-center mb-2' }, h('div', { class: 'flex-grow-1', style: 'min-width:12rem;max-width:26rem' }, search), sortSel, h('div', { class: 'ms-auto' }, viewToggle));
-
-    const navBox = h('div'), mainBox = h('div');
+    // Albumvalet ligger på samma rad som sökningen: två badges (Alla bilder, Utan album) och en väljare för de egna albumen.
+    const navBox = h('div', { class: 'd-flex flex-wrap gap-2 align-items-center' }), mainBox = h('div');
+    const toolbar = h('div', { class: 'd-flex flex-wrap gap-2 align-items-center mb-2' }, h('div', { class: 'flex-grow-1', style: 'min-width:12rem;max-width:22rem' }, search), sortSel, navBox, h('div', { class: 'ms-auto' }, viewToggle));
     const pick = v => { L.album = v; L.sel.clear(); L.sort = typeof v === 'number' ? 'manual' : (L.sort === 'manual' ? 'new' : L.sort); paint(); };
     const paint = () => {
       const inAlbum = typeof L.album === 'number' ? byId.get(L.album) : null;
@@ -953,15 +953,14 @@
       // vänster: albumlistan (dator) och en rullgardin (telefon)
       if (albumsOn) {
         const none = files.filter(x => !memberOf.has(x.id)).length;
-        const item = (key, label, n) => h('button', { type: 'button', class: 'list-group-item list-group-item-action d-flex justify-content-between align-items-center' + (L.album === key ? ' active' : ''), 'aria-current': L.album === key ? 'true' : null, 'data-album': String(key), onclick: () => pick(key) }, h('span', { class: 'text-truncate' }, label), h('span', { class: 'badge text-bg-light border ms-2' }, String(n)));
-        const sel = h('select', { class: 'form-select', 'aria-label': 'Visa album', id: 'hsAlbumSel' },
-          h('option', { value: 'all', selected: L.album === 'all' ? true : null }, 'Alla bilder (' + files.length + ')'), h('option', { value: 'none', selected: L.album === 'none' ? true : null }, 'Utan album (' + none + ')'),
+        const badge = (key, label, n) => h('button', { type: 'button', class: 'btn btn-sm rounded-pill ' + (L.album === key ? 'btn-primary' : 'btn-outline-secondary'), 'aria-pressed': L.album === key ? 'true' : 'false', 'data-album': String(key), onclick: () => pick(key) }, label + ' ', h('span', { class: 'badge ' + (L.album === key ? 'text-bg-light' : 'text-bg-secondary') }, String(n)));
+        const sel = h('select', { class: 'form-select w-auto' + (typeof L.album === 'number' ? ' border-primary' : ''), 'aria-label': 'Visa ett album', id: 'hsAlbumSel' },
+          h('option', { value: '' }, albums.length ? 'Album (' + albums.length + ') …' : 'Inga album än'),
           albums.map(a => h('option', { value: String(a.id), selected: L.album === a.id ? true : null }, a.name + ' (' + a.fileIds.length + ')')));
-        sel.addEventListener('change', () => pick(sel.value === 'all' || sel.value === 'none' ? sel.value : parseInt(sel.value, 10)));
-        navBox.replaceChildren(
-          h('div', { class: 'd-none d-md-block' }, h('div', { class: 'list-group mb-2', role: 'group', 'aria-label': 'Album' }, item('all', 'Alla bilder', files.length), item('none', 'Utan album', none), albums.map(a => item(a.id, a.name, a.fileIds.length)))),
-          h('div', { class: 'd-md-none mb-2' }, sel),
-          h('button', { type: 'button', class: 'btn btn-sm btn-outline-primary mb-3', id: 'hsNewAlbum', disabled: albums.length >= (f.maxAlbums || 50), onclick: () => newAlbum([]) }, h('i', { class: 'bi bi-plus-lg me-1', 'aria-hidden': 'true' }), 'Nytt album'));
+        sel.disabled = !albums.length;
+        sel.value = typeof L.album === 'number' ? String(L.album) : '';
+        sel.addEventListener('change', () => { if (sel.value) pick(parseInt(sel.value, 10)); });
+        navBox.replaceChildren(badge('all', 'Alla bilder', files.length), badge('none', 'Utan album', none), sel);
       } else navBox.replaceChildren();
       // höger: albumrubrik, markeringsrad och bilderna
       const ids = [...L.sel];
@@ -996,15 +995,14 @@
     };
 
     view(shell('bilder',
-      pageHead('Bilder', 'Föreningens bilder. Sortera dem i album, sök, och välj dem i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
+      pageHead('Bilder', 'Föreningens bilder. Sortera dem i album, sök, och välj dem i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan. Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.', [
         ['Ladda upp bilder', () => fileInp.click()], albumsOn ? ['Nytt album …', () => newAlbum([])] : null]),
       msg, fileInp,
       f.failed ? alertBox('danger', f.failed) : h('div', { class: 'hs-card p-3 mb-3' },
         h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används (bilder ' + fmtSize(f.imageBytes || 0) + ', dokument ' + fmtSize(f.documentBytes || 0) + ') · högst ' + (f.maxFiles || 0) + ' bilder')),
         h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Använt utrymme', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', style: 'height:.5rem' }, h('div', { class: 'progress-bar' + (pct >= 90 ? ' bg-warning' : ''), style: 'width:' + pct + '%' }))),
       files.length ? toolbar : null,
-      h('div', { class: 'row g-3' }, albumsOn ? h('div', { class: 'col-12 col-md-4 col-lg-3' }, navBox) : null, h('div', { class: albumsOn ? 'col-12 col-md-8 col-lg-9' : 'col-12' }, mainBox)),
-      h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.')));
+      mainBox));
     paint();
     if (banner) show(banner.cls, banner.text);
   }
