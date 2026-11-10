@@ -81,7 +81,9 @@ namespace HpskSite.Services.SitePages
                 else if (!page.Suspended)
                 {
                     var html = SiteBlockRenderer.Render(b, page.PageVisibility, ctx);
-                    if (html.Length > 0) items.Add(new ConvertedItem(null, PanelZone.Full, html));
+                    // Ägarens egna block på Hem kan ligga i huvud- eller sidokolumnen (data.zone); överallt annars hela bredden.
+                    var zone = b.Data["zone"]?.GetValue<string>() switch { "main" => PanelZone.Main, "side" => PanelZone.Side, _ => PanelZone.Full };
+                    if (html.Length > 0) items.Add(new ConvertedItem(null, zone, html));
                 }
             }
             if (ctx.Template.OwnerType == SiteTemplates.Club && items.Any(i => i.PanelKey == "quicklinks"))

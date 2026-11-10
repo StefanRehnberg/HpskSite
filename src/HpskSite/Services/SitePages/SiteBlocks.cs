@@ -321,9 +321,17 @@ namespace HpskSite.Services.SitePages
             if (b["data"] is not JsonObject d) errors.Add(new($"{p}.data", "Blocket saknar innehåll."));
             else if (type != null)
             {
-                foreach (var key in d.Select(x => x.Key).Where(k => !type.Fields.Contains(k)))
+                // "zone" (plats på Hem: huvud- eller sidokolumn) får ligga på varje blocktyp; panelen har den redan i sina fält.
+                foreach (var key in d.Select(x => x.Key).Where(k => !type.Fields.Contains(k) && k != "zone"))
                     errors.Add(new($"{p}.data.{key}", $"Okänt fält \"{key}\"."));
                 data = NormalizeData(type, d, $"{p}.data", template, errors, pageKey, seen);
+                if (data != null && type.Name != "panel" && d["zone"] != null)
+                {
+                    var z = Str(d["zone"]);
+                    if (z is not ("main" or "side" or "full")) errors.Add(new($"{p}.data.zone", "Okänd plats på sidan."));
+                    else if (kind != SiteContentKind.ConvertedPage || pageKey != "home") errors.Add(new($"{p}.data.zone", "Platsen i en kolumn går bara att välja på Hem."));
+                    else if (z != "full") data["zone"] = z;   // "full" är standard och lagras aldrig: en sida som inte valt kolumner har samma JSON som förut
+                }
             }
 
             return errors.Count == before && id != null && type != null && data != null

@@ -26,7 +26,7 @@
     {
         foreach (var i in plan.Items)
         {
-            if (i.PanelKey == null) { Add(("", PanelZone.Full, i.Html)); continue; }
+            if (i.PanelKey == null) { Add(("", i.Zone, i.Html)); continue; }
             // En panel som inte ger något att visa ritas inte (ingen tom ruta, ingen tom kolumn).
             var html = await RenderPanelAsync(i.PanelKey);
             if (string.IsNullOrWhiteSpace(Flatten(html))) continue;

@@ -1798,9 +1798,17 @@
     const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser blocket' },
       visOptions().filter(o => o.v >= min).map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.t)));
     visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); S.refreshWho && S.refreshWho(); });
+    // Plats på Hem (bara en omgjord Hem): hela bredden, huvudkolumnen (2/3) eller sidokolumnen (1/3). Hela bredden lagras aldrig (ingen zon).
+    let zoneSel = null;
+    if (S.kind === 'converted' && S.pageKey === 'home') {
+      zoneSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Plats på sidan', 'data-block-zone': b.id },
+        ['full', 'main', 'side'].map(z => h('option', { value: z, selected: (b.data.zone || 'full') === z ? true : null }, ZONE_LABEL[z])));
+      zoneSel.addEventListener('change', () => { if (zoneSel.value === 'full') delete b.data.zone; else b.data.zone = zoneSel.value; markDirty(); });
+    }
     const head = h('div', { class: 'hs-block-head' },
       h('span', { class: 'hs-type' }, h('i', { class: 'bi ' + info.icon + ' me-2' }), info.label),
       visOptions().filter(o => o.v >= min).length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : null,
+      zoneSel ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Plats', zoneSel) : null,
       h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, -1) < 0, 'aria-label': 'Flytta upp', onclick: () => move(i, -1) }, h('i', { class: 'bi bi-arrow-up' })),
       h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, 1) < 0, 'aria-label': 'Flytta ner', onclick: () => move(i, 1) }, h('i', { class: 'bi bi-arrow-down' })),
       h('button', { class: 'btn btn-sm btn-outline-danger', 'aria-label': 'Ta bort blocket', onclick: async () => {
