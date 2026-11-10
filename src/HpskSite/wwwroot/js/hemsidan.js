@@ -693,6 +693,8 @@
   function paintStatus() {
     const el = document.getElementById('hsStatus'); if (el) { el.textContent = S.statusText; el.className = 'hs-status' + (S.statusErr ? ' err' : ''); }
     const pub = document.getElementById('hsPublish'); if (pub) pub.disabled = S.saving || !(S.dirty || S.hasUnpublished);
+    // "Öppna sidan": bara när sidan finns publicerad och har en adress (en utkastsida kan ingen annan öppna).
+    const open = document.getElementById('hsOpenPage'); if (open) { const url = S.page && S.page.url; open.hidden = !(S.published && url); if (url) open.href = url; }
     // En omvandling som inte är publicerad avbryts med "Avbryt omvandlingen" (inte "Kasta ändringarna", som skulle lämna sidan i ett halvt läge).
     const dis = document.getElementById('hsDiscard'); if (dis) dis.hidden = !(S.published && (S.dirty || S.hasUnpublished)) || (S.kind === 'converted' && !S.convertedLive);
     const cc = document.getElementById('hsCancelConv'); if (cc) cc.hidden = !(S.kind === 'converted' && !S.convertedLive);
@@ -788,9 +790,7 @@
     if (r.success) {
       S.revision = r.revision; S.published = true; S.hasUnpublished = false; S.dirty = false; S.statusText = 'Publicerat kl. ' + clock(); S.statusErr = false;
       if (S.kind === 'converted') S.convertedLive = true;   // nu ser besökarna den egna versionen; den ångras med Gå tillbaka
-      const url = S.page.url;
-      setBanner('success', 'Sidan är publicerad.', url ? [h('a', { class: 'btn btn-sm btn-outline-success', href: url, target: '_blank', rel: 'noopener' }, 'Se sidan'),
-        h('button', { class: 'btn btn-sm btn-outline-success', onclick: () => copyLink(url) }, 'Kopiera länk')] : null);
+      S.banner = null; paintEditorBanner();   // ingen grön ruta: statusraden säger "Publicerat kl." och knappen "Öppna sidan" visas bredvid Publicera ändringar
       paintStatus(); return true;
     }
     return handleWrite(r, 0, 'publish');
@@ -840,6 +840,8 @@
         if (!r.success) { setBanner('danger', r.message || 'Det gick inte att kasta ändringarna.'); return; }
         openEditor(S.page.id);
       } }, 'Kasta ändringarna'),
+      h('a', { id: 'hsOpenPage', class: 'btn btn-outline-secondary', href: (S.page && S.page.url) || '#', target: '_blank', rel: 'noopener', hidden: true, title: 'Öppna sidan i en ny flik' },
+        h('i', { class: 'bi bi-box-arrow-up-right me-1' }), 'Öppna sidan'),
       h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
 
     view(shell(slots ? 'sys:' + S.templateKey : conv ? 'sys:' + S.pageKey : 'sidor', bar, h('div', { id: 'hsBanner' }),
