@@ -86,15 +86,17 @@
     { group: 3, type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right', desc: 'En knapp till en av ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' andra sidor.' },
     { group: 4, type: 'competitions', label: 'Kommande tävlingar', icon: 'bi-trophy', desc: 'De närmaste tävlingarna med datum och länk.' },
     { group: 4, type: 'records', label: IS_REGION ? 'Kretsrekord' : 'Klubbrekord', icon: 'bi-award', desc: 'Gällande rekord per gren och klass.' },
+    { group: 4, type: 'champions', label: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare', icon: 'bi-trophy-fill', desc: 'Senaste årets mästare per gren och klass. Visas aldrig för alla, bara för inloggade eller strängare.' },
+    { group: 5, type: 'stats', label: IS_REGION ? 'Kretsen i siffror' : 'Klubben i siffror', icon: 'bi-bar-chart', desc: IS_REGION ? 'Antal klubbar, banor, serier och kommande tävlingar.' : 'Antal medlemmar, banor och kommande tävlingar.' },
     { group: 5, type: 'ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', desc: IS_REGION ? 'Banorna kretsens klubbar använder.' : 'Klubbens banor, utan karta.' },
     // Kretsens egna block (2d): läses live ur kretsens data, lagrar inget i sidan.
     { group: 5, type: 'region-clubs', label: 'Klubbar i kretsen', icon: 'bi-people', region: true, desc: 'Kretsens klubbar med länk till deras sidor.' },
     { group: -1, type: 'region-ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', region: true, desc: '' },   // äldre block: nya sidor väljer Skjutbanor ovan; typen finns kvar så att befintliga block ritas
     { group: 5, type: 'region-series', label: 'Serier', icon: 'bi-trophy', region: true, desc: 'Kretsens egna serier.' },
-    { group: 5, type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true, desc: 'Antal klubbar, banor, serier och kommande tävlingar.' },
+    { group: -1, type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true, desc: '' },   // äldre block: nya sidor väljer "Kretsen i siffror" (stats) ovan
   ].filter(t => !t.region || IS_REGION);
   const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
-  const minVisFor = type => Math.max(S.visibility, type === 'contact' ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
+  const minVisFor = type => Math.max(S.visibility, (type === 'contact' || type === 'champions') ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
   const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
   const pad = n => String(n).padStart(2, '0');
   const clock = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
@@ -1003,7 +1005,7 @@
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
@@ -1234,8 +1236,10 @@
       case 'competitions': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många tävlingar', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           IS_REGION ? 'Visar de närmaste kommande tävlingarna i kretsen. Klubbinterna tävlingar visas aldrig här.' : 'Visar de närmaste kommande tävlingarna där klubben är arrangör. Klubbinterna tävlingar ser bara klubbens medlemmar.')];
-      case 'records': case 'ranges': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+      case 'records': case 'ranges': case 'champions': case 'stats': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, b.type === 'records' ? 'Visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' gällande rekord per gren och klass. Listan hämtas vid varje besök.'
+          : b.type === 'champions' ? 'Visar senaste årets mästare per gren och klass, som de är inmatade under ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' Mästare. Mästarna är personuppgifter, så blocket kan aldrig visas för alla.'
+          : b.type === 'stats' ? (IS_REGION ? 'Visar antal klubbar, skjutbanor, serier och kommande tävlingar i kretsen.' : 'Visar antal medlemmar, skjutbanor och kommande tävlingar. Bara siffror, inga namn. Klubbinterna tävlingar räknas inte med.') + ' Siffrorna hämtas vid varje besök.'
           : (IS_REGION ? 'Listar skjutbanorna som kretsens klubbar använder.' : 'Listar klubbens skjutbanor (namn och ort), utan karta.') + ' Banor som är markerade som begränsade visas aldrig här.')];
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];

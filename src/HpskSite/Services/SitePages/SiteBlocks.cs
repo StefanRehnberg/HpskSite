@@ -140,6 +140,8 @@ namespace HpskSite.Services.SitePages
             new BlockType("competitions", false, false, Set("title", "count")),   // föreningens kommande tävlingar (live ur tävlingslagringen, lagras inte)
             new BlockType("records", false, false, Set("title")),   // föreningens gällande rekord (live ur rekordtabellen, lagras inte)
             new BlockType("ranges", false, false, Set("title")),   // skjutbanor (klubbens egna respektive kretsens klubbars), utan karta; begränsade banor utelämnas
+            new BlockType("champions", Personal: true, false, Set("title")),   // regerande mästare (live): namn på personer, aldrig Alla (som mästarpanelen, bara inloggade)
+            new BlockType("stats", false, false, Set("title")),   // föreningens siffror (live): klubbens medlemmar, banor och tävlingar, eller kretsens klubbar, banor, serier och tävlingar
             new BlockType("about", false, false, Set("title")),   // föreningens presentationstext (live ur nodens uppgifter, lagras inte): första biblioteksblocket, samma text som Om-panelen
             new BlockType("panel", Personal: false, AllowedInSlot: false, Set("key", "zone"), ConvertedOnly: true),   // en systempanel på en omvandlad sida (schema 2); ritas av vyn ur registret, personnivån ur registret
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -417,6 +419,8 @@ namespace HpskSite.Services.SitePages
                     break;
                 }
                 case "records":
+                case "champions":
+                case "stats":
                 case "ranges":
                 {
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);

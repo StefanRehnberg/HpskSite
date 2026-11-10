@@ -61,7 +61,9 @@ namespace HpskSite.Tests
             public SiteRegionStats? RegionStats() => new(7777, 2, 3, 4);
             public string? AboutHtml() => "<p>KANARIE-OM-X</p>";
             public IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count) => new[] { new SiteCompetitionInfo("KANARIE-TAVLING-X", new DateTime(2027, 6, 1), "/t/") };
-            public IReadOnlyList<SiteRecordInfo> Records() => new[] { new SiteRecordInfo("Precision", "Klass", false, 290, "KANARIE-REKORD-X", new DateTime(2026, 1, 1)) };
+            public IReadOnlyList<SiteRecordInfo> Records() => new[] { new SiteRecordInfo("Precision", "Klass", false, "290 / 300", "KANARIE-REKORD-X", new DateTime(2026, 1, 1)) };
+            public IReadOnlyList<SiteChampionInfo> Champions() => new[] { new SiteChampionInfo(2026, "Precision", "Klass", false, "290 / 300", "KANARIE-MASTARE-X") };
+            public IReadOnlyList<SiteStatItem> Stats() => new[] { new SiteStatItem("KANARIE-SIFFRA-X", 4242) };
             public IReadOnlyList<SiteRangeInfo> OwnerRanges() => new[] { new SiteRangeInfo(1, "KANARIE-BANA-X", "Ort", "/skjutbana/1") };
         }
 
@@ -82,15 +84,17 @@ namespace HpskSite.Tests
                 "competitions" => new JsonObject { ["title"] = canary, ["count"] = 3 },
                 "records" => new JsonObject { ["title"] = canary },
                 "ranges" => new JsonObject { ["title"] = canary },
+                "champions" => new JsonObject { ["title"] = canary },
+                "stats" => new JsonObject { ["title"] = canary },
                 "image" => new JsonObject { ["ref"] = "file:5", ["alt"] = canary, ["decorative"] = false },
                 _ => new JsonObject(),
             };
             return new SiteBlock("abcd1", type, (SiteVisibility)vis, data);
         }
 
-        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image", "news", "about", "competitions", "records", "ranges" };
+        private static readonly string[] Types = { "text", "heading", "links", "documents", "contact", "events", "pagelink", "image", "news", "about", "competitions", "records", "ranges", "champions", "stats" };
         private static readonly string[] RegionTypes = { "region-clubs", "region-ranges", "region-series", "region-stats" };
-        private static bool IsPersonal(string type) => type == "contact";
+        private static bool IsPersonal(string type) => type == "contact" || type == "champions";
 
         [Fact]
         public void Varje_kombination_visar_ett_blockmärke_om_och_bara_om_oraklet_säger_att_tittaren_får_se_det()
@@ -127,7 +131,7 @@ namespace HpskSite.Tests
                 }
                 if (type == "pagelink")
                     blockVisible = blockVisible && Oracle(1, persona.Viewer);              // länken går till Rekord (kräver inloggning) och visas bara för den som får se den
-                var marker = type switch { "contact" => "KANARIE-KONTAKT-X", "events" => "KANARIE-EVENT-X", "news" => "KANARIE-NYHET-X", "about" => "KANARIE-OM-X", "competitions" => "KANARIE-TAVLING-X", "records" => "KANARIE-REKORD-X", "ranges" => "KANARIE-BANA-X", _ => canary };
+                var marker = type switch { "contact" => "KANARIE-KONTAKT-X", "events" => "KANARIE-EVENT-X", "news" => "KANARIE-NYHET-X", "about" => "KANARIE-OM-X", "competitions" => "KANARIE-TAVLING-X", "records" => "KANARIE-REKORD-X", "ranges" => "KANARIE-BANA-X", "champions" => "KANARIE-MASTARE-X", "stats" => "KANARIE-SIFFRA-X", _ => canary };
                 var seesMarker = html.Contains(marker);
                 if (blockVisible != seesMarker) failures.Add($"{(seesMarker ? "LÄCKA" : "SAKNAS")}: {persona.Name} / sida {pageVis} / {type} block {blockVis}");
                 if (!blockVisible && html.Length != 0) failures.Add($"TOM SAKNAS: {persona.Name} / sida {pageVis} / {type} block {blockVis}: ett dolt block ska ge tomt svar, inte en tom ruta");

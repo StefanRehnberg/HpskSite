@@ -15,7 +15,7 @@ namespace HpskSite.Tests
         }
 
         [Theory]
-        [InlineData("competitions")] [InlineData("records")] [InlineData("ranges")]
+        [InlineData("competitions")] [InlineData("records")] [InlineData("ranges")] [InlineData("champions")] [InlineData("stats")]
         public void Blocken_gäller_både_klubb_och_krets_har_bara_rubrik_och_lagrar_inga_id(string type)
         {
             Assert.True(Parse(type, "{}").Ok);
@@ -23,7 +23,7 @@ namespace HpskSite.Tests
             Assert.False(Parse(type, "{\"title\":\"x\",\"ids\":[1,2]}").Ok);      // inget fält för id: ägaren kommer ur begäran
             Assert.False(Parse(type, "{\"ownerId\":5}").Ok);
             Assert.False(Parse(type, "{}", vis: 0).Ok);                           // aldrig öppnare än sidan
-            Assert.False(SiteBlockSchema.Types[type].Personal);
+            Assert.Equal(type == "champions", SiteBlockSchema.Types[type].Personal);   // mästarna är namn på personer: aldrig Alla
             Assert.Empty(SiteBlockSchema.ExtractRefs(Parse(type, "{}")));
         }
 
@@ -42,6 +42,10 @@ namespace HpskSite.Tests
             public IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count) => Comps;
             public IReadOnlyList<SiteRecordInfo> Records() => Recs;
             public IReadOnlyList<SiteRangeInfo> OwnerRanges() => Ranges;
+            public List<SiteChampionInfo> Champs = new();
+            public List<SiteStatItem> StatItems = new();
+            public IReadOnlyList<SiteChampionInfo> Champions() => Champs;
+            public IReadOnlyList<SiteStatItem> Stats() => StatItems;
         }
 
         private static readonly SiteViewer Member = new(true, true, false, false);
@@ -78,8 +82,9 @@ namespace HpskSite.Tests
         {
             var d = new LibData
             {
-                Recs = { new SiteRecordInfo("Precision", "Dam <1>", false, 289, "Anna \"A\" Ek", new DateTime(2026, 3, 4)),
-                         new SiteRecordInfo("Precision", "Öppen", true, 850, "Lag & Co", new DateTime(2025, 1, 2)) }
+                Recs = { new SiteRecordInfo("Precision", "Dam <1>", false, "289 / 300", "Anna \"A\" Ek", new DateTime(2026, 3, 4)),
+                         new SiteRecordInfo("Precision", "Öppen", true, "850 / 900", "Lag & Co", new DateTime(2025, 1, 2)),
+                         new SiteRecordInfo("Fältskytte", "Öppen", false, "42 träff <b>", "Fält", new DateTime(2025, 1, 2)) }
             };
             var html = Render("records", new JsonObject { ["title"] = "Rekord" }, d);
             Assert.Contains("<table", html);
@@ -87,7 +92,8 @@ namespace HpskSite.Tests
             Assert.Contains("Anna &quot;A&quot; Ek", html);
             Assert.Contains("Lag &amp; Co", html);
             Assert.Contains("(lag)", html);
-            Assert.Contains("289", html);
+            Assert.Contains("289 / 300", html);
+            Assert.Contains("42 träff &lt;b&gt;", html);                                // enheten följer med talet och är kodad
             Assert.Contains("table-responsive", html);                                  // tabellen går att rulla på telefon
         }
 
@@ -116,12 +122,42 @@ namespace HpskSite.Tests
             var d = new LibData
             {
                 Comps = { new SiteCompetitionInfo("T", new DateTime(2027, 1, 1), "/t/") },
-                Recs = { new SiteRecordInfo("Precision", "K", false, 1, "H", new DateTime(2026, 1, 1)) },
+                Recs = { new SiteRecordInfo("Precision", "K", false, "1 / 300", "H", new DateTime(2026, 1, 1)) },
                 Ranges = { new SiteRangeInfo(1, "B", null, "/skjutbana/1") },
             };
             Assert.NotEqual("", Render(type, new JsonObject(), d));
             Assert.Equal("", Render(type, new JsonObject(), d, new SiteViewer(true, false, false, false)));
             Assert.Equal("", Render(type, new JsonObject(), d, SiteViewer.Anonymous, SiteVisibility.Inloggade));
+        }
+
+        [Fact]
+        public void Mästarna_ritas_med_kodade_namn_år_och_enhet_och_aldrig_för_alla()
+        {
+            var d = new LibData { Champs = { new SiteChampionInfo(2026, "Precision", "C <Dam>", false, "285 / 300", "Eva & Co"),
+                                             new SiteChampionInfo(2025, "Fältskytte", "Öppen", true, "42 träff (25 figurer)", "Lag <1>") } };
+            var html = Render("champions", new JsonObject { ["title"] = "Mästare" }, d);
+            Assert.Contains("<td>2026</td>", html);
+            Assert.Contains("C &lt;Dam&gt;", html);
+            Assert.Contains("Eva &amp; Co", html);
+            Assert.Contains("42 träff (25 figurer)", html);
+            Assert.Contains("Lag &lt;1&gt;", html);
+            Assert.Contains("(lag)", html);
+            // Personblock: även om författaren valt Alla (Dold→Alla-skalan) släpps en utloggad aldrig in.
+            var anon = SiteBlockRenderer.Render(new SiteBlock("abcd1", "champions", SiteVisibility.Alla, new JsonObject()), SiteVisibility.Alla,
+                new SiteRenderContext(SiteViewer.Anonymous, "/halland/ankeborg/", SiteTemplates.ClubTemplate, d));
+            Assert.Equal("", anon);
+            Assert.False(Parse("champions", "{}", vis: 0).Ok);
+        }
+
+        [Fact]
+        public void Siffrorna_ritas_kodade_med_rubrik_och_ger_tomt_svar_utan_siffror()
+        {
+            var d = new LibData { StatItems = { new SiteStatItem("Medlemmar <x>", 123), new SiteStatItem("Skjutbanor", 2) } };
+            var html = Render("stats", new JsonObject { ["title"] = "Vi i siffror" }, d);
+            Assert.Contains("Vi i siffror", html);
+            Assert.Contains(">123<", html);
+            Assert.Contains("Medlemmar &lt;x&gt;", html);
+            Assert.Equal("", Render("stats", new JsonObject { ["title"] = "Vi i siffror" }, new LibData()));
         }
     }
 }

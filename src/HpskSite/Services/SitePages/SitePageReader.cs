@@ -135,14 +135,16 @@ namespace HpskSite.Services.SitePages
         private readonly PageAddressUrls _urls;
 
         private readonly IScopeProvider _scopes;
+        private readonly ClubRosterService _roster;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
         public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.ICompetitionSeriesStore series,
-            HpskSite.Services.Competitions.CompetitionLinks links)
+            HpskSite.Services.Competitions.CompetitionLinks links, ClubRosterService roster)
         {
+            _roster = roster;
             _competitions = competitions;
             _series = series;
             _links = links;
@@ -309,8 +311,40 @@ namespace HpskSite.Services.SitePages
                         "WHERE Level = @0 AND ScopeId = @1 AND IsCurrent = 1 ORDER BY Discipline, RecordType, ClassCode", level, scopeId)
                     .Select(r => new SiteRecordInfo(HpskSite.Models.RecordDisciplines.DisplayName(r.Discipline),
                         HpskSite.Models.RecordClassRegistry.GetClassDisplayName(r.ClassCode), r.RecordType == HpskSite.Models.RecordTypes.Team,
-                        r.TotalScore, string.IsNullOrWhiteSpace(r.TeamName) ? r.HolderName : r.TeamName!, r.RecordDate))
+                        HpskSite.Models.RecordClassRegistry.FormatScore(r.Discipline, r.RecordType, r.TotalScore, null),   // enheten reser med talet
+                        string.IsNullOrWhiteSpace(r.TeamName) ? r.HolderName : r.TeamName!, r.RecordDate))
                     .ToList();
+            }
+
+            public IReadOnlyList<SiteChampionInfo> Champions()
+            {
+                var level = _ownerType == SiteTemplates.Club ? HpskSite.Models.RecordLevels.Club : HpskSite.Models.RecordLevels.Region;
+                var scopeId = _ownerType == SiteTemplates.Club ? _ownerId.ToString() : RegionCode;
+                if (scopeId.Length == 0) return Array.Empty<SiteChampionInfo>();
+                using var scope = _f._scopes.CreateScope(autoComplete: true);
+                // Regerande = senaste året per gren, typ och klass (samma regel som mästarpanelen).
+                return scope.Database.Fetch<HpskSite.Models.CompetitionChampion>("WHERE Level = @0 AND ScopeId = @1 ORDER BY Year DESC, Id DESC", level, scopeId)
+                    .GroupBy(c => new { c.Discipline, c.ChampionType, c.ClassCode }).Select(g => g.First())
+                    .OrderBy(c => c.Discipline).ThenBy(c => c.ChampionType).ThenBy(c => c.ClassCode)
+                    .Select(c => new SiteChampionInfo(c.Year, HpskSite.Models.RecordDisciplines.DisplayName(c.Discipline),
+                        HpskSite.Models.RecordClassRegistry.GetClassDisplayName(c.ClassCode), c.ChampionType == HpskSite.Models.RecordTypes.Team,
+                        HpskSite.Models.RecordClassRegistry.FormatScore(c.Discipline, c.ChampionType, c.TotalScore, c.SecondaryScore),
+                        string.IsNullOrWhiteSpace(c.TeamName) ? c.HolderName : c.TeamName!))
+                    .ToList();
+            }
+
+            public IReadOnlyList<SiteStatItem> Stats()
+            {
+                if (_ownerType == SiteTemplates.Region)
+                {
+                    var s = RegionStats();
+                    return s == null ? Array.Empty<SiteStatItem>() : new[] { new SiteStatItem("Klubbar", s.Clubs), new SiteStatItem("Skjutbanor", s.Ranges),
+                        new SiteStatItem("Serier", s.Series), new SiteStatItem("Kommande tävlingar", s.UpcomingCompetitions) };
+                }
+                var members = _f._roster.ActiveMemberIds(_ownerId).Count;
+                // Samma urval som tävlingsblocket för en tittare utan medlemskap: klubbinterna tävlingar räknas aldrig in i en siffra som kan visas för fler.
+                var upcoming = _f._competitions.List().Count(c => c.ClubId == _ownerId && c.IsVisible && !c.IsClubOnly && c.CompetitionDate.HasValue && c.CompetitionDate.Value >= DateTime.Today);
+                return new[] { new SiteStatItem("Medlemmar", members), new SiteStatItem("Skjutbanor", OwnerRanges().Count), new SiteStatItem("Kommande tävlingar", upcoming) };
             }
 
             public IReadOnlyList<SiteRangeInfo> OwnerRanges()

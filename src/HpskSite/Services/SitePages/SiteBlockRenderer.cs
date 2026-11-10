@@ -60,13 +60,25 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Skjutbanor: klubbens egna eller, för en krets, banorna kretsens klubbar använder. Begränsade banor ingår aldrig. Standard: inga.</summary>
         IReadOnlyList<SiteRangeInfo> OwnerRanges() => Array.Empty<SiteRangeInfo>();
+
+        /// <summary>Ägarens regerande mästare (namn på personer: bara för inloggade, se blockets personflagga). Standard: inga.</summary>
+        IReadOnlyList<SiteChampionInfo> Champions() => Array.Empty<SiteChampionInfo>();
+
+        /// <summary>Ägarens siffror: klubbens medlemmar, banor och kommande tävlingar, eller kretsens klubbar, banor, serier och tävlingar. Standard: inga.</summary>
+        IReadOnlyList<SiteStatItem> Stats() => Array.Empty<SiteStatItem>();
     }
 
     /// <summary>En kommande tävling i tävlingsblocket.</summary>
     public sealed record SiteCompetitionInfo(string Title, DateTime Date, string Url);
 
-    /// <summary>Ett gällande rekord: gren, klass, resultat, innehavare och datum.</summary>
-    public sealed record SiteRecordInfo(string Discipline, string Class, bool IsTeam, int Score, string Holder, DateTime Date);
+    /// <summary>Ett gällande rekord: gren, klass, resultat, innehavare och datum. <see cref="Result"/> är den färdiga strängen med enheten på ("285 / 300"): talet reser aldrig utan sin enhet.</summary>
+    public sealed record SiteRecordInfo(string Discipline, string Class, bool IsTeam, string Result, string Holder, DateTime Date);
+
+    /// <summary>En regerande mästare: senaste året per gren, typ och klass. <see cref="Result"/> är den färdiga strängen med enheten på.</summary>
+    public sealed record SiteChampionInfo(int Year, string Discipline, string Class, bool IsTeam, string Result, string Holder);
+
+    /// <summary>Ett tal i siffrorutan (medlemmar, banor, kommande tävlingar …).</summary>
+    public sealed record SiteStatItem(string Label, int Value);
 
     /// <summary>Vad en rendering behöver veta: tittaren, ägarens adress och mall, samt live-data.</summary>
     public sealed record SiteRenderContext(SiteViewer Viewer, string OwnerUrl, SiteTemplate Template, ISiteBlockData Data);
@@ -138,6 +150,8 @@ namespace HpskSite.Services.SitePages
                 "competitions" => Competitions(block, ctx),
                 "records" => Records(block, ctx),
                 "ranges" => Ranges(block, ctx),
+                "champions" => Champions(block, ctx),
+                "stats" => Stats(block, ctx),
                 "region-clubs" => RegionClubs(block, ctx),
                 "region-ranges" => RegionRanges(block, ctx),
                 "region-series" => RegionSeries(block, ctx),
@@ -355,11 +369,37 @@ namespace HpskSite.Services.SitePages
             var title = b.Data["title"]?.GetValue<string>();
             var sb = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
-            sb.Append("<div class=\"table-responsive\"><table class=\"table table-sm align-middle\"><thead><tr><th>Gren</th><th>Klass</th><th class=\"text-end\">Poäng</th><th>Innehavare</th><th>Datum</th></tr></thead><tbody>");
+            sb.Append("<div class=\"table-responsive\"><table class=\"table table-sm align-middle\"><thead><tr><th>Gren</th><th>Klass</th><th class=\"text-end\">Resultat</th><th>Innehavare</th><th>Datum</th></tr></thead><tbody>");
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             foreach (var r in items)
-                sb.Append($"<tr><td>{E(r.Discipline)}{(r.IsTeam ? " <span class=\"text-muted small\">(lag)</span>" : "")}</td><td>{E(r.Class)}</td><td class=\"text-end\">{r.Score}</td><td>{E(r.Holder)}</td><td>{E(r.Date.ToString("d MMM yyyy", sv))}</td></tr>");
+                sb.Append($"<tr><td>{E(r.Discipline)}{(r.IsTeam ? " <span class=\"text-muted small\">(lag)</span>" : "")}</td><td>{E(r.Class)}</td><td class=\"text-end\">{E(r.Result)}</td><td>{E(r.Holder)}</td><td>{E(r.Date.ToString("d MMM yyyy", sv))}</td></tr>");
             return Section(b.Id, sb.Append("</tbody></table></div>").ToString());
+        }
+
+        private static string Champions(SiteBlock b, SiteRenderContext ctx)
+        {
+            var items = ctx.Data.Champions().ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<div class=\"table-responsive\"><table class=\"table table-sm align-middle\"><thead><tr><th>År</th><th>Gren</th><th>Klass</th><th>Mästare</th><th class=\"text-end\">Resultat</th></tr></thead><tbody>");
+            foreach (var c in items)
+                sb.Append($"<tr><td>{c.Year}</td><td>{E(c.Discipline)}{(c.IsTeam ? " <span class=\"text-muted small\">(lag)</span>" : "")}</td><td>{E(c.Class)}</td><td>{E(c.Holder)}</td><td class=\"text-end\">{E(c.Result)}</td></tr>");
+            return Section(b.Id, sb.Append("</tbody></table></div>").ToString());
+        }
+
+        private static string Stats(SiteBlock b, SiteRenderContext ctx)
+        {
+            var items = ctx.Data.Stats().ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<div class=\"row row-cols-2 row-cols-md-4 g-3 text-center\">");
+            foreach (var s in items)
+                sb.Append($"<div class=\"col\"><div class=\"border rounded p-3\"><div class=\"h3 mb-0\">{s.Value}</div><div class=\"small text-muted\">{E(s.Label)}</div></div></div>");
+            return Section(b.Id, sb.Append("</div>").ToString());
         }
 
         private static string Ranges(SiteBlock b, SiteRenderContext ctx)
