@@ -96,7 +96,7 @@
     { group: -1, type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true, desc: '' },   // äldre block: nya sidor väljer "Kretsen i siffror" (stats) ovan
   ].filter(t => !t.region || IS_REGION);
   const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
-  const minVisFor = type => Math.max(S.visibility, (type === 'contact' || type === 'champions') ? 1 : 0);   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
+  const minVisFor = type => Math.max(S.visibility, ((S.st && S.st.blockFloors && S.st.blockFloors[type]) || 0));   // golvet kommer ur serverns golv-tabell (State.blockFloors), aldrig en egen regel här   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
   const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
   const pad = n => String(n).padStart(2, '0');
   const clock = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
@@ -619,14 +619,15 @@
   function templateBlocks(tpl, vis) {
     const text = () => ({ id: newId(), type: 'text', visibility: vis, data: { html: '' } });
     if (tpl === 'empty') return [];
-    if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, 1), data: { title: 'Kontakt' } }];
+    if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, ((S.st && S.st.blockFloors) || {}).contact || 0), data: { title: 'Kontakt' } }];
     if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }];
     // Färdiga sidor ur biblioteket. Personblock (kontakt, mästare) får aldrig vara öppnare än Inloggade, och ett block aldrig öppnare än sidan.
-    const blk = (type, data, minVis) => ({ id: newId(), type, visibility: Math.max(vis, minVis || 0), data });
+    const floorOf = type => (S.st && S.st.blockFloors && S.st.blockFloors[type]) || 0;   // serverns golv-tabell
+    const blk = (type, data) => ({ id: newId(), type, visibility: Math.max(vis, floorOf(type)), data });
     const noun = IS_REGION ? 'Kretsrekord' : 'Klubbrekord';
     if (tpl === 'welcome') return [blk('about', { title: '' }), blk('events', { title: 'Kommande händelser', count: 5 }), blk('news', { title: 'Nyheter', count: 3 }), blk('competitions', { title: 'Kommande tävlingar', count: 3 })];
-    if (tpl === 'aboutus') return [blk('about', { title: '' }), blk('contact', { title: 'Kontakt' }, 1)];
-    if (tpl === 'competitions') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('records', { title: noun }), blk('champions', { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' }, 1)];
+    if (tpl === 'aboutus') return [blk('about', { title: '' }), blk('contact', { title: 'Kontakt' })];
+    if (tpl === 'competitions') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('records', { title: noun }), blk('champions', { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' })];
     if (tpl === 'ranges') return [text(), blk('ranges', { title: 'Skjutbanor' })];
     if (tpl === 'overview') return [text(),
       { id: newId(), type: 'region-clubs', visibility: vis, data: { title: 'Klubbar i kretsen' } },
@@ -1002,8 +1003,9 @@
 
   // Väljaren: blocken grupperade efter vad besökaren ser, med en rad om vad varje block visar. Ingen ny design: samma kort och knappar som resten av sidan.
   function addBlockBar() {
+    const retired = new Set((S.st && S.st.retiredBlocks) || []);   // en utgången typ erbjuds inte, men en sida som har den ritas som förut
     const groups = BLOCK_GROUPS.map((title, gi) => {
-      const items = BLOCK_TYPES.filter(t => t.group === gi);
+      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type));
       if (!items.length) return null;
       return h('div', { class: 'mb-3' }, h('p', { class: 'text-muted small fw-semibold mb-1' }, title),
         h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2', 'data-add-block': t.type, onclick: () => addBlock(t.type) },

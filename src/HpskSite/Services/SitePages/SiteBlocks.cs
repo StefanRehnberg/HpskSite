@@ -104,7 +104,21 @@ namespace HpskSite.Services.SitePages
         public static int? FileIdOf(SiteBlock b) =>
             b.Type == "image" && b.Data["ref"] is JsonValue v && v.TryGetValue<string>(out var r) && FileRefRx.IsMatch(r) ? int.Parse(r["file:".Length..]) : null;
 
-        public sealed record BlockType(string Name, bool Personal, bool AllowedInSlot, IReadOnlySet<string> Fields, bool RegionOnly = false, bool ConvertedOnly = false);
+        /// <param name="Retired">Utgången blocktyp: en sida som redan har den läses och sparas som förut (nyckeln finns kvar), men den ritas aldrig och erbjuds inte i väljaren.</param>
+        public sealed record BlockType(string Name, bool Personal, bool AllowedInSlot, IReadOnlySet<string> Fields, bool RegionOnly = false, bool ConvertedOnly = false, bool Retired = false);
+
+        /// <summary>Är typen utgången? EN fråga för ritningen, väljaren och State (<see cref="IsRetired(BlockType?)"/> för typen själv).</summary>
+        public static bool IsRetired(string typeName) => Types.TryGetValue(typeName, out var t) && IsRetired(t);
+        public static bool IsRetired(BlockType? type) => type is { Retired: true };
+
+        /// <summary>
+        /// GOLV-TABELLEN: det öppnaste en blocktyp får vara, per ägartyp. Ett personblock aldrig öppnare än Inloggade, övriga Alla (sidans egen nivå sätter taket).
+        /// Skrivlagret (<c>Parse</c>), ritningen (<c>Effective</c>) och editorn (State.blockFloors) läser ALLA härifrån; ingen kopia någon annanstans.
+        /// En typ som inte får finnas hos ägartypen (kretsblock på en klubb) saknar rad.
+        /// </summary>
+        public static IReadOnlyDictionary<string, SiteVisibility> FloorTable(string ownerType) =>
+            Types.Values.Where(t => !t.ConvertedOnly && !t.Retired && (!t.RegionOnly || ownerType == SiteTemplates.Region))
+                .ToDictionary(t => t.Name, t => IsPersonalBlock(t.Name, ownerType, null) ? SiteAccess.CapPersonal(SiteVisibility.Alla) : SiteVisibility.Alla, StringComparer.Ordinal);
 
         /// <summary>
         /// Panelblockets nyckel (<c>data.key</c>), eller null. Personuppgiftsnivån hör till PANELEN (registret), inte till blocktypen:

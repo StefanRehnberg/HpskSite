@@ -165,6 +165,9 @@ namespace HpskSite.Controllers
                 // Varje vanlig sida bär sitt läge (mode: asBefore | draft | converted, word = orden användaren ser), sidans id/revision när den har en rad, och
                 // om "Ändra den här sidan" får visas. panels = de paneler ägaren får välja på sidan (för kortet och dialogerna).
                 convertEnabled,
+                // Golv-tabellen (det öppnaste varje blocktyp får vara hos den här ägartypen) och utgångna typer: editorn har ingen egen kopia av reglerna.
+                blockFloors = SiteBlockSchema.FloorTable(g.OwnerType).ToDictionary(kv => kv.Key, kv => (int)kv.Value),
+                retiredBlocks = SiteBlockSchema.Types.Values.Where(t => t.Retired).Select(t => t.Name),
                 systemPages = sysStates.Select(s => new
                 {
                     key = s.Key, label = s.Label, mode = SiteSystemPages.Code(s.Mode), word = SiteSystemPages.Word(s.Mode),

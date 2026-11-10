@@ -133,6 +133,7 @@ namespace HpskSite.Services.SitePages
         {
             var effective = Effective(block, pageVisibility, ctx);
             if (!SiteAccess.CanSee(effective, ctx.Viewer)) return "";
+            if (SiteBlockSchema.IsRetired(block.Type)) return "";   // en utgången typ ritas aldrig, men sidan som har den läses och sparas som förut
 
             return block.Type switch
             {
