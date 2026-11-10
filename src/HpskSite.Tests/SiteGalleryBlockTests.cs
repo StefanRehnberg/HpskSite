@@ -175,6 +175,14 @@ namespace HpskSite.Tests
             Assert.Null(await SiteImages.ThumbnailAsync(ms.ToArray(), "image/gif", 640));       // en animerad gif behåller sina rutor
         }
 
+        [Theory]
+        [InlineData(100L * 1024 * 1024, 30L * 1024 * 1024, 70L * 1024 * 1024)]
+        [InlineData(100L * 1024 * 1024, 100L * 1024 * 1024, 0L)]
+        [InlineData(100L * 1024 * 1024, 150L * 1024 * 1024, 0L)]   // dokumenten har redan tagit mer än gränsen: aldrig ett negativt utrymme
+        [InlineData(0L, 0L, 0L)]
+        public void Bilderna_får_det_dokumenten_lämnat_kvar_av_den_gemensamma_gränsen(long limit, long docs, long expected) =>
+            Assert.Equal(expected, SiteImages.QuotaFor(limit, docs));
+
         [Fact]
         public void Miniatyradressen_bär_bara_id_och_en_tillåten_bredd()
         {

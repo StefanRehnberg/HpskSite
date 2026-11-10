@@ -774,11 +774,11 @@
           await renderLibrary({ cls: r.success ? 'success' : 'danger', text: r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.') });
         }, { danger: true }]]));
     view(shell('bilder',
-      pageHead('Bilder', 'Föreningens bilder. De väljs i bildblock, bildgalleri och text på era sidor. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
+      pageHead('Bilder', 'Föreningens bilder. De väljs i bildblock, bildgalleri och text på era sidor. Bilder och dokument delar på samma utrymme. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
         ['Ladda upp bilder', () => fileInp.click()]]),
       msg, fileInp,
       f.failed ? alertBox('danger', f.failed) : h('div', { class: 'hs-card p-3 mb-3' },
-        h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används · högst ' + (f.maxFiles || 0) + ' bilder')),
+        h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används (bilder ' + fmtSize(f.imageBytes || 0) + ', dokument ' + fmtSize(f.documentBytes || 0) + ') · högst ' + (f.maxFiles || 0) + ' bilder')),
         h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Använt utrymme', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', style: 'height:.5rem' }, h('div', { class: 'progress-bar' + (pct >= 90 ? ' bg-warning' : ''), style: 'width:' + pct + '%' }))),
       files.length ? h('div', { class: 'hs-imggrid mb-3' }, files.map(tile)) : h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.'),
       h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.')));

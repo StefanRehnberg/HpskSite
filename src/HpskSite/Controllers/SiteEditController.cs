@@ -233,12 +233,17 @@ namespace HpskSite.Controllers
         /// <summary>Ägarens bilder (med var de används) och kvoten.</summary>
         [HttpGet]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
-        public async Task<IActionResult> Files(string ownerType, int ownerId)
+        public async Task<IActionResult> Files(string ownerType, int ownerId, [FromServices] HpskSite.Services.DocumentService docs)
         {
             var g = await Gate(ownerType, ownerId, write: false);
             if (g.Error != null) return g.Error;
             using var scope = _scopes.CreateScope(autoComplete: true);
-            var (count, bytes) = SiteFiles.Usage(scope.Database, g.OwnerType, g.OwnerId);
+            var (count, imageBytes) = SiteFiles.Usage(scope.Database, g.OwnerType, g.OwnerId);
+            // EN gemensam gräns för dokument och bilder: samma som dokumentarkivet (appsettings DocumentArchive:Default…StorageLimitMB eller föreningens egen gräns).
+            var docType = g.OwnerType == SiteTemplates.Region ? HpskSite.Models.DocumentOwnerType.Region : HpskSite.Models.DocumentOwnerType.Club;
+            var documentBytes = docs.GetDocumentBytes(docType, g.OwnerId);
+            var limitBytes = docs.GetStorageLimitBytes(docType, g.OwnerId);
+            var bytes = imageBytes + documentBytes;
             return Json(new
             {
                 success = true,
@@ -247,7 +252,7 @@ namespace HpskSite.Controllers
                     id = f.Id, name = f.FileName, size = f.Size, width = f.Width, height = f.Height, uploaded = f.UploadedDate, usedBy = f.UsedBy,
                     url = SiteImages.UrlFor(f.Id),
                 }),
-                count, bytes, maxBytes = SiteImages.QuotaBytesPerOwner, maxFiles = SiteImages.MaxFilesPerOwner,
+                count, bytes, imageBytes, documentBytes, maxBytes = limitBytes, maxFiles = SiteImages.MaxFilesPerOwner,   // bytes = bilder + dokument, mot samma gräns
             });
         }
 
@@ -256,10 +261,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         [RequestSizeLimit(25 * 1024 * 1024)]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ, villkoren accepterade")]
-        public async Task<IActionResult> UploadImage(string ownerType, int ownerId, IFormFile? upload, [FromServices] HpskSite.Services.Storage.IFileStore store)
+        public async Task<IActionResult> UploadImage(string ownerType, int ownerId, IFormFile? upload, [FromServices] HpskSite.Services.Storage.IFileStore store, [FromServices] HpskSite.Services.DocumentService docs)
         {
             var g = await Gate(ownerType, ownerId, write: true);
             if (g.Error != null) return g.Error;
+            // Gränsen är föreningens gemensamma för dokument och bilder: bilderna får det som dokumenten lämnat kvar.
+            var docType = g.OwnerType == SiteTemplates.Region ? HpskSite.Models.DocumentOwnerType.Region : HpskSite.Models.DocumentOwnerType.Club;
+            var limitBytes = docs.GetStorageLimitBytes(docType, g.OwnerId);
+            var quotaBytes = SiteImages.QuotaFor(limitBytes, docs.GetDocumentBytes(docType, g.OwnerId));
             if (Throttled($"sitefile-up:{g.OwnerType}:{g.OwnerId}", UploadsPerHour, TimeSpan.FromHours(1))) return Fail("För många uppladdningar på kort tid. Försök igen om en stund.", "rate");
             if (upload == null || upload.Length == 0) return Fail("Ingen fil vald.");
 
@@ -278,7 +287,7 @@ namespace HpskSite.Controllers
             var now = DateTime.Now;
             using (var scope = _scopes.CreateScope())
             {
-                status = SiteFiles.Insert(scope.Database, g.OwnerType, g.OwnerId, SiteImages.DisplayName(upload.FileName), stored, img, g.Actor!.MemberId, now, out fileId);
+                status = SiteFiles.Insert(scope.Database, g.OwnerType, g.OwnerId, SiteImages.DisplayName(upload.FileName), stored, img, g.Actor!.MemberId, now, out fileId, quotaBytes);
                 if (status == SiteFileStatus.Ok)
                 {
                     scope.Database.Execute(
@@ -293,7 +302,7 @@ namespace HpskSite.Controllers
                 await store.DeleteAsync(SiteImages.Area, fileName);
                 return status switch
                 {
-                    SiteFileStatus.QuotaFull => Fail($"Utrymmet för bilder är fullt ({SiteImages.QuotaBytesPerOwner / 1024 / 1024} MB). Ta bort bilder som inte används.", "quota"),
+                    SiteFileStatus.QuotaFull => Fail($"Utrymmet är fullt ({limitBytes / 1024 / 1024} MB för bilder och dokument tillsammans). Ta bort bilder eller dokument som inte används.", "quota"),
                     SiteFileStatus.TooMany => Fail($"Ni har nått taket på {SiteImages.MaxFilesPerOwner} bilder. Ta bort bilder som inte används.", "quota"),
                     _ => Fail("Föreningen finns inte."),
                 };

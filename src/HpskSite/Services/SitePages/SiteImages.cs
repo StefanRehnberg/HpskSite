@@ -50,7 +50,11 @@ namespace HpskSite.Services.SitePages
         public const long MaxPixels = 40_000_000;
         /// <summary>Längsta sida efter omkodning: en kamerabild på 6000 px behövs inte på en klubbsida.</summary>
         public const int MaxSide = 2400;
+        /// <summary>Reservvärde när ingen gräns ges (prov). I drift gäller föreningens gemensamma gräns för dokument och bilder: <see cref="QuotaFor"/>.</summary>
         public const long QuotaBytesPerOwner = 200L * 1024 * 1024;
+
+        /// <summary>Utrymmet bilder får ta när dokumenten redan tagit sitt av den gemensamma gränsen (aldrig negativt).</summary>
+        public static long QuotaFor(long storageLimitBytes, long documentBytes) => Math.Max(0, storageLimitBytes - documentBytes);
         public const int MaxFilesPerOwner = 500;
 
         private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
