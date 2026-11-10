@@ -77,6 +77,7 @@
     { group: 0, type: 'text', label: 'Text', icon: 'bi-text-paragraph', desc: 'Egen text med rubriker, listor och bilder.' },
     { group: 0, type: 'heading', label: 'Rubrik', icon: 'bi-type-h2', desc: 'En mellanrubrik som delar upp sidan.' },
     { group: 0, type: 'image', label: 'Bild', icon: 'bi-image', desc: 'En bild med bildtext.' },
+    { group: 0, type: 'gallery', label: 'Bildgalleri', icon: 'bi-images', desc: 'Flera bilder som miniatyrer. Ett klick öppnar bilden i full storlek.' },
     { group: 0, type: 'about', label: IS_REGION ? 'Om kretsen' : 'Om klubben', icon: 'bi-info-circle', desc: 'Presentationstexten. Den skrivs under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och hämtas vid varje besök.' },
     { group: 1, type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill', desc: 'Kontaktperson, e-post och telefon. Visas aldrig för alla.' },
     { group: 2, type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event', desc: 'De närmaste händelserna i kalendern.' },
@@ -179,6 +180,7 @@
     if ((m = /^#redigera=(\d+)$/.exec(hsh))) return openEditor(parseInt(m[1], 10));
     if (hsh === '#raderade') return renderTrash();
     if (hsh === '#lankar') return renderLinks();
+    if (hsh === '#bilder') return renderLibrary();
     if (hsh === '#logg') return renderAudit();
     if ((m = /^#ny(?:=(\d+))?$/.exec(hsh))) return renderNew(null, m[1] ? parseInt(m[1], 10) : null);   // #ny=12 = en ny undersida till sidan 12
     return renderList();
@@ -200,7 +202,7 @@
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
       onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
     const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Egen version') : null;
-    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
+    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'bilder' ? 'Bilder' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
     return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
       h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
       h('div', { class: 'hs-org' }, 'Hemsidan'),
@@ -213,6 +215,7 @@
         h('div', { class: 'hs-railh' }, IS_REGION ? 'Kretsens vanliga sidor' : 'Klubbens vanliga sidor'),
         sys.map(p => nav('sys:' + p.key, p.label, '#sida=' + p.key, pill(p))),
         h('div', { class: 'hs-railh' }, 'Mer'),
+        nav('bilder', 'Bilder', '#bilder'),
         nav('lankar', 'Länkar i menyn', '#lankar', (st.menuLinks || []).length ? h('span', { class: 'hs-pill' }, st.menuLinks.length) : null),
         st.trash.length ? nav('raderade', 'Raderade sidor', '#raderade', h('span', { class: 'hs-pill' }, st.trash.length)) : null,
         st.support ? null : nav('logg', 'Vad som hänt', '#logg')));
@@ -620,6 +623,52 @@
     renderBanner();
   }
 
+  // ── Bilder: föreningens bildbibliotek. Här laddar ni upp, ser vad som används och tar bort. Bilderna väljs sedan i bildblock, galleri och text. ──
+  async function renderLibrary(banner) {   // banner = { cls, text }: ett besked som ska stå kvar i den nya vyn
+    setHash('#bilder');
+    view(shell('bilder', pageHead('Bilder', 'Laddar …'), h('p', { class: 'text-muted' }, 'Laddar …')));
+    await loadFiles();
+    const f = S.files, files = f.files || [];
+    const msg = h('div', { id: 'hsBanner' });
+    const show = (cls, text) => msg.replaceChildren(text ? alertBox(cls, text) : '');
+    const fileInp = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', multiple: true, class: 'd-none', 'aria-label': 'Välj bilder att ladda upp' });
+    fileInp.addEventListener('change', async () => {
+      const list = [...fileInp.files]; fileInp.value = ''; if (!list.length) return;
+      let okCount = 0, lastErr = null;
+      for (let i = 0; i < list.length; i++) {
+        show('info', list.length > 1 ? 'Laddar upp ' + (i + 1) + ' av ' + list.length + ' …' : 'Laddar upp …');
+        const r = await uploadImage(list[i]);
+        if (!r.success) { lastErr = list[i].name + ': ' + (r.message || 'Det gick inte att ladda upp bilden.'); if (r.code === 'quota' || r.code === 'rate') break; continue; }
+        okCount++;
+      }
+      await renderLibrary({ cls: lastErr ? 'danger' : 'success', text: lastErr ? (okCount ? okCount + ' uppladdade. ' : '') + lastErr : okCount === 1 ? 'Bilden är uppladdad.' : okCount + ' bilder är uppladdade.' });
+    });
+    const pct = f.maxBytes ? Math.min(100, Math.round((f.bytes || 0) * 100 / f.maxBytes)) : 0;
+    const tile = x => h('div', { class: 'hs-imgtile', 'data-file': x.id },
+      h('a', { href: x.url, target: '_blank', rel: 'noopener', class: 'hs-imgpick', 'aria-label': 'Öppna ' + x.name + ' i en ny flik' }, h('img', { src: x.url + '&w=320', alt: '', loading: 'lazy' })),
+      h('span', { class: 'hs-imgname', title: x.name }, x.name),
+      h('span', { class: 'small text-muted' }, x.width + ' × ' + x.height + ' · ' + fmtSize(x.size)),
+      h('span', { class: 'small ' + (x.usedBy > 0 ? '' : 'text-muted') }, x.usedBy > 0 ? 'Används på ' + x.usedBy + (x.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte'),
+      rowMenu([
+        ['Öppna bilden', null, { href: x.url }],
+        '-',
+        x.usedBy > 0 ? ['Ta bort (används på en sida)', null, { disabled: true }] : ['Ta bort', async () => {
+          if (!await confirmDialog('Ta bort bilden?', 'Bilden "' + x.name + '" tas bort från biblioteket. Det går inte att ångra.', 'Ta bort', true)) return;
+          const r = await api('POST', 'DeleteFile', { fileId: x.id });
+          await renderLibrary({ cls: r.success ? 'success' : 'danger', text: r.success ? 'Bilden är borttagen.' : (r.message || 'Det gick inte att ta bort bilden.') });
+        }, { danger: true }]]));
+    view(shell('bilder',
+      pageHead('Bilder', 'Föreningens bilder. De väljs i bildblock, bildgalleri och text på era sidor. En bild som används på en sida kan inte tas bort förrän den tagits bort från sidan.', [
+        ['Ladda upp bilder', () => fileInp.click()]]),
+      msg, fileInp,
+      f.failed ? alertBox('danger', f.failed) : h('div', { class: 'hs-card p-3 mb-3' },
+        h('div', { class: 'd-flex flex-wrap justify-content-between gap-2 mb-1' }, h('strong', {}, files.length + (files.length === 1 ? ' bild' : ' bilder')), h('span', { class: 'text-muted small' }, fmtSize(f.bytes || 0) + ' av ' + fmtSize(f.maxBytes || 0) + ' används · högst ' + (f.maxFiles || 0) + ' bilder')),
+        h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Använt utrymme', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', style: 'height:.5rem' }, h('div', { class: 'progress-bar' + (pct >= 90 ? ' bg-warning' : ''), style: 'width:' + pct + '%' }))),
+      files.length ? h('div', { class: 'hs-imggrid mb-3' }, files.map(tile)) : h('div', { class: 'hs-card p-3 text-muted' }, 'Ni har inga bilder än. Välj Åtgärder → Ladda upp bilder.'),
+      h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.')));
+    if (banner) show(banner.cls, banner.text);
+  }
+
   function renderTrash() {
     if (!S.st.trash.length) return renderList();
     setHash('#raderade');
@@ -849,7 +898,8 @@
   }
 
   async function publishNow() {
-    const noAlt = S.blocks.filter(b => b.type === 'image' && b.data.decorative !== true && !String(b.data.alt || '').trim()).length;
+    const noAlt = S.blocks.filter(b => b.type === 'image' && b.data.decorative !== true && !String(b.data.alt || '').trim()).length
+      + S.blocks.filter(b => b.type === 'gallery').reduce((n, b) => n + (b.data.items || []).filter(it => !String(it.alt || '').trim() && !String(it.caption || '').trim()).length, 0);   // en bild i ett galleri räknas som beskriven om den har beskrivning eller bildtext
     if (noAlt > 0 && !S.altAck) {
       const go = await modal('Bilder utan beskrivning', [h('p', {}, noAlt === 1 ? 'En bild på sidan saknar beskrivning.' : noAlt + ' bilder på sidan saknar beskrivning.'),
         h('p', { class: 'text-muted mb-0' }, 'Den som använder skärmläsare får då inte veta vad bilden visar. Är bilden bara dekoration kan du kryssa i det på bilden.')],
@@ -1107,6 +1157,13 @@
       S.hint = 'Beskriv bilden med några ord, så att den som inte ser bilden förstår vad den visar.';
       markDirty(); drawBlocks(); paintEditorBanner(); return;
     }
+    if (type === 'gallery') {   // ett galleri börjar med bilderna: välj dem först, lägg till sedan (avbryter du läggs inget till)
+      const fs = await pickImage(null, { multi: true });
+      if (!fs || !fs.length) return;
+      S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data: { title: '', items: fs.slice(0, 24).map(f => ({ ref: 'file:' + f.id, alt: '', caption: '' })) }, ...(S.kind === 'slots' ? { pos } : {}) });
+      S.hint = 'Beskriv varje bild med några ord, så att den som inte ser bilderna förstår vad de visar.';
+      markDirty(); drawBlocks(); return;
+    }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
       : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
@@ -1347,6 +1404,7 @@
       case 'pagelink': return [field('Vilken sida?', bind(h('select', { class: 'form-select' }, S.st.systemPages.map(p => h('option', { value: p.key, selected: p.key === d.key ? true : null }, p.label))), d, 'key')),
         field('Text på knappen (valfri)', bind(h('input', { class: 'form-control', maxlength: '80', value: d.label || '' }), d, 'label'))];
       case 'image': return imageEditor(b);
+      case 'gallery': return galleryEditor(b);
       case 'region-clubs': case 'region-ranges': case 'region-stats': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, b.type === 'region-clubs' ? 'Listar kretsens klubbar med länk till deras sidor. Listan hämtas vid varje besök.'
           : b.type === 'region-ranges' ? 'Listar skjutbanorna som kretsens klubbar använder (namn och ort). Banor som är markerade som begränsade visas aldrig här.'
@@ -1361,6 +1419,34 @@
   // ── Bilder (2c) ────────────────────────────────────────────────────────────
   const imgUrl = ref => '/umbraco/surface/SiteFile/Image?id=' + parseInt(String(ref).replace('file:', ''), 10);
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+
+  // Galleriet: bilderna i ordning, var och en med beskrivning (läses upp) och bildtext (visas under bilden). Flytta med pilarna, ta bort, lägg till fler ur biblioteket.
+  function galleryEditor(b) {
+    const d = b.data;
+    if (!Array.isArray(d.items)) d.items = [];
+    const wrap = h('div');
+    const draw = () => {
+      const move = (i, dir) => { const j = i + dir; if (j < 0 || j >= d.items.length) return; [d.items[i], d.items[j]] = [d.items[j], d.items[i]]; markDirty(); draw(); };
+      wrap.replaceChildren(
+        field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        d.items.length ? h('div', { class: 'row g-3 mb-3' }, d.items.map((it, i) => h('div', { class: 'col-12 col-md-6' }, h('div', { class: 'hs-card p-2 h-100' },
+          h('img', { class: 'hs-imgprev mb-2', src: imgUrl(it.ref) + '&w=320', alt: it.alt || it.caption || '', loading: 'lazy',
+            onerror: e => e.target.replaceWith(h('p', { class: 'text-danger small' }, 'Bilden finns inte längre. Ta bort den ur galleriet.')) }),
+          field('Beskriv bilden', bind(h('input', { class: 'form-control form-control-sm', maxlength: '200', value: it.alt || '', placeholder: 'Till exempel: Skyttar vid banan' }), it, 'alt')),
+          field('Bildtext (valfri)', bind(h('input', { class: 'form-control form-control-sm', maxlength: '200', value: it.caption || '' }), it, 'caption')),
+          h('div', { class: 'd-flex gap-1' },
+            h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', disabled: i === 0, 'aria-label': 'Flytta bilden åt vänster', onclick: () => move(i, -1) }, h('i', { class: 'bi bi-arrow-left' })),
+            h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', disabled: i === d.items.length - 1, 'aria-label': 'Flytta bilden åt höger', onclick: () => move(i, 1) }, h('i', { class: 'bi bi-arrow-right' })),
+            h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger ms-auto', onclick: () => { d.items.splice(i, 1); markDirty(); draw(); } }, 'Ta bort ur galleriet')))))) : h('p', { class: 'text-muted' }, 'Galleriet har inga bilder än.'),
+        h('button', { type: 'button', class: 'btn btn-sm btn-outline-primary', disabled: d.items.length >= 24, onclick: async () => {
+          const fs = await pickImage(null, { multi: true }); if (!fs || !fs.length) return;
+          for (const f of fs) if (d.items.length < 24 && !d.items.some(x => x.ref === 'file:' + f.id)) d.items.push({ ref: 'file:' + f.id, alt: '', caption: '' });
+          markDirty(); draw();
+        } }, '＋ Lägg till bilder'),
+        h('p', { class: 'text-muted small mt-2 mb-0' }, d.items.length + ' av högst 24 bilder. Besökaren ser miniatyrer; ett klick öppnar bilden i full storlek i en ny flik.'));
+    };
+    draw(); return wrap;
+  }
 
   function imageEditor(b) {
     const d = b.data;
@@ -1397,13 +1483,16 @@
   }
 
   // Bildväljaren: ladda upp en ny bild eller välj en av föreningens. Svarar med den valda filen, eller null.
-  function pickImage(currentRef) {
+  function pickImage(currentRef, opts) {
+    const multi = !!(opts && opts.multi);   // flerval: svarar med en lista bilder (för galleriet)
     return new Promise(async resolve => {
       await loadFiles();
       let chosen = null, done = false;
+      const picked = new Map();
+      const isSel = f => multi ? picked.has(f.id) : !!(chosen && chosen.id === f.id);
       const msg = h('div'), info = h('p', { class: 'small text-muted mb-2' }), grid = h('div', { class: 'hs-imggrid' });
       const useBtn = h('button', { type: 'button', class: 'btn btn-primary', disabled: true }, 'Använd bilden');
-      const fileInp = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', class: 'd-none', 'aria-label': 'Välj en bild att ladda upp' });
+      const fileInp = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/gif,image/webp', class: 'd-none', 'aria-label': 'Välj en bild att ladda upp', multiple: multi ? true : null });
       const upBtn = h('button', { type: 'button', class: 'btn btn-outline-primary', onclick: () => fileInp.click() }, h('i', { class: 'bi bi-upload me-1' }), 'Ladda upp en bild');
       const show = (cls, text) => msg.replaceChildren(text ? h('div', { class: 'alert alert-' + cls + ' py-2' }, text) : '');
 
@@ -1411,41 +1500,51 @@
         const fs = S.files.files || [];
         info.textContent = S.files.failed ? '' : fs.length + ' bilder, ' + fmtSize(S.files.bytes || 0) + ' av ' + fmtSize(S.files.maxBytes || 0) + ' används.';
         if (S.files.failed) show('danger', S.files.failed);
-        grid.replaceChildren(...(fs.length ? fs.map(f => h('div', { class: 'hs-imgtile' + (chosen && chosen.id === f.id ? ' sel' : '') },
-          h('button', { type: 'button', class: 'hs-imgpick', 'aria-pressed': chosen && chosen.id === f.id ? 'true' : 'false', 'aria-label': 'Välj ' + f.name, onclick: () => { chosen = f; useBtn.disabled = false; paint(); } },
-            h('img', { src: f.url, alt: '', loading: 'lazy' }), h('span', { class: 'hs-imgname d-block', title: f.name }, f.name)),
+        grid.replaceChildren(...(fs.length ? fs.map(f => h('div', { class: 'hs-imgtile' + (isSel(f) ? ' sel' : '') },
+          h('button', { type: 'button', class: 'hs-imgpick', 'aria-pressed': isSel(f) ? 'true' : 'false', 'aria-label': 'Välj ' + f.name, onclick: () => { if (multi) { if (picked.has(f.id)) picked.delete(f.id); else picked.set(f.id, f); } else chosen = f; paint(); } },
+            h('img', { src: f.url + '&w=320', alt: '', loading: 'lazy' }), h('span', { class: 'hs-imgname d-block', title: f.name }, f.name)),
           h('span', { class: 'small text-muted' }, f.usedBy > 0 ? 'Används på ' + f.usedBy + (f.usedBy === 1 ? ' sida' : ' sidor') : 'Används inte'),
           f.usedBy === 0 ? h('button', { type: 'button', class: 'btn btn-sm btn-outline-danger', onclick: async () => {
             const r = await api('POST', 'DeleteFile', { fileId: f.id });
             if (!r.success) { show('danger', r.message || 'Det gick inte att ta bort bilden.'); return; }
-            if (chosen && chosen.id === f.id) { chosen = null; useBtn.disabled = true; }
+            if (chosen && chosen.id === f.id) chosen = null;
+            picked.delete(f.id);
             await loadFiles(); show('', ''); paint();
           } }, 'Ta bort') : null))
           : [h('p', { class: 'text-muted' }, 'Ni har inga bilder än. Ladda upp den första.')]));
+        useBtn.disabled = multi ? picked.size === 0 : !chosen;
+        if (multi) useBtn.textContent = picked.size ? 'Lägg till ' + picked.size + (picked.size === 1 ? ' bild' : ' bilder') : 'Lägg till bilder';
       };
       fileInp.addEventListener('change', async () => {
-        const f = fileInp.files[0]; fileInp.value = ''; if (!f) return;
-        upBtn.disabled = true; show('info', 'Laddar upp …');
-        const r = await uploadImage(f);
+        const list = [...fileInp.files]; fileInp.value = ''; if (!list.length) return;
+        upBtn.disabled = true; let okCount = 0, lastErr = null;
+        for (let i = 0; i < list.length; i++) {
+          show('info', list.length > 1 ? 'Laddar upp ' + (i + 1) + ' av ' + list.length + ' …' : 'Laddar upp …');
+          const r = await uploadImage(list[i]);
+          if (!r.success) { lastErr = list[i].name + ': ' + (r.message || 'Det gick inte att ladda upp bilden.'); if (r.code === 'quota' || r.code === 'rate') break; continue; }
+          okCount++;
+          await loadFiles();
+          const nf = (S.files.files || []).find(x => x.id === r.id) || null;
+          if (multi) { if (nf) picked.set(nf.id, nf); } else chosen = nf;
+        }
         upBtn.disabled = false;
-        if (!r.success) { show('danger', r.message || 'Det gick inte att ladda upp bilden.'); return; }
-        show('success', 'Bilden är uppladdad.');
-        await loadFiles(); chosen = (S.files.files || []).find(x => x.id === r.id) || null; useBtn.disabled = !chosen; paint();
+        if (lastErr) show('danger', (okCount ? okCount + ' uppladdade. ' : '') + lastErr); else show('success', okCount === 1 ? 'Bilden är uppladdad.' : okCount + ' bilder är uppladdade.');
+        paint();
       });
 
       const el = h('div', { class: 'modal fade', tabindex: '-1' },
         h('div', { class: 'modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable' }, h('div', { class: 'modal-content' },
-          h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, 'Välj bild'), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+          h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, multi ? 'Välj bilder' : 'Välj bild'), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
           h('div', { class: 'modal-body' },
             h('p', { class: 'text-muted small' }, 'Bilden skrivs om när den laddas upp: platsdata och annan dold information tas bort och en mycket stor bild förminskas. Lägg inte upp bilder där någon kan kännas igen utan att ha gett sitt tillstånd.'),
             h('div', { class: 'mb-3' }, upBtn, fileInp), msg, info, grid),
           h('div', { class: 'modal-footer' }, h('button', { type: 'button', class: 'btn btn-secondary', 'data-bs-dismiss': 'modal' }, 'Avbryt'), useBtn))));
       document.body.append(el);
       const bsm = new bootstrap.Modal(el);
-      useBtn.addEventListener('click', () => { done = true; bsm.hide(); resolve(chosen); });
+      useBtn.addEventListener('click', () => { done = true; bsm.hide(); resolve(multi ? [...picked.values()] : chosen); });
       el.addEventListener('hidden.bs.modal', () => { el.remove(); if (!done) resolve(null); });
       if (currentRef) chosen = (S.files.files || []).find(x => 'file:' + x.id === currentRef) || null;
-      useBtn.disabled = !chosen; paint(); bsm.show();
+      paint(); bsm.show();
     });
   }
 

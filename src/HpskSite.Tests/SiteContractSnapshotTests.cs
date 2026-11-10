@@ -37,6 +37,7 @@ namespace HpskSite.Tests
                 "ranges|n|n|n|n|title",
                 "champions|Y|n|n|n|title",
                 "stats|n|n|n|n|title",
+                "gallery|n|n|n|n|items,title",
                 "about|n|n|n|n|title",
                 "panel|n|n|n|Y|key,zone",
             };

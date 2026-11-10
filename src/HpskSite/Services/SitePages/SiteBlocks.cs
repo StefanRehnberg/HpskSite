@@ -98,7 +98,26 @@ namespace HpskSite.Services.SitePages
         {
             if (b.Type == "image") return FileIdOf(b) is int id ? new[] { id } : Array.Empty<int>();
             if (b.Type == "text") return SiteHtmlSanitizer.InlineFileIds(b.Data["html"]?.GetValue<string>());
+            if (b.Type == "gallery") return GalleryItems(b).Select(i => i.Id).Distinct().ToList();
             return Array.Empty<int>();
+        }
+
+        public const int MaxGalleryItems = 24;
+
+        /// <summary>En bild i ett galleri: fil-id, beskrivning (alt) och bildtext. Båda texterna är valfria i ett utkast (som bildblockets).</summary>
+        public sealed record GalleryItem(int Id, string? Alt, string? Caption);
+
+        /// <summary>Galleriblockets bilder i ordning. Rader som inte är en giltig filreferens hoppas över (Parse avvisar dem redan vid skrivning).</summary>
+        public static IReadOnlyList<GalleryItem> GalleryItems(SiteBlock b)
+        {
+            var list = new List<GalleryItem>();
+            if (b.Type != "gallery" || b.Data["items"] is not JsonArray arr) return list;
+            foreach (var n in arr)
+            {
+                if (n is not JsonObject o || o["ref"] is not JsonValue v || !v.TryGetValue<string>(out var r) || !FileRefRx.IsMatch(r)) continue;
+                list.Add(new GalleryItem(int.Parse(r["file:".Length..]), Str(o["alt"]), Str(o["caption"])));
+            }
+            return list;
         }
 
         public static int? FileIdOf(SiteBlock b) =>
@@ -156,6 +175,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("ranges", false, false, Set("title")),   // skjutbanor (klubbens egna respektive kretsens klubbars), utan karta; begränsade banor utelämnas
             new BlockType("champions", Personal: true, false, Set("title")),   // regerande mästare (live): namn på personer, aldrig Alla (som mästarpanelen, bara inloggade)
             new BlockType("stats", false, false, Set("title")),   // föreningens siffror (live): klubbens medlemmar, banor och tävlingar, eller kretsens klubbar, banor, serier och tävlingar
+            new BlockType("gallery", false, false, Set("title", "items")),   // bildgalleri: bilder ur ägarens bildbibliotek (file:N), miniatyrer som länkar till originalet; ren server-HTML utan JS
             new BlockType("about", false, false, Set("title")),   // föreningens presentationstext (live ur nodens uppgifter, lagras inte): första biblioteksblocket, samma text som Om-panelen
             new BlockType("panel", Personal: false, AllowedInSlot: false, Set("key", "zone"), ConvertedOnly: true),   // en systempanel på en omvandlad sida (schema 2); ritas av vyn ur registret, personnivån ur registret
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
@@ -421,6 +441,34 @@ namespace HpskSite.Services.SitePages
                 {
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     if (title != null) o["title"] = title;
+                    break;
+                }
+                case "gallery":
+                {
+                    var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
+                    if (title != null) o["title"] = title;
+                    var outItems = new JsonArray();
+                    var seenRefs = new HashSet<string>(StringComparer.Ordinal);
+                    if (d["items"] == null) { o["items"] = outItems; break; }   // ett nytt galleri utan bilder får sparas som utkast
+                    if (d["items"] is not JsonArray items) { errors.Add(new($"{p}.items", "Förväntade en lista med bilder.")); break; }
+                    if (items.Count > MaxGalleryItems) { errors.Add(new($"{p}.items", $"Högst {MaxGalleryItems} bilder i ett galleri.")); break; }
+                    for (var gi = 0; gi < items.Count; gi++)
+                    {
+                        var ip = $"{p}.items[{gi}]";
+                        if (items[gi] is not JsonObject io) { errors.Add(new(ip, "Bilden har fel form.")); continue; }
+                        foreach (var key in io.Select(x => x.Key).Where(k => k is not ("ref" or "alt" or "caption")))
+                            errors.Add(new($"{ip}.{key}", $"Okänt fält \"{key}\"."));
+                        var gref = Str(io["ref"]);
+                        if (gref == null || !FileRefRx.IsMatch(gref)) { errors.Add(new($"{ip}.ref", "Välj en bild.")); continue; }
+                        if (!seenRefs.Add(gref)) { errors.Add(new($"{ip}.ref", "Samma bild ligger två gånger i galleriet.")); continue; }
+                        var galt = Short(io["alt"], $"{ip}.alt", 200, required: false, errors);
+                        var gcap = Short(io["caption"], $"{ip}.caption", 200, required: false, errors);
+                        var oi = new JsonObject { ["ref"] = gref };
+                        if (galt != null) oi["alt"] = galt;
+                        if (gcap != null) oi["caption"] = gcap;
+                        outItems.Add(oi);
+                    }
+                    o["items"] = outItems;
                     break;
                 }
                 case "competitions":

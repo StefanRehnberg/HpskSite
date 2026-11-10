@@ -2,6 +2,7 @@ using HpskSite.Services.Security;
 using HpskSite.Services.SitePages;
 using HpskSite.Services.Storage;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -28,19 +29,23 @@ namespace HpskSite.Controllers
 
         public SiteFileController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory, ServiceContext services,
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
-            SiteImageService images, SiteViewerResolver viewers, IFileStore store, IContentService content, ILogger<SiteFileController> logger)
+            SiteImageService images, SiteViewerResolver viewers, IFileStore store, IContentService content, ILogger<SiteFileController> logger,
+            Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
-            _images = images; _viewers = viewers; _store = store; _content = content; _logger = logger;
+            _images = images; _viewers = viewers; _store = store; _content = content; _logger = logger; _cache = cache;
         }
+
+        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
 
         [HttpGet]
         [PublicEndpoint("Bilden serveras bara om en publicerad, för tittaren synlig referens finns (SiteImageAccess); annars 404")]
-        public async Task<IActionResult> Image(int id)
+        public async Task<IActionResult> Image(int id, int w = 0)
         {
             try
             {
                 if (id <= 0) return NotFound();
+                if (w != 0 && !SiteImages.ThumbnailWidths.Contains(w)) return NotFound();   // bara de tillåtna bredderna: ingen fri storlek
                 var (file, decision) = await _images.AuthorizeAsync(id, async (type, ownerId) =>
                 {
                     string? code = null;
@@ -58,6 +63,21 @@ namespace HpskSite.Controllers
                 Response.Headers["Cache-Control"] = decision == SiteImageDecision.ServePublic ? "public, max-age=3600" : "private, no-store";
                 if (decision == SiteImageDecision.ServePrivate) Response.Headers["X-Robots-Tag"] = "noindex";
                 else Response.Headers["Vary"] = "Cookie";
+
+                // Miniatyr: åtkomsten är redan prövad ovan, så en miniatyr kan aldrig nå någon originalet inte når. Varianten cachas i minnet (id, bredd), aldrig på disk.
+                if (w > 0)
+                {
+                    var key = $"sitefile-thumb:{file.Id}:{file.StoredName}:{w}";
+                    if (!_cache.TryGetValue(key, out byte[]? thumb))
+                    {
+                        byte[] original;
+                        await using (stream) { using var ms = new MemoryStream(); await stream.CopyToAsync(ms); original = ms.ToArray(); }
+                        thumb = await SiteImages.ThumbnailAsync(original, file.ContentType, w);
+                        _cache.Set(key, thumb ?? original, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(10), Size = (thumb ?? original).Length });
+                        thumb ??= original;
+                    }
+                    return File(thumb!, file.ContentType);
+                }
                 return File(stream, file.ContentType);   // typen ur raden (omkodad av oss), aldrig ur klienten
             }
             catch (Exception ex)

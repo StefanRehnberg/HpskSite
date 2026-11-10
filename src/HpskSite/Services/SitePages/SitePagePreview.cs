@@ -109,7 +109,7 @@ namespace HpskSite.Services.SitePages
         private static readonly Dictionary<string, string> BlockLabels = new()
         {
             ["text"] = "Text", ["heading"] = "Rubrik", ["links"] = "Länkar", ["documents"] = "Dokument", ["contact"] = "Kontaktuppgifter",
-            ["events"] = "Kommande händelser", ["news"] = "Nyheter", ["about"] = "Presentationstext", ["competitions"] = "Kommande tävlingar", ["records"] = "Rekord", ["ranges"] = "Skjutbanor", ["champions"] = "Regerande mästare", ["stats"] = "Siffror", ["pagelink"] = "Länk till en sida", ["image"] = "Bild",
+            ["events"] = "Kommande händelser", ["news"] = "Nyheter", ["about"] = "Presentationstext", ["competitions"] = "Kommande tävlingar", ["records"] = "Rekord", ["ranges"] = "Skjutbanor", ["champions"] = "Regerande mästare", ["stats"] = "Siffror", ["pagelink"] = "Länk till en sida", ["image"] = "Bild", ["gallery"] = "Bildgalleri",
             ["region-clubs"] = "Klubbar i kretsen", ["region-ranges"] = "Skjutbanor", ["region-series"] = "Serier", ["region-stats"] = "Kretsen i siffror",
         };
 
@@ -120,6 +120,7 @@ namespace HpskSite.Services.SitePages
                 "heading" => b.Data["text"]?.GetValue<string>(),
                 "text" => System.Text.RegularExpressions.Regex.Replace(b.Data["html"]?.GetValue<string>() ?? "", "<[^>]+>", " "),
                 "image" => b.Data["caption"]?.GetValue<string>() ?? b.Data["alt"]?.GetValue<string>(),
+                "gallery" => b.Data["title"]?.GetValue<string>() is { Length: > 0 } gt ? gt : SiteBlockSchema.GalleryItems(b).Count + " bilder",
                 _ => null,
             };
             s = System.Text.RegularExpressions.Regex.Replace(s ?? "", @"\s+", " ").Trim();

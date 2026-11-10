@@ -66,6 +66,34 @@ namespace HpskSite.Services.SitePages
         /// <summary>Adressen en bild visas på. Åtkomsten prövas per anrop (<see cref="SiteImageAccess"/>); adressen bär bara id:t.</summary>
         public static string UrlFor(int id) => $"/umbraco/surface/SiteFile/Image?id={id}";
 
+        /// <summary>Bredder en miniatyr får ha. Bara dessa tillåts (en fri bredd vore en billig väg att fylla serverns minne med varianter).</summary>
+        public static readonly int[] ThumbnailWidths = { 320, 640, 1280 };
+
+        /// <summary>Adressen till en miniatyr: samma åtkomstprövning som originalet, bara en annan storlek.</summary>
+        public static string ThumbUrlFor(int id, int width) => $"/umbraco/surface/SiteFile/Image?id={id}&w={width}";
+
+        /// <summary>
+        /// En förminskad kopia av en (redan omkodad) bild, eller null när originalet ska användas: en animerad GIF behåller sina rutor, och en bild som
+        /// redan är högst <paramref name="width"/> bred förstoras aldrig. Typen är oförändrad. Avkodningen går genom <see cref="HpskSite.Services.Media.SafeImageConfiguration"/>.
+        /// </summary>
+        public static async Task<byte[]?> ThumbnailAsync(byte[] original, string contentType, int width)
+        {
+            if (contentType == "image/gif" || !ThumbnailWidths.Contains(width)) return null;
+            var options = new DecoderOptions { Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance, MaxFrames = 1 };
+            using var image = await Image.LoadAsync(options, new MemoryStream(original));
+            if (image.Width <= width) return null;
+            image.Mutate(c => c.Resize(width, 0));   // 0 = behåll proportionerna
+            IImageEncoder encoder = contentType switch
+            {
+                "image/png" => new PngEncoder(),
+                "image/webp" => new WebpEncoder { Quality = 80 },
+                _ => new JpegEncoder { Quality = 80 },
+            };
+            using var ms = new MemoryStream();
+            await image.SaveAsync(ms, encoder);
+            return ms.ToArray();
+        }
+
         /// <summary>Visningsnamnet ur ett uppladdat filnamn: bara filnamnet, utan bidi- och kontrolltecken, högst 200 tecken.</summary>
         public static string DisplayName(string? original)
         {

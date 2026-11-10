@@ -186,6 +186,10 @@ namespace HpskSite.Services.SitePages
                     case "links":
                         foreach (var it in b.Data["items"]!.AsArray()) yield return it!["label"]?.GetValue<string>();
                         break;
+                    case "gallery":
+                        yield return b.Data["title"]?.GetValue<string>();
+                        foreach (var gi in SiteBlockSchema.GalleryItems(b)) { yield return gi.Alt; yield return gi.Caption; }   // personnummerspärren läser också bildtexterna
+                        break;
                 }
             }
         }

@@ -148,6 +148,7 @@ namespace HpskSite.Services.SitePages
                 "image" => Image(block, ctx),
                 "news" => News(block, ctx),
                 "about" => About(block, ctx),
+                "gallery" => Gallery(block, ctx),
                 "competitions" => Competitions(block, ctx),
                 "records" => Records(block, ctx),
                 "ranges" => Ranges(block, ctx),
@@ -346,6 +347,36 @@ namespace HpskSite.Services.SitePages
                           (string.IsNullOrWhiteSpace(e.Location) ? "" : $" <span class=\"text-muted\">{E(e.Location)}</span>") + "</li>");
             }
             return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        /// <summary>
+        /// Bildgalleri: miniatyrer i ett rutnät, var och en en länk till originalet (öppnas i ny flik, inget JS). Bara bilder som hör till ägaren och inte är raderade visas
+        /// (<see cref="ISiteBlockData.Images"/>); inga bilder kvar ger inget block. Beskrivningen (alt) faller tillbaka på bildtexten, annars är bilden dekoration.
+        /// </summary>
+        private static string Gallery(SiteBlock b, SiteRenderContext ctx)
+        {
+            var items = SiteBlockSchema.GalleryItems(b);
+            if (items.Count == 0) return "";
+            var infos = ctx.Data.Images(items.Select(i => i.Id).Distinct().ToList()).GroupBy(i => i.Id).ToDictionary(g => g.Key, g => g.First());
+            var shown = items.Where(i => infos.ContainsKey(i.Id)).ToList();
+            if (shown.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<div class=\"row row-cols-2 row-cols-md-3 g-2 site-gallery\">");
+            foreach (var it in shown)
+            {
+                var info = infos[it.Id];
+                var alt = string.IsNullOrWhiteSpace(it.Alt) ? it.Caption ?? "" : it.Alt!;
+                var srcset = string.Join(", ", SiteImages.ThumbnailWidths.Select(w => $"{SiteImages.ThumbUrlFor(it.Id, w)} {w}w"));
+                sb.Append("<div class=\"col\"><figure class=\"mb-0\">")
+                  .Append($"<a href=\"{E(SiteImages.UrlFor(it.Id))}\" target=\"_blank\" rel=\"noopener\"{(alt.Length == 0 ? " aria-label=\"Öppna bilden i full storlek\"" : "")}>")
+                  .Append($"<img class=\"img-fluid rounded\" src=\"{E(SiteImages.ThumbUrlFor(it.Id, 640))}\" srcset=\"{E(srcset)}\" sizes=\"(min-width: 768px) 33vw, 50vw\" width=\"{info.Width}\" height=\"{info.Height}\" alt=\"{E(alt)}\" loading=\"lazy\" decoding=\"async\" style=\"aspect-ratio:4/3;object-fit:cover;width:100%;height:auto\">")
+                  .Append("</a>");
+                if (!string.IsNullOrWhiteSpace(it.Caption)) sb.Append($"<figcaption class=\"small text-muted mt-1\">{E(it.Caption)}</figcaption>");
+                sb.Append("</figure></div>");
+            }
+            return Section(b.Id, sb.Append("</div>").ToString());
         }
 
         private static string Competitions(SiteBlock b, SiteRenderContext ctx)
