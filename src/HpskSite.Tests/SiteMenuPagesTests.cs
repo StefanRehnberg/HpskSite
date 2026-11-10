@@ -44,15 +44,16 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Klubbens_utloggade_ser_Hem_och_låsta_systemsidor_men_aldrig_en_egen_etikett()
+        public void Klubbens_utloggade_ser_Hem_låsta_systemsidor_och_bara_egna_sidor_ägaren_gett_nivån_Alla()
         {
             var menu = Club(Anon).Menu();
-            Assert.DoesNotContain(menu, e => e.Page.Key.StartsWith("page:"));                      // ingen fri text läcker till anonyma (plan v3 B3)
+            Assert.Equal(new[] { "page:10" }, menu.Where(e => e.Page.Key.StartsWith("page:")).Select(e => e.Page.Key));   // bara Alla-sidan; ingen etikett på lägre nivå läcker till anonyma (plan v3 B3)
+            Assert.False(menu.Single(e => e.Page.Key == "page:10").Locked);
             Assert.DoesNotContain(menu, e => e.Page.IsAdmin);
-            Assert.Equal("home", menu.Single(e => !e.Locked).Page.Key);                            // Hem är den enda öppna
+            Assert.Equal(new[] { "home", "page:10" }, menu.Where(e => !e.Locked).Select(e => e.Page.Key));   // Hem och ägarens Alla-sida är de öppna
             Assert.False(menu.Single(e => e.Page.Key == "home").IsTabButton);                      // en utloggad har ingen flikpanel: Hem är en länk
-            Assert.All(menu.Where(e => e.Page.Key != "home"), e => Assert.True(e.Locked, e.Page.Key));
-            Assert.Equal(SiteTemplates.ClubTemplate.Pages.Count(p => !p.IsAdmin), menu.Count);    // alla vanliga sidor finns, de flesta med hänglås
+            Assert.All(menu.Where(e => e.Page.Key != "home" && !e.Page.Key.StartsWith("page:")), e => Assert.True(e.Locked, e.Page.Key));
+            Assert.Equal(SiteTemplates.ClubTemplate.Pages.Count(p => !p.IsAdmin) + 1, menu.Count);    // alla vanliga sidor finns (de flesta med hänglås) plus Alla-sidan
         }
 
         [Fact]

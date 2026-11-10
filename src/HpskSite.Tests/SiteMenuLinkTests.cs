@@ -85,9 +85,9 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void En_klubbmeny_som_kräver_inloggning_visar_ingen_länk_för_en_utloggad_men_samma_nivåer_för_inloggade()
+        public void En_klubbmeny_visar_en_utloggad_bara_länkar_ägaren_gett_nivån_Alla_och_samma_nivåer_som_förut_för_inloggade()
         {
-            Assert.Empty(Seen(SiteTemplates.Club, Anon));   // ingen fri text till anonyma i en meny som kräver inloggning
+            Assert.Equal(new[] { "KANARIE-ALLA" }, Seen(SiteTemplates.Club, Anon));   // bara det ägaren själv öppnat för alla; ingen länk på lägre nivå läcker till anonyma
             Assert.Equal(new[] { "KANARIE-ALLA", "KANARIE-INLOGGADE" }, Seen(SiteTemplates.Club, Outsider));
             Assert.Equal(new[] { "KANARIE-ALLA", "KANARIE-INLOGGADE", "KANARIE-MEDLEM" }, Seen(SiteTemplates.Club, Member));
         }

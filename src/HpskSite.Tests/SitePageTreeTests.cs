@@ -148,7 +148,7 @@ namespace HpskSite.Tests
             var pages = Tree(new(1, "Öppen", "oppen", SiteVisibility.Alla, 10), new(2, "Bara styrelsen", "styrelse-sida", SiteVisibility.Styrelse, 10, ParentPageId: 1),
                              new(3, "Föräldralös", "foraldralos", SiteVisibility.Alla, 10, ParentPageId: 99));
             Assert.Equal(new[] { "page:1" }, Keys(Club(Member, pages)));
-            Assert.Empty(Keys(Club(Anon, pages)));                         // en klubbs meny kräver inloggning: en utloggad ser ingen etikett alls
+            Assert.Equal(new[] { "page:1" }, Keys(Club(Anon, pages)));    // en utloggad ser bara det ägaren gett nivån Alla (inte styrelsens undersida, inte den föräldralösa)
             Assert.DoesNotContain("page:3", Keys(Club(Member, pages)));   // förälder som inte finns i menyn: undersidan hänger inte i luften
         }
 

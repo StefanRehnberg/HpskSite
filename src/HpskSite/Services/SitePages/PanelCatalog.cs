@@ -49,7 +49,7 @@ namespace HpskSite.Services.SitePages
 
         public static readonly IReadOnlyList<PanelDef> Club = new[]
         {
-            D("about-text", "Om klubben", "Klubbens presentation. Texten skrivs under Klubbens uppgifter och visas här automatiskt.", "_PanelClubAbout", PanelZone.Main),
+            D("about-text", "Om klubben", "Klubbens presentation. Texten skrivs under Klubbens uppgifter och visas här automatiskt.", "_PanelClubAbout", PanelZone.Main, publicAllowed: true),   // presentationstexten visas redan för utloggade på Hem; den ritas på servern (ingen dataslutpunkt att grinda)
             D("login-prompt", "Inloggningsruta", "Rutan som bjuder besökare som inte är inloggade att logga in.", "_PanelClubLoginPrompt", PanelZone.Side, required: true),
             D("contact-card", "Kontakt", "Kontaktperson, e-post och telefon. Hämtas automatiskt ur klubbens uppgifter.", "_PanelClubContact", PanelZone.Side),
             D("quicklink-docs", "Dokument med snabblänk", "Dokument som klubben valt att visa som snabblänk.", "_PanelClubQuickLinkDocs", PanelZone.Side, required: true),

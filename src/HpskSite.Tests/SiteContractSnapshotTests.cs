@@ -54,7 +54,7 @@ namespace HpskSite.Tests
             // nyckel | zon | personuppgift | obligatorisk | värd | kan visas publikt
             var expected = new[]
             {
-                "about-text|Main|n|n||n", "login-prompt|Side|n|Y||n", "contact-card|Side|n|n||n", "quicklink-docs|Side|n|Y||n",
+                "about-text|Main|n|n||Y", "login-prompt|Side|n|Y||n", "contact-card|Side|n|n||n", "quicklink-docs|Side|n|Y||n",
                 "whats-happening|Full|n|n||n", "upcoming-events|Main|n|n||n", "motions|Side|n|Y||n", "quicklinks|Side|n|n||n",
                 "ranges|Full|n|n||Y", "calendar|Full|n|Y||Y", "competitions|Full|n|Y||Y", "instructors|Full|Y|n||n",
                 "guldserie|Full|Y|n||n", "member-directory|Full|Y|Y||n", "records|Full|n|n||Y", "document-archive|Full|n|Y||n",

@@ -1125,6 +1125,7 @@
 
   // "Visa publikt": vad en panel visar för en utloggad när ägaren öppnar den (servern avgör samma sak; texten är den ärliga beskrivningen).
   const PUBLIC_WHAT = {
+    'about-text': 'klubbens presentationstext, samma text som redan visas på startsidan för den som inte är inloggad.',
     ranges: 'klubbens banor med adress, karta och fasta tider. Banor med begränsad plats visas aldrig.',
     calendar: 'klubbens kalender med öppna händelser, träningar och tävlingar. Inga namn på personer och inga interna tävlingar.',
     competitions: 'klubbens tävlingar. Interna tävlingar visas aldrig.',

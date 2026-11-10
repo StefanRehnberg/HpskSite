@@ -16,7 +16,7 @@ namespace HpskSite.Tests
             var allowed = new List<string>();
             foreach (var owner in new[] { "Club", "Region" })
                 foreach (var d in PanelCatalog.For(owner).Where(d => d.PublicAllowed)) allowed.Add(owner + "/" + d.Key);
-            Assert.Equal(new[] { "Club/ranges", "Club/calendar", "Club/competitions", "Club/records", "Region/records" }.OrderBy(x => x), allowed.OrderBy(x => x));
+            Assert.Equal(new[] { "Club/about-text", "Club/ranges", "Club/calendar", "Club/competitions", "Club/records", "Region/records" }.OrderBy(x => x), allowed.OrderBy(x => x));
             Assert.All(PanelCatalog.Club.Concat(PanelCatalog.Region).Where(d => d.PublicAllowed), d => { Assert.False(d.PersonalData); Assert.Null(d.HostedBy); });
         }
 
@@ -30,11 +30,15 @@ namespace HpskSite.Tests
             Assert.Equal(SiteVisibility.Inloggade, SiteConversion.PanelFloor("Club", "members", "member-directory"));
             Assert.Equal(SiteVisibility.Inloggade, SiteConversion.PanelFloor("Region", "board", "board"));
             Assert.True(SiteConversion.CanShowPublicly("Club", "calendar", "calendar"));
+            Assert.True(SiteConversion.CanShowPublicly("Club", "about", "about-text"));
+            Assert.False(SiteConversion.CanShowPublicly("Club", "home", "about-text"));   // mallens utloggad-ruta på Hem
+            Assert.Equal(SiteVisibility.Inloggade, SiteConversion.PanelVisibility("Club", "about", "about-text"));   // standardnivån är oförändrad
             Assert.False(SiteConversion.CanShowPublicly("Region", "calendar", "calendar"));   // redan öppen
             Assert.False(SiteConversion.CanShowPublicly("Club", "documents", "document-archive"));
         }
 
         [Theory]
+        [InlineData("Club", "about", "about-text")]
         [InlineData("Club", "ranges", "ranges")]
         [InlineData("Club", "calendar", "calendar")]
         [InlineData("Club", "competitions", "competitions")]
@@ -53,6 +57,7 @@ namespace HpskSite.Tests
         [InlineData("Club", "members", "instructors")]
         [InlineData("Club", "members", "guldserie")]
         [InlineData("Club", "home", "motions")]
+        [InlineData("Club", "home", "about-text")]   // Om-texten på Hem är mallens egen utloggad-ruta: aldrig valbar, aldrig Alla
         [InlineData("Region", "board", "board")]
         [InlineData("Region", "documents", "document-archive")]
         [InlineData("Region", "about", "region-instructors")]
@@ -62,6 +67,7 @@ namespace HpskSite.Tests
         [Fact]
         public void Sidans_golv_är_den_öppnaste_panelens()
         {
+            Assert.Equal(SiteVisibility.Alla, SiteConversion.PageFloor("Club", "about"));
             Assert.Equal(SiteVisibility.Alla, SiteConversion.PageFloor("Club", "ranges"));
             Assert.Equal(SiteVisibility.Alla, SiteConversion.PageFloor("Club", "records"));
             Assert.Equal(SiteVisibility.Inloggade, SiteConversion.PageFloor("Club", "documents"));

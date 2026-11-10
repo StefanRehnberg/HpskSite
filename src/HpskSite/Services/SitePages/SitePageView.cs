@@ -132,13 +132,12 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>
-        /// Ägarens externa länkar längst ned i menyn, i ordning, bara de tittaren får se. Samma regel som för egna sidor: en meny som kräver inloggning
-        /// visar ingen fri etikett för en utloggad (ingen text läcker till anonyma), och varje länks nivå prövas för tittaren vid varje rendering.
+        /// Ägarens externa länkar längst ned i menyn, i ordning, bara de tittaren får se. Samma regel som för egna sidor: varje länks nivå prövas för tittaren vid varje
+        /// rendering. En utloggad ser därför bara länkar ägaren själv gett nivån Alla, aldrig någon annan text (en länk på en lägre nivå är osynlig för hen).
         /// </summary>
         public IReadOnlyList<SiteExternalLink> Links()
         {
             if (!Enabled || _links.Count == 0) return Array.Empty<SiteExternalLink>();
-            if (_template!.MenuRequiresLogin && !Viewer.LoggedIn) return Array.Empty<SiteExternalLink>();
             return _links.Where(l => SiteAccess.CanSee(l.Visibility, Viewer)).ToList();
         }
 
@@ -163,8 +162,8 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>
         /// Menyn för tittaren. Tom när av (då ritar dagens flikrad). Mallens poster i mallens ordning, därefter ägarens egna sidor i menyns
-        /// ordning, Admin sist. En egen sida syns bara för den som får se den (sidans synlighet), och aldrig för en utloggad hos en ägare vars
-        /// meny kräver inloggning — ingen fri etikett läcker till anonyma (plan v3 B3).
+        /// ordning, Admin sist. En egen sida syns bara för den som får se den (sidans synlighet): en utloggad ser bara sidor
+        /// ägaren gett nivån Alla, och ingen etikett på lägre nivå läcker till anonyma (plan v3 B3). Ägaren väljer alltså själv vilka sidor som är publika i menyn.
         /// </summary>
         public IReadOnlyList<SiteMenuEntry> Menu()
         {
@@ -196,10 +195,10 @@ namespace HpskSite.Services.SitePages
             SiteMenuEntry? EntryFor(SiteMenuPage e)
             {
                 var visible = SiteAccess.CanSee(e.Visibility, Viewer);
-                // En egen sidas etikett visas aldrig för en utloggad (ingen fri text läcker till anonyma, plan v3 B3); en inloggad som inte är medlem ser en låst medlemssida.
+                // En egen sidas etikett visas för en utloggad bara när ägaren gett sidan nivån Alla (plan v3 B3 gäller fortfarande allt annat: ingen fri text på lägre nivå läcker till anonyma); en inloggad som inte är medlem ser en låst medlemssida.
                 var locked = !visible && Viewer.LoggedIn && e.Visibility == SiteVisibility.Klubbmedlemmar;
                 if (!visible && !locked) return null;
-                if (visible && _template.MenuRequiresLogin && !Viewer.LoggedIn) return null;
+                // En utloggad ser bara en egen sida ägaren gett nivån Alla (visible är då sant); en sida på lägre nivå är osynlig och låst bara för en inloggad.
                 var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
                 return new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked, FreePageId: e.PageId, ParentPageId: e.ParentPageId);
             }

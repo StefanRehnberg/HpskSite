@@ -194,7 +194,7 @@ namespace HpskSite.Tests
 
         // ── Menyn ─────────────────────────────────────────────────────────────────
         [Fact]
-        public void Menyn_visar_en_egen_sidas_etikett_om_och_bara_om_tittaren_får_se_sidan_och_utloggade_ser_aldrig_en_klubbmeny()
+        public void Menyn_visar_en_egen_sidas_etikett_om_och_bara_om_tittaren_får_se_sidan_och_en_utloggad_ser_bara_sidor_på_nivån_Alla()
         {
             var failures = new List<string>();
             foreach (var template in new[] { SiteTemplates.Club, SiteTemplates.Region })
@@ -206,13 +206,11 @@ namespace HpskSite.Tests
                 var entry = menu.FirstOrDefault(e => e.Page.Label == $"MENYETIKETT-{pageVis}");
                 var open = entry != null && !entry.Locked;
                 var locked = entry is { Locked: true };
-                var clubMenuNeedsLogin = template == SiteTemplates.Club;                  // klubbens egna sidor visas aldrig för utloggade (kretsens publika sidor syns utloggade)
-                var shouldOpen = Oracle(pageVis, persona.Viewer) && !(clubMenuNeedsLogin && !persona.Viewer.LoggedIn);
+                var shouldOpen = Oracle(pageVis, persona.Viewer);   // samma regel för klubb och krets: en utloggad ser en egen sida i menyn bara när ägaren gett den nivån Alla
                 // En låst egen sida (hänglås) visas bara för en INLOGGAD som inte får se en medlemssida: aldrig för utloggade, aldrig en Styrelse-/Dold-sida.
                 var shouldLock = !Oracle(pageVis, persona.Viewer) && persona.Viewer.LoggedIn && pageVis == 2;
                 if (shouldOpen != open) failures.Add($"{(open ? "LÄCKA" : "SAKNAS")}: {template}, {persona.Name}, sida {pageVis}");
                 if (shouldLock != locked) failures.Add($"{(locked ? "LÄCKA (hänglås)" : "SAKNAS (hänglås)")}: {template}, {persona.Name}, sida {pageVis}");
-                if (!persona.Viewer.LoggedIn && clubMenuNeedsLogin && menu.Any(e => e.Page.Key.StartsWith("page:"))) failures.Add($"utloggad ser en egen etikett i klubbmenyn: {persona.Name}");
                 // Systemsidorna: en post är öppen eller låst, och en sida som ger 404 för tittaren finns aldrig i menyn.
                 var tpl = SiteTemplates.For(template);
                 foreach (var p in tpl.Pages)

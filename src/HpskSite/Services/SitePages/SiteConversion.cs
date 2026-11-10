@@ -61,7 +61,9 @@ namespace HpskSite.Services.SitePages
         public static SiteVisibility PanelFloor(string ownerType, string pageKey, string panelKey)
         {
             var def = PanelCatalog.Find(ownerType, panelKey);
-            if (def is { PublicAllowed: true, PersonalData: false, HostedBy: null } && PanelCatalog.AllowedOn(ownerType, pageKey, panelKey)) return SiteVisibility.Alla;
+            // En panel som mallen bestämt är bara för utloggade (Om-texten på Hem) är aldrig valbar, så "Visa publikt" gäller bara dess vanliga plats (Om Klubben).
+            if (def is { PublicAllowed: true, PersonalData: false, HostedBy: null } && PanelCatalog.AllowedOn(ownerType, pageKey, panelKey)
+                && !SiteTemplates.For(ownerType).IsLoggedOutOnly(pageKey, panelKey)) return SiteVisibility.Alla;
             return PanelVisibility(ownerType, pageKey, panelKey);
         }
 
