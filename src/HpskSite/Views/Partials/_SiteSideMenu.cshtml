@@ -47,11 +47,22 @@
                 }
             </li>
         }
-        @if (!string.IsNullOrEmpty(Model.ExternalUrl) && !string.IsNullOrEmpty(Model.ExternalLabel))
+        @{ var extLinks = Model.Links ?? Array.Empty<HpskSite.Services.SitePages.SiteExternalLink>(); }
+        @if ((!string.IsNullOrEmpty(Model.ExternalUrl) && !string.IsNullOrEmpty(Model.ExternalLabel)) || extLinks.Count > 0)
         {
             <li class="hpsk-sidemenu-sep" role="presentation" aria-hidden="true"></li>
+        }
+        @if (!string.IsNullOrEmpty(Model.ExternalUrl) && !string.IsNullOrEmpty(Model.ExternalLabel))
+        {
             <li class="nav-item" role="presentation">
                 <a class="nav-link hpsk-external" href="@Model.ExternalUrl">@Model.ExternalLabel<i class="bi bi-box-arrow-up-right ms-2" aria-hidden="true"></i></a>
+            </li>
+        }
+        @* Ägarens egna externa länkar (Hemsidan → Länkar i menyn): alltid https, öppnas i ny flik, etiketten kodas av Razor. *@
+        @foreach (var link in extLinks)
+        {
+            <li class="nav-item" role="presentation">
+                <a class="nav-link hpsk-external" href="@link.Url" target="_blank" rel="noopener noreferrer" data-menu-link="@link.Id">@link.Label<i class="bi bi-box-arrow-up-right ms-2" aria-hidden="true"></i><span class="visually-hidden"> (öppnas i en ny flik)</span></a>
             </li>
         }
         @* Hemsidan ligger i Admin (som Styrelsearbete och Ekonomi), inte här. *@

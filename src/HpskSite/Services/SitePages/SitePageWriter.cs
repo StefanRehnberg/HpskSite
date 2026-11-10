@@ -563,7 +563,7 @@ namespace HpskSite.Services.SitePages
         private static List<string> TakenAddressSlugs(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<string>("SELECT Slug FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL", ownerType, ownerId);
 
-        private static void Audit(IDatabase db, string ownerType, int ownerId, SiteActor actor, string objectKind, int objectId, string action, byte[]? hash, DateTime now) =>
+        internal static void Audit(IDatabase db, string ownerType, int ownerId, SiteActor actor, string objectKind, int objectId, string action, byte[]? hash, DateTime now) =>
             db.Execute(
                 @"INSERT INTO dbo.SiteAudit (OwnerType, OwnerId, ActorMemberId, ActedAsSupport, ObjectKind, ObjectId, Action, ContentHash, CreatedDate)
                   VALUES (@0, @1, @2, @3, @4, @5, @6, CONVERT(BINARY(32), @7), @8)",

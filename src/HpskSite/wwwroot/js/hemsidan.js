@@ -178,6 +178,7 @@
     if ((m = /^#sida=([\w-]+)$/.exec(hsh))) return renderSystemPage(m[1]);
     if ((m = /^#redigera=(\d+)$/.exec(hsh))) return openEditor(parseInt(m[1], 10));
     if (hsh === '#raderade') return renderTrash();
+    if (hsh === '#lankar') return renderLinks();
     if (hsh === '#logg') return renderAudit();
     if ((m = /^#ny(?:=(\d+))?$/.exec(hsh))) return renderNew(null, m[1] ? parseInt(m[1], 10) : null);   // #ny=12 = en ny undersida till sidan 12
     return renderList();
@@ -199,7 +200,7 @@
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
       onclick: e => { e.preventDefault(); go(hash); } }, h('span', {}, label), extra || null);
     const pill = p => p.mode === 'draft' ? h('span', { class: 'hs-pill warn' }, 'Utkast') : p.mode === 'converted' ? h('span', { class: 'hs-pill own' }, 'Egen version') : null;
-    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
+    const here = active === 'sidor' ? 'Sidor' : active === 'raderade' ? 'Raderade sidor' : active === 'lankar' ? 'Länkar i menyn' : active === 'logg' ? 'Vad som hänt' : ((sys.find(p => 'sys:' + p.key === active) || {}).label || 'Sidor');
     return h('nav', { class: 'hs-rail', 'aria-label': 'Hemsidans delar' },
       h('a', { href: OWNER.url, class: 'hs-back' }, h('i', { class: 'bi bi-arrow-left me-1' }), 'Tillbaka till ' + (IS_REGION ? 'kretsen' : 'klubben')),
       h('div', { class: 'hs-org' }, 'Hemsidan'),
@@ -211,7 +212,8 @@
         nav('sidor', 'Sidor', '#sidor'),
         h('div', { class: 'hs-railh' }, IS_REGION ? 'Kretsens vanliga sidor' : 'Klubbens vanliga sidor'),
         sys.map(p => nav('sys:' + p.key, p.label, '#sida=' + p.key, pill(p))),
-        st.trash.length || !st.support ? h('div', { class: 'hs-railh' }, 'Mer') : null,
+        h('div', { class: 'hs-railh' }, 'Mer'),
+        nav('lankar', 'Länkar i menyn', '#lankar', (st.menuLinks || []).length ? h('span', { class: 'hs-pill' }, st.menuLinks.length) : null),
         st.trash.length ? nav('raderade', 'Raderade sidor', '#raderade', h('span', { class: 'hs-pill' }, st.trash.length)) : null,
         st.support ? null : nav('logg', 'Vad som hänt', '#logg')));
   }
@@ -535,6 +537,87 @@
   async function reloadState() {
     const st = await api('GET', 'State'); if (st.success) S.st = st;
     renderList();
+  }
+
+  // ── Länkar i menyn: externa länkar längst ned i besökarens meny (som Svenska Lags "externa länkar") ──────────────
+  /** En dialog som STANNAR öppen när sparandet ger ett fel (modal() stänger direkt). onSave returnerar ett felmeddelande eller null när det gick bra. */
+  function formDialog(title, bodyNodes, saveLabel, onSave) {
+    const err = h('div', { class: 'mt-2', role: 'alert' });
+    const save = h('button', { type: 'button', class: 'btn btn-primary' }, saveLabel);
+    const el = h('div', { class: 'modal fade', tabindex: '-1' },
+      h('div', { class: 'modal-dialog modal-dialog-centered' }, h('div', { class: 'modal-content' },
+        h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, title), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+        h('div', { class: 'modal-body' }, bodyNodes, err),
+        h('div', { class: 'modal-footer' }, h('button', { type: 'button', class: 'btn btn-secondary', 'data-bs-dismiss': 'modal' }, 'Avbryt'), save))));
+    document.body.append(el);
+    const bs = new bootstrap.Modal(el);
+    el.addEventListener('hidden.bs.modal', () => el.remove());
+    save.addEventListener('click', async () => {
+      save.disabled = true; err.replaceChildren();
+      const msg = await onSave();
+      if (msg) { err.replaceChildren(alertBox('danger', msg)); save.disabled = false; return; }
+      bs.hide();
+    });
+    bs.show();
+    setTimeout(() => { const f = el.querySelector('input,select,textarea'); if (f) f.focus(); }, 300);
+  }
+
+  function linkDialog(link) {
+    const st = S.st;
+    const label = h('input', { class: 'form-control', maxlength: '80', value: link ? link.label : '', id: 'hsLinkLabel', placeholder: 'Till exempel: Skjuthandboken' });
+    const url = h('input', { class: 'form-control', maxlength: '500', value: link ? link.url : '', id: 'hsLinkUrl', placeholder: 'https://', inputmode: 'url', autocapitalize: 'off', spellcheck: 'false' });
+    const vis = h('select', { class: 'form-select', id: 'hsLinkVis' }, visOptions().map(o => h('option', { value: o.v, selected: o.v === (link ? link.visibility : 0) ? true : null }, o.t + ' – ' + o.s.toLowerCase())));
+    formDialog(link ? 'Ändra länken' : 'Ny länk i menyn', [
+      h('label', { class: 'form-label fw-semibold', for: 'hsLinkLabel' }, 'Namn i menyn'), label,
+      h('label', { class: 'form-label fw-semibold mt-3', for: 'hsLinkUrl' }, 'Adress'), url,
+      h('div', { class: 'form-text' }, 'Adressen måste börja med https://. Länken öppnas i en ny flik.'),
+      h('label', { class: 'form-label fw-semibold mt-3', for: 'hsLinkVis' }, 'Vem ser länken?'), vis], 'Spara', async () => {
+      const r = await api('POST', 'SaveMenuLink', { linkId: link ? link.id : undefined, label: label.value, url: url.value, visibility: vis.value });
+      if (!r.success) return r.message || 'Det gick inte att spara länken.';
+      const s = await api('GET', 'State'); if (s.success) S.st = s;
+      renderLinks();
+      return null;
+    });
+  }
+
+  function renderLinks() {
+    setHash('#lankar');
+    const st = S.st, links = st.menuLinks || [], full = links.length >= (st.maxLinks || 15);
+    const move = async (l, d) => {
+      const r = await api('POST', 'MoveMenuLink', { linkId: l.id, direction: d });
+      if (!r.success) S.banner = { cls: 'danger', text: r.message || 'Det gick inte att flytta länken.' };
+      const s = await api('GET', 'State'); if (s.success) S.st = s;
+      renderLinks();
+    };
+    const rows = links.map((l, i) => h('tr', {},
+      h('td', { class: 'ps-3 fw-semibold' }, l.label),
+      h('td', { class: 'text-break' }, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer', class: 'text-decoration-none small' }, l.url)),
+      h('td', {}, visBadge(l.visibility)),
+      h('td', { class: 'text-end pe-3' }, rowMenu([
+        ['Ändra', () => linkDialog(l)],
+        ['Öppna länken', null, { href: l.url }],
+        '-',
+        ['Flytta upp', () => move(l, -1), i === 0 ? { disabled: true } : null],
+        ['Flytta ner', () => move(l, 1), i === links.length - 1 ? { disabled: true } : null],
+        '-',
+        ['Ta bort', async () => {
+          if (!await confirmDialog('Ta bort länken?', 'Länken "' + l.label + '" tas bort från menyn.', 'Ta bort', true)) return;
+          const r = await api('POST', 'RemoveMenuLink', { linkId: l.id });
+          S.banner = r.success ? { cls: 'success', text: 'Länken är borttagen.' } : { cls: 'danger', text: r.message || 'Det gick inte att ta bort länken.' };
+          const s = await api('GET', 'State'); if (s.success) S.st = s;
+          renderLinks();
+        }, { danger: true }]]))));
+    view(shell('lankar',
+      pageHead('Länkar i menyn', 'Länkar till andra webbplatser, till exempel ' + (IS_REGION ? 'förbundet och andra kretsar' : 'kretsens hemsida, Facebook eller en webbshop') + '. De visas längst ned i ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' meny.', [
+        ['Ny länk', () => linkDialog(null), full ? { disabled: true } : null]]),
+      h('div', { id: 'hsBanner' }),
+      links.length
+        ? h('div', { class: 'hs-card p-0 overflow-hidden mb-3' }, h('table', { class: 'table align-middle hs-list mb-0' },
+            h('thead', {}, h('tr', {}, h('th', { class: 'ps-3' }, 'Namn i menyn'), h('th', {}, 'Adress'), h('th', {}, 'Vem ser den'), h('th', { class: 'text-end pe-3' }, 'Åtgärder'))),
+            h('tbody', {}, rows)))
+        : h('div', { class: 'hs-card p-3 mb-3 text-muted' }, 'Ni har inga länkar i menyn än. Välj Åtgärder → Ny länk.'),
+      h('p', { class: 'text-muted small' }, links.length + ' av högst ' + (st.maxLinks || 15) + ' länkar. Menyn visas bara för dem som får se den, och varje länk har sin egen nivå.')));
+    renderBanner();
   }
 
   function renderTrash() {

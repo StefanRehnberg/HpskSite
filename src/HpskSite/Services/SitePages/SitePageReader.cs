@@ -46,6 +46,14 @@ namespace HpskSite.Services.SitePages
                 .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder, r.ParentPageId, r.ParentTemplateKey)).ToList();
         }
 
+        /// <summary>Ägarens externa länkar i menyn, i ordning. En SQL-fråga; körs bara när ägaren har egen redigering PÅ. Nivån prövas för tittaren i <see cref="SitePageView.Links"/>.</summary>
+        public IReadOnlyList<SiteExternalLink> MenuLinks(string ownerType, int ownerId)
+        {
+            using var scope = _scopes.CreateScope(autoComplete: true);
+            return SiteMenuLinkStore.List(scope.Database, ownerType, ownerId)
+                .Select(r => new SiteExternalLink(r.Id, r.Label, r.Url, (SiteVisibility)r.Visibility)).ToList();
+        }
+
         /// <summary>Sidans rad (för filtret efter inloggningen: synligheten läses färskt), eller null.</summary>
         public SitePageRow? Page(string ownerType, int ownerId, int pageId)
         {

@@ -184,6 +184,8 @@ namespace HpskSite.Controllers
                         page = copy == null ? null : new { id = copy.Id, status = copy.Status, visibility = copy.Visibility, revision = copy.Revision },
                     };
                 }),
+                menuLinks = SiteMenuLinkStore.List(scope.Database, g.OwnerType, g.OwnerId).Select(l => new { id = l.Id, label = l.Label, url = l.Url, visibility = (int)l.Visibility }),
+                maxLinks = SiteMenuLinkRules.MaxLinks,
                 pages = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Select(Row),
                 trash = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId, deleted: true).Select(Row),
             });
@@ -828,6 +830,64 @@ namespace HpskSite.Controllers
                 if (r.Ok) scope.Complete();
             }
             return Map(r);
+        }
+
+        // ── Externa länkar i menyn (Hemsidan → Länkar i menyn) ───────────────────────────────────────────────
+        private IActionResult MapLink(SiteLinkWriteResult r) => Json(new { success = r.Ok, message = r.Ok ? null : r.Message, id = r.Id });
+
+        /// <summary>Lägger till (<c>linkId</c> utelämnad) eller ändrar en extern länk i menyn: namn, https-adress och vem som ser den.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SaveMenuLink(string ownerType, int ownerId, int? linkId, string? label, string? url, int visibility)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:links", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteLinkWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SiteMenuLinkWriter.Save(scope.Database, g.OwnerType, g.OwnerId, linkId, label, url, visibility, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return MapLink(r);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> RemoveMenuLink(string ownerType, int ownerId, int linkId)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:links", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteLinkWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SiteMenuLinkWriter.Remove(scope.Database, g.OwnerType, g.OwnerId, linkId, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return MapLink(r);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> MoveMenuLink(string ownerType, int ownerId, int linkId, int direction)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:links", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteLinkWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SiteMenuLinkWriter.Move(scope.Database, g.OwnerType, g.OwnerId, linkId, direction, g.Actor!, DateTime.Now);
+                if (r.Ok) scope.Complete();
+            }
+            return MapLink(r);
         }
 
         [HttpPost]

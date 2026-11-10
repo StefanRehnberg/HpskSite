@@ -55,7 +55,7 @@ namespace HpskSite.Services.SitePages
     /// <param name="Tutorial">Guidefilmens id för administratören (tom = ingen Guide-knapp).</param>
     /// <param name="ExternalLabel">Etiketten på en extern länk längst ned i menyn ("Kretsens hemsida"), eller null.</param>
     public sealed record SiteSideMenuModel(string ListId, string OwnerType, IReadOnlyList<SiteMenuEntry> Items, string OwnerUrl, bool CanEditSite, bool IsAdmin,
-        string Tutorial, string? ExternalLabel = null, string? ExternalUrl = null);
+        string Tutorial, string? ExternalLabel = null, string? ExternalUrl = null, IReadOnlyList<SiteExternalLink>? Links = null);
 
     /// <summary>Ikonen för en menypost (Bootstrap Icons): samma som flikraden hade.</summary>
     public static class SiteMenuIcons
@@ -93,11 +93,13 @@ namespace HpskSite.Services.SitePages
         private readonly SiteTemplate? _template;
         private readonly SitePageDef? _page;
         private readonly IReadOnlyList<SiteMenuPage> _extra;
+        private readonly IReadOnlyList<SiteExternalLink> _links;
         private readonly int? _freePageId;
 
         private SitePageView(bool enabled, SiteTemplate? template, SitePageDef? page, string ownerUrl, SiteViewer viewer,
-            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null)
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, IReadOnlyList<SiteExternalLink>? links = null)
         {
+            _links = links ?? Array.Empty<SiteExternalLink>();
             Enabled = enabled;
             _template = template;
             _page = page;
@@ -119,14 +121,25 @@ namespace HpskSite.Services.SitePages
         /// <param name="extra">Ägarens egna sidor som ligger i menyn (steg 2); tom när ägaren inte har egen redigering PÅ.</param>
         /// <param name="freePageId">Begäran gäller den här egna sidan (inte en systemsida): ingen systempost är då aktuell.</param>
         public static SitePageView On(string ownerType, string ownerUrl, string? pageKey, SiteViewer viewer,
-            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, SiteTemplate? template = null)
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, SiteTemplate? template = null, IReadOnlyList<SiteExternalLink>? links = null)
         {
             // template: mallen med ägarens omvandlade sidor utbytta (SiteConvertedPages.Apply); utan den är det den vanliga mallen.
             template ??= SiteTemplates.For(ownerType);
             // En okänd nyckel (t.ex. en föråldrad Items-post) är Hem, aldrig en sida som inte finns.
             var page = (pageKey != null ? template.PageByKey(pageKey) : null) ?? template.Pages.First(p => p.IsHome);
             if (page.IsAdmin) page = template.Pages.First(p => p.IsHome); // Admin har ingen egen adress
-            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer, extra, freePageId);
+            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer, extra, freePageId, links);
+        }
+
+        /// <summary>
+        /// Ägarens externa länkar längst ned i menyn, i ordning, bara de tittaren får se. Samma regel som för egna sidor: en meny som kräver inloggning
+        /// visar ingen fri etikett för en utloggad (ingen text läcker till anonyma), och varje länks nivå prövas för tittaren vid varje rendering.
+        /// </summary>
+        public IReadOnlyList<SiteExternalLink> Links()
+        {
+            if (!Enabled || _links.Count == 0) return Array.Empty<SiteExternalLink>();
+            if (_template!.MenuRequiresLogin && !Viewer.LoggedIn) return Array.Empty<SiteExternalLink>();
+            return _links.Where(l => SiteAccess.CanSee(l.Visibility, Viewer)).ToList();
         }
 
         /// <summary>Ska panelen <paramref name="paneId"/> skrivas ut? Av: alltid. På: bara den här sidans panel (och Admin på roten för ägarens admin).</summary>
@@ -233,7 +246,15 @@ namespace HpskSite.Services.SitePages
             var req = SitePageRequest.Current(_http.HttpContext);
             var key = req != null && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageKey : null;
             int? freeId = req is { IsFreePage: true } && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageId : null;
-            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId, _converted?.Template(ownerType, ownerId));
+            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId, _converted?.Template(ownerType, ownerId), MenuLinks(ownerType, ownerId));
+        }
+
+        /// <summary>Ägarens externa länkar — bara när ägaren har egen redigering PÅ, och ett fel i läsningen ger en meny utan dem.</summary>
+        private IReadOnlyList<SiteExternalLink> MenuLinks(string ownerType, int ownerId)
+        {
+            if (_reader == null || !_owners.IsEditingEnabled(ownerType, ownerId)) return Array.Empty<SiteExternalLink>();
+            try { return _reader.MenuLinks(ownerType, ownerId); }
+            catch { return Array.Empty<SiteExternalLink>(); }
         }
 
         /// <summary>Ägarens egna sidor i menyn — bara när ägaren har egen redigering PÅ, och ett fel i läsningen ger en meny utan dem (aldrig ett trasigt flikfält).</summary>

@@ -9,7 +9,7 @@
 {
     @* Besökarens vy: kretsens sidor som en VÄNSTERMENY (se _SiteSideMenu). Samma flik-id:n och hashtolkare som förut; låsta sidor visas med hänglås. *@
     await Html.RenderPartialAsync("_SiteSideMenu", new HpskSite.Services.SitePages.SiteSideMenuModel("regionPageTabs", HpskSite.Services.SitePages.SiteTemplates.Region,
-        sp.Menu().ToList(), sp.OwnerUrl, ViewBag.canEditSite as bool? ?? false, isRegionalAdmin, "tutorial-06"));
+        sp.Menu().ToList(), sp.OwnerUrl, ViewBag.canEditSite as bool? ?? false, isRegionalAdmin, "tutorial-06", null, null, sp.Links()));
 }
 else
 {
