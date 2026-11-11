@@ -52,6 +52,31 @@ namespace HpskSite.Services.SitePages
     public sealed record SiteSignupCheck(bool Ok, IReadOnlyList<(string Field, string Message)> Errors, SiteSignupData? Data);
 
     /// <summary>Vad sidan säger efter en inskickning (koden ligger i adressen: <c>?anmalan=blockId&amp;r=ok</c> eller <c>&amp;r=err&amp;e=kod</c>). Ingen text ur adressen skrivs någonsin ut: bara kända koder.</summary>
+    public static class SiteFormFlashCookie
+    {
+        public const string Name = "site_form_flash";
+        public const int LifetimeSeconds = 30;
+        private static readonly string[] KnownCodes = { "closed", "rate", "invalid", "full", "error" };
+
+        /// <summary>blockId|ok/err|kod|fält,fält. Allt är kända ord eller nycklar: aldrig något besökaren skrivit.</summary>
+        public static string Pack(string blockId, bool ok, string? code, IEnumerable<string>? fields) =>
+            string.Join("|", blockId, ok ? "ok" : "err", code ?? "", fields == null ? "" : string.Join(",", fields));
+
+        /// <summary>Tolkar kakan; allt okänt (en kaka är besökarens egen och kan vara vad som helst) ger null eller släpps.</summary>
+        public static SiteFormFlash? Unpack(string? value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length > 200) return null;
+            var p = value.Split('|');
+            if (p.Length != 4) return null;
+            var bid = p[0];
+            if (bid.Length is 0 or > 12 || !bid.All(char.IsAsciiLetterOrDigit)) return null;
+            if (p[1] == "ok") return new SiteFormFlash(bid, true, null);
+            if (p[1] != "err") return null;
+            var fields = p[3].Split(',', StringSplitOptions.RemoveEmptyEntries).Where(k => SiteSignupRules.FieldText(k) != null).Distinct().Take(12).ToList();
+            return new SiteFormFlash(bid, false, KnownCodes.Contains(p[2]) ? p[2] : "error", fields);
+        }
+    }
+
     public sealed record SiteFormFlash(string BlockId, bool Success, string? ErrorCode, IReadOnlyList<string>? Fields = null);
 
     /// <summary>Det ett anmälningsblock behöver veta om begäran: sidan (för formulärets mål), skyddstoken och eventuellt besked efter en inskickning. Null = en förhandsvisning: formuläret visas men går inte att skicka.</summary>

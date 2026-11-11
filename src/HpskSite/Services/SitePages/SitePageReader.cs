@@ -194,8 +194,6 @@ namespace HpskSite.Services.SitePages
             public Data(SiteBlockDataFactory f, string ownerType, int ownerId, IPublishedContent? node, SiteViewer viewer, int pageId = 0)
             { _f = f; _ownerType = ownerType; _ownerId = ownerId; _node = node; _viewer = viewer; _pageId = pageId; }
 
-            private static readonly string[] KnownFlashCodes = { "closed", "rate", "invalid", "full", "error" };
-
             /// <summary>Sidans id, skyddstoken (antiforgery, som också hindrar att sidan cachas) och beskedet efter en inskickning. Ur adressen läses bara blockets id och en känd kod: ingen text därifrån skrivs någonsin ut.</summary>
             public SiteFormContext? Form()
             {
@@ -204,18 +202,11 @@ namespace HpskSite.Services.SitePages
                 if (http == null) return null;
                 string? token = null;
                 try { token = _f._antiforgery.GetAndStoreTokens(http).RequestToken; } catch { /* utan token ritas formuläret avstängt */ }
-                SiteFormFlash? flash = null;
-                var bid = http.Request.Query["anmalan"].ToString();
-                if (bid.Length is > 0 and <= 12 && bid.All(c => char.IsAsciiLetterOrDigit(c)))
+                // Beskedet efter en inskickning kommer ur en kortlivad kaka (inte ur adressen): läses en gång och tas bort, så en omladdning ger en ren sida.
+                var flash = SiteFormFlashCookie.Unpack(http.Request.Cookies[SiteFormFlashCookie.Name]);
+                if (flash != null && !http.Response.HasStarted)
                 {
-                    var r = http.Request.Query["r"].ToString();
-                    if (r == "ok") flash = new SiteFormFlash(bid, true, null);
-                    else if (r == "err")
-                    {
-                        var e = http.Request.Query["e"].ToString();
-                        var fields = http.Request.Query["f"].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries).Where(k => SiteSignupRules.FieldText(k) != null).Distinct().Take(12).ToList();   // bara kända fältnycklar
-                        flash = new SiteFormFlash(bid, false, KnownFlashCodes.Contains(e) ? e : "error", fields);
-                    }
+                    try { http.Response.Cookies.Delete(SiteFormFlashCookie.Name, new Microsoft.AspNetCore.Http.CookieOptions { Path = "/" }); } catch { /* kakan går ändå ut efter 30 sekunder */ }
                 }
                 return new SiteFormContext(_pageId, token, flash);
             }

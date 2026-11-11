@@ -31,6 +31,26 @@ namespace HpskSite.Tests
             Assert.True(Parse(owner, "about", SiteContentKind.ConvertedPage).Ok);
         }
 
+        [Fact]
+        public void Beskedet_efter_en_inskickning_bärs_av_en_kaka_och_tål_vad_som_helst_i_den()
+        {
+            var err = SiteFormFlashCookie.Unpack(SiteFormFlashCookie.Pack("anm01", false, "invalid", new[] { "email", "personalNumber" }));
+            Assert.NotNull(err);
+            Assert.False(err!.Success);
+            Assert.Equal("invalid", err.ErrorCode);
+            Assert.Equal(new[] { "email", "personalNumber" }, err.Fields);
+            Assert.True(SiteFormFlashCookie.Unpack(SiteFormFlashCookie.Pack("anm01", true, null, null))!.Success);
+
+            // kakan är besökarens egen: okända fält och koder blir aldrig text, trasiga värden ger inget besked
+            var odd = SiteFormFlashCookie.Unpack("anm01|err|<b>|email,<script>,x")!;
+            Assert.Equal("error", odd.ErrorCode);
+            Assert.Equal(new[] { "email" }, odd.Fields);
+            Assert.Null(SiteFormFlashCookie.Unpack("a<b|err|invalid|"));
+            Assert.Null(SiteFormFlashCookie.Unpack("anm01|ok"));
+            Assert.Null(SiteFormFlashCookie.Unpack(new string('x', 300)));
+            Assert.Null(SiteFormFlashCookie.Unpack(null));
+        }
+
         [Theory, MemberData(nameof(Owners))]
         public void Anmälan_vägras_på_en_systemsida_i_den_gamla_formen(string owner)
         {

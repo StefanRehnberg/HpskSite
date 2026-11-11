@@ -113,8 +113,13 @@ namespace HpskSite.Controllers
                 var ownerUrl = UmbracoContext.Content?.GetById(ownerId)?.Url() ?? "/";
                 if (!ownerUrl.EndsWith('/')) ownerUrl += "/";
                 var pageUrl = slug == null ? ownerUrl : ownerUrl + slug + "/";
-                IActionResult Back(bool ok, string? code = null, IEnumerable<string>? fields = null) =>
-                    Redirect($"{pageUrl}?anmalan={m.BlockId}&r={(ok ? "ok" : "err")}{(code == null ? "" : "&e=" + code)}{(fields == null || !fields.Any() ? "" : "&f=" + string.Join(",", fields))}#{m.BlockId}-anmalan");
+                // Beskedet bärs av en kortlivad kaka, inte av adressen: en omladdning (Ctrl+F5) ska ge en ren sida, inte samma besked igen.
+                IActionResult Back(bool ok, string? code = null, IEnumerable<string>? fields = null)
+                {
+                    Response.Cookies.Append(SiteFormFlashCookie.Name, SiteFormFlashCookie.Pack(m.BlockId, ok, code, fields),
+                        new CookieOptions { Path = "/", HttpOnly = true, Secure = Request.IsHttps, SameSite = SameSiteMode.Lax, MaxAge = TimeSpan.FromSeconds(SiteFormFlashCookie.LifetimeSeconds), IsEssential = true });
+                    return Redirect($"{pageUrl}#{m.BlockId}-anmalan");
+                }
 
                 // Honungsfältet först: en robot får ett tyst tack och äter inte upp en riktig besökares kvot.
                 if (!string.IsNullOrWhiteSpace(m.Website)) return Back(true);
