@@ -160,9 +160,9 @@
                 actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
                 if (s.hasSkjutledareView)
                     actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '" target="_blank" rel="noopener"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
-                if (s.teamCount > 1) extra = '<div class="ns-note">Öppnar skjutlag ' + team + ', det första med serier kvar. Andra skjutlag finns under Funktionärer.</div>';
+                if (s.teamCount > 1) extra = '<div class="ns-note">Öppnar skjutlag ' + team + ', det första med serier kvar. Andra skjutlag finns under Skjutlag &amp; markörer.</div>';
             } else {
-                actions = '<button type="button" class="btn btn-primary" data-ns="goto-funktionarer">Öppna Funktionärer</button>';
+                actions = '<button type="button" class="btn btn-primary" data-ns="goto-funktionarer">Öppna Skjutlag &amp; markörer</button>';
             }
         } else if (p === 'CreateFinals') {
             const gs = groupsIn(p);
