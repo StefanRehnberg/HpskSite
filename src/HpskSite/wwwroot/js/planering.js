@@ -129,6 +129,17 @@
         const fn = rowFns[parseInt(b.dataset.plRow, 10)]; if (fn) fn();
     });
 
+    document.addEventListener('click', async e => {
+        const b = e.target.closest('#plJoinSupport'); if (!b || b.disabled) return;
+        b.disabled = true;
+        try {
+            const r = await post('JoinAsSupport');
+            if (r && r.success) { location.reload(); return; }
+            showMsg(esc((r && r.message) || 'Det gick inte att gå med.'), 'danger');
+        } catch (err) { showMsg(esc(err.message), 'danger'); }
+        b.disabled = false;
+    });
+
     function showMsg(text, kind) {
         const el = $('plMsg'); if (!el) return;
         el.innerHTML = text ? `<div class="alert alert-${kind || 'success'} alert-dismissible fade show" role="alert">${text}
@@ -533,7 +544,9 @@
         }
         if (p.me.isSupportReader) {
             html.push(`<div class="pl-card" id="plSupportReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen som sajtadmin (support).
-                Du är inte med i den: du skriver inget här och får inga notiser härifrån.</p></div>`);
+                Du är inte med i den och ser därför inte Bemanning eller Inställningar. Vill du hjälpa till och ändra går du med som support:
+                du blir sammankallande, märkt "(support)" i deltagarlistan, utan mejl. Du lämnar när du är klar.</p>
+                <button type="button" class="btn btn-primary btn-sm mt-2" id="plJoinSupport"><i class="bi bi-life-preserver me-1"></i>Gå med som support</button></div>`);
         } else if (p.me.isParentReader) {
             html.push(`<div class="pl-card" id="plParentReader"><p class="mb-0"><i class="bi bi-eye me-1"></i>Du <b>läser</b> den här planeringen eftersom du kan ändra i
                 ${p.planning.parent && p.planning.parent.url ? `<a href="${esc(p.planning.parent.url)}">${esc(p.planning.parent.name)}</a>` : 'huvudplaneringen'}.

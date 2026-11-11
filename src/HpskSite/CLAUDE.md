@@ -591,7 +591,9 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **⚠️⚠️ Planeringsgruppen är sin egen enhet** (Stefan 2026-10-23): den som är inbjuden är med, ingen annan.
   Ingen förening, styrelse eller roll ger läsrätt — `PlanningCaller` har bara `Participant` och `ViaLink`
   (`PlanningRulesTests` fäller bygget om ett fält läggs till). Kolumnerna `OwnerType/OwnerId/Visibility` är
-  borttagna. Ingen underförstådd rätt för sajtadmin (som vapenregistret). Varje id prövas mot planeringen.
+  borttagna. Ingen underförstådd rätt för sajtadmin (som vapenregistret) — hen öppnar som läsare (support) och kan
+  **gå med som support** (`Planning/JoinAsSupport`, Stefan 2026-11-11: vanlig deltagarrad, Sammankallande, märkt
+  "(support)", mejl av, loggad; lämnar med Lämna). Varje id prövas mot planeringen.
 - **Nivåerna = `PlanningAccessLevel`** (lagrade strängar byts aldrig): `Follower` *Följer* < `Participant`
   *Deltar* < `Editor` *Kan ändra* < `Owner` **Sammankallande**. Förklaringarna (`Help`) är EN text, skickas i
   `Get.accessLevels` och visas vid varje val av nivå. Följer läser allt men skriver inte, röstar inte och är
