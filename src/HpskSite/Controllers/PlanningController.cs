@@ -618,6 +618,31 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Stefan 2026-11-11: sajtadmin ska kunna HJÄLPA till i en planering (supportläget var bara läsning, så Bemanning,
+        /// Inställningar och allt som skrivs var stängt). Läsaren går med som en vanlig deltagare — Sammankallande, märkt
+        /// "(support)" och med mejlen av — så att varje åtgärd har en författare och gruppen ser vem som hjälpt till.
+        /// Inget släpps in i tysthet: det är ett uttryckligt klick, loggat, och synligt i deltagarlistan och flödet.
+        /// Hen lämnar med den vanliga Lämna-åtgärden.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> JoinAsSupport(int id)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Missing();
+            var x = await ResolveAsync(id, null, allowParentReader: true);
+            if (x == null) return Missing();
+            if (x.Caller.IsParticipant) return Ok(new { success = true, alreadyIn = true });
+            var m = _memberService.GetById(x.MemberId);
+            if (m == null) return No("Kunde inte läsa ditt konto.");
+            var r = _planning.AddParticipant(id, x.MemberId, MemberDisplayName(m) + " (support)", null, PlanningAccessLevel.Owner,
+                null, null, "Pistol.nu support", x.MemberId);
+            if (r.Error != null) return No(r.Error);
+            _planning.SetNotifyMode(id, r.ParticipantId, PlanningNotifyMode.Off);
+            _logger.LogWarning("Sajtadmin {Member} gick med i planering {Id} som support", x.MemberId, id);
+            return Ok(new { success = true, participantId = r.ParticipantId });
+        }
+
+        /// <summary>
         /// Bjud in någon som saknar konto (Stefan 2026-10-21: i undantagsfall — någon i planeringen är
         /// inte skytt).
         /// <para><b>⚠️ Hör adressen till en medlem VÄGRAS inbjudan</b> (Stefan 2026-10-22) och svaret säger att

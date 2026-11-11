@@ -31,7 +31,9 @@ namespace HpskSite.Services.Planning
     /// utser personer, och vad var och en företräder står på deltagarraden.</para>
     ///
     /// <para><b>⚠️ Ingen underförstådd rätt för sajtadministratören.</b> Meddelandena är
-    /// deltagarnas — samma princip som vapenregistret. En sajtadmin som behöver hjälpa till bjuds in.</para>
+    /// deltagarnas — samma princip som vapenregistret. Sajtadmin öppnar som LÄSARE (support) och kan, med ett uttryckligt
+    /// klick, gå med som support (<c>PlanningController.JoinAsSupport</c>, Stefan 2026-11-11): en vanlig deltagarrad som
+    /// Sammankallande, märkt "(support)", utan mejl — så varje åtgärd har en författare och gruppen ser vem som hjälpt till.</para>
     ///
     /// <para><b>⚠️ Alla som deltar får skapa och boka möten</b> (Stefan 2026-10-21) — en
     /// representant ska kunna föreslå tider utan att be den sammankallande. <b>Följer</b> läser allt
