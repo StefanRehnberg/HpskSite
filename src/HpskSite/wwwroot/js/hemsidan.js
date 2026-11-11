@@ -167,7 +167,8 @@
         h('label', { class: 'form-label fw-semibold' }, 'Varför behöver du ändra föreningens sidor?'), reason,
         h('div', { class: 'form-text mb-3' }, 'Minst tio tecken. Föreningens administratörer får läsa det du skriver.'), msg, btn)]);
   }
-  const alertBox = (cls, ...kids) => h('div', { class: 'alert alert-' + cls }, kids);
+  // ⚠️ kids.flat(): anropen skickar ibland en lista med noder som ett argument (till exempel [' ', länk]). Utan flat() blev den nästlade listan text, ", https://…", i stället för länken "Se klubbens sida".
+  const alertBox = (cls, ...kids) => h('div', { class: 'alert alert-' + cls }, kids.flat());
 
   // ── Skalet (förslag 3, Ekonomins skal): vänstermeny med en plats per flik, en kolumn till höger ──────────
   // Platserna adresseras med hash (#sidor, #sida=home, #redigera=12, #raderade, #logg, #ny) så att bakåtknappen och en delad länk fungerar.
@@ -205,6 +206,9 @@
   const MODE_CLASS = { asBefore: 'off', draft: 'wait', converted: 'ok' };
   const modePill = p => h('span', { class: 'hs-state ' + (MODE_CLASS[p.mode] || 'off') }, p.word);
 
+  // Tutorialnodens id i TutorialHelper (tutorialnodens fält tutorialId). Knappen "Guide" sitter i sidhuvudet, till vänster om Åtgärder (pageHead), som på de andra arbetsytorna.
+  const GUIDE_ID = 'tutorial-designa-klubbsidan';
+
   function rail(active) {
     const st = S.st, sys = st.systemPages || [];
     const nav = (key, label, hash, extra) => h('a', { href: hash, class: 'hs-nav' + (active === key ? ' on' : ''), 'aria-current': active === key ? 'page' : null,
@@ -236,10 +240,12 @@
   }
   /** Rubrik med blå Åtgärder uppe till höger (adminlistans form, som Träningar). */
   function pageHead(title, sub, menuItems) {
+    const guide = GUIDE_ID && typeof TutorialHelper !== 'undefined' ? TutorialHelper.guideButton(GUIDE_ID, { title: 'Se instruktionsfilm om Hemsidan' }) : null;
+    const actions = menuItems && menuItems.filter(Boolean).length ? h('div', { class: 'dropdown' },
+      h('button', { class: 'btn btn-primary shadow dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
+      menuList(menuItems)) : null;
     return h('div', { class: 'hs-head' }, h('div', {}, h('h1', {}, title), sub ? h('div', { class: 'hs-sub' }, sub) : null),
-      menuItems && menuItems.filter(Boolean).length ? h('div', { class: 'dropdown' },
-        h('button', { class: 'btn btn-primary shadow dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
-        menuList(menuItems)) : null);
+      guide || actions ? h('div', { class: 'hs-head-actions' }, guide, actions) : null);
   }
   /** Menyrader: [text, fn, { href?, danger?, disabled? }]; '-' = avdelare; null hoppas över. */
   function menuList(items) {

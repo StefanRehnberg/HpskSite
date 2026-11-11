@@ -152,6 +152,19 @@ const TutorialHelper = {
         markWatchedBtn.onclick = () => this.markAsWatched(tutorialId);
     },
 
+    // ENDA Guide-knappen i JavaScript-byggda ytor (Hemsidan m.fl.). Razor-ytor använder delen Partials/_GuideButton.cshtml, som ger samma knapp.
+    // Placeringen är en regel (UX 2026-11-11): i sidhuvudet, till vänster om den blå Åtgärder-knappen. Texten är alltid "Guide".
+    guideButton: function(tutorialId, opts) {
+        opts = opts || {};
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-outline-primary text-nowrap' + (opts.small ? ' btn-sm' : '') + (opts.className ? ' ' + opts.className : '');
+        b.title = opts.title || 'Se instruktionsfilm om den här delen';
+        b.innerHTML = '<i class="bi bi-play-circle me-1" aria-hidden="true"></i>Guide';
+        b.addEventListener('click', () => TutorialHelper.open(tutorialId));
+        return b;
+    },
+
     // Close tutorial overlay
     closeModal: function() {
         const overlayEl = document.getElementById('tutorialModal');

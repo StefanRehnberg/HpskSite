@@ -34,9 +34,7 @@
         <h1 class="h3 mb-0"><i class="bi bi-diagram-3 me-2 text-primary"></i>Tävlingsplanering</h1>
         <div class="d-flex gap-2">
         @* Filmen om planeringen i stort — noden tutorial-planering-promo under /tutorials. *@
-        <button type="button" class="btn btn-outline-primary text-nowrap" onclick="TutorialHelper.open('tutorial-planering-promo')" title="Se filmen om tävlingsplanering">
-            <i class="bi bi-play-circle me-1"></i>Guide
-        </button>
+        @await Html.PartialAsync("_GuideButton", new HpskSite.Models.GuideButtonModel("tutorial-planering-promo", "Se filmen om tävlingsplanering"))
         <div class="dropdown">
             <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-sliders me-1"></i>Åtgärder

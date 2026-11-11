@@ -1,0 +1,11 @@
+@*
+    Guide-knappen. ENDA Razor-formen (JavaScript-byggda ytor använder TutorialHelper.guideButton i tutorialHelper.js).
+    Regeln (UX 2026-11-11): i sidhuvudet, till vänster om den blå Åtgärder-knappen; texten är alltid "Guide".
+    Anrop: @await Html.PartialAsync("_GuideButton", new GuideButtonModel("tutorial-xx", "Se instruktionsfilm om …"))
+    Flikrader utan Åtgärder-knapp (klubbens och kretsens sida) lägger knappen längst till höger i raden, med Small = true.
+*@
+@model HpskSite.Models.GuideButtonModel
+<button type="button" class="btn btn-outline-primary text-nowrap@(Model.Small ? " btn-sm" : "")@(string.IsNullOrEmpty(Model.ExtraClass) ? "" : " " + Model.ExtraClass)"
+        onclick="TutorialHelper.open('@Model.TutorialId')" title="@Model.Title">
+    <i class="bi bi-play-circle me-1" aria-hidden="true"></i>Guide
+</button>

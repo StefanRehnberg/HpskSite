@@ -75,6 +75,7 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 #hemsidan-app .hs-rail .hs-railtoggle { display: none; }
 #hemsidan-app .hs-main { flex: 1 1 auto; min-width: 0; font-size: 1.05rem; }
 #hemsidan-app .hs-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+#hemsidan-app .hs-head-actions { display: flex; gap: .5rem; align-items: flex-start; flex-wrap: wrap; }
 #hemsidan-app .hs-head h1 { font-size: 1.7rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
 #hemsidan-app .hs-sub { color: var(--bs-secondary-color); margin-top: .15rem; }
 #hemsidan-app .hs-state { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600; padding: .12rem .55rem; border-radius: 1rem; white-space: nowrap; }
@@ -98,7 +99,7 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 @media (min-width: 768px) {
   #hemsidan-app .hs-head { flex-wrap: nowrap; }
   #hemsidan-app .hs-head > div:first-child { flex: 1 1 auto; min-width: 0; }
-  #hemsidan-app .hs-head > .dropdown { flex: 0 0 auto; }
+  #hemsidan-app .hs-head > .hs-head-actions { flex: 0 0 auto; }
 }
 
 /* K5c: panel cards on a converted page and a grey row for a removed panel. */
