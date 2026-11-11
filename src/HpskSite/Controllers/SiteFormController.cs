@@ -113,8 +113,8 @@ namespace HpskSite.Controllers
                 var ownerUrl = UmbracoContext.Content?.GetById(ownerId)?.Url() ?? "/";
                 if (!ownerUrl.EndsWith('/')) ownerUrl += "/";
                 var pageUrl = slug == null ? ownerUrl : ownerUrl + slug + "/";
-                IActionResult Back(bool ok, string? code = null) =>
-                    Redirect($"{pageUrl}?anmalan={m.BlockId}&r={(ok ? "ok" : "err")}{(code == null ? "" : "&e=" + code)}#{m.BlockId}-anmalan");
+                IActionResult Back(bool ok, string? code = null, IEnumerable<string>? fields = null) =>
+                    Redirect($"{pageUrl}?anmalan={m.BlockId}&r={(ok ? "ok" : "err")}{(code == null ? "" : "&e=" + code)}{(fields == null || !fields.Any() ? "" : "&f=" + string.Join(",", fields))}#{m.BlockId}-anmalan");
 
                 // Honungsfältet först: en robot får ett tyst tack och äter inte upp en riktig besökares kvot.
                 if (!string.IsNullOrWhiteSpace(m.Website)) return Back(true);
@@ -127,7 +127,7 @@ namespace HpskSite.Controllers
 
                 var cfg = SiteSignupConfig.FromBlock(block);
                 var check = SiteSignupRules.Validate(cfg, new SiteSignupInput(m.Name, m.Email, m.Phone, m.Gender, m.PersonalNumber, m.Address, m.PostalCode, m.City, m.Message, m.Choice, m.Consent), DateTime.Today);
-                if (!check.Ok) return Back(false, check.Errors.Any(e => e.Field == "") ? "closed" : "invalid");
+                if (!check.Ok) return Back(false, check.Errors.Any(e => e.Field == "") ? "closed" : "invalid", check.Errors.Select(e => e.Field).Where(f => f.Length > 0).Distinct());
 
                 SiteSignupInsert result;
                 using (var scope = _scopes.CreateScope())

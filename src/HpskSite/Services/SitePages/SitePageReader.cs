@@ -210,7 +210,12 @@ namespace HpskSite.Services.SitePages
                 {
                     var r = http.Request.Query["r"].ToString();
                     if (r == "ok") flash = new SiteFormFlash(bid, true, null);
-                    else if (r == "err") { var e = http.Request.Query["e"].ToString(); flash = new SiteFormFlash(bid, false, KnownFlashCodes.Contains(e) ? e : "error"); }
+                    else if (r == "err")
+                    {
+                        var e = http.Request.Query["e"].ToString();
+                        var fields = http.Request.Query["f"].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries).Where(k => SiteSignupRules.FieldText(k) != null).Distinct().Take(12).ToList();   // bara kända fältnycklar
+                        flash = new SiteFormFlash(bid, false, KnownFlashCodes.Contains(e) ? e : "error", fields);
+                    }
                 }
                 return new SiteFormContext(_pageId, token, flash);
             }

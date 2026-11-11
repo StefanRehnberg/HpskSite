@@ -52,7 +52,7 @@ namespace HpskSite.Services.SitePages
     public sealed record SiteSignupCheck(bool Ok, IReadOnlyList<(string Field, string Message)> Errors, SiteSignupData? Data);
 
     /// <summary>Vad sidan säger efter en inskickning (koden ligger i adressen: <c>?anmalan=blockId&amp;r=ok</c> eller <c>&amp;r=err&amp;e=kod</c>). Ingen text ur adressen skrivs någonsin ut: bara kända koder.</summary>
-    public sealed record SiteFormFlash(string BlockId, bool Success, string? ErrorCode);
+    public sealed record SiteFormFlash(string BlockId, bool Success, string? ErrorCode, IReadOnlyList<string>? Fields = null);
 
     /// <summary>Det ett anmälningsblock behöver veta om begäran: sidan (för formulärets mål), skyddstoken och eventuellt besked efter en inskickning. Null = en förhandsvisning: formuläret visas men går inte att skicka.</summary>
     public sealed record SiteFormContext(int PageId, string? Token, SiteFormFlash? Flash);
@@ -76,6 +76,28 @@ namespace HpskSite.Services.SitePages
             "full" => "Anmälan kan inte ta emot fler just nu. Kontakta föreningen.",
             _ => code == null ? null : "Det gick inte att ta emot anmälan. Försök igen om en stund.",
         };
+
+        /// <summary>
+        /// Vilket fält som underkändes, som fasta texter (adressen bär bara fältnyckeln, aldrig något besökaren skrivit). Utan den fick besökaren bara
+        /// "Kontrollera uppgifterna" och kunde inte se vad som var fel.
+        /// </summary>
+        private static readonly Dictionary<string, string> FieldTexts = new()
+        {
+            ["name"] = "Fyll i ditt namn (minst två tecken, utan < eller >).",
+            ["email"] = "Ange en giltig e-postadress.",
+            ["choice"] = "Välj vad din anmälan gäller.",
+            ["phone"] = "Fyll i ett giltigt mobilnummer.",
+            ["address"] = "Fyll i din adress.",
+            ["postalCode"] = "Ange ett postnummer med fem siffror.",
+            ["city"] = "Fyll i din ort.",
+            ["gender"] = "Välj ett av alternativen för kön, eller lämna det tomt.",
+            ["personalNumber"] = "Ange ett giltigt personnummer som ÅÅÅÅMMDD-NNNN (kontrollsiffran måste stämma).",
+            ["message"] = "Meddelandet är för långt eller innehåller tecken som inte går att ta emot.",
+            ["consent"] = "Du måste godkänna att uppgifterna sparas.",
+        };
+
+        /// <summary>Texten för ett fält, eller null för en okänd nyckel (ur adressen får bara kända nycklar bli text).</summary>
+        public static string? FieldText(string? key) => key != null && FieldTexts.TryGetValue(key, out var t) ? t : null;
 
         public static SiteSignupCheck Validate(SiteSignupConfig cfg, SiteSignupInput i, DateTime today)
         {

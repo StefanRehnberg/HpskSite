@@ -374,7 +374,11 @@ namespace HpskSite.Services.SitePages
                 sb.Append($"<div class=\"alert alert-success\" role=\"status\">{E(cfg.Thanks ?? SiteSignupConfig.DefaultThanks)}</div>");
                 return Section(b.Id, sb.Append("</div>").ToString());
             }
-            if (flash != null) sb.Append($"<div class=\"alert alert-danger\" role=\"alert\">{E(SiteSignupRules.ErrorText(flash.ErrorCode) ?? "Det gick inte att ta emot anmälan.")}</div>");
+            if (flash != null)
+            {
+                var detail = flash.Fields is { Count: > 0 } ? "<ul class=\"mb-0 mt-1\">" + string.Concat(flash.Fields.Select(k => $"<li>{E(SiteSignupRules.FieldText(k) ?? "")}</li>")) + "</ul>" : "";
+                sb.Append($"<div class=\"alert alert-danger\" role=\"alert\">{E(SiteSignupRules.ErrorText(flash.ErrorCode) ?? "Det gick inte att ta emot anmälan.")}{detail}</div>");
+            }
 
             var state = cfg.StateOn(DateTime.Today);
             if (state == SiteSignupOpenState.NotYet) { sb.Append($"<div class=\"alert alert-info\">Anmälan öppnar {E(cfg.Opens!.Value.ToString("d MMMM yyyy", sv))}.</div>"); return Section(b.Id, sb.Append("</div>").ToString()); }
@@ -402,11 +406,11 @@ namespace HpskSite.Services.SitePages
                 sb.Append("</fieldset>");
             }
             Field("name", "Namn *", $"<input class=\"form-control\" type=\"text\" name=\"Name\" id=\"{Id("name")}\" maxlength=\"120\" autocomplete=\"name\" required>");
-            Field("email", "E-post *", $"<input class=\"form-control\" type=\"email\" name=\"Email\" id=\"{Id("email")}\" maxlength=\"200\" autocomplete=\"email\" required>");
+            Field("email", "E-post *", $"<input class=\"form-control\" type=\"email\" name=\"Email\" id=\"{Id("email")}\" maxlength=\"200\" autocomplete=\"email\" data-1p-ignore data-lpignore=\"true\" data-bwignore required>");   // ett anmälningsformulär är ingen inloggning: lösenordshanterare ska inte erbjuda sig
             if (cfg.Phone) Field("phone", "Mobilnummer *", $"<input class=\"form-control\" type=\"tel\" name=\"Phone\" id=\"{Id("phone")}\" maxlength=\"20\" autocomplete=\"tel\" required>");
             if (cfg.PersonalNumber)
                 Field("pnr", "Personnummer *", $"<input class=\"form-control\" type=\"text\" name=\"PersonalNumber\" id=\"{Id("pnr")}\" maxlength=\"13\" inputmode=\"numeric\" pattern=\"[0-9]{{8}}-?[0-9]{{4}}\" placeholder=\"ÅÅÅÅMMDD-NNNN\" autocomplete=\"off\" required>",
-                    "Föreningen använder personnumret för att kunna registrera dig. Det tas bort automatiskt 30 dagar efter att din anmälan har avgjorts.");
+                    "Föreningen använder personnumret för att kunna registrera dig.");
             if (cfg.Address)
             {
                 Field("address", "Adress *", $"<input class=\"form-control\" type=\"text\" name=\"Address\" id=\"{Id("address")}\" maxlength=\"200\" autocomplete=\"street-address\" required>");
@@ -417,7 +421,7 @@ namespace HpskSite.Services.SitePages
                 Field("gender", "Kön", $"<select class=\"form-select\" name=\"Gender\" id=\"{Id("gender")}\"><option value=\"\"></option>{string.Concat(SiteSignupRules.Genders.Select(g => $"<option value=\"{E(g)}\">{E(g)}</option>"))}</select>");
             if (cfg.Message) Field("message", "Meddelande", $"<textarea class=\"form-control\" name=\"Message\" id=\"{Id("message")}\" rows=\"4\" maxlength=\"1000\"></textarea>");
 
-            sb.Append($"<div class=\"form-check mb-3\"><input class=\"form-check-input\" type=\"checkbox\" name=\"Consent\" value=\"true\" id=\"{Id("consent")}\" required><label class=\"form-check-label\" for=\"{Id("consent")}\">Jag godkänner att uppgifterna sparas hos föreningen för att hantera min anmälan. De raderas när ärendet är avslutat. <a href=\"/integritetspolicy\" target=\"_blank\" rel=\"noopener\">Integritetspolicy</a></label></div>")
+            sb.Append($"<div class=\"form-check mb-3\"><input class=\"form-check-input\" type=\"checkbox\" name=\"Consent\" value=\"true\" id=\"{Id("consent")}\" required><label class=\"form-check-label\" for=\"{Id("consent")}\">Jag godkänner att uppgifterna sparas hos föreningen för att hantera min anmälan. Gäller anmälan medlemskap blir uppgifterna en del av föreningens medlemsregister. <a href=\"/integritetspolicy\" target=\"_blank\" rel=\"noopener\">Integritetspolicy</a></label></div>")
               .Append("<button type=\"submit\" class=\"btn btn-primary\">Skicka anmälan</button>")
               .Append(live ? "</form>" : "</fieldset></form>");
             return Section(b.Id, sb.Append("</div>").ToString());
