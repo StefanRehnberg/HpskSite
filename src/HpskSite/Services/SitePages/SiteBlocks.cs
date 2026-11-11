@@ -284,8 +284,8 @@ namespace HpskSite.Services.SitePages
                 errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" får inte ligga före eller efter en systemsida."));
             else if (type.ConvertedOnly && kind != SiteContentKind.ConvertedPage)
                 errors.Add(new($"{p}.type", $"Blocktypen \"{typeName}\" finns bara på en omvandlad systemsida."));
-            else if (type.Name == "signup" && kind != SiteContentKind.FreePage)
-                errors.Add(new($"{p}.type", "Anmälan går bara att lägga på en egen sida."));   // formuläret postar med sidans id: en systemsida har ingen sådan
+            else if (type.Name == "signup" && kind != SiteContentKind.FreePage && kind != SiteContentKind.ConvertedPage)
+                errors.Add(new($"{p}.type", "Anmälan går bara att lägga på en egen sida eller en omgjord systemsida."));   // formuläret postar med sidans id: en systemsida i den gamla formen (platser före/efter) har inget eget innehåll att läsa om
 
             // Panelens registerpost avgör personnivå och om den är en systempanel (login-prompt: lagringsbar, aldrig valbar).
             var bData = b["data"] as JsonObject;

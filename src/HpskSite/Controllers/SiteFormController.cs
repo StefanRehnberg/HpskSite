@@ -87,15 +87,18 @@ namespace HpskSite.Controllers
             try
             {
                 if (m == null || m.PageId <= 0 || string.IsNullOrEmpty(m.BlockId) || m.BlockId.Length > 12) return NotFound();
-                (string OwnerType, int OwnerId)? owner;
+                (string OwnerType, int OwnerId, string? TemplateKey)? owner;
                 string? slug;
                 using (var scope = _scopes.CreateScope(autoComplete: true))
                 {
-                    owner = SitePageStore.OwnerOfFreePage(scope.Database, m.PageId);
-                    slug = owner == null ? null : scope.Database.FirstOrDefault<string>("SELECT TOP 1 Slug FROM dbo.PageAddress WHERE TargetKind = @0 AND TargetId = @1 AND IsCurrent = 1", PageAddressKinds.SitePage, m.PageId);
+                    owner = SitePageStore.OwnerOfPage(scope.Database, m.PageId);
+                    // En egen sida har sin adress i PageAddress; en omgjord systemsida har mallens adressdel (Hem har ingen: ägarens egen adress).
+                    slug = owner == null ? null
+                        : owner.Value.TemplateKey != null ? SiteTemplates.For(owner.Value.OwnerType).PageByKey(owner.Value.TemplateKey)?.Slug
+                        : scope.Database.FirstOrDefault<string>("SELECT TOP 1 Slug FROM dbo.PageAddress WHERE TargetKind = @0 AND TargetId = @1 AND IsCurrent = 1", PageAddressKinds.SitePage, m.PageId);
                 }
                 if (owner == null) return NotFound();
-                var (ownerType, ownerId) = owner.Value;
+                var (ownerType, ownerId, _) = owner.Value;
                 if (!_owners.IsEditingEnabled(ownerType, ownerId)) return NotFound();   // brytare 2 av: ytan finns inte
 
                 var loaded = _reader.LoadPublished(ownerType, ownerId, m.PageId);        // null = stoppad, ej publicerad eller ogiltig

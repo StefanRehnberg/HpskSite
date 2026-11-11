@@ -80,6 +80,7 @@ namespace HpskSite.Services.SitePages
 
         public sealed class ConvertedRow
         {
+            public int Id { get; set; }
             public string TemplateKey { get; set; } = "";
             public byte Visibility { get; set; }
             public DateTime? SuspendedDate { get; set; }
@@ -94,7 +95,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             var rows = scope.Database.Fetch<ConvertedRow>(
-                @"SELECT p.TemplateKey, p.Visibility, p.SuspendedDate, v.BlocksJson
+                @"SELECT p.Id, p.TemplateKey, p.Visibility, p.SuspendedDate, v.BlocksJson
                   FROM dbo.SitePage p JOIN dbo.SitePageVersion v ON v.Id = p.PublishedVersionId AND v.PageId = p.Id
                   WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NOT NULL AND p.DeletedDate IS NULL AND v.SchemaVersion = @2",
                 ownerType, ownerId, SiteBlockSchema.ConvertedSchemaVersion);
@@ -112,7 +113,7 @@ namespace HpskSite.Services.SitePages
                 }
                 catch { content = null; }
                 result[r.TemplateKey] = content is { Ok: true }
-                    ? new ConvertedPage(r.TemplateKey, ConvertedState.Ok, vis, r.SuspendedDate != null, content)
+                    ? new ConvertedPage(r.TemplateKey, ConvertedState.Ok, vis, r.SuspendedDate != null, content, r.Id)
                     : new ConvertedPage(r.TemplateKey, ConvertedState.Broken, vis, r.SuspendedDate != null, null);
             }
             return result;

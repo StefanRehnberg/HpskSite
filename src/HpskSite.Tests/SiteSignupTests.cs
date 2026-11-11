@@ -166,10 +166,11 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Blocket_finns_bara_på_en_egen_sida()
+        public void Blocket_finns_på_en_egen_sida_och_en_omgjord_systemsida_men_inte_i_den_gamla_formen()
         {
             Assert.True(Parse("{}").Ok);
-            Assert.False(Parse("{}", SiteContentKind.ConvertedPage, "about").Ok);   // en systemsida har inget sid-id att posta med
+            Assert.True(Parse("{}", SiteContentKind.ConvertedPage, "about").Ok);   // en omgjord sida har ett eget sid-id att posta med (se SiteSignupOnConvertedPageTests)
+            Assert.False(Parse("{}", SiteContentKind.TemplateCopy, "about").Ok);   // platser före/efter har inget eget innehåll att läsa om vid inskickningen
         }
 
         [Fact]

@@ -1580,15 +1580,25 @@
       h('div', { class: 'form-text' }, 'Länken syns i menyn när sidan är publicerad, och bara för dem som får läsa sidan.'));
   }
 
+  // Varför ett block inte går att lägga på den här sidan (tom sträng = det går). Servern prövar samma sak i SiteBlocks.
+  function blockUnavailable(t) {
+    if (t.type === 'signup' && S.kind !== 'free' && S.kind !== 'converted') return 'Går inte att lägga på den här sidan (sidan är en systemsida i den gamla formen). Gör om sidan först, eller använd en egen sida.';
+    return '';
+  }
+
   // Väljaren: blocken grupperade efter vad besökaren ser, med en rad om vad varje block visar. Ingen ny design: samma kort och knappar som resten av sidan.
   function addBlockBar() {
     const retired = new Set((S.st && S.st.retiredBlocks) || []);   // en utgången typ erbjuds inte, men en sida som har den ritas som förut
     const groups = BLOCK_GROUPS.map((title, gi) => {
-      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type) && !(t.type === 'signup' && S.kind !== 'free'));   // formuläret postar med sidans id: bara på en egen sida
+      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type));
       if (!items.length) return null;
+      // Ett block som inte går att lägga på just den här sidan göms aldrig: det visas nedtonat med förklaringen, så att ingen letar efter det.
       return h('div', { class: 'mb-3' }, h('p', { class: 'text-muted small fw-semibold mb-1' }, title),
-        h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2', 'data-add-block': t.type, onclick: () => addBlock(t.type) },
-          h('i', { class: 'bi ' + t.icon + ' mt-1' }), h('span', {}, h('span', { class: 'fw-semibold d-block' }, t.label), h('span', { class: 'small text-muted' }, t.desc))))));
+        h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => {
+          const why = blockUnavailable(t);
+          return h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2' + (why ? ' disabled' : ''), 'data-add-block': t.type, ...(why ? { 'aria-disabled': 'true', 'data-unavailable': why, tabindex: '-1' } : {}), onclick: () => { if (!why) addBlock(t.type); } },
+            h('i', { class: 'bi ' + t.icon + ' mt-1' }), h('span', {}, h('span', { class: 'fw-semibold d-block' }, t.label), h('span', { class: 'small ' + (why ? 'text-body-secondary fst-italic' : 'text-muted') }, why || t.desc)));
+        })));
     }).filter(Boolean);
     return h('div', { class: 'hs-card p-3', id: 'hsAddBlocks' }, h('p', { class: 'fw-semibold mb-2' }, 'Lägg till'), ...groups);
   }

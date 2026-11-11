@@ -386,6 +386,18 @@ namespace HpskSite.Services.SitePages
             return r == null ? null : (r.OwnerType, r.OwnerId);
         }
 
+        private sealed class OwnerKeyRef { public string OwnerType { get; set; } = ""; public int OwnerId { get; set; } public string? TemplateKey { get; set; } }
+
+        /// <summary>
+        /// Vem en sida hör till, bara på id, för en publik inskickning: en egen sida eller en omgjord systemsida (<c>TemplateKey</c> sätts då). Null om sidan inte finns eller är raderad.
+        /// En mallkopia i den gamla formen (platser före/efter) har inga formulär: den hittar inget Anmälan-block och avvisas av anroparen.
+        /// </summary>
+        public static (string OwnerType, int OwnerId, string? TemplateKey)? OwnerOfPage(IDatabase db, int pageId)
+        {
+            var r = db.FirstOrDefault<OwnerKeyRef>("SELECT OwnerType, OwnerId, TemplateKey FROM dbo.SitePage WHERE Id = @0 AND DeletedDate IS NULL", pageId);
+            return r == null ? null : (r.OwnerType, r.OwnerId, r.TemplateKey);
+        }
+
         public static bool IsInMenu(IDatabase db, string ownerType, int ownerId, int pageId) =>
             db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteMenuItem WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = 1 AND PageId = @2 AND IsRemoved = 0", ownerType, ownerId, pageId) > 0;
 

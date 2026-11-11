@@ -10,7 +10,7 @@ namespace HpskSite.Services.SitePages
     /// vyn visar då ett felkort (aldrig standardsidan, som kan visa paneler ägaren dolt — plan v2 beslut 4). <see cref="PageVisibility"/> är sidans
     /// AKTUELLA nivå ur SQL, <see cref="Suspended"/> = nödbromsen (ägarens egna block stoppas, panelerna ritas med sina lagrade nivåer).
     /// </summary>
-    public sealed record ConvertedPage(string TemplateKey, ConvertedState State, SiteVisibility PageVisibility, bool Suspended, SiteContentResult? Content);
+    public sealed record ConvertedPage(string TemplateKey, ConvertedState State, SiteVisibility PageVisibility, bool Suspended, SiteContentResult? Content, int PageId = 0);
 
     /// <summary>En post i en omvandlad sida som vyn ritar: en panel (<see cref="PanelKey"/> satt) eller ett eget block (färdig, kodad <see cref="Html"/>).</summary>
     public sealed record ConvertedItem(string? PanelKey, PanelZone Zone, string Html);
@@ -190,7 +190,7 @@ namespace HpskSite.Services.SitePages
             }
             try
             {
-                var rctx = new SiteRenderContext(ctx.Viewer, ownerUrl, SiteTemplates.For(ctx.OwnerType), _data.For(ctx.OwnerType, ctx.OwnerId, ctx.Node, ctx.Viewer));
+                var rctx = new SiteRenderContext(ctx.Viewer, ownerUrl, SiteTemplates.For(ctx.OwnerType), _data.For(ctx.OwnerType, ctx.OwnerId, ctx.Node, ctx.Viewer, page.PageId));   // sidans id: ett formulär (Anmälan) på en omgjord sida postar med det
                 return SiteConvertedPages.Plan(page, rctx);
             }
             catch (Exception ex)
