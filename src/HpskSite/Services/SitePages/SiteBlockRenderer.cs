@@ -371,7 +371,8 @@ namespace HpskSite.Services.SitePages
             var flash = form?.Flash is { } f && f.BlockId == b.Id ? f : null;
             if (flash is { Success: true })
             {
-                sb.Append($"<div class=\"alert alert-success\" role=\"status\">{E(cfg.Thanks ?? SiteSignupConfig.DefaultThanks)}</div>");
+                sb.Append($"<div class=\"alert alert-success\" role=\"status\">{E(cfg.Thanks ?? SiteSignupConfig.DefaultThanks)}</div>")
+                  .Append("<script>try{sessionStorage.removeItem('site_signup_'+" + System.Text.Json.JsonSerializer.Serialize(b.Id) + ")}catch(x){}</script>");   // tackat visas: det sparade är inte längre till nytta
                 return Section(b.Id, sb.Append("</div>").ToString());
             }
             if (flash != null)
@@ -424,6 +425,16 @@ namespace HpskSite.Services.SitePages
             sb.Append($"<div class=\"form-check mb-3\"><input class=\"form-check-input\" type=\"checkbox\" name=\"Consent\" value=\"true\" id=\"{Id("consent")}\" required><label class=\"form-check-label\" for=\"{Id("consent")}\">Jag godkänner att uppgifterna sparas hos föreningen för att hantera min anmälan. Gäller anmälan medlemskap blir uppgifterna en del av föreningens medlemsregister. <a href=\"/integritetspolicy\" target=\"_blank\" rel=\"noopener\">Integritetspolicy</a></label></div>")
               .Append("<button type=\"submit\" class=\"btn btn-primary\">Skicka anmälan</button>")
               .Append(live ? "</form>" : "</fieldset></form>");
+            // Efter ett fel ska besökaren slippa skriva om allt: fälten sparas i webbläsaren (sessionStorage, aldrig i adressen eller på servern)
+            // när formuläret skickas och läggs tillbaka när sidan visar felrutan. Utan JS fungerar formuläret som förut. Samtycket kryssas aldrig i åt besökaren.
+            if (live)
+                sb.Append("<script>(function(){var d=document.currentScript.parentNode,f=d.querySelector('form'),k='site_signup_'+" + System.Text.Json.JsonSerializer.Serialize(b.Id) + ";"
+                  + "try{if(d.querySelector('.alert-danger')){var s=JSON.parse(sessionStorage.getItem(k)||'[]');s.forEach(function(p){var e=f.elements[p[0]];if(!e)return;"
+                  + "if(e.length&&e[0]&&e[0].type==='radio'){for(var i=0;i<e.length;i++)if(e[i].value===p[1])e[i].checked=true;}else if(!e.value)e.value=p[1];});}"
+                  + "else sessionStorage.removeItem(k);}catch(x){}"
+                  + "f.addEventListener('submit',function(){try{var s=[];for(var i=0;i<f.elements.length;i++){var e=f.elements[i];"
+                  + "if(!e.name||/^(Consent|Website|__RequestVerificationToken|PageId|BlockId)$/.test(e.name))continue;if(e.type==='radio'){if(e.checked)s.push([e.name,e.value]);}else if(e.value)s.push([e.name,e.value]);}"
+                  + "sessionStorage.setItem(k,JSON.stringify(s));}catch(x){}});})();</script>");
             return Section(b.Id, sb.Append("</div>").ToString());
         }
 

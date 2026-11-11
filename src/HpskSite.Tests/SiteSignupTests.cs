@@ -230,7 +230,10 @@ namespace HpskSite.Tests
             foreach (var n in new[] { "Name", "Email", "Phone", "Address", "PostalCode", "City", "Gender", "PersonalNumber", "Message", "Choice", "Consent" })
                 Assert.Contains($"name=\"{n}\"", html);
             Assert.Contains("href=\"/integritetspolicy\"", html);
-            Assert.DoesNotContain("<script", html, StringComparison.OrdinalIgnoreCase);
+            // Formuläret har ett enda eget skript (fälten sparas i webbläsaren efter ett fel) och inget av det som redaktören skrivit hamnar i det
+            Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(html, "<script", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count);
+            var script = html.Substring(html.IndexOf("<script", StringComparison.Ordinal), html.IndexOf("</script>", StringComparison.Ordinal) - html.IndexOf("<script", StringComparison.Ordinal));
+            Assert.DoesNotContain("Grundkurs", script);
             Assert.DoesNotContain("onsubmit", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
         }

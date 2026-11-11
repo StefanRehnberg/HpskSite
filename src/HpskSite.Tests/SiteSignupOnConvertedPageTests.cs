@@ -17,6 +17,14 @@ namespace HpskSite.Tests
             public SiteFormContext? Form() => new(4711, "tok", null);
         }
 
+        private sealed class NoForm : ISiteBlockData
+        {
+            public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids) => Array.Empty<SiteDocumentInfo>();
+            public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count) => Array.Empty<SiteEventInfo>();
+            public SiteContactInfo? Contact() => null;
+            public SiteFormContext? Form() => null;
+        }
+
         private const string Signup = "{\"id\":\"anm01\",\"type\":\"signup\",\"visibility\":0,\"data\":{\"title\":\"Intresseanmälan\"}}";
 
         private static SiteContentResult Parse(string owner, string? page, SiteContentKind kind) =>
@@ -80,6 +88,19 @@ namespace HpskSite.Tests
             Assert.DoesNotContain("tas bort automatiskt", html);
             Assert.Contains("medlemsregister", html);
             Assert.Matches("type=\"email\"[^>]*data-1p-ignore", html);   // annars erbjuder 1Password en inloggning i ett anmälningsformulär
+        }
+
+        [Fact]
+        public void Ett_riktigt_formulär_sparar_fälten_i_webbläsaren_men_aldrig_samtycket_och_förhandsvisningen_ingenting()
+        {
+            var json = "{\"schema\":1,\"blocks\":[{\"id\":\"anm01\",\"type\":\"signup\",\"visibility\":0,\"data\":{\"title\":\"Bli medlem\",\"pnr\":true}}]}";
+            var content = SiteBlockSchema.Parse(json, SiteContentKind.FreePage, SiteVisibility.Alla, SiteTemplates.For(SiteTemplates.Club), null);
+            var live = SiteBlockRenderer.Render(content.Blocks[0], SiteVisibility.Alla, new SiteRenderContext(SiteViewer.Anonymous, "/x/", SiteTemplates.For(SiteTemplates.Club), new LiveForm()));
+            Assert.Contains("sessionStorage", live);
+            Assert.Contains("site_signup_", live);
+            Assert.Contains("Consent|Website", live);   // samtycket och honungsfältet sparas aldrig
+            var preview = SiteBlockRenderer.Render(content.Blocks[0], SiteVisibility.Alla, new SiteRenderContext(SiteViewer.Anonymous, "/x/", SiteTemplates.For(SiteTemplates.Club), new NoForm()));
+            Assert.DoesNotContain("sessionStorage", preview);
         }
 
         [Theory, MemberData(nameof(Owners))]
