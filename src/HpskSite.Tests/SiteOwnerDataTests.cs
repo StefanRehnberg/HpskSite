@@ -34,7 +34,7 @@ namespace HpskSite.Tests
             Assert.True(saved.Ok, saved.Message);
             Assert.True(SitePageWriter.Publish(db, f, page.PageId, "Club", owner, saved.Revision, actor, Now).Ok);
             SitePageStore.Create(db, "Club", owner, "Utkast", SiteVisibility.Dold, null, null, 7, false, Now);
-            db.Execute("INSERT INTO dbo.SiteMenuItem (OwnerType, OwnerId, Kind, PageId, Label) VALUES ('Club', @0, 1, @1, N'Regler')", owner, page.PageId);
+            db.Execute("IF NOT EXISTS (SELECT 1 FROM dbo.SiteMenuItem WHERE OwnerType = 'Club' AND OwnerId = @0 AND PageId = @1) INSERT INTO dbo.SiteMenuItem (OwnerType, OwnerId, Kind, PageId, Label) VALUES ('Club', @0, 1, @1, N'Regler')", owner, page.PageId);   // en ny sida ligger redan i menyn
             db.Execute("INSERT INTO dbo.SiteSupportGrant (MemberId, OwnerType, OwnerId, Reason, ExpiresDate) VALUES (7, 'Club', @0, N'prov', DATEADD(HOUR, 1, SYSDATETIME()))", owner);
         }
 

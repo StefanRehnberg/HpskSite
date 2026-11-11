@@ -40,7 +40,7 @@ namespace HpskSite.Tests
             foreach (var (id, days) in new[] { (old, 31), (recent, 29) })
             {
                 f.Db.Execute("UPDATE dbo.SitePage SET DeletedDate = @1 WHERE Id = @0", id, Now.AddDays(-days));
-                f.Db.Execute("INSERT INTO dbo.SiteMenuItem (OwnerType, OwnerId, Kind, PageId, Label) VALUES ('Club', @0, 1, @1, N'x')", Owner, id);
+                f.Db.Execute("IF NOT EXISTS (SELECT 1 FROM dbo.SiteMenuItem WHERE OwnerType = 'Club' AND OwnerId = @0 AND PageId = @1) INSERT INTO dbo.SiteMenuItem (OwnerType, OwnerId, Kind, PageId, Label) VALUES ('Club', @0, 1, @1, N'x')", Owner, id);
                 f.Db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES ('Club', @0, NULL, @1, 'sitepage', @2, 1)", Owner, "s" + id, id);
                 var v = AddVersion(f.Db, id, Now.AddDays(-40));
                 f.Db.Execute("UPDATE dbo.SitePage SET PublishedVersionId = @1 WHERE Id = @0", id, v);

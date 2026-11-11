@@ -87,6 +87,7 @@ namespace HpskSite.Tests
             using var f = new SiteSqlFixture(); SeedOwners(f.Db);
             var parent = New(f.Db, "Styrelsen", SiteVisibility.Styrelse);
             var page = New(f.Db, "Öppen sida", SiteVisibility.Alla);
+            Assert.True(SitePageWriter.SetInMenu(f.Db, parent, Club, Owner, false, Admin, Now).Ok);   // nya sidor ligger i menyn från början: föräldern tas ur den för provets skull
             Assert.True(SitePageWriter.SetInMenu(f.Db, page, Club, Owner, true, Admin, Now).Ok);
             var r = SitePageWriter.SetParent(f.Db, page, Club, Owner, parent, Admin, Now);
             Assert.True(r.Ok, r.Message);
@@ -206,6 +207,9 @@ namespace HpskSite.Tests
         {
             using var f = new SiteSqlFixture(); SeedOwners(f.Db);
             var parent = New(f.Db, "Förälder"); var a = New(f.Db, "A", parent: parent); var b = New(f.Db, "B", parent: parent);
+            Assert.True(SitePageStore.IsInMenu(f.Db, Club, Owner, a));                                                      // nya sidor ligger i menyn från början, undersidor med föräldern
+            Assert.True(SitePageWriter.SetInMenu(f.Db, parent, Club, Owner, false, Admin, Now).Ok);                         // ut med hela familjen, för provet av regeln nedan
+            Assert.False(SitePageStore.IsInMenu(f.Db, Club, Owner, a));
             var refused = SitePageWriter.SetInMenu(f.Db, a, Club, Owner, true, Admin, Now);
             Assert.Equal(SiteWriteStatus.Invalid, refused.Status);
             Assert.False(SitePageStore.IsInMenu(f.Db, Club, Owner, a));

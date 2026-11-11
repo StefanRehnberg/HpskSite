@@ -243,6 +243,10 @@ namespace HpskSite.Services.SitePages
             var addr = PageAddressService.SetCurrentFlat(db, PageAddressKinds.SitePage, created.PageId, new PageAddressOwner(ownerType, ownerId), slug);
             if (!addr.Ok) throw new InvalidOperationException("Adressen blev upptagen mitt i skapandet: " + addr.Conflict); // låset på SiteOwner gör det omöjligt; rulla tillbaka
             Audit(db, ownerType, ownerId, actor, "page", created.PageId, "page-create", null, now);
+            // En ny sida läggs i menyn från början: en sida som ingen länk leder till upplevs som borta. Ägaren kan ta bort den ur menyn (Visa sidan i menyn). En undersida kommer med
+            // bara när föräldern är i menyn (en omgjord systemsida är alltid det), annars vore den onåbar där.
+            if (parentPageId is not int pid || SitePageStore.GetPage(db, pid, ownerType, ownerId) is { } menuParent && ParentIsInMenu(db, ownerType, ownerId, menuParent))
+                SitePageStore.SetInMenu(db, created.PageId, ownerType, ownerId, true, now);
             return new SiteWriteResult(SiteWriteStatus.Ok, created.PageId, created.Revision, slug);
         }
 

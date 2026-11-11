@@ -62,6 +62,23 @@ namespace HpskSite.Tests
         }
 
         [SqlFact]
+        public void En_ny_sida_läggs_i_menyn_från_början_och_en_undersida_bara_när_föräldern_är_där()
+        {
+            using var f = new SiteSqlFixture(); SeedOwners(f.Db);
+            var facts = new Facts();
+            var top = NewPage(f.Db, facts);
+            Assert.True(SitePageStore.IsInMenu(f.Db, Club, Owner, top.PageId));          // annars upplevs en ny sida som borta: ingen länk leder till den
+            var child = SitePageWriter.CreatePage(f.Db, facts, Club, Owner, "Undersida ett", null, SiteVisibility.Klubbmedlemmar, Admin, Now, top.PageId);
+            Assert.True(child.Ok, child.Message);
+            Assert.True(SitePageStore.IsInMenu(f.Db, Club, Owner, child.PageId));
+            Assert.True(SitePageWriter.SetInMenu(f.Db, top.PageId, Club, Owner, false, Admin, Now).Ok);   // ägaren kan ta bort den ur menyn
+            Assert.False(SitePageStore.IsInMenu(f.Db, Club, Owner, top.PageId));
+            var orphan = SitePageWriter.CreatePage(f.Db, facts, Club, Owner, "Undersida två", null, SiteVisibility.Klubbmedlemmar, Admin, Now, top.PageId);
+            Assert.True(orphan.Ok, orphan.Message);
+            Assert.False(SitePageStore.IsInMenu(f.Db, Club, Owner, orphan.PageId));       // föräldern är inte i menyn: undersidan vore onåbar där
+        }
+
+        [SqlFact]
         public void Samma_titel_igen_numreras_men_en_uttryckligen_vald_krock_vägras()
         {
             using var f = new SiteSqlFixture(); SeedOwners(f.Db);
