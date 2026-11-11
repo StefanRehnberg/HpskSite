@@ -1834,6 +1834,16 @@
     if (input && input.nodeType === 1 && /^(INPUT|SELECT|TEXTAREA)$/.test(input.tagName) && !input.id) input.id = 'hsf' + (++fieldSeq);
     return h('div', { class: 'mb-2' }, h('label', { class: 'form-label small fw-semibold mb-1', for: input && input.nodeType === 1 ? input.id : null }, label), input, help ? h('div', { class: 'form-text' }, help) : null);
   }
+  // Datumfält: sajtens vanliga svenska datumväljare (flatpickr + planering-dates.js: skriv "16 maj 2027" eller välj i kalendern). Värdet lagras alltid som åååå-mm-dd;
+  // ett datum som inte går att läsa lagras som det står, så att servern avvisar det i stället för att tyst tappa det.
+  function dateInput(obj, key) {
+    const inp = h('input', { class: 'form-control', type: 'text', value: obj[key] || '', autocomplete: 'off' });
+    const set = () => { const v = window.hpskPlParseDate ? window.hpskPlParseDate(inp.value) : inp.value; obj[key] = v === null ? inp.value.trim() : v; markDirty(); };
+    inp.addEventListener('input', set); inp.addEventListener('change', set);
+    if (window.hpskPlDatePicker) { window.hpskPlDatePicker(inp); S.editors.push({ destroy: () => { if (inp._flatpickr) inp._flatpickr.destroy(); } }); }
+    return inp;
+  }
+
   function bind(inp, obj, key, conv) { inp.addEventListener('input', () => { obj[key] = conv ? conv(inp.value) : inp.value; markDirty(); }); return inp; }
 
   function blockBody(b) {
@@ -1936,8 +1946,8 @@
         flag('phone', 'Mobilnummer'), flag('address', 'Adress (adress, postnummer och ort)'), flag('gender', 'Kön (frivilligt)'), flag('message', 'Meddelande (frivilligt)'),
         flag('pnr', 'Personnummer', 'Personnummer är en känslig personuppgift. Be bara om det om ni behöver det för att registrera personen. Det tas bort automatiskt 30 dagar efter att ni har avgjort anmälan.'),
         h('div', { class: 'row g-2 mt-2' },
-          h('div', { class: 'col-12 col-md-6' }, field('Öppnar (valfritt)', bind(h('input', { class: 'form-control', type: 'date', value: d.opens || '' }), d, 'opens'), 'Tomt = öppen direkt.')),
-          h('div', { class: 'col-12 col-md-6' }, field('Stänger (valfritt)', bind(h('input', { class: 'form-control', type: 'date', value: d.closes || '' }), d, 'closes'), 'Sista dagen som går att anmäla sig. Tomt = alltid öppen.'))),
+          h('div', { class: 'col-12 col-md-6' }, field('Öppnar (valfritt)', dateInput(d, 'opens'), 'Tomt = öppen direkt.')),
+          h('div', { class: 'col-12 col-md-6' }, field('Stänger (valfritt)', dateInput(d, 'closes'), 'Sista dagen som går att anmäla sig. Tomt = alltid öppen.'))),
         field('Svar efter anmälan (valfritt)', bind(h('input', { class: 'form-control', maxlength: '300', value: d.thanks || '', placeholder: 'Tack! Vi har tagit emot din anmälan och hör av oss.' }), d, 'thanks')),
         h('div', { class: 'alert alert-info small mt-3 mb-0' }, 'Anmälningarna kommer in under ', h('strong', {}, 'Anmälningar'), ' i Hemsidan. Där godkänner, köar eller nekar ni dem. Formuläret kan fyllas i av alla som får se blocket, även den som inte är inloggad om blocket visas för alla.'));
     };
