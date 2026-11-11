@@ -679,7 +679,7 @@
     const saved = { header: r.header, palette: r.palette };
     const miniOf = key => {
       const logo = h('span', { class: 'm-logo' }), line = h('span', { class: 'm-line' }), banner = h('span', { class: 'm-banner' });
-      return h('span', { class: 'hs-ap-mini m-' + key, 'aria-hidden': 'true' }, key === 'standard' ? [banner, logo, line] : key === 'banner-utan-logo' ? [banner, h('span', { class: 'm-row' }, logo, line)] : [h('span', { class: 'm-row' }, logo, line)]);
+      return h('span', { class: 'hs-ap-mini m-' + key, 'aria-hidden': 'true' }, key === 'standard' ? [banner, logo, line] : key === 'banner-utan-logo' ? [banner, h('span', { class: 'm-row' }, logo, line)] : key === 'banner-hoger' ? [banner, h('span', { class: 'm-row' }, line, logo)] : /-hoger$/.test(key) ? [h('span', { class: 'm-row' }, line, logo)] : [h('span', { class: 'm-row' }, logo, line)]);
     };
     const save = h('button', { type: 'button', class: 'btn btn-primary', disabled: true }, 'Spara utseendet');
     const msg = h('div', { id: 'hsApMsg', role: 'status' });

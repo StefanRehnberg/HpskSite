@@ -121,6 +121,25 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 #hemsidan-app .hs-ap-mini.m-utan-banner-vanster .m-row { margin-top: 22px; }
 #hemsidan-app .hs-ap-mini.m-utan-banner-mitten .m-row { flex-direction: column; margin-top: 10px; }
 #hemsidan-app .hs-ap-mini.m-utan-banner-mitten .m-line { width: 45%; }
+#hemsidan-app .hs-ap-mini.m-farg-hoger .m-row, #hemsidan-app .hs-ap-mini.m-accentkant-hoger .m-row, #hemsidan-app .hs-ap-mini.m-logo-hoger .m-row { justify-content: space-between; }
+#hemsidan-app .hs-ap-mini.m-farg-hoger .m-line, #hemsidan-app .hs-ap-mini.m-accentkant-hoger .m-line, #hemsidan-app .hs-ap-mini.m-banner-hoger .m-line { width: 45%; }
+#hemsidan-app .hs-ap-mini.m-accentkant-hoger { border-left: 6px solid var(--bs-primary); }
+#hemsidan-app .hs-ap-mini.m-accentkant-hoger .m-row { margin-top: 22px; }
+#hemsidan-app .hs-ap-mini.m-banner-hoger .m-row { justify-content: space-between; }
+#hemsidan-app .hs-ap-mini.m-farg-hoger .m-logo { background: #fff; }
+#hemsidan-app .hs-ap-mini.m-farg-hoger .m-line { background: #fff; opacity: .9; }
+#hemsidan-app .hs-ap-mini.m-farg-vanster .m-row, #hemsidan-app .hs-ap-mini.m-farg-mitten .m-row, #hemsidan-app .hs-ap-mini.m-farg-hoger .m-row { margin: -8px -8px 0; padding: 14px 10px; background: var(--bs-primary); min-height: 52px; }
+#hemsidan-app .hs-ap-mini.m-farg-vanster .m-logo, #hemsidan-app .hs-ap-mini.m-farg-mitten .m-logo { background: #fff; }
+#hemsidan-app .hs-ap-mini.m-farg-vanster .m-line, #hemsidan-app .hs-ap-mini.m-farg-mitten .m-line { background: #fff; opacity: .9; }
+#hemsidan-app .hs-ap-mini.m-farg-mitten .m-row { flex-direction: column; min-height: 66px; padding: 8px 10px; }
+#hemsidan-app .hs-ap-mini.m-farg-mitten .m-line { width: 45%; }
+#hemsidan-app .hs-ap-mini.m-kompakt .m-row { margin-top: 26px; }
+#hemsidan-app .hs-ap-mini.m-kompakt .m-logo { width: 14px; height: 14px; }
+#hemsidan-app .hs-ap-mini.m-kompakt .m-line { height: 6px; }
+#hemsidan-app .hs-ap-mini.m-accentkant { border-left: 6px solid var(--bs-primary); }
+#hemsidan-app .hs-ap-mini.m-accentkant .m-row { margin-top: 22px; }
+#hemsidan-app .hs-ap-mini.m-logo-hoger .m-row { margin-top: 22px; justify-content: space-between; }
+#hemsidan-app .hs-ap-mini.m-logo-hoger .m-line { width: 45%; }
 #hemsidan-app .hs-ap-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
 #hemsidan-app .hs-ap-sw { display: flex; align-items: center; gap: .5rem; border: 2px solid var(--bs-border-color); border-radius: .5rem; padding: .4rem .6rem; cursor: pointer; background: var(--bs-body-bg); }
 #hemsidan-app .hs-ap-sw:hover { border-color: var(--bs-secondary-color); }

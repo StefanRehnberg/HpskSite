@@ -35,6 +35,14 @@ namespace HpskSite.Services.SitePages
             new HeaderStyle("utan-banner-vanster", "Utan bild, logon till vänster", "Ren rad med logon till vänster och namnet bredvid. Ingen bannerbild."),
             new HeaderStyle("utan-banner-mitten", "Utan bild, logon i mitten", "Logon och namnet centrerade i mitten. Ingen bannerbild."),
             new HeaderStyle("banner-utan-logo", "Bannerbild, logon under", "Bannerbilden i full bredd, med logon och namnet på raden under bilden."),
+            new HeaderStyle("farg-vanster", "Färgat band, logon till vänster", "Ett band i vald färg med vit text och logon till vänster. Ingen bannerbild."),
+            new HeaderStyle("farg-mitten", "Färgat band, logon i mitten", "Ett band i vald färg med vit text, logon och namnet centrerade. Ingen bannerbild."),
+            new HeaderStyle("kompakt", "Kompakt", "En smal rad med liten logo och namnet. Lämnar mest plats åt innehållet."),
+            new HeaderStyle("accentkant", "Accentkant", "Vit ruta med en kraftig kant i vald färg åt vänster. Lugn och ren."),
+            new HeaderStyle("logo-hoger", "Logon till höger", "Namnet och texten till vänster, logon till höger. Ingen bannerbild."),
+            new HeaderStyle("farg-hoger", "Färgat band, logon till höger", "Ett band i vald färg med vit text, namnet till vänster och logon till höger. Ingen bannerbild."),
+            new HeaderStyle("banner-hoger", "Bannerbild, logon till höger", "Bannerbilden i full bredd, med namnet på raden under och logon till höger."),
+            new HeaderStyle("accentkant-hoger", "Accentkant, logon till höger", "Vit ruta med en kraftig kant i vald färg åt vänster, namnet till vänster och logon till höger."),
         };
 
         /// <summary>En färg i paletten. <see cref="Hex"/> är knappfärgen (vit text) och länkfärgen i ljust läge.</summary>
@@ -52,6 +60,16 @@ namespace HpskSite.Services.SitePages
             new PaletteColor("brandgul", "Brandgul", "#b45309"),
             new PaletteColor("brun", "Brun", "#7c4a21"),
             new PaletteColor("skiffer", "Skifferfärgad", "#475569"),
+            new PaletteColor("indigo", "Indigo", "#4338ca"),
+            new PaletteColor("cyan", "Havsblå", "#0e7490"),
+            new PaletteColor("smaragd", "Smaragdgrön", "#047857"),
+            new PaletteColor("oliv", "Olivgrön", "#4d7c0f"),
+            new PaletteColor("militar", "Militärgrön", "#3f6212"),
+            new PaletteColor("guld", "Guld", "#a16207"),
+            new PaletteColor("orange", "Orange", "#c2410c"),
+            new PaletteColor("rod", "Röd", "#b91c1c"),
+            new PaletteColor("fuchsia", "Fuchsia", "#a21caf"),
+            new PaletteColor("grafit", "Grafit", "#1f2937"),
         };
 
         public static string NormalizeHeader(string? key) =>
@@ -203,6 +221,13 @@ namespace HpskSite.Services.SitePages
               .Append(";--bs-pagination-active-border-color:").Append(s.Primary).Append("}\n");
             sb.Append(b).Append(" .progress{--bs-progress-bar-bg:").Append(s.Primary).Append("}\n");
             return sb.ToString();
+        }
+
+        /// <summary>Bakgrunden på de färgade banden (vit text): alltid vald palettfärg, även standardblå (aldrig den lila bannerfyllnaden). Båda ändar klarar vit text.</summary>
+        public static string HeaderBand(string? paletteKey)
+        {
+            var hex = ColorOf(paletteKey).Hex;
+            return $"linear-gradient(135deg, {hex} 0%, {Mix(hex, "#000000", 0.3)} 100%)";
         }
 
         /// <summary>Färgen sidhuvudet fyller med när bannerbild saknas (eller utan bild): standarden behåller dagens lila.</summary>

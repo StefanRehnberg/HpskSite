@@ -5,10 +5,12 @@
     var m = Model;
     var hasTagline = !string.IsNullOrWhiteSpace(m.Tagline) || !string.IsNullOrWhiteSpace(m.TaglineHtml);
     var fill = HpskSite.Services.SitePages.SiteAppearance.HeaderFill(m.Palette);
+    var isBand = m.Style == "farg-vanster" || m.Style == "farg-mitten" || m.Style == "farg-hoger";
+    var bandStyle = isBand ? "background: " + HpskSite.Services.SitePages.SiteAppearance.HeaderBand(m.Palette) + ";" : null;
 }
 
 <header class="site-head site-head--@m.Style" data-site-header="@m.Style">
-    @if (m.Style == "banner-utan-logo")
+    @if (m.Style == "banner-utan-logo" || m.Style == "banner-hoger")
     {
         if (!string.IsNullOrEmpty(m.BannerUrl))
         {
@@ -19,7 +21,7 @@
             <div class="site-head-banner site-head-banner--fill" style="background: @Html.Raw(fill);" aria-hidden="true"></div>
         }
     }
-    <div class="site-head-body">
+    <div class="site-head-body"@(bandStyle != null ? Html.Raw(" style=\"" + bandStyle + "\"") : null)>
         @if (!string.IsNullOrEmpty(m.LogoUrl))
         {
             <img src="@m.LogoUrl" alt="" class="site-head-logo">
@@ -53,9 +55,24 @@
 .site-head-tagline > :last-child { margin-bottom: 0; }
 .site-head--utan-banner-mitten .site-head-body { flex-direction: column; text-align: center; padding: 1.75rem 1.5rem; }
 .site-head--utan-banner-mitten .site-head-logo { width: 104px; height: 104px; }
+.site-head--farg-vanster .site-head-body, .site-head--farg-mitten .site-head-body, .site-head--farg-hoger .site-head-body { color: #fff; border-color: transparent; }
+.site-head--farg-vanster .site-head-name, .site-head--farg-mitten .site-head-name, .site-head--farg-hoger .site-head-name,
+.site-head--farg-vanster .site-head-tagline, .site-head--farg-mitten .site-head-tagline, .site-head--farg-hoger .site-head-tagline,
+.site-head--farg-vanster .site-head-tagline a, .site-head--farg-mitten .site-head-tagline a, .site-head--farg-hoger .site-head-tagline a { color: #fff; }
+.site-head--farg-vanster .site-head-logo--empty, .site-head--farg-mitten .site-head-logo--empty, .site-head--farg-hoger .site-head-logo--empty { color: var(--bs-body-color); border-color: transparent; }
+.site-head--farg-mitten .site-head-body { flex-direction: column; text-align: center; padding: 1.75rem 1.5rem; }
+.site-head--farg-mitten .site-head-logo { width: 104px; height: 104px; }
+.site-head--kompakt .site-head-body { padding: .5rem 1rem; gap: .75rem; }
+.site-head--kompakt .site-head-logo { width: 44px; height: 44px; padding: .15rem; }
+.site-head--kompakt .site-head-logo--empty { font-size: 1.5rem; }
+.site-head--kompakt .site-head-name { font-size: 1.25rem; }
+.site-head--kompakt .site-head-tagline { font-size: .9rem; margin-top: .1rem; }
+.site-head--accentkant .site-head-body, .site-head--accentkant-hoger .site-head-body { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-left: .5rem solid var(--bs-primary); }
+.site-head--logo-hoger .site-head-body, .site-head--farg-hoger .site-head-body, .site-head--banner-hoger .site-head-body, .site-head--accentkant-hoger .site-head-body { flex-direction: row-reverse; }
+.site-head--logo-hoger .site-head-text, .site-head--farg-hoger .site-head-text, .site-head--banner-hoger .site-head-text, .site-head--accentkant-hoger .site-head-text { flex: 1 1 auto; min-width: 0; }
 .site-head-banner { height: 220px; border-radius: .5rem .5rem 0 0; background-size: cover; background-position: center; }
 .site-head-banner--fill { height: 120px; }
-.site-head--banner-utan-logo .site-head-body { border-radius: 0 0 .5rem .5rem; border-top: 0; }
+.site-head--banner-utan-logo .site-head-body, .site-head--banner-hoger .site-head-body { border-radius: 0 0 .5rem .5rem; border-top: 0; }
 @@media (max-width: 575.98px) {
   .site-head-body { padding: 1rem; gap: .9rem; }
   .site-head-logo { width: 64px; height: 64px; }
