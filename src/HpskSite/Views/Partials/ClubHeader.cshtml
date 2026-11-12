@@ -1,3 +1,4 @@
+@inject HpskSite.Services.SitePages.SiteAppearanceService Appearance
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
     var clubName = ViewBag.clubName as string ?? "Club";
@@ -5,8 +6,16 @@
     var logo = ViewBag.logo as IPublishedContent;
     var bannerImage = ViewBag.bannerImage as IPublishedContent;
     var isClubAdmin = ViewBag.isClubAdmin as bool? ?? false;
+    var look = clubId > 0 ? Appearance.Get(HpskSite.Services.SitePages.SiteTemplates.Club, clubId) : HpskSite.Services.SitePages.SiteAppearance.Look.Default;
 }
 
+@if (look.Header != HpskSite.Services.SitePages.SiteAppearance.DefaultHeader)
+{
+    @await Html.PartialAsync("_SiteHeaderVariant", new HpskSite.Services.SitePages.SiteHeaderModel(
+        look.Header, look.Palette, clubName, description, null, logo?.Url(), bannerImage?.Url()))
+}
+else
+{
 <div class="club-header">
     @if (bannerImage != null)
     {
@@ -15,7 +24,7 @@
     }
     else
     {
-        <div class="club-banner bg-gradient" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 200px;">
+        <div class="club-banner bg-gradient" style="background: @Html.Raw(HpskSite.Services.SitePages.SiteAppearance.HeaderFill(look.Palette)); height: 200px;">
         </div>
     }
 
@@ -45,6 +54,7 @@
         </div>
     </div>
 </div>
+}
 
 
 <style>

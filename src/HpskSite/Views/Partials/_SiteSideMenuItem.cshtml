@@ -1,0 +1,29 @@
+@* En post i vänstermenyn (se _SiteSideMenu): en låst sida (hänglås), en flik (Hem och Admin) eller en länk. Delas av posterna på första nivån och av undersidorna. *@
+@model (HpskSite.Services.SitePages.SiteMenuEntry Item, string OwnerType)
+@{
+    var item = Model.Item;
+    var icon = HpskSite.Services.SitePages.SiteMenuIcons.For(Model.OwnerType, item.Page.Key);
+}
+@if (item.Locked)
+{
+    <a class="nav-link hpsk-locked @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)" title="Bara för inloggade medlemmar">
+        <i class="bi @icon me-2"></i>@item.Page.Label
+        <i class="bi bi-lock-fill hpsk-lock" role="img" aria-label="Låst, bara för medlemmar"></i>
+    </a>
+}
+else if (item.IsTabButton)
+{
+    <button class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" data-bs-toggle="tab" data-bs-target="#@(item.PaneId)" type="button" role="tab" aria-controls="@(item.PaneId)" aria-selected="@(item.Current ? "true" : "false")">
+        <i class="bi @icon me-2"></i>@item.Page.Label
+    </button>
+}
+else
+{
+    <a class="nav-link @(item.Current ? "active" : "")" id="@(item.PaneId)-tab" href="@item.Href" data-bs-target="#@(item.PaneId)" aria-current="@(item.Current ? "page" : null)">
+        <i class="bi @icon me-2"></i>@item.Page.Label
+        @if (item.Page.Key == "members")
+        {
+            <span id="prospectBadge" class="badge bg-warning text-dark ms-2" style="display: none;"></span>
+        }
+    </a>
+}

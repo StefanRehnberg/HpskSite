@@ -473,6 +473,11 @@
         if (tabBtn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tabBtn).show();
         start(trainingId, scheduleId);
     };
+    // Klubbsidorna: Admin → Träningar på en annan adress länkar hit med ?kopiera={träning}&schema={schema}.
+    (function () {
+        var q = new URLSearchParams(window.location.search), tid = parseInt(q.get('kopiera'), 10);
+        if (tid > 0) setTimeout(function () { window.hpskCalendarCopyMode(tid, parseInt(q.get('schema'), 10) || 0); }, 300);
+    })();
     document.getElementById('calCopyDone').addEventListener('click', stop);
     document.getElementById('calCopyUndo').addEventListener('click', undo);
 })();

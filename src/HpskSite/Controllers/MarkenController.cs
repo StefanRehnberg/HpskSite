@@ -1256,6 +1256,9 @@ namespace HpskSite.Controllers
         {
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
             if (await GetCurrentMemberAsync() == null) return Json(new { success = false, message = "Inte inloggad." });
+            if (!await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePanelReadGate>()
+                    .CanReadPanelAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "members", "guldserie"))
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Klubben visar inte Guldserien för dig." });
 
             // The liga is member-based (Stefan's call): it lists the club's members' guldserier wherever
             // they were shot. Competition series only exist here once materialised, so reconcile first —

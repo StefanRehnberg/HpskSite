@@ -1,0 +1,6 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@{
+    var ligaVD = new ViewDataDictionary(ViewData);
+    ligaVD["LeaderboardClubId"] = Model.OwnerId;
+}
+@await Html.PartialAsync("ClubGuldserieLeaderboard", null, ligaVD)

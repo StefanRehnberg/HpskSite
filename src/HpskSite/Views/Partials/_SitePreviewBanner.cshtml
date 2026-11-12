@@ -1,0 +1,44 @@
+@using HpskSite.Services.SitePages
+@*
+    Förhandsläget i Hemsidan: en banderoll högst upp och ett litet skript som gör att sidans egna anrop (kalender, banor, rekord …) och länkar innanför samma förening
+    bär biljetten med sig. Visas bara när SitePreviewMiddleware godkänt en biljett. Allt inuti kommer ur biljetten (signerad) och kodas.
+*@
+@{
+    var pv = SitePreviewContext.Current(Context);
+    var token = SitePreviewContext.Token(Context);
+    var who = pv == null ? null : SitePagePreview.Persona(pv.OwnerType, pv.Persona)?.Label;
+}
+@if (pv != null && token != null)
+{
+    <div id="hpskPreviewBar" role="status" style="position:fixed;top:0;left:0;right:0;z-index:2000;background:#fff3cd;color:#664d03;border-bottom:1px solid #ffecb5;padding:.5rem 1rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center">
+        <strong>Förhandsvisning</strong>
+        <span>Du ser sidan som: @(who ?? "besökare"). Det går bara att läsa, inget kan ändras här.</span>
+        <button type="button" class="btn btn-sm btn-outline-dark ms-auto" onclick="if (window.opener || history.length < 2) { window.close(); } setTimeout(function () { location.href = '@(pv.OwnerPath.TrimEnd('/'))/hemsidan/'; }, 150);">Avsluta förhandsvisningen</button>
+    </div>
+    <div style="height:3.25rem" aria-hidden="true"></div>
+    <script>
+    (function () {
+        var T = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token)), H = 'X-Hpsk-Forhandsvisa', Q = 'forhandsvisa';
+        var sameOrigin = function (u) { try { return new URL(u, location.href).origin === location.origin; } catch (e) { return false; } };
+        var of = window.fetch;
+        window.fetch = function (input, init) {
+            try {
+                var url = typeof input === 'string' ? input : (input && input.url);
+                if (sameOrigin(url)) { init = init || {}; var h = new Headers(init.headers || (input && input.headers) || {}); h.set(H, T); init.headers = h; }
+            } catch (e) { /* ingen biljett på det här anropet */ }
+            return of.call(this, input, init);
+        };
+        var xo = XMLHttpRequest.prototype.open, xs = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (m, u) { this.__hpskUrl = u; return xo.apply(this, arguments); };
+        XMLHttpRequest.prototype.send = function () { try { if (sameOrigin(this.__hpskUrl)) this.setRequestHeader(H, T); } catch (e) { /* ingen biljett */ } return xs.apply(this, arguments); };
+        document.addEventListener('click', function (e) {
+            var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+            if (!a || !sameOrigin(a.href)) return;
+            var u = new URL(a.href, location.href);
+            if (u.searchParams.has(Q)) return;
+            u.searchParams.set(Q, T);
+            a.href = u.href;
+        }, true);
+    })();
+    </script>
+}

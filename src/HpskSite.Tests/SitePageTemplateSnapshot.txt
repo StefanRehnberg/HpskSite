@@ -1,0 +1,55 @@
+Club v1 menyKräverInloggning=True
+  home / "Hem" #10
+    about-text Utloggad
+    login-prompt Utloggad
+    contact-card Alla
+    quicklink-docs Alla
+    whats-happening Inloggade
+    upcoming-events Inloggade
+    motions Inloggade
+    quicklinks Inloggade
+  about /om-klubben "Om Klubben" #20
+    about-text Inloggade
+  ranges /banor "Banor" #30
+    ranges Inloggade
+  calendar /kalender "Kalender" #40
+    calendar Inloggade
+  competitions /vara-tavlingar "Tävlingar" #50
+    competitions Inloggade
+  members /medlemmar "Medlemmar" #60
+    instructors Inloggade personuppgifter
+    guldserie Inloggade personuppgifter
+    member-directory Inloggade personuppgifter
+  records /rekord "Rekord" #70
+    records Inloggade
+  documents /dokument "Dokument" #80
+    document-archive Inloggade
+  admin / "Admin" #90 ADMIN
+    admin-panel Dold
+Region v1 menyKräverInloggning=False
+  home / "Hem" #10
+    welcome Alla
+    whats-happening Alla
+    stats-card Alla
+    upcoming-events Alla
+    contact-card Alla
+    quicklink-docs Alla
+    quicklinks Alla
+    quicklink-records Inloggade
+    motions Inloggade
+    champions Inloggade
+  about /om "Om" #20
+    about-region Alla
+    region-instructors Inloggade personuppgifter
+  competitions /vara-tavlingar "Tävlingar" #30
+    competitions Alla
+  calendar /kalender "Kalender" #40
+    calendar Alla
+  records /rekord "Rekord" #50
+    records Inloggade
+  documents /dokument "Dokument" #60
+    document-archive Inloggade
+  board /styrelsen "Styrelsen" #70
+    board Inloggade personuppgifter
+  admin / "Administration" #80 ADMIN
+    admin-panel Dold

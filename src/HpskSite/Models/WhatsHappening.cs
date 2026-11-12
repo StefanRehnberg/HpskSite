@@ -58,6 +58,14 @@ namespace HpskSite.Models
 
         public string Title { get; set; } = "";
         public string ClubName { get; set; } = "";
+
+        /// <summary>
+        /// Klubbhändelser: ägaren (<c>Club</c>/<c>Region</c>, med <see cref="ClubId"/> som ägarens id) och händelsens synlighet. Flödet är cachat och
+        /// inloggningsoberoende, så synligheten prövas när raden visas (vyn), aldrig när flödet byggs. Andra källor: tomt och Alla.
+        /// </summary>
+        public string EventOwnerType { get; set; } = "";
+        public HpskSite.Services.SitePages.SiteVisibility ReadVisibility { get; set; } = HpskSite.Services.SitePages.SiteVisibility.Alla;
+
         public string Venue { get; set; } = "";
         public string Url { get; set; } = "";
         public int ParticipantCount { get; set; }

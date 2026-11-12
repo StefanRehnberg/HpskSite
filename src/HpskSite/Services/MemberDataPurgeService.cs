@@ -185,6 +185,18 @@ namespace HpskSite.Services
             // (SetByMemberId är NULL-bar, CHECK tillåter NULL). ClearSql får inte nämna medlemskolumnen och inte vara tom.
             ("CompetitionRegistrationClassDecision", "SetByMemberId", "SetAt = SetAt"),
             ("ChampionshipDecisionLog",              "SetByMemberId", "SetAt = SetAt"),
+            // Klubbsidorna steg 1 (2026-11-07): vem som slog på den nya sidstrukturen för en klubb/krets är en aktör, inte ett
+            // ämne. Pekaren släpps (NULL-bar), raden och brytaren står kvar. ClearSql får inte vara tom eller nämna medlemskolumnen.
+            ("SiteOwner",                            "EnabledByMemberId", "UpdatedDate = UpdatedDate"),
+            // Klubbsidorna steg 2a (2026-11-08): den som sparade en sida, en version, en loggrad eller öppnade stödläget är en aktör.
+            // Pekaren släpps (alla är NULL-bara); sidan, versionen och loggraden står kvar (loggen bär bara hash, aldrig text).
+            ("SiteOwner",                            "TermsAcceptedByMemberId", "UpdatedDate = UpdatedDate"),   // den som accepterade villkoren; accepten själv (datum, version) står kvar
+            ("SitePage",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
+            ("SitePageVersion",                      "SavedByMemberId",   "SavedDate = SavedDate"),
+            ("SiteAudit",                            "ActorMemberId",     "CreatedDate = CreatedDate"),
+            ("SiteSupportGrant",                     "MemberId",          "CreatedDate = CreatedDate"),
+            ("SiteFile",                             "UploadedByMemberId", "UploadedDate = UploadedDate"),   // bilden står kvar, uppladdaren släpps
+            ("SiteFormEntry",                        "HandledByMemberId", "CreatedDate = CreatedDate"),      // anmälan står kvar (den hör till föreningen), bara vem som avgjorde släpps
         };
 
         /// <summary>

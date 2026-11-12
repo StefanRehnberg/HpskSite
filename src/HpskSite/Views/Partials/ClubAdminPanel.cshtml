@@ -2,6 +2,8 @@
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
     var clubName = ViewBag.clubName as string ?? "Club";
+    // Hemsidan (egna sidor) är en egen sida, som Styrelsearbete och Ekonomi; länken syns bara för den som får redigera (ClubNavigation räknar ut det).
+    var hemsidanUrl = (ViewBag.canEditSite as bool? ?? false) && ViewBag.sitePageView is HpskSite.Services.SitePages.SitePageView hsp ? hsp.OwnerUrl + "hemsidan/" : null;
     // Kretskalendern i planeringsläge (kretsgranskning fas 4) — klubben ansöker härifrån och ser
     // krockar. Bara när klubbens krets går att avgöra.
     var clubRegionId = 0;
@@ -79,6 +81,7 @@
 
         <!-- Small screens (< lg): full-width grouped section picker -->
         <div class="col-12 d-lg-none">
+            <a href="#" class="hpsk-admin-back d-block mb-2" data-hpsk-back-to-pages>← Tillbaka till klubbens sidor</a>
             <label for="adminTabMobileSelect" class="form-label small text-muted mb-1">Välj sektion</label>
             <select class="form-select" id="adminTabMobileSelect" aria-label="Välj adminsektion">
                 <optgroup label="Kalender &amp; tävlingar">
@@ -107,6 +110,7 @@
                 <optgroup label="Klubben">
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=0&id=@clubId">Ekonomi ↗</option>
+                    @if (hemsidanUrl != null) { <option value="@hemsidanUrl">Hemsidan ↗</option> }
                     <option value="#clubFirearmsTab">Klubbvapen</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
@@ -118,6 +122,7 @@
         <!-- Large screens (≥ lg): grouped vertical rail -->
         <div class="col-lg-auto d-none d-lg-block">
             <nav class="nav nav-pills flex-column admin-rail" id="adminTabs" role="tablist" aria-orientation="vertical">
+                <a href="#" class="hpsk-admin-back" data-hpsk-back-to-pages>← Tillbaka till klubbens sidor</a>
                 <div class="admin-rail-group">Kalender &amp; tävlingar</div>
                 <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button" role="tab" aria-controls="eventsTab" aria-selected="true">
                     <i class="bi bi-calendar-event me-2"></i>Händelser
@@ -221,6 +226,13 @@
                     <i class="bi bi-cash-coin me-2"></i>Ekonomi
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kassörens arbetsyta"></i>
                 </a>
+                @if (hemsidanUrl != null)
+                {
+                    <a class="nav-link d-flex align-items-center" href="@hemsidanUrl" target="_blank" rel="noopener">
+                        <i class="bi bi-pencil-square me-2"></i>Hemsidan
+                        <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar redigeringen av klubbens egna sidor"></i>
+                    </a>
+                }
                 @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24, Stefan: "Allt under Admin / Fakturor för
                    klubbar och Kretsar ska in under Ekonomin"). Den bor nu i Ekonomi → Fakturor, med
                    den gamla modellens lista orörd under "Fakturor enligt det gamla sättet".

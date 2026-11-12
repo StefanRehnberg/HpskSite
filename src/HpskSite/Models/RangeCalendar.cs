@@ -161,6 +161,7 @@ namespace HpskSite.Models
         {
             var today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             return items.Where(i => (i.Kind == RangeCalendarKind.Training || i.Kind == RangeCalendarKind.Event)
+                                    && i.SourceId > 0   // en händelse tittaren inte får se (SourceId 0) går inte att checka in på
                                     && !i.IsCancelled && i.Date == today
                                     && Training.TrainingCourseRules.CheckInCounts(now, now.Date, i.Start, i.End))
                         .ToList();

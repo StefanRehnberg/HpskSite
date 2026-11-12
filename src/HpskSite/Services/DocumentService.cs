@@ -199,7 +199,14 @@ namespace HpskSite.Services
 
         // ===== STORAGE QUOTA =====
 
-        public long GetStorageUsage(int ownerType, int ownerId)
+        /// <summary>
+        /// Förbrukat utrymme: dokumenten OCH bilderna på klubbens/kretsens egna sidor (<c>SiteFile</c>) räknas ihop mot EN gräns
+        /// (<see cref="GetStorageLimit"/>: appsettings <c>DocumentArchive:Default…StorageLimitMB</c>, eller föreningens egen gräns).
+        /// </summary>
+        public long GetStorageUsage(int ownerType, int ownerId) => GetDocumentBytes(ownerType, ownerId) + GetImageBytes(ownerType, ownerId);
+
+        /// <summary>Bara dokumentarkivets filer.</summary>
+        public long GetDocumentBytes(int ownerType, int ownerId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -207,6 +214,19 @@ namespace HpskSite.Services
                 "SELECT ISNULL(SUM(FileSize), 0) FROM Documents WHERE OwnerType = @0 AND OwnerId = @1",
                 ownerType, ownerId);
         }
+
+        /// <summary>Bara bilderna på föreningens egna sidor (inte raderade). Saknas tabellen (migreringen inte körd) är det 0 i stället för ett fel.</summary>
+        public long GetImageBytes(int ownerType, int ownerId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<long>(
+                @"IF OBJECT_ID(N'dbo.SiteFile', N'U') IS NULL SELECT CAST(0 AS bigint)
+                  ELSE SELECT ISNULL(SUM(CAST(Size AS bigint)), 0) FROM dbo.SiteFile WHERE OwnerType = @0 AND OwnerId = @1 AND DeletedDate IS NULL",
+                ownerType == DocumentOwnerType.Region ? "Region" : "Club", ownerId);
+        }
+
+        /// <summary>Gränsen i byte för föreningen (en gemensam budget för dokument och bilder).</summary>
+        public long GetStorageLimitBytes(int ownerType, int ownerId) => (long)GetStorageLimit(ownerType, ownerId) * 1024 * 1024;
 
         public int GetStorageLimit(int ownerType, int ownerId)
         {

@@ -8,7 +8,15 @@
 @inject HpskSite.Services.CompetitionMenuService CompetitionMenu
 @inject HpskSite.Services.BoardRoleService BoardRoleService
 @inject HpskSite.Services.Training.TrainingCourseService TrainingCourseService
+@inject HpskSite.Services.SitePages.SiteAppearanceService SiteAppearanceSvc
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    // Klubbens/kretsens grundfärg (Utseende i Hemsidan): bara sidor som själva sagt vems de är (ViewBag.siteOwnerType/-Id).
+    var ownerLook = (ViewBag.siteOwnerType is string sot && ViewBag.siteOwnerId is int soi && soi > 0)
+        ? SiteAppearanceSvc.Get(sot, soi) : HpskSite.Services.SitePages.SiteAppearance.Look.Default;
+    var ownerPaletteCss = HpskSite.Services.SitePages.SiteAppearance.Css(ownerLook.Palette);
+    var bodyClass = ownerPaletteCss.Length > 0 ? HpskSite.Services.SitePages.SiteAppearance.BodyClass : "";
+}
 @{
     Layout = null;
 
@@ -423,8 +431,13 @@
             }
         }
     </style>
+    @if (ownerPaletteCss.Length > 0)
+    {
+        <style id="owner-palette">@Html.Raw(ownerPaletteCss)</style>
+    }
 </head>
-<body>
+<body class="@bodyClass">
+    @await Html.PartialAsync("_SitePreviewBanner")
     <header>
         <!-- Combined Compact Navigation Header -->
         <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">

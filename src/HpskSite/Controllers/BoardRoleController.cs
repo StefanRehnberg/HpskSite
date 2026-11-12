@@ -54,11 +54,27 @@ namespace HpskSite.Controllers
             if (currentMember == null)
                 return Json(new { success = false, message = "Inte inloggad" });
 
+            // Blockets egen nivå gäller också dess data. Kretsens Styrelse-panel följer sin inställning (standard Inloggade, som förut);
+            // en klubbs styrelse har ingen panel och läses av klubbens medlemmar. Ägarens styrelse och admin läser alltid sin egen.
+            if (!await CanReadBoardAsync(ownerType, ownerId))
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Styrelsen visas inte för dig." });
+
             var roles = _boardRoleService.GetBoardMembers(ownerType, ownerId, boardOnly);
 
             var data = roles.Select(ToDto);
 
             return Json(new { success = true, data });
+        }
+
+        private async Task<bool> CanReadBoardAsync(int ownerType, int ownerId)
+        {
+            var gate = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePanelReadGate>();
+            return ownerType switch
+            {
+                HpskSite.Models.DocumentOwnerType.Region => await gate.CanReadPanelAsync(HpskSite.Services.SitePages.SiteTemplates.Region, ownerId, "board", "board", orOwnerBoard: true),
+                HpskSite.Models.DocumentOwnerType.Club => await gate.CanReadAtLevelAsync(HpskSite.Services.SitePages.SiteTemplates.Club, ownerId, HpskSite.Services.SitePages.SiteVisibility.Klubbmedlemmar, orOwnerBoard: true),
+                _ => false,
+            };
         }
 
         /// <summary>
@@ -71,6 +87,13 @@ namespace HpskSite.Controllers
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null)
                 return Json(new { success = false, message = "Inte inloggad" });
+
+            // Mandat som löper ut är styrelsens/valberedningens underlag: bara ägarens styrelse och admin.
+            var owner = ownerType == HpskSite.Models.DocumentOwnerType.Region ? HpskSite.Services.SitePages.SiteTemplates.Region : HpskSite.Services.SitePages.SiteTemplates.Club;
+            if (ownerType != HpskSite.Models.DocumentOwnerType.Region && ownerType != HpskSite.Models.DocumentOwnerType.Club
+                || !await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePanelReadGate>()
+                    .CanReadAtLevelAsync(owner, ownerId, HpskSite.Services.SitePages.SiteVisibility.Styrelse))
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Mandaten visas bara för styrelsen." });
 
             var before = DateTime.Today.AddDays(withinDays);
             var roles = _boardRoleService.GetExpiringRoles(ownerType, ownerId, before);

@@ -1,0 +1,224 @@
+@*
+    Klubbsidorna steg 1: slå på eller av den nya sidstrukturen per klubb och krets. Bara sajtadministratör.
+    AV = dagens vy. Ändringen syns direkt för alla besökare (cachen töms), så varje knapp kräver ett andra tryck.
+*@
+<div id="sgpPanel" class="mt-5">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-layout-text-window me-2"></i>Klubbsidor</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        Den nya sidstrukturen ger klubbens och kretsens flikar riktiga adresser (till exempel <code>/halland/klubben/banor/</code>).
+        Innehållet och vem som ser vad är detsamma som förut. Av betyder dagens vy. Ny klubb är av tills du slår på den.
+    </p>
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-2">
+        <input type="search" id="sgpQ" class="form-control form-control-sm" style="max-width:16rem" placeholder="Sök klubb eller krets" aria-label="Sök klubb eller krets" />
+        <select id="sgpType" class="form-select form-select-sm" style="max-width:9rem" aria-label="Typ">
+            <option value="">Alla</option>
+            <option value="Club">Klubbar</option>
+            <option value="Region">Kretsar</option>
+        </select>
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="sgpOn" />
+            <label class="form-check-label" for="sgpOn">Bara påslagna</label>
+        </div>
+        <span id="sgpCount" class="ms-auto small text-body-secondary"></span>
+    </div>
+    <div id="sgpOut" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__sgpInit) return; window.__sgpInit = true;
+    var BASE = '/umbraco/surface/SitePagesAdmin';
+    var root = document.getElementById('sgpPanel');
+    var out = document.getElementById('sgpOut');
+    var count = document.getElementById('sgpCount');
+    var timer = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
+
+    // Egen redigering (brytare 2): bara när brytare 1 är på. Klubb kräver godkänd DPA (servern prövar), krets har ingen avtalsgrind.
+    function editingCell(o) {
+        if (!o.enabled) return '<span class="text-body-secondary">–</span>';
+        var state = o.editing ? '<span class="badge text-bg-success">På</span>' : '<span class="badge text-bg-secondary">Av</span>';
+        var info = o.type === 'Club' ? (o.dpaAccepted ? '' : ' <span class="text-warning small" title="Klubben har inte godkänt DPA">DPA saknas</span>') : '';
+        var terms = o.editing ? ' <span class="small text-body-secondary">' + (o.termsAccepted ? 'villkor godkända' : 'villkor ej godkända') + '</span>' : '';
+        var label = o.editing ? 'Slå av redigering' : 'Slå på redigering';
+        var main = state + info + terms + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-edit-type="' + esc(o.type) + '" data-sgp-edit-id="' + esc(o.id)
+            + '" data-sgp-edit="' + (o.editing ? '0' : '1') + '">' + label + '</button>';
+        // Brytare 3: får ägarens admin göra om en systemsida till en blocksida? Bara när egen redigering är på.
+        if (!o.editing) return main;
+        var conv = o.convert ? '<span class="badge text-bg-success">Tillåten</span>' : '<span class="badge text-bg-secondary">Inte tillåten</span>';
+        return main + '<div class="mt-1 small">Göra om sidor: ' + conv + ' <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-sgp-conv-type="' + esc(o.type)
+            + '" data-sgp-conv-id="' + esc(o.id) + '" data-sgp-conv="' + (o.convert ? '0' : '1') + '">' + (o.convert ? 'Tillåt inte' : 'Tillåt') + '</button></div>';
+    }
+
+    function render(d) {
+        var c = d.counts;
+        count.textContent = 'Klubbar på: ' + c.clubsOn + ' av ' + c.clubs + ' · Kretsar på: ' + c.regionsOn + ' av ' + c.regions
+            + ' · Egen redigering på: ' + c.editingOwners + ', har publicerat en egen sida: ' + c.publishingOwners
+            + (c.editingOwners > 0 ? ' (' + Math.round(100 * c.publishingOwners / c.editingOwners) + ' %, målet är 50 %)' : '')
+            + ' · visar ' + d.shown + ' av ' + d.total + ' · mallversion klubb ' + d.clubTemplateVersion + ', krets ' + d.regionTemplateVersion;
+        if (!d.owners.length) { out.innerHTML = '<div class="text-body-secondary py-2">Inga träffar.</div>'; return; }
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th>Typ</th><th>Krets</th><th>Läge</th><th>Egen redigering</th><th class="text-end">Åtgärd</th></tr></thead><tbody>';
+        d.owners.forEach(function (o) {
+            html += '<tr><td>' + esc(o.name) + '</td><td>' + (o.type === 'Club' ? 'Klubb' : 'Krets') + '</td><td>' + esc(o.region || '') + '</td>'
+                + '<td>' + (o.enabled ? '<span class="badge text-bg-success">På</span> <span class="text-body-secondary">mall ' + esc(o.templateVersion) + '</span>' : '<span class="badge text-bg-secondary">Av</span>') + '</td>'
+                + '<td>' + editingCell(o) + '</td>'
+                + '<td class="text-end"><button type="button" class="btn btn-outline-secondary btn-sm me-1" data-sgp-pages-type="' + esc(o.type) + '" data-sgp-pages-id="' + esc(o.id) + '">Sidor</button><button type="button" class="btn btn-outline-secondary btn-sm" data-sgp-type="' + esc(o.type) + '" data-sgp-id="' + esc(o.id)
+                + '" data-sgp-enable="' + (o.enabled ? '0' : '1') + '">' + (o.enabled ? 'Slå av' : 'Slå på') + '</button></td></tr>';
+        });
+        out.innerHTML = html + '</tbody></table></div>';
+    }
+
+    async function load(note) {
+        out.textContent = 'Läser…';
+        var p = new URLSearchParams({ q: document.getElementById('sgpQ').value, type: document.getElementById('sgpType').value, onlyOn: document.getElementById('sgpOn').checked ? 'true' : 'false', take: '100' });
+        try {
+            var r = await fetch(BASE + '/Overview?' + p.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            render(d);
+            if (note) out.insertAdjacentHTML('afterbegin', '<div class="mb-2">' + note + '</div>');
+        } catch (e) { out.innerHTML = '<span class="text-danger">Läget gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+
+    async function set(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpType);
+            fd.append('ownerId', btn.dataset.sgpId);
+            fd.append('enabled', btn.dataset.sgpEnable === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/Set', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
+    async function setEditing(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpEditType);
+            fd.append('ownerId', btn.dataset.sgpEditId);
+            fd.append('enabled', btn.dataset.sgpEdit === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/SetEditing', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
+    async function setConversion(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpConvType);
+            fd.append('ownerId', btn.dataset.sgpConvId);
+            fd.append('enabled', btn.dataset.sgpConv === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/SetConversion', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); btn.disabled = false; return; }
+            await load('<span class="text-success">Sparat.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+            btn.disabled = false;
+        }
+    }
+
+    // Nödbromsen per sida: Sidor-knappen fäller ut ägarens sidor under raden, med Stoppa / Häv stopp (två tryck, aldrig confirm()).
+    async function showPages(btn) {
+        var tr = btn.closest('tr');
+        var next = tr.nextElementSibling;
+        if (next && next.dataset.sgpPagesRow === '1') { next.remove(); return; }
+        var row = document.createElement('tr'); row.dataset.sgpPagesRow = '1';
+        row.innerHTML = '<td colspan="6" class="bg-body-tertiary small">Läser sidorna…</td>'; tr.after(row);
+        var type = btn.dataset.sgpPagesType, id = btn.dataset.sgpPagesId;
+        try {
+            var r = await fetch(BASE + '/OwnerPages?ownerType=' + encodeURIComponent(type) + '&ownerId=' + encodeURIComponent(id), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { row.firstChild.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            if (!d.pages.length) { row.firstChild.textContent = 'Ägaren har inga egna sidor.'; return; }
+            row.firstChild.innerHTML = '<table class="table table-sm mb-0"><tbody>' + d.pages.map(function (p) {
+                return '<tr><td>' + esc(p.title) + '</td><td>' + esc(p.status) + '</td><td class="text-end"><button type="button" class="btn btn-sm '
+                    + (p.suspended ? 'btn-outline-success' : 'btn-outline-danger') + '" data-sgp-susp-type="' + esc(type) + '" data-sgp-susp-owner="' + esc(id)
+                    + '" data-sgp-susp-page="' + esc(p.id) + '" data-sgp-susp="' + (p.suspended ? '0' : '1') + '">' + (p.suspended ? 'Häv stopp' : 'Stoppa sidan') + '</button></td></tr>';
+            }).join('') + '</tbody></table>';
+        } catch (e) { row.firstChild.innerHTML = '<span class="text-danger">Sidorna gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+    async function suspendPage(btn) {
+        btn.disabled = true;
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            fd.append('ownerType', btn.dataset.sgpSuspType); fd.append('ownerId', btn.dataset.sgpSuspOwner); fd.append('pageId', btn.dataset.sgpSuspPage);
+            fd.append('suspend', btn.dataset.sgpSusp === '1' ? 'true' : 'false');
+            var r = await fetch(BASE + '/SuspendPage', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { btn.insertAdjacentHTML('afterend', ' <span class="text-danger">' + esc(d.message) + '</span>'); btn.disabled = false; return; }
+            var tr = btn.closest('table').closest('tr').previousElementSibling;
+            await showPages(tr.querySelector('[data-sgp-pages-id]')); // stänger
+            await showPages(tr.querySelector('[data-sgp-pages-id]')); // öppnar med nytt läge
+        } catch (e) { btn.insertAdjacentHTML('afterend', ' <span class="text-danger">Gick inte: ' + esc(e.message) + '</span>'); btn.disabled = false; }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    out.addEventListener('click', function (e) {
+        var pb = e.target.closest('button[data-sgp-pages-id]');
+        if (pb) { showPages(pb); return; }
+        var sb = e.target.closest('button[data-sgp-susp-page]');
+        if (sb) {
+            if (sb.dataset.armed === '1') { sb.dataset.armed = ''; suspendPage(sb); return; }
+            sb.dataset.label = sb.textContent; sb.dataset.armed = '1'; sb.textContent = 'Tryck igen';
+            setTimeout(function () { if (sb.dataset.armed === '1') { sb.dataset.armed = ''; sb.textContent = sb.dataset.label; } }, 6000);
+            return;
+        }
+        var cb = e.target.closest('button[data-sgp-conv-id]');
+        if (cb) {
+            if (cb.dataset.armed === '1') { cb.dataset.armed = ''; setConversion(cb); return; }
+            cb.dataset.label = cb.textContent; cb.dataset.armed = '1'; cb.textContent = 'Tryck igen';
+            setTimeout(function () { if (cb.dataset.armed === '1') { cb.dataset.armed = ''; cb.textContent = cb.dataset.label; } }, 6000);
+            return;
+        }
+        var eb = e.target.closest('button[data-sgp-edit-id]');
+        if (eb) {
+            if (eb.dataset.armed === '1') { eb.dataset.armed = ''; setEditing(eb); return; }
+            eb.dataset.label = eb.textContent; eb.dataset.armed = '1'; eb.textContent = 'Tryck igen';
+            setTimeout(function () { if (eb.dataset.armed === '1') { eb.dataset.armed = ''; eb.textContent = eb.dataset.label; } }, 6000);
+            return;
+        }
+        var btn = e.target.closest('button[data-sgp-id]');
+        if (!btn) return;
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; set(btn); return; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = 'Tryck igen';
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+    });
+    document.getElementById('sgpQ').addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(); }, 300); });
+    document.getElementById('sgpType').addEventListener('change', function () { load(); });
+    document.getElementById('sgpOn').addEventListener('change', function () { load(); });
+
+    // Laddas när Underhåll-fliken öppnas första gången (undviker en fråga för varje sidvisning av /admin-page).
+    var tab = document.querySelector('[data-bs-target="#underhall"]');
+    var loaded = false;
+    function first() { if (!loaded) { loaded = true; load(); } }
+    if (tab) tab.addEventListener('shown.bs.tab', first);
+    if (document.getElementById('underhall') && document.getElementById('underhall').classList.contains('active')) first();
+})();
+</script>

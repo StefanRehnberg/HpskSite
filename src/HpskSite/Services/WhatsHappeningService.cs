@@ -167,7 +167,7 @@ namespace HpskSite.Services
                 {
                     clubEvents = serviceScope.ServiceProvider
                         .GetRequiredService<HpskSite.Services.Events.IClubEventStore>()
-                        .ListPublishedBetween(today, horizon.AddDays(1));
+                        .ListPublishedBetween(today, horizon.AddDays(1), HpskSite.Services.Events.EventViewer.System);   // cachat och delat: synligheten prövas per rad i vyn
                 }
                 foreach (var ev in clubEvents)
                 {
@@ -195,6 +195,8 @@ namespace HpskSite.Services
                         Masked = true,
                         ClubId = clubId,
                         SourceLabel = "Klubbhändelse",
+                        EventOwnerType = ev.OwnerType,
+                        ReadVisibility = ev.ReadVisibility,
                         TypeLabel = eventType,
                         MaskedTypeLabel = NeutralEventLabel(eventType),
                         Title = ev.DisplayName,

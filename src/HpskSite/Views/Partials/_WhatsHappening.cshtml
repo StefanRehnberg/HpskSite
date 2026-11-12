@@ -5,6 +5,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
 @inject HpskSite.Services.MemberClubService MemberClubService
+@inject HpskSite.Services.Events.EventViewerFactory EventViewers
 @model HpskSite.Models.WhatsHappeningScope
 @{
     var sv = new CultureInfo("sv-SE");
@@ -40,7 +41,10 @@
         items = items.Where(i => i.ClubId == lockedClubId);
     else if (isLocked)
         items = items.Where(i => string.Equals(i.RegionCode, lockedCode, StringComparison.OrdinalIgnoreCase));
-    var itemList = items.ToList();
+    // Händelsens egen synlighet (ReadVisibility) prövas HÄR, per besökare: flödet är cachat och delas. En rad besökaren inte får se tas bort helt.
+    var eventViewer = await EventViewers.CurrentAsync();
+    var itemList = items.Where(i => i.Source != FeedSource.ClubEvent
+        || HpskSite.Services.SitePages.SiteAccess.CanSee(i.ReadVisibility, eventViewer.For(i.EventOwnerType, i.ClubId))).ToList();
 
     var ongoing = itemList.Where(i => i.IsOngoing).OrderBy(i => i.Start).ToList();
     var upcoming = itemList.Where(i => !i.IsOngoing).OrderBy(i => i.Start).ToList();

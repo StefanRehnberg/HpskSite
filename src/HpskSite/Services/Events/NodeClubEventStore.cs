@@ -21,7 +21,7 @@ namespace HpskSite.Services.Events
     /// så ett fält som anroparen inte rör har sitt lagrade värde. Fält posten inte känner (äldre
     /// <c>feeAmount</c>, <c>clubId</c>) rörs aldrig.</para>
     /// </summary>
-    public class NodeClubEventStore : IClubEventStore
+    public class NodeClubEventStore : IClubEventBackend
     {
         private readonly IContentService _contentService;
         private readonly IContentTypeService _contentTypeService;
@@ -55,7 +55,8 @@ namespace HpskSite.Services.Events
                 aliases.Contains(ClubEvents.DeadlineProperty),
                 aliases.Contains(EventPrices.Property),
                 aliases.Contains(ClubEvents.SwishProperty),
-                aliases.Contains(EventAudience.Property));
+                aliases.Contains(EventAudience.Property),
+                ReadVisibility: false);   // nodlagringen har ingen plats för synligheten: en händelse som kräver den får ligga i tabellen
         }
 
         // ── Läsning ────────────────────────────────────────────────────────────────────────

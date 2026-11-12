@@ -21,7 +21,7 @@ namespace HpskSite.Services.Events
     /// <para><b>Inget Umbraco-lås.</b> Att skapa en händelse är en tabellrad, inte en nodsparning som
     /// köar i det globala innehållslåset.</para>
     /// </summary>
-    public class SqlClubEventStore : IClubEventStore
+    public class SqlClubEventStore : IClubEventBackend
     {
         private readonly IScopeProvider _scopeProvider;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
@@ -46,7 +46,7 @@ namespace HpskSite.Services.Events
 e.EventType, e.Venue, e.Description, e.ImageRef, e.ContactPerson, e.ContactEmail, e.ContactPhone, e.EquipmentRequired,
 e.TargetAudience, e.IsActive, e.IsPublished, e.RegistrationRequired, e.RegistrationUrl, e.MaxParticipants,
 e.RegistrationDeadline, e.IsMandatory, e.LanevapenOffered, e.PricesJson, e.Audience, e.SwishNumber, e.LandingPageId,
-e.CreatedDate, e.UpdatedDate, lp.ContentBlocksJson, lp.QuickLinksJson";
+e.CreatedDate, e.UpdatedDate, e.ReadVisibility, lp.ContentBlocksJson, lp.QuickLinksJson";
 
         // ── Läsning ────────────────────────────────────────────────────────────────────────
 
@@ -150,15 +150,15 @@ INSERT INTO dbo.ClubEvent
     (OwnerType, OwnerId, Name, PageName, Slug, UrlYear, StartsAt, EndsAt, EventType, Venue, Description, ImageRef,
      ContactPerson, ContactEmail, ContactPhone, EquipmentRequired, TargetAudience, IsActive, IsPublished,
      RegistrationRequired, RegistrationUrl, MaxParticipants, RegistrationDeadline, IsMandatory, LanevapenOffered,
-     PricesJson, Audience, SwishNumber, LandingPageId, CreatedDate, UpdatedDate)
-VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@20,@21,@22,@23,@24,@25,@26,@27,@28,@29,@29);
+     PricesJson, Audience, SwishNumber, LandingPageId, CreatedDate, UpdatedDate, ReadVisibility)
+VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@20,@21,@22,@23,@24,@25,@26,@27,@28,@29,@29,@30);
 SELECT CAST(SCOPE_IDENTITY() AS INT);",
                     r.OwnerType, r.OwnerId, r.Name ?? "", PageNameOf(r), slug, year, r.StartsAt, r.EndsAt, r.EventType ?? "",
                     Blank(r.Venue), Blank(r.Description), Blank(r.ImageRef), Blank(r.ContactPerson), Blank(r.ContactEmail),
                     Blank(r.ContactPhone), Blank(r.EquipmentRequired), Blank(r.TargetAudience), r.IsActive, r.IsPublished,
                     r.RegistrationRequired, Blank(r.RegistrationUrl), Math.Max(0, r.MaxParticipants), r.RegistrationDeadline?.Date,
                     r.IsMandatory, r.LanevapenOffered, Blank(r.PricesJson), EventAudience.Normalise(r.Audience),
-                    Blank(r.SwishNumber?.Trim()), landingPageId, r.CreatedDate == default ? now : r.CreatedDate);
+                    Blank(r.SwishNumber?.Trim()), landingPageId, r.CreatedDate == default ? now : r.CreatedDate, ReadVisibilityValue(r));
                 db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, @2, @3, 'event', @4, 1)",
                     r.OwnerType, r.OwnerId, year, slug, id);
                 addressChanged = true;
@@ -184,19 +184,27 @@ UPDATE dbo.ClubEvent SET
     Description = @9, ImageRef = @10, ContactPerson = @11, ContactEmail = @12, ContactPhone = @13,
     EquipmentRequired = @14, TargetAudience = @15, IsActive = @16, IsPublished = @17, RegistrationRequired = @18,
     RegistrationUrl = @19, MaxParticipants = @20, RegistrationDeadline = @21, IsMandatory = @22, LanevapenOffered = @23,
-    PricesJson = @24, Audience = @25, SwishNumber = @26, LandingPageId = @27, UpdatedDate = @28
+    PricesJson = @24, Audience = @25, SwishNumber = @26, LandingPageId = @27, UpdatedDate = @28, ReadVisibility = @29
 WHERE Id = @0",
                     id, r.Name ?? "", PageNameOf(r), slug, urlYear, r.StartsAt, r.EndsAt, r.EventType ?? "", Blank(r.Venue),
                     Blank(r.Description), Blank(r.ImageRef), Blank(r.ContactPerson), Blank(r.ContactEmail), Blank(r.ContactPhone),
                     Blank(r.EquipmentRequired), Blank(r.TargetAudience), r.IsActive, r.IsPublished, r.RegistrationRequired,
                     Blank(r.RegistrationUrl), Math.Max(0, r.MaxParticipants), r.RegistrationDeadline?.Date, r.IsMandatory,
                     r.LanevapenOffered, Blank(r.PricesJson), EventAudience.Normalise(r.Audience), Blank(r.SwishNumber?.Trim()),
-                    landingPageId, now);
+                    landingPageId, now, ReadVisibilityValue(r));
             }
 
             scope.Complete();
             r.Id = id;
             return (id, null);
+        }
+
+        /// <summary>Det som skrivs i kolumnen: bara 0–4 (Utloggad är ett systemvärde och kan aldrig bli en händelses synlighet).</summary>
+        private static byte ReadVisibilityValue(ClubEventRecord r)
+        {
+            var v = (int)r.ReadVisibility;
+            if (v < 0 || v > (int)HpskSite.Services.SitePages.SiteVisibility.Dold) throw new ArgumentOutOfRangeException(nameof(r), v, "Ogiltig synlighet för en händelse.");
+            return (byte)v;
         }
 
         public bool Delete(int id)
@@ -325,6 +333,8 @@ UNION SELECT Slug FROM dbo.ClubEvent WHERE OwnerType = @0 AND OwnerId = @1 AND U
                     LanevapenOffered = x.LanevapenOffered,
                     PricesJson = x.PricesJson ?? "",
                     Audience = EventAudience.Normalise(x.Audience),
+                    // Ett värde utanför 0–4 (databasens CHECK hindrar det) läses som Dold: aldrig synligare än oklart.
+                    ReadVisibility = x.ReadVisibility <= (byte)HpskSite.Services.SitePages.SiteVisibility.Dold ? (HpskSite.Services.SitePages.SiteVisibility)x.ReadVisibility : HpskSite.Services.SitePages.SiteVisibility.Dold,
                     SwishNumber = x.SwishNumber ?? "",
                     ContentBlocksJson = x.ContentBlocksJson ?? "",
                     QuickLinksJson = x.QuickLinksJson ?? "",
@@ -373,6 +383,7 @@ UNION SELECT Slug FROM dbo.ClubEvent WHERE OwnerType = @0 AND OwnerId = @1 AND U
             public bool LanevapenOffered { get; set; }
             public string? PricesJson { get; set; }
             public string? Audience { get; set; }
+            public byte ReadVisibility { get; set; }
             public string? SwishNumber { get; set; }
             public int? LandingPageId { get; set; }
             public DateTime CreatedDate { get; set; }

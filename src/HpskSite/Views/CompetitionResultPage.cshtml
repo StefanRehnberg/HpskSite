@@ -453,8 +453,8 @@
     const allowTeams = @(allowTeams.ToString().ToLower());
 
     // Current user info for highlighting
-    const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
-    const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+    const currentUserName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(currentMemberName));
+    const currentUserClub = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(currentMemberClub));
 
     // Admin-only delete capability for individual shooter results
     const canDeleteResults = @(canDeleteResults.ToString().ToLower());

@@ -135,7 +135,7 @@ namespace HpskSite.Controllers
                 else
                 {
                     // Händelsens adress ur händelselagringen (sajtstrukturen fas 2a).
-                    model.EventUrl = _events.Get(e)?.Url ?? "";
+                    model.EventUrl = _events.Get(e, HpskSite.Services.Events.EventViewer.System)?.Url ?? "";
                 }
             }
             catch (Exception)

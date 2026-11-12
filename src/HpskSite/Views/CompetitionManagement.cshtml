@@ -531,7 +531,9 @@
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="funktionarer-tab" data-bs-toggle="tab" data-bs-target="#funktionarer" type="button" role="tab">
-                    <i class="bi bi-person-badge me-1"></i>Funktionärer
+                    @* Heter inte "Funktionärer": det ordet är bemanningens (planeringen, före tävlingen).
+                       Den här fliken är tävlingsdagens cockpit — skjutlag/skjutledare och markörerna. *@
+                    <i class="bi bi-person-badge me-1"></i>@(string.Equals(compTypeForTabs, "Springskytte", StringComparison.OrdinalIgnoreCase) ? "Skjutledare & markörer" : "Skjutlag & markörer")
                 </button>
             </li>
         }

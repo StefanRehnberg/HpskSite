@@ -1,0 +1,46 @@
+@* Klubbens Om-text: LIVE ur klubbnodens egenskaper (aboutClub, annars description) — ingen kopia (konvertera-planen v2, beslut 2). *@
+@model HpskSite.Services.SitePages.SitePanelContext
+@using Umbraco.Extensions
+@{
+    var description = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Node.Value<string>("description"));
+    var aboutClub = HpskSite.Extensions.RteHelper.SafeMarkup(Model.Node.Value<string>("aboutClub"));
+    var welcomeMessage = !string.IsNullOrEmpty(aboutClub) ? aboutClub : description;
+}
+@if (!Model.LoggedIn)
+{
+    @if (!string.IsNullOrEmpty(welcomeMessage))
+    {
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-info-circle me-2"></i>Om Klubben
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="prose">
+                    @Html.Raw(welcomeMessage)
+                </div>
+            </div>
+        </div>
+    }
+}
+else
+{
+    @if (!string.IsNullOrEmpty(welcomeMessage))
+    {
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om klubben</h5>
+            </div>
+            <div class="card-body">
+                <div class="prose">
+                    @Html.Raw(welcomeMessage)
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">Ingen information om klubben har lagts till ännu.</div>
+    }
+}

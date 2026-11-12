@@ -11,7 +11,12 @@ namespace HpskSite.Services.Addresses
         public const string Event = "event";
         public const string Competition = "competition"; // competitionstore-ok: adressens sort, inte en doktyp
         public const string Series = "series";
+        /// <summary>Klubbens/kretsens egna sidor (klubbsidorna 2a): adress utan år, <c>/{ägare}/{slug}/</c>.</summary>
+        public const string SitePage = "sitepage";
     }
+
+    /// <summary>Utfallet av <see cref="PageAddressService.SetCurrentFlat"/>: <c>Ok</c> false = adressen är upptagen av en annan sida (<c>Conflict</c> säger varför).</summary>
+    public readonly record struct FlatAddressResult(bool Ok, bool Changed, string? Conflict);
 
     /// <summary>
     /// Ägaren i en adress. En klubb eller krets bär sitt nod-id; förbundets mästerskap har ingen nod och
@@ -210,6 +215,39 @@ namespace HpskSite.Services.Addresses
             return (slug, true);
         }
 
+        /// <summary>
+        /// Adress UTAN år (<c>UrlYear IS NULL</c>): klubbens och kretsens egna sidor, <c>/{ägare}/{slug}/</c>. Delar namnrymd
+        /// med ALLA sorter hos ägaren (händelsernas gamla trädadresser m.fl.). Till skillnad från <see cref="SetCurrent(IUmbracoDatabase,string,int,PageAddressOwner,int,string)"/>
+        /// numreras en krock ALDRIG: <b>sluggen ändras aldrig automatiskt</b> (en admin väljer en annan, plan v3 A8) — en
+        /// upptagen adress ger <c>Taken</c>. Validera i förväg med <see cref="HpskSite.Services.SitePages.SitePageSlugRules"/>.
+        /// Oförändrad slugg = ingenting skrivs; byte = den gamla blir en historikrad, och en adress sidan själv haft återanvänds.
+        /// Körs i anroparens databas (samma transaktion som sidan).
+        /// </summary>
+        public static FlatAddressResult SetCurrentFlat(NPoco.IDatabase db, string kind, int id, PageAddressOwner owner, string slug)
+        {
+            if (string.IsNullOrWhiteSpace(slug)) throw new ArgumentException("Sidan saknar slug.", nameof(slug));
+            var current = db.FirstOrDefault<PageAddressRow>(
+                $"SELECT TOP 1 {Columns} FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE TargetKind = @0 AND TargetId = @1 AND IsCurrent = 1", kind, id);
+            if (current != null && current.OwnerType == owner.Type && current.OwnerId == owner.Id && current.UrlYear == null
+                && string.Equals(current.Slug, slug, StringComparison.OrdinalIgnoreCase))
+                return new FlatAddressResult(true, false, null);
+
+            // Namnrymden: ägarens alla årslösa adresser, av alla sorter. En rad som sidan själv haft är ledig.
+            var holder = db.FirstOrDefault<PageAddressRow>(
+                $"SELECT TOP 1 {Columns} FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2 AND NOT (TargetKind = @3 AND TargetId = @4)",
+                owner.Type, owner.Id, slug, kind, id);
+            if (holder != null) return new FlatAddressResult(false, false, "Det finns redan en sida med den adressen.");
+
+            db.Execute("UPDATE dbo.PageAddress SET IsCurrent = 0 WHERE TargetKind = @0 AND TargetId = @1 AND IsCurrent = 1", kind, id);
+            var reused = db.Execute(
+                "UPDATE dbo.PageAddress SET IsCurrent = 1 WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2 AND TargetKind = @3 AND TargetId = @4",
+                owner.Type, owner.Id, slug, kind, id);
+            if (reused == 0)
+                db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, NULL, @2, @3, @4, 1)",
+                    owner.Type, owner.Id, slug, kind, id);
+            return new FlatAddressResult(true, true, null);
+        }
+
         /// <summary>Sätter (ägare, år, slug) som sidans aktuella adress i en egen transaktion.</summary>
         public (string Slug, bool Changed) SetCurrent(string kind, int id, PageAddressOwner owner, int year, string baseSlug)
         {
@@ -309,6 +347,16 @@ namespace HpskSite.Services.Addresses
         /// <summary>Får <paramref name="segment"/> användas för en klubb eller en sida direkt under en krets?</summary>
         public static bool IsReservedOwnerChildSegment(string segment)
             => ReservedOwnerChildSegments.Contains(segment, StringComparer.OrdinalIgnoreCase) || IsYearSegment(segment, out _);
+
+        /// <summary>
+        /// Klubbsidorna steg 1/2: kretsens sidor i den nya sidstrukturen (<c>/{krets}/rekord/</c>, <c>/{krets}/kalender/</c> …) delar
+        /// namnrymd med kretsens klubbar (<c>/{krets}/{klubb}/</c>). En klubb som heter som en av dem skulle skugga kretsens sida
+        /// (eller tvärtom), så klubbnamnet vägras. Gäller också <c>hemsidan</c> (steg 2:s redigeringsyta).
+        /// </summary>
+        public static bool IsRegionTemplateSlug(string segment)
+            => string.Equals(segment, "hemsidan", StringComparison.OrdinalIgnoreCase)
+               || HpskSite.Services.SitePages.SiteTemplates.Slugs(HpskSite.Services.SitePages.SiteTemplates.Region)
+                    .Contains(segment, StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Delar två sorter namnrymd hos ägaren? Bara hos förbundets mästerskap, vars adress saknar sortsegment.

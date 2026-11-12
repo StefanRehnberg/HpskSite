@@ -230,8 +230,19 @@ namespace HpskSite.Controllers
         private IActionResult ServeEvent(IUmbracoContext uc, int eventId)
         {
             if (!ClubEventStoreSettings.UsesTable(_settings)) return NotFoundPage();
+            // Tabellen direkt (inte genom växeln) för att kunna skilja "finns inte" från "får inte se": synligheten prövas strax nedan, innan något visas.
             var ev = HttpContext.RequestServices.GetRequiredService<SqlClubEventStore>().Get(eventId);
             if (ev == null || !ev.IsPublished) return NotFoundPage();
+            var viewer = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync().GetAwaiter().GetResult();
+            if (!viewer.CanSee(ev))
+            {
+                // Samma regel som sidorna: den som inte är inloggad och skulle få se händelsen efter inloggning hänvisas dit; Styrelse och Dold är 404 åt alla andra.
+                var needsLogin = !viewer.For(ev.OwnerType, ev.OwnerId).LoggedIn
+                    && (ev.ReadVisibility == HpskSite.Services.SitePages.SiteVisibility.Inloggade || ev.ReadVisibility == HpskSite.Services.SitePages.SiteVisibility.Klubbmedlemmar);
+                if (needsLogin)
+                    return Redirect("/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(HttpContext.Request.Path + HttpContext.Request.QueryString));
+                return NotFoundPage();
+            }
             var owner = uc.Content!.GetById(ev.OwnerId);
             if (owner == null) return NotFoundPage();
             _page.Event = ev;
@@ -254,7 +265,9 @@ namespace HpskSite.Controllers
             if (row.TargetKind != PageAddressKinds.Event) return _urls.UrlFor(row.TargetKind, row.TargetId);
             if (!ClubEventStoreSettings.UsesTable(_settings)) return null;
             var ev = HttpContext.RequestServices.GetRequiredService<SqlClubEventStore>().Get(row.TargetId);
-            return ev is { IsPublished: true } && !string.IsNullOrEmpty(ev.Url) ? ev.Url : null;
+            // Adressen till en händelse som besökaren inte får se avslöjas inte heller.
+            var viewer = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync().GetAwaiter().GetResult();
+            return ev is { IsPublished: true } && viewer.CanSee(ev) && !string.IsNullOrEmpty(ev.Url) ? ev.Url : null;
         }
 
         private string? MovedOwnerPrefix(IUmbracoContext uc, string[] ownerSegs)

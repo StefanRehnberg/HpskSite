@@ -1033,3 +1033,15 @@
     background-color: var(--bs-secondary-bg);
     color: var(--bs-secondary-color);
 }
+
+/* Bilder i klubbens och kretsens egna sidor (textblock): ramen (figure) har placering som class och bredd i procent som style. Servern sanerar bada. */
+.site-text figure.image { display: table; max-width: 100%; margin: 1rem auto; }
+.site-text figure.image img { display: block; width: 100%; height: auto; }
+.site-text figure.image-style-align-left { float: left; margin: .25rem 1.5rem 1rem 0; max-width: 60%; }
+.site-text figure.image-style-align-right { float: right; margin: .25rem 0 1rem 1.5rem; max-width: 60%; }
+.site-text figure.image-style-block-align-left { margin-left: 0; margin-right: auto; }
+.site-text figure.image-style-block-align-right { margin-left: auto; margin-right: 0; }
+.site-text::after { content: ""; display: block; clear: both; }
+@media (max-width: 575.98px) {
+    .site-text figure.image-style-align-left, .site-text figure.image-style-align-right { float: none; max-width: 100%; margin: 1rem auto; }
+}

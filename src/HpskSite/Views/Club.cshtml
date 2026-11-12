@@ -6,6 +6,11 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
+@inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
+@inject HpskSite.Services.ClubRosterService ClubRoster
+@inject HpskSite.Services.BoardRoleService BoardRoles
+@inject HpskSite.Services.SitePages.SiteViewerResolver SiteViewers
+@inject HpskSite.Services.SitePages.SiteOwnerService SiteOwners
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -34,6 +39,7 @@
     var isLoggedIn = currentMember != null;
     var isClubAdmin = false;
     var isClubMember = false;
+    var isClubBoard = false;
 
     // Check if current member is club admin or member for this specific club
     if (currentMember != null && clubId > 0)
@@ -47,11 +53,11 @@
 
         if (member != null)
         {
-            // Check if member belongs to this club (primary or additional)
-            var primaryClubId = member.GetValue("primaryClubId")?.ToString();
-            var memberClubIds = member.GetValue("memberClubIds")?.ToString() ?? "";
-            isClubMember = primaryClubId == clubId.ToString() ||
-                          memberClubIds.Split(',').Select(s => s.Trim()).Contains(clubId.ToString());
+            // Aktiv medlem = en aktiv rad i ClubMembership (status annan än Utträdd/Avliden), aldrig de råa
+            // egenskaperna, som räknade en utträdd som medlem (Stefans beslut 2026-11-07).
+            isClubMember = ClubRoster.ActiveMemberIds(clubId).Contains(member.Id);
+            // Styrelse = en aktiv styrelseroll (BoardRoles.IsBoardMember), den enda källan för styrelsen (klubbsidorna F1).
+            isClubBoard = BoardRoles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Club, clubId, member.Id);
         }
     }
 
@@ -63,12 +69,28 @@
 
 @{
     ViewBag.clubId = clubId;
+    ViewBag.siteOwnerType = HpskSite.Services.SitePages.SiteTemplates.Club;
+    ViewBag.siteOwnerId = clubId;
     ViewBag.clubName = clubName;
     ViewBag.description = description;
     ViewBag.logo = logo;
     ViewBag.bannerImage = bannerImage;
     ViewBag.isClubMember = isClubMember;
     ViewBag.isClubAdmin = isClubAdmin;
+
+    // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
+    var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, Model.Url(),
+        new HpskSite.Services.SitePages.SiteViewer(isLoggedIn, isClubMember, isClubBoard, isClubAdmin));
+    ViewBag.sitePageView = sp;
+    // Panelregistret (K0b): EN ritväg för systemsidornas paneler.
+    var panelCtx = new HpskSite.Services.SitePages.SitePanelContext(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, clubName, Model, sp.Viewer);
+    // Klubbens egen text före/efter systemsidorna (slots): bara när egen redigering är PÅ (annars ritas ingenting).
+    ViewBag.slotCtx = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
+        ? new HpskSite.Services.SitePages.SiteSlotContext(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, sp.Viewer, Model.Url(), Model)
+        : null;
+    // Hemsidan (egna sidor): länken syns bara för klubbens EGEN admin och bara när brytare 2 är PÅ.
+    ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
+        && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, null);
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: club logo → region logo → site default
@@ -78,6 +100,9 @@
         regionPage = null;
     }
     var regionLogo = regionPage?.Value<IPublishedContent>("logo");
+    // Besökarens vy: en extern länk längst ned i vänstermenyn till kretsens hemsida.
+    ViewBag.regionUrl = regionPage?.Url();
+    ViewBag.regionLabel = "Kretsens hemsida";
     var siteDefaultLogo = "/images/HPSK_Logo.png";
 
     ViewBag.OgTitle = clubName;
@@ -95,342 +120,153 @@ const isLoggedIn = @isLoggedIn.ToString().ToLower();
 window.currentClubId = clubId;
 </script>
 
+@{ var lockedNeeds = HpskSite.Services.SitePages.SitePageRequest.LockedNeedsMembership(Context); }
 <div class="club-page container-fluid">
     <!-- Club Header with Logo and Banner -->
     @await Html.PartialAsync("ClubHeader")
 
     @if (!isLoggedIn)
     {
-        <!-- TIER 1: PUBLIC VIEW - About section only -->
-        <div class="container-fluid mt-4">
-            <div class="row">
-                <div class="col-lg-8">
-                    <!-- About Club -->
-                    @if (!string.IsNullOrEmpty(welcomeMessage))
-                    {
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h5 class="mb-0">
-                                    <i class="bi bi-info-circle me-2"></i>Om Klubben
-                                </h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="prose">
-                                    @Html.Raw(welcomeMessage)
-                                </div>
-                            </div>
-                        </div>
-                    }
-                </div>
-
-                <div class="col-lg-4">
-                    <!-- Contact Information -->
-                    <div class="card mb-4">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="bi bi-telephone me-2"></i>Kontaktinformation
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            @if (!string.IsNullOrEmpty(contactPerson))
-                            {
-                                <p class="mb-2">
-                                    <strong>Kontaktperson:</strong><br />
-                                    @contactPerson
-                                </p>
-                            }
-                            @if (!string.IsNullOrEmpty(contactEmail))
-                            {
-                                <p class="mb-2">
-                                    <strong>E-post:</strong><br />
-                                    <a href="mailto:@contactEmail">@contactEmail</a>
-                                </p>
-                            }
-                            @if (!string.IsNullOrEmpty(contactPhone))
-                            {
-                                <p class="mb-0">
-                                    <strong>Telefon:</strong><br />
-                                    @contactPhone
-                                </p>
-                            }
-                        </div>
-                    </div>
-
-                    <!-- Public Quick Link Documents -->
-                    <div id="publicQuickLinkDocumentsCard" class="card mb-4" style="display: none;">
-                        <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Dokument</h5>
-                        </div>
-                        <div class="list-group list-group-flush" id="publicQuickLinkDocuments"></div>
-                    </div>
-
-                    <!-- Login Prompt -->
-                    <div class="card">
-                        <div class="card-body text-center">
-                            <i class="bi bi-lock fs-1 text-muted mb-3 d-block"></i>
-                            <h6 class="mb-2">Medlemsinloggning</h6>
-                            <p class="text-muted small mb-3">Logga in för att se händelser, nyheter, kalender och mer</p>
-                            <a href="@loginUrl" class="btn btn-primary btn-sm">
-                                <i class="bi bi-box-arrow-in-right me-1"></i>Logga in
-                            </a>
-                        </div>
+        <!-- TIER 1: PUBLIC VIEW (Om-text, kontakt, publika dokument, inloggningsruta) — ritas av panelregistret -->
+        <div class="container-fluid mt-4@(sp.Enabled ? " hpsk-sidelayout" : "")">
+            @if (sp.Enabled)
+            {
+                @await Html.PartialAsync("ClubNavigation")
+                @Html.Raw("<div class=\"hpsk-sidebody\">")
+            }
+            @if (lockedNeeds != null)
+            {
+                @await Html.PartialAsync("_SiteLocked", ("Club", clubName, lockedNeeds.Value, false, loginUrl.TrimEnd('/') + "/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
+            }
+            else if (sp.Enabled && !sp.IsRoot)
+            {
+                @* "Visa publikt": en omgjord systemsida som klubben publicerat för alla (Banor, Kalender, Tävlingar, Rekord). Samma flikpanel som för en inloggad, så panelernas skript fungerar likadant. *@
+                <div class="tab-content mt-3" id="clubTabContent">
+                    <div class="tab-pane fade show active" id="@HpskSite.Services.SitePages.SiteTemplates.LegacyPaneId(HpskSite.Services.SitePages.SiteTemplates.Club, sp.PageKey)" role="tabpanel">
+                        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = sp.PageKey })
                     </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
+            }
+            @if (sp.Enabled)
+            {
+                @Html.Raw("</div>")
+            }
         </div>
     }
     else
     {
         <!-- TIER 2 & 3: MEMBER/ADMIN VIEW - With tabs and role-based functionality -->
-        <div class="container-fluid mt-4">
+        <div class="container-fluid mt-4@(sp.Enabled ? " hpsk-sidelayout" : "")">
             @await Html.PartialAsync("ClubNavigation")
+            @if (sp.Enabled)
+            {
+                @Html.Raw("<div class=\"hpsk-sidebody\">")
+            }
+            @if (lockedNeeds != null)
+            {
+                @await Html.PartialAsync("_SiteLocked", ("Club", clubName, lockedNeeds.Value, true, loginUrl))
+            }
 
             <!-- Tab Content -->
             <div class="tab-content mt-3" id="clubTabContent">
 
+                @* Klubbsidorna: med den nya sidstrukturen PÅ skrivs bara den här sidans panel ut (sp.ShowsPane); av = alla, som förut. *@
                 <!-- TIER 2: About Tab (All logged-in users) -->
-                <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
-                    @* "Det här händer i {klubben}" — samma flöde som startsidan och kretssidan, låst till
-                       klubbens egna tävlingar, händelser och träningar. Ersätter "Utvalda tävlingar" (C3 F3). *@
-                    @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedClubId = clubId, LockedClubName = clubName })
-                    <div class="row">
-                        <!-- Main Content Column -->
-                        <div class="col-lg-8">
-                            <!-- Upcoming Events -->
-                            <div class="card mb-4">
-                                <div class="card-header">
-                                    <h5 class="mb-0">
-                                        <i class="bi bi-calendar-event me-2"></i>Kommande Händelser
-                                    </h5>
-                                </div>
-                                <div class="card-body" id="upcomingEventsContainer">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Laddar händelser...</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Sidebar Column -->
-                        <div class="col-lg-4">
-                            @* Motionerna (för klubbens medlemmar) och styrelsens ärenden (för styrelseledamöter). *@
-                            @await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardClubId", clubId } })
-                            <!-- Contact Information -->
-                            @if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
-                            {
-                                <div class="card mb-4">
-                                    <div class="card-header bg-primary text-white">
-                                        <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontakt</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        @if (!string.IsNullOrEmpty(contactPerson))
-                                        {
-                                            <div class="d-flex align-items-center mb-3">
-                                                <i class="bi bi-person fs-4 text-primary me-3"></i>
-                                                <div>
-                                                    <small class="text-muted d-block">Kontaktperson</small>
-                                                    <span>@contactPerson</span>
-                                                </div>
-                                            </div>
-                                        }
-                                        @if (!string.IsNullOrEmpty(contactEmail))
-                                        {
-                                            <div class="d-flex align-items-center mb-3">
-                                                <i class="bi bi-envelope fs-4 text-primary me-3"></i>
-                                                <div>
-                                                    <small class="text-muted d-block">E-post</small>
-                                                    <a href="mailto:@contactEmail">@contactEmail</a>
-                                                </div>
-                                            </div>
-                                        }
-                                        @if (!string.IsNullOrEmpty(contactPhone))
-                                        {
-                                            <div class="d-flex align-items-center">
-                                                <i class="bi bi-telephone fs-4 text-primary me-3"></i>
-                                                <div>
-                                                    <small class="text-muted d-block">Telefon</small>
-                                                    <a href="tel:@contactPhone">@contactPhone</a>
-                                                </div>
-                                            </div>
-                                        }
-                                    </div>
-                                </div>
-                            }
-
-                            <!-- Quick Links -->
-                            <div class="card mb-4">
-                                <div class="card-header">
-                                    <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Snabblänkar</h5>
-                                </div>
-                                <div class="list-group list-group-flush">
-                                    <a href="#" onclick="document.getElementById('clubCalendar-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
-                                        <i class="bi bi-calendar3 me-3 text-primary"></i>
-                                        <div>
-                                            <strong>Kalender</strong>
-                                            <small class="d-block text-muted">Se alla händelser</small>
-                                        </div>
-                                    </a>
-                                    <a href="#" onclick="document.getElementById('clubMembers-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
-                                        <i class="bi bi-people me-3 text-primary"></i>
-                                        <div>
-                                            <strong>Medlemmar</strong>
-                                            <small class="d-block text-muted">Medlemskatalog</small>
-                                        </div>
-                                    </a>
-                                    <a href="#" onclick="document.getElementById('clubRecords-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
-                                        <i class="bi bi-award me-3 text-primary"></i>
-                                        <div>
-                                            <strong>Klubbrekord</strong>
-                                            <small class="d-block text-muted">Rekord i @clubName</small>
-                                        </div>
-                                    </a>
-                                    <a href="#" onclick="document.getElementById('clubCompetitions-tab').click(); return false;" class="list-group-item list-group-item-action d-flex align-items-center">
-                                        <i class="bi bi-trophy me-3 text-primary"></i>
-                                        <div>
-                                            <strong>Tävlingar</strong>
-                                            <small class="d-block text-muted">Tävlingar arrangerade av @clubName</small>
-                                        </div>
-                                    </a>
-                                    <div id="clubQuickLinkDocuments"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                @if (sp.ShowsPane("clubHome"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubHome")" id="clubHome" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("home", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
+                    @await Html.PartialAsync("_SitePageSlots", ("home", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: About Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubAbout" role="tabpanel">
-                    @if (!string.IsNullOrEmpty(welcomeMessage))
-                    {
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om klubben</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="prose">
-                                    @Html.Raw(welcomeMessage)
-                                </div>
-                            </div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="alert alert-info">Ingen information om klubben har lagts till ännu.</div>
-                    }
+                @if (sp.ShowsPane("clubAbout"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubAbout")" id="clubAbout" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("about", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "about" })
+                    @await Html.PartialAsync("_SitePageSlots", ("about", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Banor Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubRanges" role="tabpanel">
-                    @*
-                        Klubbens banor (omgjord 2026-10-11): ett kort per bana med samma karta som tävlingssidan
-                        (röd punkt, Vägbeskrivning), klubbens fasta tider och länkar till banans egen sida
-                        (/skjutbana/{id}) och dess kalender. Kartan ritas när fliken visas — Leaflet räknar fel i
-                        en dold ruta. ⚠️ Inga användartexter i onclick.
-                    *@
-                    <div id="clubRangesList"></div>
-                    <div id="clubRangesEmpty" class="alert alert-info" style="display:none">
-                        <i class="bi bi-info-circle me-1"></i>Ingen skjutbana är kopplad till klubben ännu.
-                        Klubbens administratör hittar er bana bland <a href="/skjutbanor">skjutbanorna</a> och gör anspråk på den.
-                    </div>
-                    <link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
-                    <script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
-                    <script src="~/js/range-map.js" asp-append-version="true"></script>
-                    <script>
-                    (function () {
-                        const crClubId = @clubId;
-                        const DAYS = { 1:'Måndag', 2:'Tisdag', 3:'Onsdag', 4:'Torsdag', 5:'Fredag', 6:'Lördag', 7:'Söndag' };
-                        const RELATION = { Owner:'Klubben äger banan', Huvudman:'Klubben äger banan', PrimaryUser:'Klubbens huvudbana', User:'Klubben använder banan', Tenant:'Klubben hyr tider på banan' };
-                        const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-                        let ranges = [];
-                        function drawMaps() {
-                            if (!document.getElementById('clubRanges').classList.contains('active') || !window.hpskRangeMap) return;
-                            ranges.forEach(r => window.hpskRangeMap.render(document.getElementById('crMap' + r.id), r));
-                        }
-                        async function load() {
-                            try {
-                                const res = await fetch('/umbraco/surface/ShootingRange/GetClubRanges?clubId=' + crClubId, { credentials: 'same-origin' });
-                                const d = res.ok ? await res.json() : null;
-                                if (!d || !d.success || !d.ranges.length) { document.getElementById('clubRangesEmpty').style.display = ''; return; }
-                                ranges = d.ranges;
-                                document.getElementById('clubRangesList').innerHTML = ranges.map(r => {
-                                    const pos = window.hpskRangeMap && window.hpskRangeMap.hasPos(r);
-                                    const addr = window.hpskRangeMap ? window.hpskRangeMap.addressText(r) : (r.city || '');
-                                    const times = r.allocations.length
-                                        ? '<ul class="list-unstyled mb-0">' + r.allocations.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime))
-                                            .map(a => `<li>${DAYS[a.dayOfWeek]} ${esc(a.startTime)}–${esc(a.endTime)}${a.note ? ' <span class="text-muted">(' + esc(a.note) + ')</span>' : ''}</li>`).join('') + '</ul>'
-                                        : '<span class="text-muted">Inga fasta tider.</span>';
-                                    return `<div class="card mb-3"><div class="card-body">
-                                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
-                                            <div><h5 class="mb-0"><a class="text-decoration-none" href="/skjutbana/${r.id}">${esc(r.name)}</a></h5>
-                                                <div class="small text-muted">${esc(RELATION[r.relationType] || '')}</div></div>
-                                            <div class="d-flex flex-wrap gap-2">
-                                                ${pos ? `<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="${esc(window.hpskRangeMap.directionsUrl(r))}"><i class="bi bi-signpost-2 me-1"></i>Vägbeskrivning</a>` : ''}
-                                                <a class="btn btn-sm btn-outline-primary" href="/skjutbana/${r.id}#vy=kalender"><i class="bi bi-calendar3 me-1"></i>Banans kalender</a>
-                                                <a class="btn btn-sm btn-outline-secondary" href="/skjutbana/${r.id}">Om banan</a>
-                                            </div></div>
-                                        <div class="row g-3">
-                                            <div class="col-md-7">${addr ? `<div class="mb-2"><i class="bi bi-geo-alt-fill text-danger me-1"></i>${esc(addr)}</div>` : ''}
-                                                ${pos ? `<div id="crMap${r.id}" style="height:220px;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>` : '<div class="text-muted small">Banan har ingen plats på kartan ännu.</div>'}</div>
-                                            <div class="col-md-5"><div class="fw-semibold mb-1">Klubbens tider</div>${times}</div>
-                                        </div></div></div>`;
-                                }).join('');
-                                drawMaps();
-                            } catch (e) { document.getElementById('clubRangesEmpty').style.display = ''; }
-                        }
-                        const tabBtn = document.getElementById('clubRanges-tab');
-                        if (tabBtn) tabBtn.addEventListener('shown.bs.tab', drawMaps);
-                        load();
-                    })();
-                    </script>
+                @if (sp.ShowsPane("clubRanges"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubRanges")" id="clubRanges" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("ranges", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "ranges" })
+                    @await Html.PartialAsync("_SitePageSlots", ("ranges", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Calendar Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubCalendar" role="tabpanel">
-                    @await Html.PartialAsync("ClubCalendar")
+                @if (sp.ShowsPane("clubCalendar"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubCalendar")" id="clubCalendar" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("calendar", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "calendar" })
+                    @await Html.PartialAsync("_SitePageSlots", ("calendar", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Competitions Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubCompetitions" role="tabpanel">
-                    @await Html.PartialAsync("ClubCompetitionsList")
+                @if (sp.ShowsPane("clubCompetitions"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubCompetitions")" id="clubCompetitions" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("competitions", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "competitions" })
+                    @await Html.PartialAsync("_SitePageSlots", ("competitions", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Members Directory (All logged-in users) -->
-                <div class="tab-pane fade" id="clubMembers" role="tabpanel">
-                    @await Html.PartialAsync("ClubInstructorsPublicPanel")
-                    @{
-                        var ligaVD = new ViewDataDictionary(ViewData);
-                        ligaVD["LeaderboardClubId"] = clubId;
-                    }
-                    @await Html.PartialAsync("ClubGuldserieLeaderboard", null, ligaVD)
-                    @await Html.PartialAsync("ClubMembersDirectory")
+                @if (sp.ShowsPane("clubMembers"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubMembers")" id="clubMembers" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("members", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "members" })
+                    @await Html.PartialAsync("_SitePageSlots", ("members", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Records (All logged-in users) -->
-                <div class="tab-pane fade" id="clubRecords" role="tabpanel">
-                    @{
-                        var clubRecVD = new ViewDataDictionary(ViewData);
-                        clubRecVD["RecordsScopeType"] = "Club";
-                        clubRecVD["RecordsScopeId"] = clubId.ToString();
-                        clubRecVD["RecordsCanEdit"] = isClubAdmin;
-                        clubRecVD["RecordsScopeName"] = clubName;
-                    }
-                    @await Html.PartialAsync("RecordsHallOfFame", null, clubRecVD)
+                @if (sp.ShowsPane("clubRecords"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubRecords")" id="clubRecords" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("records", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "records" })
+                    @await Html.PartialAsync("_SitePageSlots", ("records", "after"))
                 </div>
+                }
 
                 <!-- TIER 2: Documents Tab (All logged-in users) -->
-                <div class="tab-pane fade" id="clubDocuments" role="tabpanel">
-                    @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
-                    @await Html.PartialAsync("DocumentArchive")
+                @if (sp.ShowsPane("clubDocuments"))
+                {
+                <div class="tab-pane fade @sp.PaneClass("clubDocuments")" id="clubDocuments" role="tabpanel">
+                    @await Html.PartialAsync("_SitePageSlots", ("documents", "before"))
+                    @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "documents" })
+                    @await Html.PartialAsync("_SitePageSlots", ("documents", "after"))
                 </div>
+                }
 
-                @if (isClubAdmin)
+                @if (isClubAdmin && sp.ShowsPane("clubAdmin"))
                 {
                     <!-- TIER 3: Admin Tab (Club admins only) -->
-                    <div class="tab-pane fade" id="clubAdmin" role="tabpanel">
+                    <div class="tab-pane fade @sp.PaneClass("clubAdmin")" id="clubAdmin" role="tabpanel">
                         @await Html.PartialAsync("ClubAdminPanel")
                     </div>
                 }
             </div>
+            @if (sp.Enabled)
+            {
+                @Html.Raw("</div>")
+            }
         </div>
     }
 </div>
@@ -498,6 +334,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadUpcomingEvents() {
+    // Med den nya sidstrukturen finns Hem-panelen bara på rotadressen: ingen container, ingen hämtning.
+    if (!document.getElementById('upcomingEventsContainer')) return;
     // Fas B5: träningarna är inte längre händelser. GetClubEvents är klubbens HÄNDELSER (adminpanelen
     // redigerar dem därifrån), så träningarna hämtas ur GetUpcomingEvents (kind = 'training') och läggs
     // in i samma lista. Deras url är "#training-{id}" och öppnar träningspanelen.
@@ -595,11 +433,12 @@ function loadClubQuickLinkDocuments() {
             if (data.success && data.data && data.data.length > 0) {
                 let html = '';
                 data.data.forEach(doc => {
-                    html += `<a href="/umbraco/surface/Document/DownloadDocument?id=${doc.id}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
-                        <i class="bi ${doc.icon} me-3 text-primary"></i>
+                    // Titel och filnamn är klubbadminens fria text: aldrig rått in i innerHTML.
+                    html += `<a href="/umbraco/surface/Document/DownloadDocument?id=${encodeURIComponent(doc.id)}" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">
+                        <i class="bi ${escapeHtml(String(doc.icon || ''))} me-3 text-primary"></i>
                         <div>
-                            <strong>${doc.title}</strong>
-                            <small class="d-block text-muted">${doc.fileName}</small>
+                            <strong>${escapeHtml(doc.title)}</strong>
+                            <small class="d-block text-muted">${escapeHtml(doc.fileName)}</small>
                         </div>
                     </a>`;
                 });

@@ -21,7 +21,9 @@
     var contactEmail = clubNode?.Value<string>("contactEmail") ?? "";
 
     // Welcome message can come from clubHome page itself
-    var welcomeMessage = Model?.Value<string>("welcomeMessage") ?? description;
+    // Saneras som all RTE-text innan den skrivs ut med Html.Raw (lagrad XSS annars).
+    var welcomeMessage = HpskSite.Extensions.RteHelper.SafeMarkup(Model?.Value<string>("welcomeMessage"));
+    if (string.IsNullOrEmpty(welcomeMessage)) welcomeMessage = description;
 
     // Get current member to check permissions
     var currentMember = await MemberManager.GetCurrentMemberAsync();
@@ -33,6 +35,8 @@
 
 @{
     ViewBag.clubId = clubId;
+    ViewBag.siteOwnerType = HpskSite.Services.SitePages.SiteTemplates.Club;
+    ViewBag.siteOwnerId = clubId;
     ViewBag.clubName = clubName;
     ViewBag.description = description;
     ViewBag.logo = logo;

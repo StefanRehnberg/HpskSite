@@ -2220,8 +2220,8 @@ window.formatAgeSpan = function(cls) {
 };
 
 // Current user information for highlighting
-const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
-const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+const currentUserName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(currentMemberName));
+const currentUserClub = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(currentMemberClub));
 const currentUserIsLoggedIn = @(currentMember != null ? "true" : "false");
 
 window.showLoginRequiredModal = function(whatLabel) {

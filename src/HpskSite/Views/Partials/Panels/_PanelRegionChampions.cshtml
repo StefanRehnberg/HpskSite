@@ -1,0 +1,11 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@if (Model.LoggedIn)
+{
+    var regChampVD = new ViewDataDictionary(ViewData);
+    regChampVD["ChampionsScopeType"] = "Region";
+    regChampVD["ChampionsScopeId"] = Model.RegionCode;
+    regChampVD["ChampionsScopeName"] = Model.OwnerName;
+    // Bara läsning på Hem — inmatning och hantering sker i kretsens Administration > Mästare.
+    regChampVD["ChampionsCanEdit"] = false;
+    @await Html.PartialAsync("ReigningChampionsPanel", null, regChampVD)
+}

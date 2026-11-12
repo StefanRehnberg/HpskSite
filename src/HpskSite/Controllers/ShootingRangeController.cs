@@ -851,11 +851,14 @@ namespace HpskSite.Controllers
             try
             {
                 var memberId = await _rangeService.GetCurrentMemberIdAsync();
-                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                // "Visa publikt": en utloggad får banorna bara när klubben publicerat panelen Banor för alla. Då visas aldrig en bana med begränsad plats.
+                var publicView = memberId == null;
+                if (publicView && !HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePaneGate>().IsPublic(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "ranges", "ranges"))
+                    return Json(new { success = false, message = "Inloggning krävs." });
 
-                bool isSiteAdmin = await _rangeService.IsSiteAdminAsync();
-                var stewarded = await _rangeService.GetStewardedRangeIdsAsync(memberId.Value);
-                var ranges = await _rangeService.GetRangesForClubAsync(clubId);
+                bool isSiteAdmin = !publicView && await _rangeService.IsSiteAdminAsync();
+                var stewarded = publicView ? new HashSet<int>() : await _rangeService.GetStewardedRangeIdsAsync(memberId!.Value);
+                var ranges = (await _rangeService.GetRangesForClubAsync(clubId)).Where(r => !publicView || r.LocationSensitivity != RangeConstants.SensRestricted).ToList();
 
                 // Batch: one query for the club's links + one for all their allocations (avoids an
                 // allocation query per range).
@@ -1546,7 +1549,7 @@ namespace HpskSite.Controllers
             var result = new List<RangeOngoingActivity>();
             var now = DateTime.Now;
             var member = _memberService.GetById(memberId);
-            foreach (var i in RangeCalendarRules.OngoingForCheckIn(_calendar.Build(rangeId, now, now), now))
+            foreach (var i in RangeCalendarRules.OngoingForCheckIn(_calendar.Build(rangeId, now, now, await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Events.EventViewerFactory>().CurrentAsync()), now))
             {
                 var kind = i.Kind == RangeCalendarKind.Training ? ClubEvents.OccasionTraining : ClubEvents.OccasionEvent;
                 var ctx = _participation.GetContext(i.SourceId, kind);

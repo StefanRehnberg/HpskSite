@@ -2074,7 +2074,8 @@ namespace HpskSite.Controllers
                 // Update the regional page properties
                 regionalPage.SetValue("regionName", regionName ?? "");
                 regionalPage.SetValue("welcomeTitle", welcomeTitle ?? "");
-                regionalPage.SetValue("welcomeText", welcomeText ?? "");
+                // Rik text som visas för andra: saneras vid skrivning med samma vitlista som vid visning.
+                regionalPage.SetValue("welcomeText", HpskSite.Extensions.RteHelper.SafeMarkup(welcomeText));
                 regionalPage.SetValue("contactPerson", contactPerson ?? "");
                 regionalPage.SetValue("contactEmail", contactEmail ?? "");
                 regionalPage.SetValue("contactPhone", contactPhone ?? "");

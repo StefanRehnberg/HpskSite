@@ -1,0 +1,39 @@
+@* Klubbsidorna F1: mobilmenyn för den nya sidstrukturen. På telefon (< 768 px) ersätts flikraden av EN knapp
+   "Meny · {sida} ▾" som fäller ut listan; på dator är raden som förut. Flikarnas id:n och Bootstrap-flikarna är
+   orörda, så djuplänkar och dagens skript (getElementById('clubCalendar-tab').click()) fungerar även med menyn hhopfälld.
+   Modell: (menyns ul-id, aktuell sidas rubrik). *@
+@model (string ListId, string CurrentLabel)
+@{
+    var listId = Model.ListId;
+}
+<button type="button" class="btn btn-outline-secondary w-100 text-start d-md-none mb-2 hpsk-sitenav-toggle" id="@(listId)-toggle"
+        data-bs-toggle="collapse" data-bs-target="#@listId" aria-controls="@listId" aria-expanded="false">
+    <i class="bi bi-list me-2"></i>Meny · <span class="hpsk-sitenav-current">@Model.CurrentLabel</span>
+    <i class="bi bi-chevron-down float-end mt-1"></i>
+</button>
+<style>
+    @@media (max-width: 767.98px) {
+        #@(listId).nav-tabs { flex-direction: column; flex-wrap: nowrap; border-bottom: 0; margin-bottom: .5rem !important; }
+        #@(listId).nav-tabs .nav-link { border: 1px solid var(--bs-border-color); border-radius: .375rem; margin-bottom: .25rem; text-align: left; width: 100%; }
+        #@(listId).nav-tabs .nav-link.active { font-weight: 600; }
+        #@(listId).nav-tabs .nav-item.ms-auto { margin-left: 0 !important; }
+    }
+</style>
+<script>
+    (function () {
+        var list = document.getElementById('@listId'), btn = document.getElementById('@(listId)-toggle');
+        if (!list || !btn) return;
+        var label = btn.querySelector('.hpsk-sitenav-current');
+        function collapseIfOpen() {
+            if (list.classList.contains('show') && window.bootstrap) bootstrap.Collapse.getOrCreateInstance(list).hide();
+        }
+        // Hem och Admin är flikar på samma sida: etiketten följer den aktiva fliken och menyn fälls ihop.
+        list.addEventListener('shown.bs.tab', function (e) {
+            var t = e.target && e.target.textContent ? e.target.textContent.replace(/\s+/g, ' ').trim() : '';
+            if (t && label) label.textContent = t;
+            collapseIfOpen();
+        });
+        list.addEventListener('shown.bs.collapse', function () { btn.setAttribute('aria-expanded', 'true'); });
+        list.addEventListener('hidden.bs.collapse', function () { btn.setAttribute('aria-expanded', 'false'); });
+    })();
+</script>

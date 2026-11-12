@@ -1,0 +1,3 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = Model.OwnerId; }
+@await Html.PartialAsync("DocumentArchive", Model.Node)

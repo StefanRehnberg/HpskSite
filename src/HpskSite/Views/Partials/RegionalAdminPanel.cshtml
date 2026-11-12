@@ -1,6 +1,8 @@
 ﻿@{
     var regionContentId = ViewBag.regionContentId as int? ?? 0;
     var regionName = ViewBag.regionName as string ?? "Krets";
+    // Hemsidan (egna sidor) är en egen sida, som Styrelsearbete och Ekonomi; länken syns bara för den som får redigera (RegionalNavigation räknar ut det).
+    var hemsidanUrl = (ViewBag.canEditSite as bool? ?? false) && ViewBag.sitePageView is HpskSite.Services.SitePages.SitePageView hsp ? hsp.OwnerUrl + "hemsidan/" : null;
 }
 
 <!-- Flatpickr Date/Time Picker -->
@@ -226,6 +228,7 @@
 
         <!-- Small screens (< lg): full-width grouped section picker -->
         <div class="col-12 d-lg-none">
+            <a href="#" class="hpsk-admin-back d-block mb-2" data-hpsk-back-to-pages>← Tillbaka till kretsens sidor</a>
             <label for="regionAdminTabMobileSelect" class="form-label small text-muted mb-1">Välj sektion</label>
             <select class="form-select" id="regionAdminTabMobileSelect" aria-label="Välj adminsektion">
                 <optgroup label="Kalender &amp; tävlingar">
@@ -247,6 +250,7 @@
                 <optgroup label="Kretsen">
                     <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=1&id=@regionContentId">Ekonomi ↗</option>
+                    @if (hemsidanUrl != null) { <option value="@hemsidanUrl">Hemsidan ↗</option> }
                     <option value="#regionSettingsTab">Inställningar</option>
                     <option value="#regionDocumentsTab" selected>Dokument</option>
                     <option value="#regionStatsTab">Statistik</option>
@@ -260,6 +264,7 @@
         <!-- Large screens (≥ lg): grouped vertical rail -->
         <div class="col-lg-auto d-none d-lg-block">
             <nav class="nav nav-pills flex-column admin-rail" id="regionAdminTabs" role="tablist" aria-orientation="vertical">
+                <a href="#" class="hpsk-admin-back" data-hpsk-back-to-pages>← Tillbaka till kretsens sidor</a>
                 <div class="admin-rail-group">Kalender &amp; tävlingar</div>
                 <button class="nav-link" id="regionEvents-tab" data-bs-toggle="tab" data-bs-target="#regionEventsTab" type="button" role="tab" aria-controls="regionEventsTab" aria-selected="false">
                     <i class="bi bi-calendar-event me-2"></i>Händelser
@@ -317,6 +322,13 @@
                     <i class="bi bi-cash-coin me-2"></i>Ekonomi
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kassörens arbetsyta"></i>
                 </a>
+                @if (hemsidanUrl != null)
+                {
+                    <a class="nav-link d-flex align-items-center" href="@hemsidanUrl" target="_blank" rel="noopener">
+                        <i class="bi bi-pencil-square me-2"></i>Hemsidan
+                        <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar redigeringen av kretsens egna sidor"></i>
+                    </a>
+                }
                 @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24) — den bor i Ekonomi → Fakturor. *@
                 <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button" role="tab" aria-controls="regionSettingsTab" aria-selected="false">
                     <i class="bi bi-gear me-2"></i>Inställningar

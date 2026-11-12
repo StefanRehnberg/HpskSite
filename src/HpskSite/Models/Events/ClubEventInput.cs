@@ -25,7 +25,7 @@ namespace HpskSite.Models.Events
             ClubEventRecord r,
             bool registrationRequired, int maxParticipants, bool isMandatory, string? registrationUrl,
             bool lanevapenOffered = false, string? registrationDeadline = "", string? eventPrices = "",
-            string? eventAudience = "", string? eventSwishNumber = "")
+            string? eventAudience = "", string? eventSwishNumber = "", string? readVisibility = "")
         {
             r.RegistrationRequired = registrationRequired;
             r.RegistrationUrl = registrationUrl ?? "";
@@ -92,6 +92,15 @@ namespace HpskSite.Models.Events
                 return $"\"{eventAudience}\" är inte ett giltigt val för vem som får anmäla sig. "
                      + "Ladda om sidan och välj igen. Ingenting sparades.";
             r.Audience = audience;
+
+            // Vem som får SE händelsen. Tomt = rör inte (en ny händelse är öppen för alla, som förut). ⚠️ Ett okänt värde skrivs aldrig, och 5 (Utloggad) är
+            // ett systemvärde som aldrig kan väljas — då hade en händelse bara synts för den som inte är inloggad.
+            if (!string.IsNullOrWhiteSpace(readVisibility))
+            {
+                if (!int.TryParse(readVisibility.Trim(), out var rv) || rv < 0 || rv > (int)HpskSite.Services.SitePages.SiteVisibility.Dold)
+                    return $"\"{readVisibility}\" är inte ett giltigt val för vem som får se händelsen. Ladda om sidan och välj igen. Ingenting sparades.";
+                r.ReadVisibility = (HpskSite.Services.SitePages.SiteVisibility)rv;
+            }
             return null;
         }
 
@@ -109,6 +118,7 @@ namespace HpskSite.Models.Events
             if (!s.Prices && !string.IsNullOrWhiteSpace(r.PricesJson)) missing.Add(EventPrices.Property);
             if (!s.Swish && !string.IsNullOrWhiteSpace(r.SwishNumber)) missing.Add(HpskSite.Models.ClubEvents.SwishProperty);
             if (!s.Audience && r.Audience != EventAudience.Club) missing.Add(EventAudience.Property);
+            if (!s.ReadVisibility && r.ReadVisibility != HpskSite.Services.SitePages.SiteVisibility.Alla) missing.Add("readVisibility");
             return missing;
         }
 

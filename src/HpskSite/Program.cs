@@ -228,6 +228,10 @@ app.Use(async (context, next) =>
 // Member activity tracking middleware is now registered via MemberActivityTrackingComposer
 // using PostRouting pipeline filter to ensure it runs after authentication
 
+// Förhandsläget i Hemsidan (Förhandsvisa som en besökare): FÖRE Umbracos kedja, så att en utloggad förhandsvisning kan ta bort inloggningen ur begäran innan något läser den.
+// Utan biljett i adressen eller huvudet rör den ingenting.
+app.UseMiddleware<HpskSite.Services.SitePages.SitePreviewMiddleware>();
+
 app.UseUmbraco()
     .WithMiddleware(u =>
     {

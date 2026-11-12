@@ -1,6 +1,7 @@
 using HpskSite.Controllers;
 using HpskSite.Services.Addresses;
 using HpskSite.Services.Events;
+using HpskSite.Services.SitePages;
 using HpskSite.Services.SiteSettings;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -83,6 +84,26 @@ namespace HpskSite.Routing
             builder.ContentFinders().Insert<ClubShortUrlContentFinder>(1);
             // Före Umbracos trädupplag: gamla /competitions/-adresser ger 301 till de nya.
             builder.ContentFinders().Insert<CompetitionTreeRedirectFinder>(2);
+            // Klubbens och kretsens sidor (klubbsidorna steg 1): /halland/klubb/banor/ när den nya strukturen är PÅ för ägaren.
+            // Efter ovanstående, så att gamla händelseadresser och klubbens långa form redan är omdirigerade.
+            builder.ContentFinders().Insert<SitePageContentFinder>(3);
+            builder.Services.AddScoped<SitePageViewFactory>();
+            // Efter inloggningen: tittaren prövas mot sidan finder pekat ut (404 / inloggning). Se SitePageAccessFilter.
+            builder.Services.AddScoped<SiteViewerResolver>();
+            // Läsvägen för egna sidor: läsaren är enkel (bara IScopeProvider) och används av findern, så den är en singleton.
+            builder.Services.AddSingleton<SitePageReader>();
+            builder.Services.AddScoped<SiteBlockDataFactory>();
+            builder.Services.AddScoped<ISiteOwnerFacts, SiteOwnerFacts>();
+            builder.Services.AddScoped<ISiteSupportNotifier, SiteSupportNotifier>();
+            builder.Services.AddScoped<SiteSlotRenderer>();
+            // Omvandlade sidor (konvertera-planen K3/K4): läses en gång per begäran och delas av menyn, åtkomstfiltret och ritningen.
+            builder.Services.AddScoped<SiteConvertedSource>();
+            builder.Services.AddScoped<SiteConvertedRenderer>();
+            builder.Services.AddScoped<SitePaneGate>();   // "Visa publikt": dataanropen frågar om panelen är öppen för alla
+            builder.Services.AddScoped<SitePanelReadGate>();   // blockets egen nivå gäller också dess data (medlemskatalogen, styrelsen)
+            builder.Services.AddSingleton<SitePreviewTickets>();   // förhandsläget i Hemsidan: signerade biljetter (SitePreviewMiddleware läser dem)
+            builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
+            builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }
 }

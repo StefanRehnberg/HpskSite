@@ -1540,7 +1540,7 @@ namespace HpskSite.Controllers
                 {
                     var events = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Events.IClubEventStore))
                         as HpskSite.Services.Events.IClubEventStore;
-                    organiserEmail = events?.Get(ctx.EventId)?.ContactEmail;
+                    organiserEmail = events?.Get(ctx.EventId, HpskSite.Services.Events.EventViewer.System)?.ContactEmail;
                 }
                 if (string.IsNullOrWhiteSpace(organiserEmail))
                     organiserEmail = UmbracoContext.Content?.GetById(ctx.OwnerId)?.Value<string>("contactEmail");

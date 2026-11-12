@@ -1,8 +1,18 @@
 @{
     var isRegionalAdmin = ViewBag.isRegionalAdmin as bool? ?? false;
     var isLoggedIn = ViewBag.isLoggedIn as bool? ?? false;
+    // Klubbsidorna steg 1: med den nya sidstrukturen PÅ är menyn mallens (riktiga länkar); av = dagens flikrad, oförändrad.
+    var sp = ViewBag.sitePageView as HpskSite.Services.SitePages.SitePageView;
 }
 
+@if (sp != null && sp.Enabled)
+{
+    @* Besökarens vy: kretsens sidor som en VÄNSTERMENY (se _SiteSideMenu). Samma flik-id:n och hashtolkare som förut; låsta sidor visas med hänglås. *@
+    await Html.RenderPartialAsync("_SiteSideMenu", new HpskSite.Services.SitePages.SiteSideMenuModel("regionPageTabs", HpskSite.Services.SitePages.SiteTemplates.Region,
+        sp.Menu().ToList(), sp.OwnerUrl, ViewBag.canEditSite as bool? ?? false, isRegionalAdmin, "tutorial-06", null, null, sp.Links()));
+}
+else
+{
 <ul class="nav nav-tabs mb-4" id="regionPageTabs" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" id="regionHome-tab" data-bs-toggle="tab" data-bs-target="#regionHome" type="button" role="tab" aria-controls="regionHome" aria-selected="true">
@@ -50,9 +60,8 @@
             </button>
         </li>
         <li class="nav-item ms-auto" role="presentation">
-            <button class="btn btn-sm btn-outline-primary align-self-center mt-1" onclick="TutorialHelper.open('tutorial-06')" title="Se instruktionsvideo för kretsadministratörer">
-                <i class="bi bi-play-circle me-1"></i>Guide
-            </button>
+            @await Html.PartialAsync("_GuideButton", new HpskSite.Models.GuideButtonModel("tutorial-06", "Se instruktionsvideo för kretsadministratörer", Small: true, ExtraClass: "align-self-center mt-1"))
         </li>
     }
 </ul>
+}

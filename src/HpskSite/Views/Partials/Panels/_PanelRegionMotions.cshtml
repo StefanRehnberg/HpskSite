@@ -1,0 +1,6 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@if (Model.LoggedIn)
+{
+    @* Under kretskortet (Stefan 2026-10-08): kretsårsmötets motioner (styrelseledamöter i kretsens klubbar) och kretsstyrelsens ärenden (kretsstyrelsen). Delvyn ritar ingenting för övriga. *@
+    @await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardOwnerType", HpskSite.Models.DocumentOwnerType.Region }, { "MotionCardOwnerId", Model.OwnerId } })
+}

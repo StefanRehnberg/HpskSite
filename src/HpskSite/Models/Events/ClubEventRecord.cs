@@ -54,6 +54,12 @@ namespace HpskSite.Models.Events
         public string PricesJson { get; set; } = "";
         /// <summary>Vem som får anmäla sig (<see cref="HpskSite.Models.EventAudience"/>), normaliserad.</summary>
         public string Audience { get; set; } = HpskSite.Models.EventAudience.Club;
+        /// <summary>
+        /// Vem som får SE händelsen (skilt från <see cref="Audience"/>, som är vem som får anmäla sig). En ny händelse är öppen för alla,
+        /// som förut (alla händelser har varit publika sidor); tabellens egen DEFAULT är den snävare Inloggade. Prövas i
+        /// <c>SwitchingClubEventStore</c>. Nodlagringen kan inte bära fältet (<see cref="ClubEventFieldSupport.ReadVisibility"/>).
+        /// </summary>
+        public HpskSite.Services.SitePages.SiteVisibility ReadVisibility { get; set; } = HpskSite.Services.SitePages.SiteVisibility.Alla;
         /// <summary>Händelsens eget Swish-nummer. Tomt = ägarens.</summary>
         public string SwishNumber { get; set; } = "";
 
@@ -81,8 +87,8 @@ namespace HpskSite.Models.Events
     /// inte sparar.
     /// </summary>
     public sealed record ClubEventFieldSupport(
-        bool Mandatory, bool LanevapenOffered, bool Deadline, bool Prices, bool Swish, bool Audience)
+        bool Mandatory, bool LanevapenOffered, bool Deadline, bool Prices, bool Swish, bool Audience, bool ReadVisibility = true)
     {
-        public static readonly ClubEventFieldSupport All = new(true, true, true, true, true, true);
+        public static readonly ClubEventFieldSupport All = new(true, true, true, true, true, true, true);
     }
 }

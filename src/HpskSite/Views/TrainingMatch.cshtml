@@ -660,9 +660,9 @@
 
         // Set member data on body for other scripts to access
         document.body.dataset.memberId = '@(memberId ?? 0)';
-        document.body.dataset.memberName = '@Html.Raw(memberName.Replace("'", "\\'"))';
-        document.body.dataset.profilePictureUrl = '@Html.Raw(profilePictureUrl.Replace("'", "\\'"))';
-        document.body.dataset.clubName = '@Html.Raw(clubName.Replace("'", "\\'"))';
+        document.body.dataset.memberName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(memberName));
+        document.body.dataset.profilePictureUrl = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(profilePictureUrl));
+        document.body.dataset.clubName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(clubName));
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {

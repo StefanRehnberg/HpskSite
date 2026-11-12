@@ -1,0 +1,13 @@
+@* Klubbens egen text före/efter en systemsidas innehåll (klubbsidorna 2b, slots). Modell: (systemsidans nyckel, "before" | "after").
+   ViewBag.slotCtx sätts av Club.cshtml/RegionalPage.cshtml bara när ägaren har egen redigering PÅ; saknas den ritas ingenting (systemsidan är exakt som förut).
+   Allt i html är kodat/sanerat av SiteBlockRenderer. *@
+@model (string Key, string Position)
+@inject HpskSite.Services.SitePages.SiteSlotRenderer Slots
+@{
+    var ctx = ViewBag.slotCtx as HpskSite.Services.SitePages.SiteSlotContext;
+    var html = ctx == null ? "" : Slots.Render(ctx, Model.Key, Model.Position);
+}
+@if (html.Length > 0)
+{
+    <div class="site-slot site-slot-@Model.Position @(Model.Position == "before" ? "mb-4" : "mt-4")" data-slot="@Model.Key">@Html.Raw(html)</div>
+}

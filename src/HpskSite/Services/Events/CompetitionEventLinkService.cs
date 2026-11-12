@@ -87,7 +87,7 @@ namespace HpskSite.Services.Events
             if (competitionId <= 0) return null;
             var row = Read("WHERE CompetitionId = @0", competitionId).FirstOrDefault();
             if (row == null) return null;
-            var ev = _events.Get(row.EventId);
+            var ev = _events.Get(row.EventId, HpskSite.Services.Events.EventViewer.System);
             return ev != null && ev.IsPublished ? ev : null;
         }
 
@@ -126,7 +126,7 @@ namespace HpskSite.Services.Events
             {
                 if (!eventNames.TryGetValue(eventId, out var name))
                 {
-                    name = _events.Get(eventId)?.DisplayName;
+                    name = _events.Get(eventId, HpskSite.Services.Events.EventViewer.System)?.DisplayName;
                     eventNames[eventId] = name;
                 }
                 return name;
@@ -186,7 +186,7 @@ namespace HpskSite.Services.Events
                     : db.Fetch<LinkRow>("SELECT CompetitionId, EventId FROM dbo.CompetitionEventLink WITH (UPDLOCK, HOLDLOCK) WHERE CompetitionId IN (@0) AND EventId <> @1", wanted, ev.Id);
                 foreach (var t in taken)
                 {
-                    var other = _events.Get(t.EventId);
+                    var other = _events.Get(t.EventId, HpskSite.Services.Events.EventViewer.System);
                     if (other != null)
                         return (false, $"{allowed[t.CompetitionId]} är redan kopplad till händelsen {other.DisplayName}. Ta bort kopplingen där först.");
                 }

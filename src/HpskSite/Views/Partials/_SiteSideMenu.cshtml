@@ -1,0 +1,143 @@
+@* Besökarens vy: ägarens sidor som en VÄNSTERMENY (klubbens och kretsens sida, och deras egna sidor), i stället för flikraden. Gäller ägare med den nya sidstrukturen PÅ;
+   AV = dagens flikrad (ClubNavigation/RegionalNavigation ritar den som förut).
+   Hem och Admin är Bootstrap-flikar på rotadressen (de växlar utan omladdning, med dagens flik-id:n och hashtolkare); varje annan post är en länk. Alla har id "{panel}-tab"
+   och data-bs-target, så att dagens skript och djuplänkar (getElementById('clubCalendar-tab').click(), #clubCompetitions m.fl.) leder rätt.
+   En låst sida (en vanlig medlem skulle få se den, men inte tittaren) har ett hänglås och leder till en ruta, aldrig till innehållet.
+   Telefon (< 768 px): EN knapp "Meny · {sida} ▾" som fäller ut listan. Layouten (menyn till vänster, innehållet till höger) sätts av omslaget .hpsk-sidelayout/.hpsk-sidebody i vyn. *@
+@model HpskSite.Services.SitePages.SiteSideMenuModel
+@{
+    var listId = Model.ListId;
+    var current = (Model.Items.FirstOrDefault(i => i.Current) ?? Model.Items.FirstOrDefault())?.Page.Label ?? "";
+}
+<nav class="hpsk-sidemenu" aria-label="Sidor">
+    <button type="button" class="btn btn-outline-secondary w-100 text-start d-md-none mb-2 hpsk-sitenav-toggle" id="@(listId)-toggle"
+            data-bs-toggle="collapse" data-bs-target="#@listId" aria-controls="@listId" aria-expanded="false">
+        <i class="bi bi-list me-2"></i>Meny · <span class="hpsk-sitenav-current">@current</span>
+        <i class="bi bi-chevron-down float-end mt-1"></i>
+    </button>
+    <ul class="nav nav-pills flex-column collapse d-md-flex hpsk-sidemenu-list" id="@listId" role="tablist">
+        @* Sidor under sidor: en undersida ritas inuti sin förälders post (en grupp som fälls ut), aldrig som egen post på första nivån. Gruppen är utfälld när sidan eller en av
+           undersidorna är den aktuella. Pilen är en egen knapp, så att själva sidnamnet fortfarande är en länk. *@
+        @foreach (var item in Model.Items.Where(i => i.ParentPageId == null && i.ParentKey == null))
+        {
+            @* En egen sida har undersidor via ParentPageId; en omgjord systemsida (Om) via ParentKey = dess mallnyckel. *@
+            var children = item.FreePageId == null
+                ? Model.Items.Where(c => c.ParentKey != null && c.ParentKey == item.Page.Key).ToList()
+                : Model.Items.Where(c => c.ParentPageId == item.FreePageId).ToList();
+            var groupOpen = item.Current || children.Any(c => c.Current);
+            var subId = "sub-" + item.PaneId;
+            <li class="nav-item" role="presentation">
+                @if (children.Count == 0)
+                {
+                    @await Html.PartialAsync("_SiteSideMenuItem", (item, Model.OwnerType))
+                }
+                else
+                {
+                    <div class="hpsk-menurow">
+                        @await Html.PartialAsync("_SiteSideMenuItem", (item, Model.OwnerType))
+                        <button type="button" class="hpsk-subtoggle" data-bs-toggle="collapse" data-bs-target="#@subId" aria-controls="@subId"
+                                aria-expanded="@(groupOpen ? "true" : "false")" aria-label="Undersidor till @item.Page.Label"><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
+                    </div>
+                    <ul class="nav flex-column hpsk-submenu collapse @(groupOpen ? "show" : "")" id="@subId" aria-label="Undersidor till @item.Page.Label">
+                        @foreach (var child in children)
+                        {
+                            <li class="nav-item" role="presentation">@await Html.PartialAsync("_SiteSideMenuItem", (child, Model.OwnerType))</li>
+                        }
+                    </ul>
+                }
+            </li>
+        }
+        @{ var extLinks = Model.Links ?? Array.Empty<HpskSite.Services.SitePages.SiteExternalLink>(); }
+        @if ((!string.IsNullOrEmpty(Model.ExternalUrl) && !string.IsNullOrEmpty(Model.ExternalLabel)) || extLinks.Count > 0)
+        {
+            <li class="hpsk-sidemenu-sep" role="presentation" aria-hidden="true"></li>
+        }
+        @if (!string.IsNullOrEmpty(Model.ExternalUrl) && !string.IsNullOrEmpty(Model.ExternalLabel))
+        {
+            <li class="nav-item" role="presentation">
+                <a class="nav-link hpsk-external" href="@Model.ExternalUrl">@Model.ExternalLabel<i class="bi bi-box-arrow-up-right ms-2" aria-hidden="true"></i></a>
+            </li>
+        }
+        @* Ägarens egna externa länkar (Hemsidan → Länkar i menyn): alltid https, öppnas i ny flik, etiketten kodas av Razor. *@
+        @foreach (var link in extLinks)
+        {
+            <li class="nav-item" role="presentation">
+                <a class="nav-link hpsk-external" href="@link.Url" target="_blank" rel="noopener noreferrer" data-menu-link="@link.Id">@link.Label<i class="bi bi-box-arrow-up-right ms-2" aria-hidden="true"></i><span class="visually-hidden"> (öppnas i en ny flik)</span></a>
+            </li>
+        }
+        @* Hemsidan ligger i Admin (som Styrelsearbete och Ekonomi), inte här. *@
+        @if (Model.IsAdmin && !string.IsNullOrEmpty(Model.Tutorial))
+        {
+            <li class="hpsk-sidemenu-sep" role="presentation" aria-hidden="true"></li>
+        }
+        @if (Model.IsAdmin && !string.IsNullOrEmpty(Model.Tutorial))
+        {
+            <li class="nav-item" role="presentation">
+                <button class="btn btn-sm btn-outline-primary w-100" onclick="TutorialHelper.open('@Model.Tutorial')" title="Se instruktionsvideo för administratörer">
+                    <i class="bi bi-play-circle me-1"></i>Guide
+                </button>
+            </li>
+        }
+    </ul>
+</nav>
+<style>
+    @@media (min-width: 768px) {
+        .hpsk-sidelayout { display: flex; gap: 1.5rem; align-items: flex-start; }
+        .hpsk-sidelayout > .hpsk-sidemenu { flex: 0 0 250px; width: 250px; position: sticky; top: 1rem; }
+        .hpsk-sidelayout > .hpsk-sidebody { flex: 1 1 auto; min-width: 0; }
+        .hpsk-sidemenu .hpsk-sidemenu-list { gap: 2px; background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: 8px; }
+    }
+    .hpsk-sidelayout.hpsk-admin-open > .hpsk-sidemenu { display: none; }
+    .hpsk-admin-back { display: none; }
+    a.hpsk-admin-back { color: var(--bs-secondary-color); font-size: .9rem; padding: 6px 12px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); text-decoration: none; }
+    a.hpsk-admin-back:hover { color: var(--bs-link-color); }
+    .hpsk-sidelayout .hpsk-admin-back { display: block; }
+    .hpsk-sidemenu .nav-link { display: flex; align-items: center; width: 100%; text-align: left; color: var(--bs-body-color); border-radius: 8px; padding: 8px 12px; border-left: 3px solid transparent; }
+    .hpsk-sidemenu .nav-link:hover { background-color: var(--bs-secondary-bg); }
+    .hpsk-sidemenu .nav-link.active { background-color: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); font-weight: 600; border-left-color: var(--bs-primary); }
+    .hpsk-sidemenu .nav-link.hpsk-locked:not(.active) { color: var(--bs-secondary-color); }
+    .hpsk-sidemenu .hpsk-lock { margin-left: auto; font-size: .85rem; }
+    .hpsk-sidemenu .hpsk-external { font-size: .9rem; color: var(--bs-link-color); }
+    .hpsk-sidemenu .hpsk-sidemenu-sep { border-top: 1px solid var(--bs-border-color); margin: .5rem .25rem; list-style: none; }
+    /* Sidor under sidor: sidnamnet är en länk och pilen en egen knapp; undersidorna ligger indragna under en linje. */
+    .hpsk-sidemenu .hpsk-menurow { display: flex; align-items: stretch; gap: 2px; }
+    .hpsk-sidemenu .hpsk-menurow > .nav-link { flex: 1 1 auto; min-width: 0; width: auto; }
+    .hpsk-sidemenu .hpsk-subtoggle { flex: 0 0 auto; width: 2.25rem; border: 0; background: transparent; color: var(--bs-secondary-color); border-radius: 8px; }
+    .hpsk-sidemenu .hpsk-subtoggle:hover { background-color: var(--bs-secondary-bg); }
+    .hpsk-sidemenu .hpsk-subtoggle i { transition: transform .15s; }
+    .hpsk-sidemenu .hpsk-subtoggle[aria-expanded="true"] i { transform: rotate(180deg); }
+    .hpsk-sidemenu .hpsk-submenu { margin: 2px 0 4px 1.1rem; padding-left: .5rem; border-left: 2px solid var(--bs-border-color); gap: 2px; }
+    .hpsk-sidemenu .hpsk-submenu .nav-link { font-size: .95rem; padding: 6px 10px; }
+    @@media (max-width: 767.98px) {
+        .hpsk-sidemenu .hpsk-sidemenu-list { margin-bottom: .75rem; border: 1px solid var(--bs-border-color); border-radius: .375rem; padding: .25rem; }
+    }
+</style>
+<script>
+    (function () {
+        var list = document.getElementById('@listId'), btn = document.getElementById('@(listId)-toggle');
+        if (!list || !btn) return;
+        var label = btn.querySelector('.hpsk-sitenav-current');
+        function collapseIfOpen() {
+            if (list.classList.contains('show') && window.bootstrap) bootstrap.Collapse.getOrCreateInstance(list).hide();
+        }
+        // Hem och Admin är flikar på samma sida: etiketten följer den aktiva fliken och menyn fälls ihop.
+        // Admin har en egen meny: den ERSÄTTER sidmenyn (ingen andra meny bredvid), och "Tillbaka till sidorna" i adminpanelen leder hem.
+        var layout = list.closest('.hpsk-sidelayout');
+        list.addEventListener('shown.bs.tab', function (e) {
+            var t = e.target && e.target.textContent ? e.target.textContent.replace(/\s+/g, ' ').trim() : '';
+            if (t && label) label.textContent = t;
+            if (layout) layout.classList.toggle('hpsk-admin-open', !!(e.target && /Admin-tab$/.test(e.target.id)));
+            collapseIfOpen();
+        });
+        document.addEventListener('click', function (e) {
+            var b = e.target && e.target.closest ? e.target.closest('[data-hpsk-back-to-pages]') : null;
+            if (!b) return;
+            e.preventDefault();
+            var home = list.querySelector('button[data-bs-toggle="tab"]:not([id$="Admin-tab"])');
+            if (home) home.click();
+        });
+        // Bara menyns egen utfällning (telefon), inte en undersidegrupp inuti den: de bubblar upp hit.
+        list.addEventListener('shown.bs.collapse', function (e) { if (e.target === list) btn.setAttribute('aria-expanded', 'true'); });
+        list.addEventListener('hidden.bs.collapse', function (e) { if (e.target === list) btn.setAttribute('aria-expanded', 'false'); });
+    })();
+</script>

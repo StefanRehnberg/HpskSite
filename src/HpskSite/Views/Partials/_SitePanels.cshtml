@@ -1,0 +1,93 @@
+@* EN ritväg för systemsidornas paneler (konvertera-planen v2, K0b + K3/K4). Modell: SitePanelContext med PageKey satt.
+   En vanlig systemsida ritas ur standardlistan i PanelCatalog. En OMVANDLAD sida (egen redigering PÅ och sidan gjord om) ritas ur sina lagrade block
+   genom SAMMA loop: panelblock via SiteBlockRenderer.PanelVisible (vyns enda fråga före varje panel), egna block som färdig html.
+   Full = hela bredden; på Hem ritas följande Main/Side-paneler i en rad med col-lg-8 / col-lg-4. Varje panel är en egen delvy:
+   lokala namn kolliderar därför inte (Razor-vyn är annars EN metod). *@
+@model HpskSite.Services.SitePages.SitePanelContext
+@using HpskSite.Services.SitePages
+@using Umbraco.Extensions
+@inject SiteConvertedRenderer Converted
+@{
+    var plan = Converted.Plan(Model, Model.Node.Url());
+    // (Row = i en kolumnrad, Items = nyckel + färdig html för egna block; null = panel som ritas av delvyn)
+    var segments = new List<(bool Row, List<(string Key, PanelZone Zone, string? Html)> Items)>();
+    void Add((string Key, PanelZone Zone, string? Html) item)
+    {
+        var inRow = item.Zone != PanelZone.Full;
+        if (segments.Count == 0 || segments[^1].Row != inRow || !inRow)
+            segments.Add((inRow, new List<(string, PanelZone, string?)>()));
+        segments[^1].Items.Add(item);
+    }
+    if (plan == null)
+    {
+        foreach (var p in PanelCatalog.Standard(Model.OwnerType, Model.PageKey, Model.LoggedIn)) Add((p.Key, p.Zone, null));
+    }
+    else if (!plan.Broken)
+    {
+        foreach (var i in plan.Items)
+        {
+            if (i.PanelKey == null) { Add(("", i.Zone, i.Html)); continue; }
+            // En panel som inte ger något att visa ritas inte (ingen tom ruta, ingen tom kolumn).
+            var html = await RenderPanelAsync(i.PanelKey);
+            if (string.IsNullOrWhiteSpace(Flatten(html))) continue;
+            Add((i.PanelKey, i.Zone, null));
+            rendered[i.PanelKey] = html;
+        }
+    }
+}
+@if (plan is { Broken: true })
+{
+    <div class="alert alert-warning" role="alert" data-site-page-error="@Model.PageKey">Den här sidan kan inte visas just nu. Försök igen om en stund. Är du administratör: kontakta pistol.nu om det fortsätter.</div>
+}
+@foreach (var seg in segments)
+{
+    if (!seg.Row)
+    {
+        foreach (var p in seg.Items)
+        {
+            @await DrawAsync(p)
+        }
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-lg-8">
+                @foreach (var p in seg.Items.Where(x => x.Zone == PanelZone.Main))
+                {
+                    @await DrawAsync(p)
+                }
+            </div>
+            <div class="col-lg-4">
+                @foreach (var p in seg.Items.Where(x => x.Zone == PanelZone.Side))
+                {
+                    @await DrawAsync(p)
+                }
+            </div>
+        </div>
+    }
+}
+@functions {
+    // Redan ritade paneler på en omvandlad sida (ritas EN gång: antingen för att se om de är tomma eller för att skrivas ut).
+    private readonly Dictionary<string, Microsoft.AspNetCore.Html.IHtmlContent> rendered = new();
+
+    private async Task<Microsoft.AspNetCore.Html.IHtmlContent> RenderPanelAsync(string key)
+    {
+        var def = PanelCatalog.Find(Model.OwnerType, key);
+        if (def?.Partial == null) return Microsoft.AspNetCore.Html.HtmlString.Empty;
+        return await Html.PartialAsync(def.Partial, Model);
+    }
+
+    private async Task<Microsoft.AspNetCore.Html.IHtmlContent> DrawAsync((string Key, PanelZone Zone, string? Html) p)
+    {
+        if (p.Html != null) return new Microsoft.AspNetCore.Html.HtmlString(p.Html);
+        if (rendered.TryGetValue(p.Key, out var done)) return done;
+        return await RenderPanelAsync(p.Key);
+    }
+
+    private static string Flatten(Microsoft.AspNetCore.Html.IHtmlContent c)
+    {
+        using var w = new System.IO.StringWriter();
+        c.WriteTo(w, System.Text.Encodings.Web.HtmlEncoder.Default);
+        return w.ToString();
+    }
+}

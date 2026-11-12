@@ -48,7 +48,7 @@ namespace HpskSite.Services.Events
         /// Händelsen läses via <see cref="IClubEventStore"/> (sajtstrukturen fas 2a): posten bär ägaren.</summary>
         public EventOwner? ForEvent(int eventId)
         {
-            var e = eventId > 0 ? _events.Get(eventId) : null;
+            var e = eventId > 0 ? _events.Get(eventId, HpskSite.Services.Events.EventViewer.System) : null;
             return e is null ? null : ForOwnerId(e.OwnerId);
         }
 

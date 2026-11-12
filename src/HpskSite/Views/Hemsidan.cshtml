@@ -1,0 +1,41 @@
+@using Umbraco.Extensions
+@using HpskSite.Services.SitePages
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@*
+    Hemsidan: klubbens och kretsens redigeringsyta för egna sidor (klubbsidorna 2b). Modellen är ägarens nod. Findern pekar hit bara när brytare 2 är PÅ,
+    och SitePageAccessFilter släpper in bara ägarens EGEN admin (404 för alla andra, även utloggade). All data hämtas och skrivs via SiteEditController,
+    som prövar ägaren på nytt vid varje anrop — den här vyn är bara skalet.
+*@
+@{
+    Layout = "Master.cshtml";
+    var req = SitePageRequest.Current(Context);
+    var ownerType = req?.OwnerType ?? SiteTemplates.Club;
+    var ownerName = Model?.Value<string>("clubName") ?? Model?.Value<string>("regionName") ?? Model?.Name ?? "";
+    ViewBag.Title = "Hemsidan – " + ownerName;
+    ViewBag.OgTitle = "Hemsidan";
+    // ⚠️ UTKAST — ska ersättas av juristens text innan någon riktig klubb får skrivytan (BBS-lagen, ansvar för innehåll, personuppgifter).
+    var terms = new[]
+    {
+        "Ni ansvarar för det ni skriver och lägger upp på er hemsida på pistol.nu.",
+        "Skriv inte personnummer, och lägg inte ut uppgifter om en person utan att personen har sagt ja.",
+        "Det ni skriver ska vara sant, lagligt och inte kränka någon. Pistol.nu får ta ned en sida som bryter mot det.",
+        "Det ni väljer att göra synligt för alla kan läsas av vem som helst på internet. Välj \"Alla\" bara för sådant som verkligen är offentligt.",
+        "Ni kan ångra en radering i 30 dagar. Därefter försvinner sidan för gott.",
+    };
+}
+
+<div class="hs-page container-fluid py-4" id="hemsidan-app"
+     data-owner-type="@ownerType" data-owner-id="@req?.OwnerId" data-owner-name="@ownerName" data-owner-url="@Model?.Url()">
+    @Html.AntiForgeryToken()
+    <noscript><div class="alert alert-warning">Hemsidan behöver JavaScript för att fungera.</div></noscript>
+    <div id="hsBody"><p class="text-muted">Laddar …</p></div>
+    <script type="application/json" id="hsTerms">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(terms))</script>
+</div>
+
+<link rel="stylesheet" href="/css/hemsidan.css?v=9" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
+<script src="/js/planering-dates.js?v=1"></script>
+<script src="/js/hemsidan.js?v=40"></script>

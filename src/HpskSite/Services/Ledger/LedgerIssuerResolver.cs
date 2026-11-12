@@ -61,7 +61,7 @@ namespace HpskSite.Services.Ledger
             if (content is null) return null;
 
             // Händelsen via händelselagringen (sajtstrukturen fas 2a): posten bär ägaren som (typ, id).
-            var e = _events.Get(eventNodeId);
+            var e = _events.Get(eventNodeId, HpskSite.Services.Events.EventViewer.System);
             if (e is null)
             {
                 _logger.LogWarning("Evenemang {Id} hittades inte — utställaren kan inte avgöras.", eventNodeId);

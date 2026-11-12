@@ -1,0 +1,3 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@* "Det här händer i {klubben}" — samma flöde som startsidan och kretssidan, låst till klubbens egna tävlingar, händelser och träningar. *@
+@await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedClubId = Model.OwnerId, LockedClubName = Model.OwnerName })

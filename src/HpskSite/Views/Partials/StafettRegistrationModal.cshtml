@@ -179,7 +179,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const stafettCompetitionId = @(ViewData["CompetitionId"]);
     const stafettCurrentMemberClubId = @(ViewData["CurrentMemberClubId"] ?? 0);
-    const stafettCurrentMemberClubName = '@Html.Raw(((string)(ViewData["CurrentMemberClubName"] ?? "")).Replace("'", "\\'"))';
+    const stafettCurrentMemberClubName = @Html.Raw(System.Text.Json.JsonSerializer.Serialize((string)(ViewData["CurrentMemberClubName"] ?? "")));
     const stafettCurrentMemberId = @(ViewData["CurrentMemberId"] ?? 0);
     const stafettRegRole = '@(ViewData["RegRole"] ?? "member")';
     const stafettRegRegionCode = '@(ViewData["RegRegionCode"] ?? "")';

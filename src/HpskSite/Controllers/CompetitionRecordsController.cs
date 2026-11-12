@@ -266,7 +266,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> ListForClub(int clubId)
         {
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltigt klubb-ID." });
-            if (!await IsLoggedIn()) return Json(new { success = false, message = "Login required." });
+            if (!await CanReadAsync(RecordLevels.Club, clubId.ToString())) return Json(new { success = false, message = "Login required." });
 
             var rows = await _recordsService.GetCurrentForScopeAsync(RecordLevels.Club, clubId.ToString());
             return Json(new { success = true, data = rows.Select(ProjectRecord) });
@@ -277,7 +277,7 @@ namespace HpskSite.Controllers
         {
             if (string.IsNullOrWhiteSpace(regionCode))
                 return Json(new { success = false, message = "Ogiltig kretskod." });
-            if (!await IsLoggedIn()) return Json(new { success = false, message = "Login required." });
+            if (!await CanReadAsync(RecordLevels.Region, regionCode)) return Json(new { success = false, message = "Login required." });
 
             var rows = await _recordsService.GetCurrentForScopeAsync(RecordLevels.Region, regionCode);
             return Json(new { success = true, data = rows.Select(ProjectRecord) });
@@ -302,7 +302,7 @@ namespace HpskSite.Controllers
             {
                 return Json(new { success = false, message = "Ogiltig nyckel." });
             }
-            if (!await IsLoggedIn()) return Json(new { success = false, message = "Login required." });
+            if (!await CanReadAsync(level, scopeId)) return Json(new { success = false, message = "Login required." });
 
             var rows = await _recordsService.GetHistoryAsync(level, scopeId, discipline, recordType, classCode);
             return Json(new { success = true, data = rows.Select(ProjectRecord) });
@@ -389,6 +389,20 @@ namespace HpskSite.Controllers
         }
 
         // ── Helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Får den som frågar läsa rekorden för <paramref name="scopeId"/>? Inloggad: ja. Utloggad: bara när klubben eller kretsen publicerat panelen Rekord för alla ("Visa publikt", SitePaneGate).
+        /// </summary>
+        private async Task<bool> CanReadAsync(string level, string scopeId)
+        {
+            if (await IsLoggedIn()) return true;
+            var gate = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.SitePages.SitePaneGate>();
+            if (string.Equals(level, RecordLevels.Club, StringComparison.OrdinalIgnoreCase))
+                return int.TryParse(scopeId, out var clubId) && gate.IsPublic(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "records", "records");
+            if (string.Equals(level, RecordLevels.Region, StringComparison.OrdinalIgnoreCase))
+                return gate.IsPublicForRegionCode(scopeId, "records", "records");
+            return false;
+        }
 
         private async Task<bool> IsLoggedIn()
         {

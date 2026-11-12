@@ -1,0 +1,9 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@{
+    var regionRecVD = new ViewDataDictionary(ViewData);
+    regionRecVD["RecordsScopeType"] = "Region";
+    regionRecVD["RecordsScopeId"] = Model.RegionCode;
+    regionRecVD["RecordsCanEdit"] = Model.OwnerAdmin;
+    regionRecVD["RecordsScopeName"] = Model.OwnerName;
+}
+@await Html.PartialAsync("RecordsHallOfFame", null, regionRecVD)

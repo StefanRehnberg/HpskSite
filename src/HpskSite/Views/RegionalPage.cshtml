@@ -1,10 +1,15 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Globalization;
 @using Umbraco.Cms.Core.Security;
 @using Umbraco.Cms.Core.Services;
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
+@inject HpskSite.Services.SitePages.SitePageViewFactory SitePages
+@inject HpskSite.Services.BoardRoleService BoardRoles
+@inject HpskSite.Services.SitePages.SiteViewerResolver SiteViewers
+@inject HpskSite.Services.SitePages.SiteOwnerService SiteOwners
+@inject HpskSite.Services.SitePages.SiteAppearanceService SiteAppearanceSvc
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -34,6 +39,13 @@
 
 
     ViewBag.Title = regionName;
+    ViewBag.siteOwnerType = HpskSite.Services.SitePages.SiteTemplates.Region;
+    ViewBag.siteOwnerId = Model.Id;
+    var regionLook = SiteAppearanceSvc.Get(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id);
+    // Standardfärgen behåller dagens blå överlägg ord för ord; en vald färg läser sidans primärfärg.
+    var heroOverlay = regionLook.HasCustomColor
+        ? "linear-gradient(135deg, rgba(var(--bs-primary-rgb),0.6) 0%, rgba(var(--bs-primary-rgb),0.65) 100%)"
+        : "linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%)";
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: region logo → site default
@@ -53,17 +65,45 @@
     {
         isRegionalAdmin = await AuthorizationService.IsRegionalAdminForRegion(regionCode);
     }
+
+    // Kretsstyrelsen = en aktiv styrelseroll hos kretsen (klubbsidorna F1; "kretsmedlem" kommer med 2d).
+    var isRegionBoard = false;
+    if (currentMember != null)
+    {
+        var boardMember = MemberService.GetByEmail(currentMember.Email ?? string.Empty);
+        if (boardMember != null)
+            isRegionBoard = BoardRoles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, Model.Id, boardMember.Id);
+    }
+
+    // Klubbsidorna steg 1: den nya sidstrukturen (av = dagens vy, oförändrad). Se SitePageView.
+    var sp = SitePages.For(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, Model.Url(),
+        await SiteViewers.ResolveAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode));   // kretsmedlem (2d) räknas ut på EN plats
+    ViewBag.sitePageView = sp;
+    // Panelregistret (K0b): EN ritväg för systemsidornas paneler.
+    var panelCtx = new HpskSite.Services.SitePages.SitePanelContext(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionName, Model, sp.Viewer with { IsOwnerAdmin = isRegionalAdmin }, regionCode);
+    // Kretsens egen text före/efter systemsidorna (slots): bara när egen redigering är PÅ (annars ritas ingenting).
+    ViewBag.slotCtx = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
+        ? new HpskSite.Services.SitePages.SiteSlotContext(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, sp.Viewer, Model.Url(), Model)
+        : null;
+    // Hemsidan (egna sidor): länken syns bara för kretsens EGEN admin och bara när brytare 2 är PÅ.
+    ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
+        && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode);
 }
 
 <!-- Hero Banner Section -->
 <div class="row mb-4">
     <div class="col-12">
-        @if (bannerImage != null)
+        @if (regionLook.Header != HpskSite.Services.SitePages.SiteAppearance.DefaultHeader)
+        {
+            @await Html.PartialAsync("_SiteHeaderVariant", new HpskSite.Services.SitePages.SiteHeaderModel(
+                regionLook.Header, regionLook.Palette, welcomeTitle, null, welcomeText, logo?.Url(), bannerImage?.Url()))
+        }
+        else if (bannerImage != null)
         {
             <div class="position-relative rounded overflow-hidden" style="height: 300px;">
                 <img src="@bannerImage.Url()" alt="@regionName" class="w-100 h-100" style="object-fit: cover;">
                 <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-                     style="background: linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%);">
+                     style="background: @Html.Raw(heroOverlay);">
                     <div class="text-center text-white p-4">
                         @if (logo != null)
                         {
@@ -109,8 +149,18 @@
     var regionId = @Model.Id;
 </script>
 
+@{ var lockedNeeds = HpskSite.Services.SitePages.SitePageRequest.LockedNeedsMembership(Context); }
+@* Besökarens vy: med den nya sidstrukturen PÅ ligger menyn till vänster och innehållet till höger (se _SiteSideMenu). *@
+@if (sp.Enabled)
+{
+    @Html.Raw("<div class=\"hpsk-sidelayout\">")
+}
 <!-- Tab Navigation (visible to all visitors) -->
 @await Html.PartialAsync("RegionalNavigation")
+@if (sp.Enabled)
+{
+    @Html.Raw("<div class=\"hpsk-sidebody\">")
+}
 
 @if (isRegionalAdmin)
 {
@@ -141,98 +191,101 @@
     @await Html.PartialAsync("_CompetitionEditDispatch")
 }
 
+@if (lockedNeeds != null)
+{
+    @await Html.PartialAsync("_SiteLocked", ("Region", regionName, lockedNeeds.Value, isLoggedIn, "/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(Context.Request.Path.Value!.TrimEnd('/') + "/")))
+}
+
 <div class="tab-content" id="regionPageTabContent">
+    @* Klubbsidorna: med den nya sidstrukturen PÅ skrivs bara den här sidans panel ut (sp.ShowsPane); av = alla, som förut. *@
     <!-- Home Tab -->
-    <div class="tab-pane fade show active" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
+    @if (sp.ShowsPane("regionHome"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionHome")" id="regionHome" role="tabpanel" aria-labelledby="regionHome-tab">
+        @await Html.PartialAsync("_SitePageSlots", ("home", "before"))
         @* "Det här händer" feed, locked to this krets (no krets selector, no region nav) *@
-        @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedRegionCode = regionCode, LockedRegionName = regionName })
-        @await Html.PartialAsync("_RegionPublicContent", Model, new ViewDataDictionary(ViewData)
-        {
-            { "clubsPage", clubsPage },
-            { "clubsUrl", clubsUrl },
-            { "clubCount", clubCount },
-            { "aboutRegion", aboutRegion },
-            { "contactPerson", contactPerson },
-            { "contactEmail", contactEmail },
-            { "contactPhone", contactPhone }
-        })
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
+        @await Html.PartialAsync("_SitePageSlots", ("home", "after"))
     </div>
+    }
 
     <!-- Om (About) Tab -->
-    <div class="tab-pane fade" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
-        @if (!string.IsNullOrEmpty(aboutRegion))
-        {
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Om @regionName</h5>
-                </div>
-                <div class="card-body">
-                    <div id="regionAboutContent" class="prose"></div>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>Ingen information om kretsen har lagts till ännu.
-            </div>
-        }
-        @if (isLoggedIn)
-        {
-            @await Html.PartialAsync("RegionInstructorsPublicPanel")
-        }
+    @if (sp.ShowsPane("regionAbout"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionAbout")" id="regionAbout" role="tabpanel" aria-labelledby="regionAbout-tab">
+        @await Html.PartialAsync("_SitePageSlots", ("about", "before"))
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "about" })
+        @await Html.PartialAsync("_SitePageSlots", ("about", "after"))
     </div>
+    }
 
     <!-- Competitions Tab (visible to all visitors) -->
-    <div class="tab-pane fade" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
-        @await Html.PartialAsync("RegionCompetitionsList")
+    @if (sp.ShowsPane("regionCompetitions"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionCompetitions")" id="regionCompetitions" role="tabpanel" aria-labelledby="regionCompetitions-tab">
+        @await Html.PartialAsync("_SitePageSlots", ("competitions", "before"))
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "competitions" })
+        @await Html.PartialAsync("_SitePageSlots", ("competitions", "after"))
     </div>
+    }
 
     <!-- Kretskalendern (kretsgranskning fas 4) — öppen för alla, laddas när fliken visas -->
-    <div class="tab-pane fade" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
-        @await Html.PartialAsync("_KretsCalendar", Model.Id)
+    @if (sp.ShowsPane("regionCalendar"))
+    {
+    <div class="tab-pane fade @sp.PaneClass("regionCalendar")" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
+        @await Html.PartialAsync("_SitePageSlots", ("calendar", "before"))
+        @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "calendar" })
+        @await Html.PartialAsync("_SitePageSlots", ("calendar", "after"))
     </div>
+    }
 
-    @if (isLoggedIn)
+    @* Rekord: för en inloggad som förut; en utloggad ser den bara när kretsen publicerat den för alla ("Visa publikt", bara med nya sidstrukturen PÅ, där ShowsPane prövar tittaren). *@
+    @if ((isLoggedIn || sp.Enabled) && sp.ShowsPane("regionRecords"))
     {
         <!-- Records (Hall of Fame) Tab -->
-        <div class="tab-pane fade" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
-            @{
-                var regionRecVD = new ViewDataDictionary(ViewData);
-                regionRecVD["RecordsScopeType"] = "Region";
-                regionRecVD["RecordsScopeId"] = regionCode;
-                regionRecVD["RecordsCanEdit"] = isRegionalAdmin;
-                regionRecVD["RecordsScopeName"] = regionName;
-            }
-            @await Html.PartialAsync("RecordsHallOfFame", null, regionRecVD)
-        </div>
-
-        <!-- Documents Tab -->
-        <div class="tab-pane fade" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
-            @{
-                ViewBag.DocumentOwnerType = 1;
-                ViewBag.DocumentOwnerId = Model.Id;
-            }
-            @await Html.PartialAsync("DocumentArchive")
-        </div>
-
-        <!-- Board Tab -->
-        <div class="tab-pane fade" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
-            @{
-                ViewBag.regionContentId = Model.Id;
-            }
-            @await Html.PartialAsync("RegionalBoardPanel")
+        <div class="tab-pane fade @sp.PaneClass("regionRecords")" id="regionRecords" role="tabpanel" aria-labelledby="regionRecords-tab">
+            @await Html.PartialAsync("_SitePageSlots", ("records", "before"))
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "records" })
+            @await Html.PartialAsync("_SitePageSlots", ("records", "after"))
         </div>
     }
 
-    @if (isRegionalAdmin)
+    @if (isLoggedIn)
+    {
+
+        <!-- Documents Tab -->
+        if (sp.ShowsPane("regionDocuments"))
+        {
+        <div class="tab-pane fade @sp.PaneClass("regionDocuments")" id="regionDocuments" role="tabpanel" aria-labelledby="regionDocuments-tab">
+            @await Html.PartialAsync("_SitePageSlots", ("documents", "before"))
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "documents" })
+            @await Html.PartialAsync("_SitePageSlots", ("documents", "after"))
+        </div>
+        }
+
+        <!-- Board Tab -->
+        if (sp.ShowsPane("regionBoard"))
+        {
+        <div class="tab-pane fade @sp.PaneClass("regionBoard")" id="regionBoard" role="tabpanel" aria-labelledby="regionBoard-tab">
+            @await Html.PartialAsync("_SitePageSlots", ("board", "before"))
+            @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "board" })
+            @await Html.PartialAsync("_SitePageSlots", ("board", "after"))
+        </div>
+        }
+    }
+
+    @if (isRegionalAdmin && sp.ShowsPane("regionAdmin"))
     {
         <!-- Administration Tab -->
-        <div class="tab-pane fade" id="regionAdmin" role="tabpanel" aria-labelledby="regionAdmin-tab">
+        <div class="tab-pane fade @sp.PaneClass("regionAdmin")" id="regionAdmin" role="tabpanel" aria-labelledby="regionAdmin-tab">
             @await Html.PartialAsync("RegionalAdminPanel")
         </div>
     }
 </div>
+@if (sp.Enabled)
+{
+    @Html.Raw("</div></div>")
+}
 
 <script>
 (function() {
@@ -251,12 +304,19 @@
             var container = document.getElementById('regionQuickLinkDocuments');
             if (!container) return;
             if (data.success && data.data && data.data.length > 0) {
+                // Expertgruppen 2026-11-09 (S1): titel, filnamn och ikon kommer från en administratörs inmatning
+                // och får aldrig in som markup. Samma skydd som klubbens motsvarighet (escapeHtml i Club.cshtml).
+                var esc = function(s) {
+                    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+                        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                    });
+                };
                 var html = '';
                 data.data.forEach(function(doc) {
-                    html += '<a href="/umbraco/surface/Document/DownloadDocument?id=' + doc.id + '" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank">'
-                        + '<i class="bi ' + doc.icon + ' me-3 text-primary"></i>'
-                        + '<div><strong>' + doc.title + '</strong>'
-                        + '<small class="d-block text-muted">' + doc.fileName + '</small></div></a>';
+                    html += '<a href="/umbraco/surface/Document/DownloadDocument?id=' + encodeURIComponent(doc.id) + '" class="list-group-item list-group-item-action d-flex align-items-center" target="_blank" rel="noopener">'
+                        + '<i class="bi ' + esc(doc.icon) + ' me-3 text-primary"></i>'
+                        + '<div><strong>' + esc(doc.title) + '</strong>'
+                        + '<small class="d-block text-muted">' + esc(doc.fileName) + '</small></div></a>';
                 });
                 container.innerHTML = html;
             }
@@ -277,6 +337,8 @@
 
     // Load upcoming events for the region
     function loadUpcomingEvents() {
+        // Med den nya sidstrukturen finns Hem-panelen bara på rotadressen: ingen container, ingen hämtning.
+        if (!document.getElementById('upcomingEventsContainer')) return;
         fetch('/umbraco/surface/Club/GetRegionEvents?regionId=' + regionId)
             .then(function(response) { return response.json(); })
             .then(function(data) {

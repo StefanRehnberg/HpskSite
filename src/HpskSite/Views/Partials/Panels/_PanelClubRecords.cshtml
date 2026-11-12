@@ -1,0 +1,9 @@
+@model HpskSite.Services.SitePages.SitePanelContext
+@{
+    var clubRecVD = new ViewDataDictionary(ViewData);
+    clubRecVD["RecordsScopeType"] = "Club";
+    clubRecVD["RecordsScopeId"] = Model.OwnerId.ToString();
+    clubRecVD["RecordsCanEdit"] = Model.OwnerAdmin;
+    clubRecVD["RecordsScopeName"] = Model.OwnerName;
+}
+@await Html.PartialAsync("RecordsHallOfFame", null, clubRecVD)

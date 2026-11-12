@@ -46,14 +46,42 @@ namespace HpskSite.Extensions
             };
             s.FilterUrl += (_, e) =>
             {
-                if (e.OriginalUrl.StartsWith("//", StringComparison.Ordinal)) e.SanitizedUrl = null;
+                if (PointsToAnotherHost(e.OriginalUrl)) e.SanitizedUrl = null;
             };
             return s;
         }
 
-        /// <summary>Relativ adress (egen domän) — "//värd" räknas inte.</summary>
-        public static bool IsOwnUrl(string? url) =>
-            !string.IsNullOrEmpty(url) && url.StartsWith("/", StringComparison.Ordinal) && !url.StartsWith("//", StringComparison.Ordinal);
+        /// <summary>
+        /// Relativ adress (egen domän). Webbläsaren normaliserar före tolkning: tabbar, radbrytningar och andra
+        /// kontrolltecken tas bort var de än står, och "\" läses som "/". "/\evil.com" och "/&lt;tab&gt;/evil.com"
+        /// blir därför "//evil.com" (annan värd). Allt sådant avvisas här (klubbsidorna steg 2, säkerhetsgranskningen K2).
+        /// </summary>
+        public static bool IsOwnUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url) || url[0] != '/') return false;
+            foreach (var ch in url)
+                if (ch < ' ' || ch == '\u007f' || ch == '\\') return false;
+            return !url.StartsWith("//", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Adress som en webbläsare skulle tolka som en annan värd än vår: börjar (efter webbläsarens normalisering) med
+        /// två snedstreck. Absoluta adresser med schema prövas av schemalistan; här tas bara de relativa formerna.
+        /// </summary>
+        private static bool PointsToAnotherHost(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            var sb = new System.Text.StringBuilder(url.Length);
+            foreach (var ch in url)
+            {
+                if (ch <= ' ' || ch == '\u007f') continue;
+                sb.Append(ch == '\\' ? '/' : ch);
+            }
+            var n = sb.ToString();
+            if (n.StartsWith("//", StringComparison.Ordinal)) return true;
+            // En ledande "/" som inte är en ren egen adress (kontrolltecken eller bakstreck mitt i) räknas som misstänkt.
+            return url[0] == '/' && !IsOwnUrl(url);
+        }
 
         private static bool IsOwnImage(string? src)
         {

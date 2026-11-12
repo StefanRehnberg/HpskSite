@@ -1,0 +1,92 @@
+using NPoco;
+
+namespace HpskSite.Services.SitePages
+{
+    /// <summary>En rad i klubbens ändringslogg, klar att visa. Aldrig innehåll: loggen bär bara hash.</summary>
+    public sealed class SiteAuditRow
+    {
+        public long Id { get; set; }
+        public DateTime CreatedDate { get; set; }
+        public int? ActorMemberId { get; set; }
+        public bool ActedAsSupport { get; set; }
+        public string ObjectKind { get; set; } = "";
+        public int? ObjectId { get; set; }
+        public string Action { get; set; } = "";
+        /// <summary>Sidans titel just nu (en sida som tagits bort för gott har ingen).</summary>
+        public string? PageTitle { get; set; }
+    }
+
+    /// <summary>
+    /// Klubbens ändringslogg (klubbsidorna 2b): vem gjorde vad och när, för ägarens egen admin. Läser <c>dbo.SiteAudit</c> (append-only, bevaras 24 månader, bär bara hash och
+    /// aldrig text). Sidans titel hämtas live, bara för en sida som hör till SAMMA ägare (ett objekt-id prövas mot ägaren, id-lagen).
+    /// </summary>
+    public static class SiteAuditLog
+    {
+        /// <summary>De senaste raderna för ägaren, senaste först. <paramref name="take"/> begränsas till 1–200.</summary>
+        public static List<SiteAuditRow> List(IDatabase db, string ownerType, int ownerId, int take = 100) =>
+            db.Fetch<SiteAuditRow>(
+                @"SELECT TOP (@2) a.Id, a.CreatedDate, a.ActorMemberId, a.ActedAsSupport, a.ObjectKind, a.ObjectId, a.Action,
+                         CASE WHEN a.ObjectKind IN ('page', 'menu') THEN p.Title END AS PageTitle
+                  FROM dbo.SiteAudit a
+                  LEFT JOIN dbo.SitePage p ON a.ObjectKind IN ('page', 'menu') AND p.Id = a.ObjectId AND p.OwnerType = a.OwnerType AND p.OwnerId = a.OwnerId
+                  WHERE a.OwnerType = @0 AND a.OwnerId = @1
+                  ORDER BY a.Id DESC",
+                ownerType, ownerId, Math.Clamp(take, 1, 200));
+
+        /// <summary>Vad en loggad åtgärd heter på vanlig svenska. En okänd åtgärd visas som den är, aldrig som ett fel.</summary>
+        public static string Label(string action) => action switch
+        {
+            "page-create" => "skapade sidan",
+            "page-publish" => "publicerade",
+            "page-delete" => "raderade",
+            "page-slug" => "bytte adress på",
+            "page-visibility" => "ändrade vem som ser",
+            "children-visibility" => "gav undersidorna samma nivå som",
+            "page-move" => "flyttade",
+            "page-order" => "ändrade ordningen på",
+            "page-restore-version" => "använde en tidigare version av",
+            "slot-create" => "lade till egen text på systemsidan",
+            "page-convert" => "började göra om systemsidan till en egen sida",
+            "page-convert-cancel" => "avbröt omgörningen av systemsidan",
+            "page-convert-revert" => "lade tillbaka den vanliga systemsidan",
+            "page-suspend" => "stoppade sidan (nödbroms av pistol.nu)",
+            "page-release" => "hävde stoppet på sidan",
+            "menu-add" => "lade i menyn:",
+            "menu-remove" => "tog ur menyn:",
+            "link-add" => "lade till en länk i menyn",
+            "link-edit" => "ändrade en länk i menyn",
+            "link-remove" => "tog bort en länk i menyn",
+            "link-move" => "ändrade ordningen på länkarna i menyn",
+            "appearance-set" => "ändrade sidornas utseende (design och färg)",
+            "album-create" => "skapade ett bildalbum",
+            "album-rename" => "bytte namn på ett bildalbum",
+            "album-delete" => "tog bort ett bildalbum",
+            "album-add" => "lade bilder i ett album",
+            "album-remove" => "tog bilder ur ett album",
+            "album-move" => "ändrade ordningen i ett album",
+            "file-edit" => "ändrade namn eller beskrivning på en bild",
+            "entry-new" => "tog emot en anmälan via ett formulär",
+            "entry-status-0" => "satte en anmälan som ny",
+            "entry-status-1" => "köade en anmälan",
+            "entry-status-2" => "nekade en anmälan",
+            "entry-status-3" => "godkände en anmälan",
+            "entry-note" => "skrev en anteckning på en anmälan",
+            "entry-archive" => "arkiverade en anmälan",
+            "entry-unarchive" => "tog fram en anmälan ur arkivet",
+            "entry-delete" => "raderade en anmälan",
+            "entry-export" => "exporterade anmälningarna",
+            "terms-accepted" => "godkände villkoren för klubbens sidor",
+            "support-start" => "öppnade ett stödläge",
+            "support-end" => "avslutade stödläget",
+            "personal-number-override" => "publicerade trots varning om personnummer:",
+            _ => action,
+        };
+
+        /// <summary>Hela raden som en mening utan namn: "publicerade <titel>". Titeln utelämnas när sidan inte finns längre.</summary>
+        public static string Describe(SiteAuditRow r)
+        {
+            var label = Label(r.Action);
+            return string.IsNullOrWhiteSpace(r.PageTitle) ? label : $"{label} \"{r.PageTitle}\"";
+        }
+    }
+}

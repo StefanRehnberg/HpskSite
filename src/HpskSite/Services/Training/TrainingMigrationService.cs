@@ -225,8 +225,8 @@ namespace HpskSite.Services.Training
             using (var db = _databaseFactory.CreateDatabase())
             {
                 events = (clubId == 0
-                        ? _events.ListAllForOwnerType(ClubEventRecord.OwnerClub)
-                        : _events.ListForOwner(clubId, publishedOnly: false))
+                        ? _events.ListAllForOwnerType(ClubEventRecord.OwnerClub, HpskSite.Services.Events.EventViewer.System)
+                        : _events.ListForOwner(clubId, HpskSite.Services.Events.EventViewer.System, publishedOnly: false))
                     .Where(e => e.IsClubOwned)
                     .ToList();
 
@@ -505,7 +505,7 @@ FROM dbo.ClubTraining WHERE ClubId = @0 AND LegacyEventNodeId IS NOT NULL ORDER 
                 var reason = KeepReason(t, courseLinked, courseNotes, courseSeries, ledger);
                 if (reason == null)
                 {
-                    if (_events.Get(t.LegacyEventNodeId) == null) reason = "Den gamla händelsen finns inte längre";
+                    if (_events.Get(t.LegacyEventNodeId, HpskSite.Services.Events.EventViewer.System) == null) reason = "Den gamla händelsen finns inte längre";
                 }
                 row.Action = reason == null ? ActionRestore : ActionKeep;
                 row.Reason = reason ?? "Blir en händelse igen, med sina anmälda och lånevapen";
@@ -569,7 +569,7 @@ FROM dbo.ClubTraining WHERE ClubId = @0 AND LegacyEventNodeId IS NOT NULL ORDER 
 
         private void Restore(UndoRow row, int actingMemberId)
         {
-            if (_events.Get(row.EventId) == null) { row.Action = ActionFailed; row.Reason = "Den gamla händelsen finns inte längre"; return; }
+            if (_events.Get(row.EventId, HpskSite.Services.Events.EventViewer.System) == null) { row.Action = ActionFailed; row.Reason = "Den gamla händelsen finns inte längre"; return; }
 
             try
             {
