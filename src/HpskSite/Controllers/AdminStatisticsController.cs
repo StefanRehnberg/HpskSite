@@ -1036,15 +1036,17 @@ namespace HpskSite.Controllers
 
                         // ── Single query for all document storage (replaces N+M per-owner queries) ──
                         // Dokument OCH bilderna på föreningens egna sidor (SiteFile): de delar EN gräns (DocumentService.GetStorageUsage).
-                        storageByOwner = db.Fetch<dynamic>(@"
-                            IF OBJECT_ID(N'dbo.SiteFile', N'U') IS NULL
-                                SELECT OwnerType, OwnerId, SUM(FileSize) AS UsedBytes FROM Documents GROUP BY OwnerType, OwnerId
-                            ELSE
+                        // ⚠️ Frågan måste BÖRJA med SELECT (NPoco bygger annars om den till "SELECT * FROM …") — därför kollas tabellen i C#.
+                        var hasSiteFile = db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.SiteFile', N'U') IS NULL THEN 0 ELSE 1 END") == 1;
+                        storageByOwner = hasSiteFile
+                            ? db.Fetch<dynamic>(@"
                                 SELECT OwnerType, OwnerId, SUM(UsedBytes) AS UsedBytes FROM (
                                     SELECT OwnerType, OwnerId, CAST(FileSize AS bigint) AS UsedBytes FROM Documents
                                     UNION ALL
                                     SELECT CASE OwnerType WHEN N'Region' THEN 1 ELSE 0 END, OwnerId, CAST(Size AS bigint) FROM dbo.SiteFile WHERE DeletedDate IS NULL
-                                ) u GROUP BY OwnerType, OwnerId");
+                                ) u GROUP BY OwnerType, OwnerId")
+                            : db.Fetch<dynamic>(@"
+                                SELECT OwnerType, OwnerId, SUM(FileSize) AS UsedBytes FROM Documents GROUP BY OwnerType, OwnerId");
                         totalUsedBytes = storageByOwner.Sum(r => (long)r.UsedBytes);
 
                         // Pre-load all quota overrides in one query (avoids N calls to GetStorageLimit)
