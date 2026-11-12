@@ -722,7 +722,7 @@ namespace HpskSite.Controllers
                 // Läser bara — det sparade läget ur tävlingslagringen (C3-planen S3).
                 var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
-                    return Json(new { success = false, message = "Tavlingen hittades inte." });
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var state = InspectTypeChange(competitionId, competition.CompetitionType ?? "");
                 return Json(new
@@ -770,7 +770,7 @@ namespace HpskSite.Controllers
 
                 var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
-                    return Json(new { success = false, message = "Tavlingen hittades inte." });
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var state = InspectTypeChange(request.CompetitionId, competition.CompetitionType ?? "");
                 if (!state.CanChange)
@@ -876,7 +876,7 @@ namespace HpskSite.Controllers
                     // det ar precis det svaret som skulle tillata ett farligt byte.
                     _logger.LogWarning(ex, "Could not count results in {Table} for competition {Id}", t, competitionId);
                     state.CanChange = false;
-                    state.Reason = "Kunde inte kontrollera om tavlingen har resultat. Grenbytet stoppas.";
+                    state.Reason = "Kunde inte kontrollera om tävlingen har resultat. Grenbytet stoppas.";
                     return state;
                 }
             }
@@ -884,23 +884,23 @@ namespace HpskSite.Controllers
 
             if (state.RegistrationCount > 0 && state.ResultCount > 0)
             {
-                state.Reason = $"Tavlingen har {state.RegistrationCount} anmalningar och {state.ResultCount} inmatade resultat. "
-                             + "Grenen kan bara bytas sa lange tavlingen ar orord — varje gren har egen resultattabell och egna klasser.";
+                state.Reason = $"Tävlingen har {state.RegistrationCount} anmälningar och {state.ResultCount} inmatade resultat. "
+                             + "Grenen kan bara bytas så länge tävlingen är orörd — varje gren har egen resultattabell och egna klasser.";
             }
             else if (state.RegistrationCount > 0)
             {
-                state.Reason = $"Tavlingen har {state.RegistrationCount} anmalningar. Ta bort dem forst, "
-                             + "eller skapa en ny tavling — klasserna tillhor grenen och foljer inte med.";
+                state.Reason = $"Tävlingen har {state.RegistrationCount} anmälningar. Ta bort dem först, "
+                             + "eller skapa en ny tävling — klasserna tillhör grenen och följer inte med.";
             }
             else if (state.ResultCount > 0)
             {
-                state.Reason = $"Tavlingen har {state.ResultCount} inmatade resultat. Grenen kan inte bytas, "
+                state.Reason = $"Tävlingen har {state.ResultCount} inmatade resultat. Grenen kan inte bytas, "
                              + "eftersom varje gren lagrar sina resultat i en egen tabell.";
             }
             else
             {
                 state.CanChange = true;
-                state.Reason = "Tavlingen ar orord — grenen kan bytas.";
+                state.Reason = "Tävlingen är orörd — grenen kan bytas.";
             }
 
             return state;
