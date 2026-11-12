@@ -88,6 +88,16 @@ namespace HpskSite.Services.SitePages
                 ? ownerId > 0 && await _auth.IsOwnClubAdmin(ownerId)
                 : !string.IsNullOrEmpty(regionCode) && await _auth.IsOwnRegionAdmin(regionCode);
 
+        /// <summary>Är den inloggade sajtadministratör (Administrators)? EN plats för frågan: kontrollern frågar HÄR och aldrig <c>IsCurrentUserAdminAsync</c> direkt.</summary>
+        public Task<bool> IsSiteAdminAsync() => _auth.IsCurrentUserAdminAsync();
+
+        /// <summary>
+        /// Får den inloggade redigera ägarens sidor i Hemsidan? Ägarens egen admin, och (Stefan 2026-11-12: "siteadmin ska ha tillgång till allt") sajtadmin.
+        /// Styr länken Hemsidan i Admin och vänstermenyn. Kretsadmin för en klubb är fortfarande hänvisad till stödläget. I förhandsläget är svaret alltid nej.
+        /// </summary>
+        public async Task<bool> CanEditSiteAsync(string ownerType, int ownerId, string? regionCode) =>
+            PreviewFor(ownerType, ownerId) == null && (await IsOwnAdminAsync(ownerType, ownerId, regionCode) || await IsSiteAdminAsync());
+
         /// <summary>
         /// Får den inloggade ÖPPNA ett stödläge hos ägaren? Klubb: kretsens admin i klubbens krets och sajtadmin (<c>IsClubAdminForClub</c>). Krets: sajtadmin.
         /// Ett stödläge är aldrig en rättighet att skriva: det är rätten att be om ett loggat, tidsbegränsat läge (<see cref="SiteSupport"/>). Ägarens egen admin

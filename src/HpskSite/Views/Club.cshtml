@@ -90,7 +90,7 @@
         : null;
     // Hemsidan (egna sidor): länken syns bara för klubbens EGEN admin och bara när brytare 2 är PÅ.
     ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Club, clubId)
-        && await SiteViewers.IsOwnAdminAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, null);
+        && await SiteViewers.CanEditSiteAsync(HpskSite.Services.SitePages.SiteTemplates.Club, clubId, null);
 
     // OpenGraph meta tags - use logo for social sharing preview
     // Fallback chain: club logo → region logo → site default

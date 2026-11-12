@@ -55,14 +55,18 @@ namespace HpskSite.Tests
         }
 
         [Fact]
-        public void Gate_kräver_ägarens_egen_admin_och_aldrig_sajt_eller_kretsadmin()
+        public void Gate_släpper_in_ägarens_egen_admin_och_sajtadmin_men_kretsadmin_bara_i_stödläge()
         {
             var src = File.ReadAllText(SourcePath());
             Assert.Contains("_auth.IsOwnClubAdmin(ownerId)", src);
             Assert.Contains("_auth.IsOwnRegionAdmin(", src);
-            Assert.DoesNotContain("IsClubAdminForClub", src);        // släpper in kretsens och sajtens admin: fel för klubbens egen hemsida
+            Assert.DoesNotContain("IsClubAdminForClub", src);        // släpper in kretsens och sajtens admin utan loggning: kretsadmin går via stödläget
             Assert.DoesNotContain("IsRegionalAdminForRegion", src);
+            // Sajtadmin har tillgång till allt (Stefan 2026-11-12), men frågan ställs på EN plats (SiteViewerResolver), aldrig direkt i kontrollern.
             Assert.DoesNotContain("IsCurrentUserAdminAsync", src);
+            Assert.Contains("_viewers.IsSiteAdminAsync()", src);
+            // Personuppgifterna i Anmälningar är undantaget: bara föreningens egen admin (OwnOnly stänger även sajtadmin ute).
+            Assert.Contains("mode != GateMode.OwnOnly && await _viewers.IsSiteAdminAsync()", src);
         }
 
         private static string SourcePath([CallerFilePath] string here = "") =>

@@ -43,7 +43,7 @@
         ViewBag.isClubAdmin = viewer.IsOwnerAdmin;
         ViewBag.isRegionalAdmin = viewer.IsOwnerAdmin;
         ViewBag.isLoggedIn = viewer.LoggedIn;
-        ViewBag.canEditSite = await Viewers.IsOwnAdminAsync(req.OwnerType, req.OwnerId, regionCode);
+        ViewBag.canEditSite = await Viewers.CanEditSiteAsync(req.OwnerType, req.OwnerId, regionCode);
         showMenu = true;
         if (req.OwnerType == SiteTemplates.Club)
         {
