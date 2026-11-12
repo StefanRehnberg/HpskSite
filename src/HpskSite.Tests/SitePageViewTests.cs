@@ -36,6 +36,29 @@ namespace HpskSite.Tests
             Assert.Empty(v.Menu());
         }
 
+        [Fact]
+        public void Av_bär_den_verkliga_tittaren_så_att_en_inloggad_inte_får_klubbens_utloggade_Hem()
+        {
+            // Felet (2026-11-12, Joakim Öman): For() gav Off(ownerUrl) = anonym tittare, och vyerna ritar panelerna med sp.Viewer —
+            // en inloggad klubbadmin fick Hems utloggade lista med inloggningsruta så länge strukturen var AV.
+            var v = SitePageView.Off(Url, Admin);
+            Assert.Equal(Admin, v.Viewer);
+            var ctx = new SitePanelContext(SiteTemplates.Club, 1, "x", null!, v.Viewer);
+            Assert.True(ctx.LoggedIn);
+            Assert.DoesNotContain(PanelCatalog.Standard(SiteTemplates.Club, "home", ctx.LoggedIn), p => p.Key == "login-prompt");
+            Assert.Equal(Anon, SitePageView.Off(Url).Viewer);   // utan tittare = anonym som förut
+        }
+
+        [Fact]
+        public void For_ger_Off_den_verkliga_tittaren()
+        {
+            var src = File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(SourceFile())!, "..", "HpskSite", "Services", "SitePages", "SitePageView.cs")));
+            Assert.Contains("return SitePageView.Off(ownerUrl, viewer);", src);
+            Assert.DoesNotContain("SitePageView.Off(ownerUrl);", src);
+        }
+
+        private static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string here = "") => here;
+
         // ── På: klubben ────────────────────────────────────────────────────────
 
         [Fact]

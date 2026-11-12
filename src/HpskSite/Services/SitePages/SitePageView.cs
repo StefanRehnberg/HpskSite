@@ -115,8 +115,11 @@ namespace HpskSite.Services.SitePages
         public string PageKey => _page?.Key ?? "home";
         public bool IsRoot => !Enabled || (_freePageId == null && (_page == null || _page.IsHome));
 
-        /// <summary>Dagens vy: inget ändras.</summary>
-        public static SitePageView Off(string ownerUrl = "/") => new(false, null, null, Normalize(ownerUrl), SiteViewer.Anonymous);
+        /// <summary>
+        /// Dagens vy: inget ändras. ⚠️ Tittaren måste vara den VERKLIGA: vyerna ritar panelerna med <see cref="Viewer"/> (SitePanelContext), och en anonym tittare
+        /// här gav varje inloggad besökare (även klubbens admin) Hem-sidans utloggade lista med inloggningsruta så länge nya strukturen var AV för ägaren.
+        /// </summary>
+        public static SitePageView Off(string ownerUrl = "/", SiteViewer? viewer = null) => new(false, null, null, Normalize(ownerUrl), viewer ?? SiteViewer.Anonymous);
 
         /// <param name="extra">Ägarens egna sidor som ligger i menyn (steg 2); tom när ägaren inte har egen redigering PÅ.</param>
         /// <param name="freePageId">Begäran gäller den här egna sidan (inte en systemsida): ingen systempost är då aktuell.</param>
@@ -241,7 +244,7 @@ namespace HpskSite.Services.SitePages
         public SitePageView For(string ownerType, int ownerId, string ownerUrl, SiteViewer viewer)
         {
             // Av för ägaren (eller fel): dagens vy. SiteOwnerService kastar aldrig och svarar AV vid fel.
-            if (!_owners.IsEnabled(ownerType, ownerId)) return SitePageView.Off(ownerUrl);
+            if (!_owners.IsEnabled(ownerType, ownerId)) return SitePageView.Off(ownerUrl, viewer);
             var req = SitePageRequest.Current(_http.HttpContext);
             var key = req != null && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageKey : null;
             int? freeId = req is { IsFreePage: true } && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageId : null;
