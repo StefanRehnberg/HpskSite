@@ -51,6 +51,17 @@
     .shooter-row.dragging { opacity: .45; }
     .drop-target { outline: 2px dashed var(--bs-primary); outline-offset: -2px; background-color: var(--bs-primary-bg-subtle) !important; }
     .drop-target .lane-drop-hint { opacity: 1; }
+    /* En UPPTAGEN rad som släppmål säger vad som händer — annars ser den inte släppbar ut och funktionären
+       tror att man bara kan släppa på en tom bana (Pontus Vikström, 2026-11-04). Överlägg i stället för en
+       egen kolumn, så raden inte hoppar när dragningen börjar. Syns inte på raden man drar ifrån. */
+    .shooter-row.drop-target { position: relative; }
+    .shooter-row.drop-target:not(.dragging)::after {
+        content: "Släpp för att byta plats eller flytta ner";
+        position: absolute; right: 3rem; top: 50%; transform: translateY(-50%);
+        font-size: .75rem; line-height: 1.2; padding: .15rem .5rem; border-radius: .25rem;
+        background: var(--bs-primary); color: #fff; pointer-events: none; white-space: nowrap;
+    }
+    @@media (max-width: 767.98px) { .shooter-row.drop-target:not(.dragging)::after { content: "Släpp här"; } }
 
     .min-width-0 {
         min-width: 0;
@@ -1882,9 +1893,19 @@ function setLaneChoiceState(choice) {
         return;
     }
     const who = choice.occupantName || 'skytten';
+    const ctx = window._setLaneCtx || {};
+    const mover = ctx.name || 'skytten';
+    const lane = +document.getElementById('setLaneNumber').value || 0;
+    const team = +document.getElementById('setLaneTeam').value || ctx.sourceTeam;
+    // Flyttas skytten UPPÅT i listan inom samma skjutlag (till en högre bana) flyttar de andra UPP, annars
+    // NER — servern väljer riktning mot den plats skytten lämnar (StartListPlacement.MoveTo). Texten ska
+    // säga det som händer, inte alltid "ner".
+    const cur = findEditorShooter(ctx.memberId, ctx.sourceTeam);
+    const dirWord = (team === ctx.sourceTeam && cur && cur.position < lane) ? 'upp' : 'ner';
     document.getElementById('setLaneChoiceText').textContent = choice.message || '';
-    document.getElementById('setLaneSwapLabel').textContent = `Byt plats med ${who}`;
-    document.getElementById('setLaneShiftLabel').textContent = `Flytta ner ${who} och de efter (fram till första lediga bana)`;
+    document.getElementById('setLaneSwapLabel').textContent = `Byt plats: ${mover} och ${who} byter bana`;
+    document.getElementById('setLaneShiftLabel').textContent =
+        `Lägg in ${mover} på bana ${lane || 'här'} — ${who} och de efter flyttar ${dirWord} en bana`;
     box.classList.remove('d-none');
     submit.classList.add('d-none');
 }
