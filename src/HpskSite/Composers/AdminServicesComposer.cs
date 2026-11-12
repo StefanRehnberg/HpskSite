@@ -311,6 +311,8 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<HpskSite.Services.SitePages.SiteAppearanceService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentDeletedNotification,
                 HpskSite.Services.SitePages.SiteOwnerCleanupHandler>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavedNotification,
+                HpskSite.Services.SitePages.SiteOwnerAutoEnableHandler>();
             builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteOwnerSchemaGuardHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.SitePages.SiteRetentionHostedService>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och

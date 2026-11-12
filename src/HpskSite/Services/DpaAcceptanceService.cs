@@ -104,7 +104,8 @@ namespace HpskSite.Services
         /// Idempotent on (ClubId, DpaInfo.Version): a repeat accept just updates the
         /// timestamp / acceptor on the existing row rather than creating duplicates.
         /// </summary>
-        public async Task RecordAcceptanceAsync(int clubId, int memberId, string? memberName, string? ipAddress)
+        /// <returns>true när det är klubbens FÖRSTA godkännande av den aktuella versionen (en förnyad bekräftelse ger false).</returns>
+        public async Task<bool> RecordAcceptanceAsync(int clubId, int memberId, string? memberName, string? ipAddress)
         {
             using var db = _databaseFactory.CreateDatabase();
 
@@ -135,6 +136,7 @@ namespace HpskSite.Services
             _logger.LogInformation(
                 "Club {ClubId} accepted DPA version {Version} (by member {MemberId}).",
                 clubId, DpaInfo.Version, memberId);
+            return existing == null;
         }
     }
 }

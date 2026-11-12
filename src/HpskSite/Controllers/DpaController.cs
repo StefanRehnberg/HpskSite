@@ -9,6 +9,7 @@ using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
 using HpskSite.Models;
 using HpskSite.Services;
+using HpskSite.Services.SitePages;
 
 namespace HpskSite.Controllers
 {
@@ -24,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly SiteOwnerService _siteOwners;
         private readonly ILogger<DpaController> _logger;
 
         public DpaController(
@@ -37,6 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMemberManager memberManager,
             IMemberService memberService,
+            SiteOwnerService siteOwners,
             ILogger<DpaController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -44,6 +47,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _memberManager = memberManager;
             _memberService = memberService;
+            _siteOwners = siteOwners;
             _logger = logger;
         }
 
@@ -98,8 +102,28 @@ namespace HpskSite.Controllers
             if (member == null)
                 return Json(new { success = false, message = "Kunde inte identifiera medlemmen." });
 
-            await _dpaService.RecordAcceptanceAsync(
+            var first = await _dpaService.RecordAcceptanceAsync(
                 request.ClubId, member.Id, member.Name, GetClientIp());
+
+            // Klubbsidorna: godkänt DPA slår på egen redigering och omvandling av sig själv (Stefan 2026-11-12), men bara vid FÖRSTA
+            // godkännandet av versionen och bara när nya menyn är på — så att en sajtadmin som medvetet slagit av redigering inte överrulas
+            // av en förnyad bekräftelse. Ett fel här får aldrig stoppa själva godkännandet.
+            if (first)
+            {
+                try
+                {
+                    var row = _siteOwners.ListAll().FirstOrDefault(r => r.OwnerType == SiteTemplates.Club && r.OwnerId == request.ClubId);
+                    if (row != null && row.IsEnabled && !row.EditingEnabled)
+                    {
+                        _siteOwners.SetEditing(SiteTemplates.Club, request.ClubId, true, member.Id);
+                        _siteOwners.SetConversion(SiteTemplates.Club, request.ClubId, true, member.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Klubb {ClubId}: DPA godkänt men egen redigering kunde inte slås på automatiskt", request.ClubId);
+                }
+            }
 
             return Json(new
             {
