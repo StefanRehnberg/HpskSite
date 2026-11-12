@@ -1034,6 +1034,11 @@
     color: var(--bs-secondary-color);
 }
 
+/* En lang lank (eller lank-knapp) i ett block far aldrig vidga sidan: Bootstraps .btn radbryter inte, och en URL utan mellanslag har ingen brytpunkt. */
+.site-block { overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.site-block .btn { white-space: normal; max-width: 100%; text-align: left; }
+.site-block .site-text table { max-width: 100%; }
+
 /* Bilder i klubbens och kretsens egna sidor (textblock): ramen (figure) har placering som class och bredd i procent som style. Servern sanerar bada. */
 .site-text figure.image { display: table; max-width: 100%; margin: 1rem auto; }
 .site-text figure.image img { display: block; width: 100%; height: auto; }

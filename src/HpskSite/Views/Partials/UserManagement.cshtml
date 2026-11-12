@@ -34,7 +34,8 @@
     </div>
 
     <!-- Pending Approvals Section -->
-    <div class="card mb-3 border-warning">
+    <!-- Dold tills det finns något som väntar (visas av loadPendingApprovals) -->
+    <div class="card mb-3 border-warning d-none" id="pendingApprovalsCard">
         <div class="card-header bg-warning text-dark">
             <h5 class="mb-0">
                 <i class="bi bi-clock-history"></i>
@@ -1757,6 +1758,7 @@ function deleteMemberFromModal() {
 function loadPendingApprovals() {
     const container = document.getElementById('pendingApprovals');
     const countBadge = document.getElementById('pendingCount');
+    const card = document.getElementById('pendingApprovalsCard');
 
     // Always load all pending approvals (no region filter).
     // Regional admins are already restricted server-side to their managed regions.
@@ -1768,17 +1770,23 @@ function loadPendingApprovals() {
                 countBadge.textContent = pendingMembers.length;
 
                 if (pendingMembers.length === 0) {
-                    container.innerHTML = '<div class="alert alert-info mb-0">Inga väntande godkännanden.</div>';
+                    // Inget väntar: sektionen visas inte alls.
+                    container.innerHTML = '';
+                    if (card) card.classList.add('d-none');
                 } else {
+                    if (card) card.classList.remove('d-none');
                     displayPendingApprovals(pendingMembers);
                 }
             } else {
+                // Ett fel ska synas, inte döljas.
+                if (card) card.classList.remove('d-none');
                 container.innerHTML = '<div class="alert alert-danger">Fel: ' + data.message + '</div>';
                 countBadge.textContent = '!';
             }
         })
         .catch(error => {
             console.error('Error loading pending approvals:', error);
+            if (card) card.classList.remove('d-none');
             container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av väntande godkännanden.</div>';
             countBadge.textContent = '!';
         });
@@ -1800,13 +1808,15 @@ function loadPendingCertRequests() {
                 return;
             }
             const rows = data.data || [];
+            if (rows.length === 0) {
+                // Inget att granska: sektionen visas inte alls.
+                container.innerHTML = '';
+                card.classList.add('d-none');
+                return;
+            }
             card.classList.remove('d-none');
             if (countBadge) countBadge.textContent = rows.length;
-            if (rows.length === 0) {
-                container.innerHTML = '<div class="alert alert-info mb-0">Inga certifieringsförfrågningar att granska.</div>';
-            } else {
-                displayPendingCertRequests(rows);
-            }
+            displayPendingCertRequests(rows);
         })
         .catch(() => { card.classList.add('d-none'); });
 }
