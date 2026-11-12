@@ -875,6 +875,23 @@ namespace HpskSite.Controllers
                 .Where(r => r.FirearmId == f.Id && r.IsOpen)
                 .Select(r => new { r.Id, kind = r.KindLabel, status = r.StatusLabel, r.Forbund })
                 .FirstOrDefault(),
+
+            // Senast UTFÄRDADE intyg för vapnet. ⚠️ Kräver både status Utfärdad OCH ett intygs-id:
+            // raderar klubben intyget nollställs id:t och statusen, så kortet kan aldrig länka
+            // till ett intyg som inte finns. Länken kräver inloggning, som /foreningsintyg/{id}.
+            issuedIntyg = requests
+                .Where(r => r.FirearmId == f.Id
+                            && r.Status == ForeningsintygRequestStatus.Utfardad
+                            && r.IssuedIntygId > 0)
+                .OrderByDescending(r => r.HandledAt ?? r.CreatedAt)
+                .Select(r => new
+                {
+                    id = r.IssuedIntygId,
+                    forbund = r.Forbund,
+                    date = (r.HandledAt ?? r.CreatedAt).ToString("yyyy-MM-dd"),
+                    url = "/foreningsintyg/" + r.IssuedIntygId,
+                })
+                .FirstOrDefault(),
         };
 
         private async Task<int> CurrentMemberIdAsync()

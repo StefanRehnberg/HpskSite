@@ -81,6 +81,34 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Medlemmens EGNA utfärdade intyg, för "Visa mina intyg" på Min sida → Vapen.
+        ///
+        /// <para><b>⚠️ Egen slimmad projektion, inte <c>Project</c>.</b> Den bär <c>Notes</c> —
+        /// klubbens interna anteckning — och det ska medlemmen inte få med i en lista över sina
+        /// intyg. Snapshotten (personnummer) skickas aldrig; raden länkar till
+        /// <c>/foreningsintyg/{id}</c>, som kräver inloggning och prövar åtkomsten.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyIntyg()
+        {
+            var current = await GetCurrentMemberDataAsync();
+            if (current == null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var entries = _foreningsintygService.GetForMember(current.Id)
+                .OrderByDescending(e => e.IssuedDate)
+                .Select(e => new
+                {
+                    e.Id,
+                    issuedDate = e.IssuedDate.ToString("yyyy-MM-dd"),
+                    e.Purpose,
+                    e.IssuedByName,
+                    canPrint = !string.IsNullOrWhiteSpace(e.Snapshot),
+                    url = "/foreningsintyg/" + e.Id
+                });
+            return Json(new { success = true, data = entries });
+        }
+
+        /// <summary>
         /// Record a new föreningsintyg for a member. Issuing is a club/board act — only a club admin
         /// for the member's primary club (or a site admin) may do it, never the member themselves.
         /// </summary>
@@ -552,7 +580,8 @@ namespace HpskSite.Controllers
                             {
                                 openRequest.FirearmAlias ??= _firearms.GetById(openRequest.FirearmId)?.Alias;
                                 notifiedMember = await _intygNotifications
-                                    .NotifyMemberOfDecisionAsync(openRequest, issued: true, note: null);
+                                    .NotifyMemberOfDecisionAsync(openRequest, issued: true, note: null,
+                                        issuedIntygId: entry.Id);
                             }
                         }
                         else
@@ -950,7 +979,9 @@ namespace HpskSite.Controllers
             e.Description,
             e.IssuedByMemberId,
             e.IssuedByName,
-            e.Notes,
+            // ⚠️ INGEN `Notes` här. Det är klubbens interna anteckning, och den här projektionen
+            // läses av medlemmen själv (ListForMember) lika väl som av klubben. Ingen yta läste
+            // fältet ur listan, så ingenting försvann.
             createdDate = SwedishTime.FromUtc(e.CreatedDate).ToString("yyyy-MM-dd"),
             // Går raden att skriva ut? Bara när dokumentet sparades vid utfärdandet. Snapshotten
             // SKICKAS INTE med — den bär personnummer och hela intyget, och listan är en översikt.

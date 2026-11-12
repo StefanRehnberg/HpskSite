@@ -381,6 +381,20 @@
     </div>
 </div>
 
+@* Mina utfärdade intyg (Åtgärder → Visa mina intyg). Läser GetMyIntyg; själva intyget öppnas på
+   /foreningsintyg/{id}, som kräver inloggning. *@
+<div class="modal fade" id="fwIntygListModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Mina föreningsintyg</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="fwIntygListBody"></div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     if (window.__fwInit) return;
@@ -546,15 +560,26 @@
             step('bi-file-earmark-text', 'Vad du får',
                  'Påminnelse innan licensen förfaller, och underlag när klubben skriver ett föreningsintyg.') +
             '</div>' +
-            '<div class="d-flex flex-wrap gap-2 justify-content-center">' +
-            '<button type="button" class="btn btn-primary" data-fw="add">' +
-            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button>' +
             // ⚠️ Intygsvägen MÅSTE finnas här. Förstagångssökaren har en tom garderob, och det är
             // hen som behöver ett intyg — en knapp som bara sitter på ett vapenkort är onåbar
-            // för precis den användaren.
-            '<button type="button" class="btn btn-outline-primary" data-fw="intyg">' +
-            '<i class="bi bi-file-earmark-text me-1"></i>Begär föreningsintyg</button>' +
-            '</div></div>';
+            // för precis den användaren. Samma Åtgärder-meny som med vapen, så vägen är densamma.
+            '<div class="d-flex justify-content-center">' + actionsMenu('dropdown-center') + '</div></div>';
+    }
+
+    // Sidans Åtgärder-meny (blå, som Ekonomi/Träningar). Tre val, ingen gruppering behövs.
+    // ⚠️ Menyn finns även i tomt läge: "Visa mina intyg" kan ha innehåll fast vapnet är borttaget.
+    function actionsMenu(wrapClass) {
+        return '<div class="dropdown ' + (wrapClass || '') + '">' +
+            '<button type="button" class="btn btn-primary shadow dropdown-toggle" data-bs-toggle="dropdown" ' +
+            'aria-expanded="false" id="fwActionsMenu"><i class="bi bi-sliders me-1"></i>Åtgärder</button>' +
+            '<ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">' +
+            '<li><button type="button" class="dropdown-item" data-fw="add">' +
+            '<i class="bi bi-plus-circle me-2"></i>Lägg till vapen…</button></li>' +
+            '<li><button type="button" class="dropdown-item" data-fw="intyg">' +
+            '<i class="bi bi-file-earmark-text me-2"></i>Begär föreningsintyg…</button></li>' +
+            '<li><button type="button" class="dropdown-item" data-fw="intyg-list">' +
+            '<i class="bi bi-patch-check me-2"></i>Visa mina intyg</button></li>' +
+            '</ul></div>';
     }
     function step(icon, title, text) {
         return '<div class="col-md-4"><div class="d-flex gap-2">' +
@@ -574,11 +599,7 @@
         var html = '<div class="d-flex justify-content-between align-items-center mb-3">' +
             '<span class="text-muted small">' + list.length +
             (list.length === 1 ? ' vapen' : ' vapen') + '</span>' +
-            '<div class="d-flex flex-wrap gap-2">' +
-            '<button type="button" class="btn btn-sm btn-outline-primary" data-fw="intyg">' +
-            '<i class="bi bi-file-earmark-text me-1"></i>Begär föreningsintyg</button>' +
-            '<button type="button" class="btn btn-sm btn-primary" data-fw="add">' +
-            '<i class="bi bi-plus-circle me-1"></i>Lägg till vapen</button></div></div>' +
+            actionsMenu('') + '</div>' +
             '<div class="row g-3">';
 
         list.forEach(function (f) {
@@ -638,12 +659,23 @@
                     esc(f.openRequest.kind) + ') \u2014 ' + esc(f.openRequest.status) + '</div>';
             }
 
+            // Utf\u00e4rdat intyg: det mejlet fr\u00e5n klubben lovar ("finns under Min sida \u2192 Vapen").
+            // Visas \u00e4ven medan en ny f\u00f6rfr\u00e5gan \u00e4r \u00f6ppen (t.ex. f\u00f6rnyelse) \u2014 det gamla intyget
+            // finns \u00e4nd\u00e5. L\u00e4nken kr\u00e4ver inloggning, som alltid.
+            if (f.issuedIntyg) {
+                html += '<div class="alert alert-success small py-2 px-2 mt-2 mb-0">' +
+                    '<i class="bi bi-patch-check me-1"></i>F\u00f6reningsintyg utf\u00e4rdat ' +
+                    esc(f.issuedIntyg.date) + (f.issuedIntyg.forbund ? ' (' + esc(f.issuedIntyg.forbund) + ')' : '') +
+                    ' \u2014 <a class="alert-link" href="' + esc(f.issuedIntyg.url) +
+                    '" target="_blank" rel="noopener">Visa / skriv ut</a></div>';
+            }
+
             html += '<div class="d-flex gap-2 mt-2 flex-wrap">' +
                 '<button type="button" class="btn btn-sm btn-outline-primary" data-fw="edit" ' +
                 'data-firearm-id="' + f.id + '">Redigera</button>';
             if (!f.openRequest)
                 html += '<button type="button" class="btn btn-sm btn-outline-success" data-fw="request" ' +
-                    'data-firearm-id="' + f.id + '">Beg\u00e4r intyg</button>';
+                    'data-firearm-id="' + f.id + '">' + (f.issuedIntyg ? 'Beg\u00e4r nytt intyg' : 'Beg\u00e4r intyg') + '</button>';
             html += '<button type="button" class="btn btn-sm btn-outline-danger ms-auto" data-fw="remove" ' +
                 'data-firearm-id="' + f.id + '">Ta bort</button></div>';
 
@@ -1202,6 +1234,39 @@
             }).join('') + '</tbody></table>';
     }
 
+    async function showMyIntyg() {
+        var body = document.getElementById('fwIntygListBody');
+        body.innerHTML = '<div class="text-muted small">Laddar…</div>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygListModal')).show();
+
+        try {
+            var r = await fetch('/umbraco/surface/Foreningsintyg/GetMyIntyg', { credentials: 'same-origin' });
+            var j = await r.json();
+            if (!j.success) { body.innerHTML = '<div class="text-danger small">' +
+                esc(j.message || 'Kunde inte läsa dina intyg.') + '</div>'; return; }
+
+            if (!j.data.length) {
+                body.innerHTML = '<p class="small text-muted mb-0">Du har inget utfärdat föreningsintyg än. ' +
+                    'När klubben har utfärdat ett får du ett mejl, och intyget visas här.</p>';
+                return;
+            }
+            body.innerHTML = '<div class="list-group list-group-flush">' + j.data.map(function (e) {
+                return '<div class="list-group-item px-0 d-flex align-items-start gap-2">' +
+                    '<i class="bi bi-file-earmark-text text-primary mt-1"></i>' +
+                    '<div class="flex-grow-1"><div class="fw-semibold">' + esc(e.purpose || 'Föreningsintyg') + '</div>' +
+                    '<div class="small text-muted">Utfärdat ' + esc(e.issuedDate) +
+                    (e.issuedByName ? ' av ' + esc(e.issuedByName) : '') + '</div></div>' +
+                    (e.canPrint
+                        ? '<a class="btn btn-sm btn-outline-primary text-nowrap" href="' + esc(e.url) +
+                          '" target="_blank" rel="noopener">Visa / skriv ut</a>'
+                        : '<span class="small text-muted">Kan inte skrivas ut igen</span>') +
+                    '</div>';
+            }).join('') + '</div>';
+        } catch (err) {
+            body.innerHTML = '<div class="text-danger small">Kunde inte läsa dina intyg.</div>';
+        }
+    }
+
     function initDatePickers() {
         if (typeof flatpickr !== 'function') return;   // degraderar till textfält
         ['#fwExpires', '#fwLicensdatum'].forEach(function (sel) {
@@ -1221,6 +1286,7 @@
         if (action === 'edit') { await openEdit(id, false); return; }
 
         if (action === 'intyg') { openIntygStart(); return; }
+        if (action === 'intyg-list') { await showMyIntyg(); return; }
         if (action === 'intyg-new') {
             bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygStartModal')).hide();
             await openEdit(0, true);

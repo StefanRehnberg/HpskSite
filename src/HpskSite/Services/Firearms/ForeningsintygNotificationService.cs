@@ -422,7 +422,7 @@ namespace HpskSite.Services.Firearms
         /// </param>
         public async Task<bool> NotifyMemberOfDecisionAsync(
             ForeningsintygRequest request, bool issued, string? note,
-            int actingMemberId = 0, bool replyToClub = false)
+            int actingMemberId = 0, bool replyToClub = false, int? issuedIntygId = null)
         {
             try
             {
@@ -439,7 +439,8 @@ namespace HpskSite.Services.Firearms
                     toEmail!, ResolveMemberName(request.MemberId),
                     _clubs.GetClubById(request.ClubId)?.Name ?? "Klubben",
                     FirearmLabel(request), issued, note,
-                    _replyContacts.ForClubAdminChoice(actingMemberId, request.ClubId, replyToClub));
+                    _replyContacts.ForClubAdminChoice(actingMemberId, request.ClubId, replyToClub),
+                    issuedIntygId ?? request.IssuedIntygId);
 
                 // ⚠️ Mottagaren ar MEDLEMMEN som begarde intyget, inte en ansvarig.
                 LogNotify(request.ClubId, request.Id, request.MemberId, toEmail!,

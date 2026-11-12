@@ -1270,7 +1270,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> SendForeningsintygRequestDecisionAsync(
             string toEmail, string toName, string clubName, string firearmLabel,
-            bool issued, string? note, MailReplyTo replyTo)
+            bool issued, string? note, MailReplyTo replyTo, int? issuedIntygId = null)
         {
             if (string.IsNullOrWhiteSpace(toEmail))
             {
@@ -1293,9 +1293,16 @@ namespace HpskSite.Services
                 ? $"{safeClub} har utfärdat ett föreningsintyg för <strong>{safeFirearm}</strong>."
                 : $"{safeClub} har avslagit din förfrågan om föreningsintyg för <strong>{safeFirearm}</strong>.";
 
+            // ⚠️ Länken kräver inloggning (som /foreningsintyg/{id} alltid gjort) — intyget bär
+            // personnummer, så ingen signerad öppen länk. Utan id (äldre anrop) faller texten
+            // tillbaka på vägen via Min sida.
+            var intygLink = issued && issuedIntygId is int iid && iid > 0
+                ? $"<p><a href=\"{(_configuration["SiteUrl"] ?? "https://pistol.nu").TrimEnd('/')}/foreningsintyg/{iid}\">Öppna intyget</a> (du loggar in först).</p>"
+                : "";
+
             var nextStep = issued
-                ? @"<p>Intyget finns under <em>Min sida → Mina vapen</em>. Klubben lämnar ut det
-                     undertecknade originalet — hör av dig till styrelsen om hur ni gör det.</p>"
+                ? intygLink + @"<p>Du hittar det också under <em>Min sida → Vapen</em>, på vapnets kort.
+                     Klubben lämnar ut det undertecknade originalet — hör av dig till styrelsen om hur ni gör det.</p>"
                 : "<p>Hör av dig till styrelsen om du har frågor om beslutet.</p>";
 
             var body = $@"
