@@ -189,7 +189,7 @@
 </script>
 
 <div class="regional-admin-panel">
-    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", ("region", regionContentId, "kretsen", "tutorial-designa-klubbsidan")) }
+    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", (HpskSite.Services.SitePages.SiteTemplates.Region, regionContentId, "kretsen", "tutorial-designa-klubbsidan")) }
     @* Informationsrutan "Kretsadministration – Du kan hantera dokument, texter och bilder…"
        togs bort 2026-09-21 (Stefan). Den beskrev panelen för någon som redan står i den, och
        räknade dessutom upp tre av ett femtontal saker man kan göra här. *@

@@ -28,7 +28,7 @@
 @await Html.PartialAsync("_MemberActivitySummary")
 
 <div class="club-admin-panel">
-    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", ("club", clubId, "klubben", "tutorial-designa-klubbsidan")) }
+    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", (HpskSite.Services.SitePages.SiteTemplates.Club, clubId, "klubben", "tutorial-designa-klubbsidan")) }
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate().
          Shown only while the DPA is NOT yet accepted. Once accepted, this stays hidden and the
          status moves into the Medlemmar → Åtgärder menu (#dpaStatusModal). -->

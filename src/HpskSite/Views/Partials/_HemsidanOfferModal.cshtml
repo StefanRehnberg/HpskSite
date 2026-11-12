@@ -1,7 +1,7 @@
 @*
     Hemsidan-erbjudandet. Visas när nya menyn är på men egen redigering (brytare 2) är av: posten Hemsidan i Admin-menyn öppnar den här rutan i stället för
     Hemsidan. Knappen "Aktivera Hemsidan" slår på brytare 2 för den egna föreningen (SiteEdit/Activate, prövas på servern) och tar användaren in i Hemsidan.
-    Anrop: @await Html.PartialAsync("_HemsidanOfferModal", ("club", clubId, "klubben", "tutorial-designa-klubbsidan"))
+    Anrop: @await Html.PartialAsync("_HemsidanOfferModal", (SiteTemplates.Club, clubId, "klubben", "tutorial-designa-klubbsidan"))
     Öppnas med window.hpskOpenHemsidanOffer() (rälsen och mobilväljaren).
 *@
 @model (string OwnerType, int OwnerId, string Noun, string TutorialId)
