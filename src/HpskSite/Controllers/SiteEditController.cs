@@ -60,7 +60,7 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// "Aktivera Hemsidan" ur modalen i Admin-menyn: slår på brytare 2 (egen redigering) för den egna föreningen. Brytare 1 (nya menyn) måste vara PÅ.
-        /// Klubbens personuppgiftsbiträdesavtal måste vara godkänt (samma grind som sajtadmins knapp). Brytare 3 (omvandling) rörs aldrig.
+        /// Klubbens personuppgiftsbiträdesavtal måste vara godkänt (samma grind som sajtadmins knapp). Brytare 3 (omvandling av standardsidorna) slås på samtidigt.
         /// Villkoren godkänns som vanligt inne i Hemsidan.
         /// </summary>
         [HttpPost]
@@ -78,7 +78,8 @@ namespace HpskSite.Controllers
                 if (!dpa.Accepted)
                     return Fail("Klubben behöver först godkänna personuppgiftsbiträdesavtalet (rutan överst på administrationssidan). Sedan kan Hemsidan slås på.", "dpa");
             }
-            try { _owners.SetEditing(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); }
+            // Brytare 3 (göra om standardsidorna) följer med (Stefan 2026-11-12): det görs en sida i taget av admin själv och går att lägga tillbaka.
+            try { _owners.SetEditing(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); _owners.SetConversion(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); }
             catch (InvalidOperationException) { return Fail("Hemsidan kunde inte slås på just nu.", "unavailable"); }
             return Json(new { success = true, url = g.OwnerUrl + "hemsidan/" });
         }
