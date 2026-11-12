@@ -1,0 +1,78 @@
+@*
+    Hemsidan-erbjudandet. Visas när nya menyn är på men egen redigering (brytare 2) är av: posten Hemsidan i Admin-menyn öppnar den här rutan i stället för
+    Hemsidan. Knappen "Aktivera Hemsidan" slår på brytare 2 för den egna föreningen (SiteEdit/Activate, prövas på servern) och tar användaren in i Hemsidan.
+    Anrop: @await Html.PartialAsync("_HemsidanOfferModal", ("club", clubId, "klubben", "tutorial-designa-klubbsidan"))
+    Öppnas med window.hpskOpenHemsidanOffer() (rälsen och mobilväljaren).
+*@
+@model (string OwnerType, int OwnerId, string Noun, string TutorialId)
+<div class="modal fade" id="hemsidanOfferModal" tabindex="-1" aria-labelledby="hemsidanOfferTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            @Html.AntiForgeryToken()
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="hemsidanOfferTitle"><i class="bi bi-pencil-square me-2"></i>Hemsidan – egna sidor för @Model.Noun</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p>Med Hemsidan bygger ni @(Model.Noun)s egna sidor på pistol.nu:</p>
+                <ul class="mb-3">
+                    <li>välj färger och sidhuvud</li>
+                    <li>ladda upp bilder och skapa egna sidor och undersidor</li>
+                    <li>bestäm vem som ser vad: alla, inloggade, medlemmar eller styrelsen</li>
+                </ul>
+                <p class="mb-2">Ingenting ändras för besökarna förrän ni själva publicerar en sida. Det tar en minut att komma igång, och filmen visar hur.</p>
+                <div id="hemsidanOfferError" class="alert alert-danger py-2 mt-3 mb-0" role="alert" style="display:none;"></div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-outline-primary" onclick="TutorialHelper.open('@Model.TutorialId')">
+                    <i class="bi bi-play-circle me-1" aria-hidden="true"></i>Se filmen
+                </button>
+                <div>
+                    <button type="button" class="btn btn-outline-secondary me-1" data-bs-dismiss="modal">Inte nu</button>
+                    <button type="button" class="btn btn-primary" id="hemsidanOfferGo"><i class="bi bi-check2-circle me-1"></i>Aktivera Hemsidan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var modalEl = document.getElementById('hemsidanOfferModal');
+    if (!modalEl) return;
+    window.hpskOpenHemsidanOffer = function () {
+        var err = document.getElementById('hemsidanOfferError');
+        if (err) err.style.display = 'none';
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    };
+    var go = document.getElementById('hemsidanOfferGo');
+    go.addEventListener('click', async function () {
+        var err = document.getElementById('hemsidanOfferError');
+        var tokenInput = modalEl.querySelector('input[name="__RequestVerificationToken"]');
+        var label = go.innerHTML;
+        go.disabled = true;
+        go.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Aktiverar…';
+        err.style.display = 'none';
+        try {
+            var body = new URLSearchParams();
+            body.set('ownerType', '@Model.OwnerType');
+            body.set('ownerId', '@Model.OwnerId');
+            body.set('__RequestVerificationToken', tokenInput ? tokenInput.value : '');
+            var res = await fetch('/umbraco/surface/SiteEdit/Activate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            });
+            var data = null;
+            try { data = await res.json(); } catch (e) { data = null; }
+            if (data && data.success) { window.location.href = data.url; return; }
+            err.textContent = (data && data.message) || 'Det gick inte att aktivera Hemsidan just nu. Försök igen om en stund.';
+            err.style.display = '';
+        } catch (e) {
+            err.textContent = 'Det gick inte att nå servern. Försök igen om en stund.';
+            err.style.display = '';
+        }
+        go.disabled = false;
+        go.innerHTML = label;
+    });
+})();
+</script>

@@ -44,17 +44,43 @@ namespace HpskSite.Controllers
         private readonly SiteViewerResolver _viewers;
         private readonly ISiteSupportNotifier _notifier;
         private readonly SiteAppearanceService _appearance;
+        private readonly DpaAcceptanceService _dpa;
 
         public SiteEditController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, ISiteOwnerFacts facts, RateCounterService rate,
             IContentService content, IMemberManager members, IMemberService memberService, SiteViewerResolver viewers, ISiteSupportNotifier notifier,
-            SiteAppearanceService appearance)
+            SiteAppearanceService appearance, DpaAcceptanceService dpa)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth; _scopes = scopes; _owners = owners; _facts = facts; _rate = rate;
             _content = content; _members = members; _memberService = memberService; _viewers = viewers; _notifier = notifier;
-            _appearance = appearance;
+            _appearance = appearance; _dpa = dpa;
+        }
+
+        /// <summary>
+        /// "Aktivera Hemsidan" ur modalen i Admin-menyn: slår på brytare 2 (egen redigering) för den egna föreningen. Brytare 1 (nya menyn) måste vara PÅ.
+        /// Klubbens personuppgiftsbiträdesavtal måste vara godkänt (samma grind som sajtadmins knapp). Brytare 3 (omvandling) rörs aldrig.
+        /// Villkoren godkänns som vanligt inne i Hemsidan.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller sajtadmin, brytare 1 PÅ (slår på brytare 2)")]
+        public async Task<IActionResult> Activate(string ownerType, int ownerId)
+        {
+            var g = await Gate(ownerType, ownerId, write: false, GateMode.Activate);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"siteactivate:{g.OwnerType}:{g.OwnerId}", 10, TimeSpan.FromMinutes(1)))
+                return Fail("För många försök. Vänta en stund.", "rate");
+            if (g.OwnerType == SiteTemplates.Club)
+            {
+                var dpa = await _dpa.GetStatusForClubAsync(g.OwnerId);
+                if (!dpa.Accepted)
+                    return Fail("Klubben behöver först godkänna personuppgiftsbiträdesavtalet (rutan överst på administrationssidan). Sedan kan Hemsidan slås på.", "dpa");
+            }
+            try { _owners.SetEditing(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); }
+            catch (InvalidOperationException) { return Fail("Hemsidan kunde inte slås på just nu.", "unavailable"); }
+            return Json(new { success = true, url = g.OwnerUrl + "hemsidan/" });
         }
 
         /// <summary>Utseendet och valen (vitlistan ur <see cref="SiteAppearance"/>). Samma sak ritas av sidorna, så editorn har inga egna listor.</summary>
@@ -112,8 +138,9 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Normal = ägarens egen admin, sajtadmin ELLER öppet stödläge (kretsadmin). OwnOnly = bara ägarens egen admin (personuppgifterna i Anmälningar).
         /// OwnOrSiteAdmin = ägarens egen admin eller sajtadmin, aldrig stödläge (villkoren, omvandlingen, loggen). StartSupport = även den som FÅR öppna ett stödläge.
+        /// Activate = som OwnOrSiteAdmin, men brytare 2 får vara AV (åtgärden är det som slår på den); brytare 1 måste vara PÅ.
         /// </summary>
-        private enum GateMode { Normal, OwnOnly, OwnOrSiteAdmin, StartSupport }
+        private enum GateMode { Normal, OwnOnly, OwnOrSiteAdmin, StartSupport, Activate }
 
         private IActionResult Fail(string message, string? code = null) => Json(new { success = false, message, code });
 
@@ -128,7 +155,8 @@ namespace HpskSite.Controllers
             if (node == null || node.Trashed || node.ContentType.Alias != alias) return new GateResult(Fail("Föreningen finns inte."));
 
             // Brytare 2 av = ytan finns inte (inte ett beskrivande fel som avslöjar något).
-            if (!_owners.IsEditingEnabled(ownerType, ownerId)) return new GateResult(Fail("Hemsidan är inte påslagen för den här föreningen.", "off"));
+            var switchOk = mode == GateMode.Activate ? _owners.IsEnabled(ownerType, ownerId) : _owners.IsEditingEnabled(ownerType, ownerId);
+            if (!switchOk) return new GateResult(Fail("Hemsidan är inte påslagen för den här föreningen.", "off"));
 
             var regionCode = node.GetValue<string>("regionCode");
             var own = ownerType == SiteTemplates.Club
@@ -147,7 +175,7 @@ namespace HpskSite.Controllers
             SupportGrantRow? grant = null;
             if (!own && !siteAdmin)
             {
-                if (mode == GateMode.OwnOnly || mode == GateMode.OwnOrSiteAdmin) return new GateResult(Fail(NotAllowed, "denied"));
+                if (mode == GateMode.OwnOnly || mode == GateMode.OwnOrSiteAdmin || mode == GateMode.Activate) return new GateResult(Fail(NotAllowed, "denied"));
                 if (!await _viewers.IsSupportEligibleAsync(ownerType, ownerId)) return new GateResult(Fail(NotAllowed, "denied"));
                 using var gs = _scopes.CreateScope(autoComplete: true);
                 grant = SiteSupport.Active(gs.Database, memberId.Value, ownerType, ownerId, DateTime.Now);

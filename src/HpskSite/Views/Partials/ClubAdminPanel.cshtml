@@ -4,6 +4,8 @@
     var clubName = ViewBag.clubName as string ?? "Club";
     // Hemsidan (egna sidor) är en egen sida, som Styrelsearbete och Ekonomi; länken syns bara för den som får redigera (ClubNavigation räknar ut det).
     var hemsidanUrl = (ViewBag.canEditSite as bool? ?? false) && ViewBag.sitePageView is HpskSite.Services.SitePages.SitePageView hsp ? hsp.OwnerUrl + "hemsidan/" : null;
+    // Nya menyn på, egen redigering av: Hemsidan visas ändå och öppnar en förklaring med knappen "Aktivera" (_HemsidanOfferModal).
+    var hemsidanOffer = hemsidanUrl == null && (ViewBag.hemsidanOffer as bool? ?? false);
     // Kretskalendern i planeringsläge (kretsgranskning fas 4) — klubben ansöker härifrån och ser
     // krockar. Bara när klubbens krets går att avgöra.
     var clubRegionId = 0;
@@ -26,6 +28,7 @@
 @await Html.PartialAsync("_MemberActivitySummary")
 
 <div class="club-admin-panel">
+    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", ("club", clubId, "klubben", "tutorial-designa-klubbsidan")) }
     <!-- Personuppgiftsbiträdesavtal (DPA) acceptance gate — populated by loadDpaGate().
          Shown only while the DPA is NOT yet accepted. Once accepted, this stays hidden and the
          status moves into the Medlemmar → Åtgärder menu (#dpaStatusModal). -->
@@ -111,6 +114,7 @@
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=0&id=@clubId">Ekonomi ↗</option>
                     @if (hemsidanUrl != null) { <option value="@hemsidanUrl">Hemsidan ↗</option> }
+                    @if (hemsidanOffer) { <option value="hemsidan:offer">Hemsidan</option> }
                     <option value="#clubFirearmsTab">Klubbvapen</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
@@ -232,6 +236,12 @@
                         <i class="bi bi-pencil-square me-2"></i>Hemsidan
                         <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar redigeringen av klubbens egna sidor"></i>
                     </a>
+                }
+                @if (hemsidanOffer)
+                {
+                    <button type="button" class="nav-link d-flex align-items-center" onclick="hpskOpenHemsidanOffer()">
+                        <i class="bi bi-pencil-square me-2"></i>Hemsidan
+                    </button>
                 }
                 @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24, Stefan: "Allt under Admin / Fakturor för
                    klubbar och Kretsar ska in under Ekonomin"). Den bor nu i Ekonomi → Fakturor, med
@@ -6674,6 +6684,7 @@ function showDpaStatusModal() {
     sel.addEventListener('change', function () {
         // A URL-valued option (Styrelsearbete, Ekonomi) opens its own page in a new tab, like the
         // rail links, and the picker goes back to the section the user is on.
+        if (sel.value === 'hemsidan:offer') { if (window.hpskOpenHemsidanOffer) hpskOpenHemsidanOffer(); sel.value = lastPane; return; }
         if (sel.value && sel.value.charAt(0) !== '#') { window.open(sel.value, '_blank', 'noopener'); sel.value = lastPane; return; }
         lastPane = sel.value;
         var btn = document.querySelector('#adminTabs [data-bs-target="' + sel.value + '"]');

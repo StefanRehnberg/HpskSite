@@ -3,6 +3,8 @@
     var regionName = ViewBag.regionName as string ?? "Krets";
     // Hemsidan (egna sidor) är en egen sida, som Styrelsearbete och Ekonomi; länken syns bara för den som får redigera (RegionalNavigation räknar ut det).
     var hemsidanUrl = (ViewBag.canEditSite as bool? ?? false) && ViewBag.sitePageView is HpskSite.Services.SitePages.SitePageView hsp ? hsp.OwnerUrl + "hemsidan/" : null;
+    // Nya menyn på, egen redigering av: Hemsidan visas ändå och öppnar en förklaring med knappen "Aktivera" (_HemsidanOfferModal).
+    var hemsidanOffer = hemsidanUrl == null && (ViewBag.hemsidanOffer as bool? ?? false);
 }
 
 <!-- Flatpickr Date/Time Picker -->
@@ -187,6 +189,7 @@
 </script>
 
 <div class="regional-admin-panel">
+    @if (hemsidanOffer) { @await Html.PartialAsync("_HemsidanOfferModal", ("region", regionContentId, "kretsen", "tutorial-designa-klubbsidan")) }
     @* Informationsrutan "Kretsadministration – Du kan hantera dokument, texter och bilder…"
        togs bort 2026-09-21 (Stefan). Den beskrev panelen för någon som redan står i den, och
        räknade dessutom upp tre av ett femtontal saker man kan göra här. *@
@@ -251,6 +254,7 @@
                     <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=1&id=@regionContentId">Ekonomi ↗</option>
                     @if (hemsidanUrl != null) { <option value="@hemsidanUrl">Hemsidan ↗</option> }
+                    @if (hemsidanOffer) { <option value="hemsidan:offer">Hemsidan</option> }
                     <option value="#regionSettingsTab">Inställningar</option>
                     <option value="#regionDocumentsTab" selected>Dokument</option>
                     <option value="#regionStatsTab">Statistik</option>
@@ -328,6 +332,12 @@
                         <i class="bi bi-pencil-square me-2"></i>Hemsidan
                         <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar redigeringen av kretsens egna sidor"></i>
                     </a>
+                }
+                @if (hemsidanOffer)
+                {
+                    <button type="button" class="nav-link d-flex align-items-center" onclick="hpskOpenHemsidanOffer()">
+                        <i class="bi bi-pencil-square me-2"></i>Hemsidan
+                    </button>
                 }
                 @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24) — den bor i Ekonomi → Fakturor. *@
                 <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button" role="tab" aria-controls="regionSettingsTab" aria-selected="false">
@@ -1789,6 +1799,7 @@
         }
         // A URL-valued option (Styrelsearbete, Ekonomi) opens its own page in a new tab, like the
         // rail links, and the picker goes back to the section the user is on.
+        if (sel.value === 'hemsidan:offer') { if (window.hpskOpenHemsidanOffer) hpskOpenHemsidanOffer(); sel.value = lastPane; return; }
         if (sel.value && sel.value.charAt(0) !== '#') { window.open(sel.value, '_blank', 'noopener'); sel.value = lastPane; return; }
         lastPane = sel.value;
         var btn = document.querySelector('#regionAdminTabs [data-bs-target="' + sel.value + '"]');

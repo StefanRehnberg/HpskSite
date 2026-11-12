@@ -20,6 +20,7 @@
             <input class="form-check-input" type="checkbox" role="switch" id="sgpOn" />
             <label class="form-check-label" for="sgpOn">Bara påslagna</label>
         </div>
+        <button type="button" id="sgpAll" class="btn btn-outline-primary btn-sm" data-label="Slå på nya menyn för alla">Slå på nya menyn för alla</button>
         <span id="sgpCount" class="ms-auto small text-body-secondary"></span>
     </div>
     <div id="sgpOut" class="small" style="min-width:0"></div>
@@ -213,6 +214,30 @@
     document.getElementById('sgpQ').addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(); }, 300); });
     document.getElementById('sgpType').addEventListener('change', function () { load(); });
     document.getElementById('sgpOn').addEventListener('change', function () { load(); });
+
+    // "Slå på nya menyn för alla": två tryck (som övriga knappar här). Slår bara PÅ de som är av; rör inte egen redigering eller omvandling.
+    var allBtn = document.getElementById('sgpAll');
+    allBtn.addEventListener('click', async function () {
+        if (allBtn.dataset.armed !== '1') {
+            allBtn.dataset.armed = '1';
+            allBtn.textContent = 'Säker? Tryck igen: alla klubbar och kretsar får nya menyn';
+            setTimeout(function () { if (allBtn.dataset.armed === '1') { allBtn.dataset.armed = ''; allBtn.textContent = allBtn.dataset.label; } }, 6000);
+            return;
+        }
+        allBtn.dataset.armed = ''; allBtn.disabled = true; allBtn.textContent = 'Slår på…';
+        try {
+            var fd = new FormData();
+            fd.append('__RequestVerificationToken', token());
+            var r = await fetch(BASE + '/EnableAllMenus', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); }
+            else await load('<span class="text-success">Nya menyn är påslagen för ' + d.clubs + ' klubbar och ' + d.regions + ' kretsar till.</span>');
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Gick inte: ' + esc(e.message) + '</div>');
+        }
+        allBtn.disabled = false; allBtn.textContent = allBtn.dataset.label;
+    });
 
     // Laddas när Underhåll-fliken öppnas första gången (undviker en fråga för varje sidvisning av /admin-page).
     var tab = document.querySelector('[data-bs-target="#underhall"]');

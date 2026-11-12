@@ -314,5 +314,47 @@ WHERE ct.alias = @0 AND n.trashed = 0 AND n.id = @1", alias, id);
             }
             return Json(new { success = true, changed = valid.Count, enabled });
         }
+
+        /// <summary>
+        /// Slår på brytare 1 (nya menyn i stället för flikar) för ALLA klubbar och kretsar som ännu är av (Stefan 2026-11-12). Slår aldrig av något och rör inte
+        /// brytare 2 och 3. Medvetet utan taket <see cref="MaxOwnersPerCall"/>: det är den här knappen som är beslutet. Noderna väljs ur trädet (rätt sort, ej papperskorg).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: bara sajtadministratör")]
+        public async Task<IActionResult> EnableAllMenus()
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = NotAdmin });
+            List<OwnerNodeRow> nodes;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+                nodes = scope.Database.Fetch<OwnerNodeRow>(@"
+SELECT n.id AS Id, n.[text] AS Name, ct.alias AS Alias
+FROM umbracoNode n
+JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+WHERE ct.alias IN ('club', 'regionalPage') AND n.trashed = 0");
+            HashSet<string> on;
+            try { on = _owners.ListAll().Where(r => r.IsEnabled).Select(r => SiteOwnerService.Key(r.OwnerType, r.OwnerId)).ToHashSet(StringComparer.Ordinal); }
+            catch (Exception ex) { return Json(new { success = false, message = "Läget gick inte att läsa (" + ex.GetBaseException().Message + ")" }); }
+
+            var cur = await _memberManager.GetCurrentMemberAsync();
+            var memberId = cur?.Email == null ? (int?)null : _memberService.GetByEmail(cur.Email)?.Id;
+            int clubs = 0, regions = 0;
+            try
+            {
+                foreach (var n in nodes)
+                {
+                    var type = n.Alias == "club" ? SiteTemplates.Club : SiteTemplates.Region;
+                    if (on.Contains(SiteOwnerService.Key(type, n.Id))) continue;
+                    _owners.Set(type, n.Id, true, memberId);
+                    if (type == SiteTemplates.Club) clubs++; else regions++;
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = $"Avbröt efter {clubs} klubbar och {regions} kretsar: " + ex.GetBaseException().Message });
+            }
+            return Json(new { success = true, clubs, regions });
+        }
     }
 }

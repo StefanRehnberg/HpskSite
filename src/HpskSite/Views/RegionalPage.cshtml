@@ -88,6 +88,9 @@
     // Hemsidan (egna sidor): länken syns bara för kretsens EGEN admin och bara när brytare 2 är PÅ.
     ViewBag.canEditSite = sp.Enabled && SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
         && await SiteViewers.CanEditSiteAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode);
+    // Nya menyn är på men egen redigering är av: Hemsidan visas i Admin-menyn och öppnar en förklaring med knappen "Aktivera".
+    ViewBag.hemsidanOffer = sp.Enabled && !SiteOwners.IsEditingEnabled(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id)
+        && await SiteViewers.CanEditSiteAsync(HpskSite.Services.SitePages.SiteTemplates.Region, Model.Id, regionCode);
 }
 
 <!-- Hero Banner Section -->
