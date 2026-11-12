@@ -17,6 +17,7 @@ using HpskSite.Shared.Models;
 using HpskSite.Services;
 using HpskSite.CompetitionTypes.Precision.Services;
 using HpskSite.CompetitionTypes.Faltskytte.Services;
+using HpskSite.CompetitionTypes.Common;
 using System.Text.Json;
 using NPoco;
 using Microsoft.AspNetCore.Hosting;
@@ -916,35 +917,40 @@ namespace HpskSite.Controllers
                         selfStatusByScore[(int)a.TrainingScoreId] = (string)a.Status;
                     }
 
-                    // Query 1: Get competition results from the correct table based on type
-                    var resultTable = competitionType switch
-                    {
-                        "Milsnabb" => "MilsnabbResultEntry",
-                        "Duell" => "DuellResultEntry",
-                        "NationellHelmatch" => "NationellHelmatchResultEntry",
-                        "MagnumPrecision" => "MagnumPrecisionResultEntry",
-                        _ => "PrecisionResultEntry"
-                    };
-                    var competitionResults = db.Fetch<dynamic>($@"
-                        SELECT
-                            CompetitionId,
-                            ShootingClass,
-                            SeriesNumber,
-                            Shots
-                        FROM {resultTable}
-                        WHERE MemberId = @0
-                        ORDER BY CompetitionId, SeriesNumber",
-                        memberId);
+                    // "Alla" = varje gren i precisionsfamiljen (Fältskytte har egen form och egen
+                    // vy). Tabellen kommer ur EN karta, CompetitionResultTables — en egen switch med
+                    // `_ => PrecisionResultEntry` lät Sportpistol/Standardpistol visa Precisions tävlingar.
+                    var isAll = competitionType == "Alla";
+                    var disciplines = isAll
+                        ? new[] { "Precision", "Milsnabb", "Duell", "NationellHelmatch", "MagnumPrecision", "Standardpistol", "Sportpistol" }
+                        : new[] { competitionType };
 
-                    // Group by CompetitionId and ShootingClass
-                    var groupedCompetitions = competitionResults
-                        .GroupBy(r => new { CompetitionId = (int)r.CompetitionId, ShootingClass = (string)r.ShootingClass })
-                        .ToList();
+                    // Query 1: Get competition results from the correct table(s) based on type
+                    var groupedCompetitions = new List<(string Discipline, int CompetitionId, string ShootingClass, List<dynamic> Rows)>();
+                    foreach (var disc in disciplines)
+                    {
+                        var competitionResults = db.Fetch<dynamic>($@"
+                            SELECT
+                                CompetitionId,
+                                ShootingClass,
+                                SeriesNumber,
+                                Shots
+                            FROM {CompetitionResultTables.For(disc)}
+                            WHERE MemberId = @0
+                            ORDER BY CompetitionId, SeriesNumber",
+                            memberId);
+
+                        foreach (var g in competitionResults
+                            .GroupBy(r => new { CompetitionId = (int)r.CompetitionId, ShootingClass = (string)r.ShootingClass }))
+                        {
+                            groupedCompetitions.Add((disc, g.Key.CompetitionId, g.Key.ShootingClass, g.ToList()));
+                        }
+                    }
 
                     foreach (var group in groupedCompetitions)
                     {
                         // Get competition details from Umbraco content
-                        var competition = _competitions.GetSaved(group.Key.CompetitionId);
+                        var competition = _competitions.GetSaved(group.CompetitionId);
                         if (competition == null) continue;
 
                         var competitionDate = (competition.CompetitionDate ?? DateTime.MinValue);
@@ -953,7 +959,7 @@ namespace HpskSite.Controllers
                         var competitionName = competition.Name ?? "Okänd tävling";
 
                         // Map ShootingClass to WeaponClass via the registry (so A_opt_X resolves to "A_Opt").
-                        var weaponClassStr = ShootingClasses.GetWeaponClassCode(group.Key.ShootingClass);
+                        var weaponClassStr = ShootingClasses.GetWeaponClassCode(group.ShootingClass);
                         if (string.IsNullOrEmpty(weaponClassStr)) weaponClassStr = "?";
 
                         // Filter by weapon class
@@ -963,7 +969,7 @@ namespace HpskSite.Controllers
                         int totalScore = 0;
                         int seriesCount = 0;
 
-                        foreach (var entry in group)
+                        foreach (var entry in group.Rows)
                         {
                             var shotsJson = (string)entry.Shots;
                             if (!string.IsNullOrEmpty(shotsJson))
@@ -982,10 +988,11 @@ namespace HpskSite.Controllers
                         var averageScore = Math.Round((double)totalScore / seriesCount, 1);
 
                         // Match the ledger on the canonical (Name-based) class key — see NormalizeClassKey.
-                        var medalKey = group.Key.CompetitionId + "|" + NormalizeClassKey(group.Key.ShootingClass);
+                        var medalKey = group.CompetitionId + "|" + NormalizeClassKey(group.ShootingClass);
 
                         results.Add(new
                         {
+                            discipline = group.Discipline,
                             date = competitionDate,
                             name = competitionName,
                             type = "Competition",
@@ -993,8 +1000,8 @@ namespace HpskSite.Controllers
                             weaponClass = weaponClassStr,
                             totalScore = totalScore,
                             seriesCount = seriesCount,
-                            competitionId = group.Key.CompetitionId,
-                            shootingClass = group.Key.ShootingClass,
+                            competitionId = group.CompetitionId,
+                            shootingClass = group.ShootingClass,
                             stdMedal = onSiteMedalLookup.GetValueOrDefault(medalKey),
                             // pistol.nu-medaljer är belagda av tävlingens egen resultatlista.
                             proofStatus = onSiteMedalLookup.ContainsKey(medalKey) ? "has" : (string)null,
@@ -1010,14 +1017,17 @@ namespace HpskSite.Controllers
                     // For other types: include only entries with matching Discipline
                     // Non-scoring practice rows (vittavla / fri övning) are excluded here; they surface
                     // separately in practiceResults (see below).
-                    var disciplineFilter = competitionType == "Precision"
-                        ? "AND (Discipline = 'Precision' OR Discipline IS NULL) AND PracticeType IS NULL"
-                        : $"AND Discipline = @2 AND PracticeType IS NULL";
-                    var trainingScoreParams = competitionType == "Precision"
+                    var disciplineFilter = isAll
+                        ? "AND (Discipline IS NULL OR Discipline <> 'Faltskytte') AND PracticeType IS NULL"
+                        : competitionType == "Precision"
+                            ? "AND (Discipline = 'Precision' OR Discipline IS NULL) AND PracticeType IS NULL"
+                            : $"AND Discipline = @2 AND PracticeType IS NULL";
+                    var trainingScoreParams = (isAll || competitionType == "Precision")
                         ? new object[] { memberId, filterYear }
                         : new object[] { memberId, filterYear, competitionType };
                     var trainingScores = db.Fetch<dynamic>($@"
                         SELECT
+                            Discipline,
                             Id,
                             TrainingDate,
                             WeaponClass,
@@ -1080,6 +1090,7 @@ namespace HpskSite.Controllers
 
                         results.Add(new
                         {
+                            discipline = string.IsNullOrEmpty((string)score.Discipline) ? "Precision" : (string)score.Discipline,
                             date = (DateTime)score.TrainingDate,
                             name = trainingName,
                             type = isCompetition ? "Competition" : "Training",
@@ -1124,10 +1135,13 @@ namespace HpskSite.Controllers
             var practice = new List<object>();
             using (var db = _databaseFactory.CreateDatabase())
             {
-                var disciplineWhere = competitionType == "Precision"
-                    ? "(Discipline = 'Precision' OR Discipline IS NULL)"
-                    : "Discipline = @2";
-                var sqlParams = competitionType == "Precision"
+                var allDisciplines = competitionType == "Alla";
+                var disciplineWhere = allDisciplines
+                    ? "(Discipline IS NULL OR Discipline <> 'Faltskytte')"
+                    : competitionType == "Precision"
+                        ? "(Discipline = 'Precision' OR Discipline IS NULL)"
+                        : "Discipline = @2";
+                var sqlParams = (allDisciplines || competitionType == "Precision")
                     ? new object[] { memberId, filterYear }
                     : new object[] { memberId, filterYear, competitionType };
 

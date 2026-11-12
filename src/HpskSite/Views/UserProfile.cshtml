@@ -279,7 +279,8 @@
                                 </div>
                                 <div class="d-flex gap-2 flex-wrap">
                                     <select id="competitionTypeFilter" class="form-select form-select-sm" style="width: auto;" onchange="loadResults()">
-                                        <option value="Precision" selected>Precision</option>
+                                        <option value="Alla" selected>Alla grenar</option>
+                                        <option value="Precision">Precision</option>
                                         <option value="Milsnabb">Milsnabb</option>
                                         <option value="Duell">Duell</option>
                                         <option value="NationellHelmatch">Nationell Helmatch</option>
@@ -1135,7 +1136,9 @@ let plFlatpickr = null;
 let plGroupChartInstance = null;
 
 function openPracticeLogModal() {
-    const discipline = document.getElementById('competitionTypeFilter')?.value || 'Precision';
+    // "Alla" är bara en visning — en träningslogg hör alltid till en gren, så Precision som förut.
+    let discipline = document.getElementById('competitionTypeFilter')?.value || 'Precision';
+    if (discipline === 'Alla') discipline = 'Precision';
     document.getElementById('plDiscipline').value = discipline;
     const labels = { Precision: 'Precision', Milsnabb: 'Milsnabb', Duell: 'Duell', NationellHelmatch: 'Nationell Helmatch', MagnumPrecision: 'Magnum Precision', Faltskytte: 'Fältskytte' };
     document.getElementById('plDisciplineLabel').value = labels[discipline] || discipline;
@@ -4378,7 +4381,7 @@ function loadResults() {
         </div>
     `;
 
-    const competitionType = document.getElementById('competitionTypeFilter')?.value || 'Precision';
+    const competitionType = document.getElementById('competitionTypeFilter')?.value || 'Alla';
     const year = document.getElementById('yearFilter')?.value || new Date().getFullYear();
     const weaponClass = document.getElementById('weaponClassFilter')?.value || 'Alla';
 
@@ -4468,6 +4471,13 @@ function renderFirearmTagCell(r) {
     return '<span class="small text-muted">–</span>';
 }
 
+// Grenens visningsnamn i resultatlistan (Gren-kolumnen). Okänd gren visas som den är lagrad.
+function resultDisciplineLabel(d) {
+    const labels = { Precision: 'Precision', Milsnabb: 'Milsnabb', Duell: 'Duell', NationellHelmatch: 'Nat. helmatch',
+                     MagnumPrecision: 'Magnum', Standardpistol: 'Standardpistol', Sportpistol: 'Sportpistol' };
+    return labels[d] || d || '';
+}
+
 function renderResultsTable(results) {
     const content = document.getElementById('resultsContent');
 
@@ -4502,6 +4512,7 @@ function renderResultsTable(results) {
                     <tr>
                         <th>Datum</th>
                         <th class="d-none d-md-table-cell">Namn</th>
+                        <th>Gren</th>
                         <th class="d-none d-md-table-cell">Medel</th>
                         <th>Klass</th>
                         <th>Totalt</th>
@@ -4522,6 +4533,7 @@ function renderResultsTable(results) {
                                 ${formatDateShort(r.date)}
                             </td>
                             <td class="d-none d-md-table-cell">${escapeHtml(r.name)}</td>
+                            <td>${escapeHtml(resultDisciplineLabel(r.discipline))}</td>
                             <td class="d-none d-md-table-cell"><strong>${r.averageScore}</strong></td>
                             <td><span class="badge bg-secondary">${r.weaponClass}</span></td>
                             <td>${r.totalScore} <small class="text-muted">(${r.seriesCount} serier)</small></td>
