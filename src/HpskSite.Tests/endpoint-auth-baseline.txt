@@ -989,6 +989,7 @@ PlanningController.GiveChiefsConfigAccess
 PlanningController.HandOver
 PlanningController.HostOptions
 PlanningController.InviteByEmail
+PlanningController.JoinAsSupport
 PlanningController.KretsChecklist
 PlanningController.LinkCompetition
 PlanningController.LinkableCompetitions
