@@ -76,7 +76,15 @@
 }
 
 <div class="container-fluid my-4 site-page">
-    <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    @if (ok)
+    {
+        @* Samma sidhuvud (namn, banner, logga, valt utseende) som på Hem. *@
+        @await Html.PartialAsync("_SiteOwnerHeader", (req!.OwnerType, Model!))
+    }
+    else
+    {
+        <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    }
     @if (ok)
     {
         @Html.Raw("<div class=\"hpsk-sidelayout\">")
@@ -92,7 +100,7 @@
     else if (req!.PageKey == SitePageRequest.NewsKey)
     {
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-            <h1 class="h2 mb-0">Nyheter</h1>
+            <h2 class="h2 mb-0">Nyheter</h2>
             @if (canWrite)
             {
                 <a class="btn btn-primary" href="@(archiveUrl)skriv/"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Skriv en nyhet</a>
@@ -137,7 +145,7 @@
         <article id="sitePost" data-post-id="@post.Id" data-revision="@post.Revision">
             <p class="mb-2"><a href="@archiveUrl" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Alla nyheter</a></p>
             @if (!post.IsPublished) { <div class="alert alert-warning py-2">Det här är ett utkast. Bara skribenterna ser det.</div> }
-            <h1 class="h2 mb-1">@post.Title</h1>
+            <h2 class="h2 mb-1">@post.Title</h2>
             <p class="text-muted mb-3">@DateOf(post)@(string.IsNullOrWhiteSpace(post.AuthorName) ? "" : " · " + post.AuthorName)
                 @if (canWrite && post.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(post.Visibility)</span> }</p>
             @if (post.CoverFileId != null)
@@ -179,7 +187,7 @@
     else if (req.PageKey == SitePageRequest.NewsWriteKey)
     {
         <p class="mb-2"><a href="@archiveUrl" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Alla nyheter</a></p>
-        <h1 class="h2 mb-3">Skriv en nyhet</h1>
+        <h2 class="h2 mb-3">Skriv en nyhet</h2>
         <div id="newsEditor" data-owner-type="@req.OwnerType" data-owner-id="@req.OwnerId" data-archive-url="@archiveUrl" data-can-delete="@(canDelete ? "1" : "0")" data-is-region="@(req.OwnerType == SiteTemplates.Region ? "1" : "0")">
             @Html.AntiForgeryToken()
             <noscript><div class="alert alert-warning">Skrivytan behöver JavaScript.</div></noscript>

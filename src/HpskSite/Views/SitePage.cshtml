@@ -62,7 +62,15 @@
 }
 
 <div class="container-fluid my-4 site-page">
-    <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    @if (showMenu)
+    {
+        @* Samma sidhuvud (namn, banner, logga, valt utseende) som på Hem. *@
+        @await Html.PartialAsync("_SiteOwnerHeader", (req!.OwnerType, Model!))
+    }
+    else
+    {
+        <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    }
     @if (showMenu)
     {
         @Html.Raw("<div class=\"hpsk-sidelayout\">")
@@ -76,7 +84,7 @@
     }
     else if (loaded != null)
     {
-        <h1 class="h2 mb-4">@title</h1>
+        <h2 class="h2 mb-4">@title</h2>
         @Html.Raw(body) @* Allt i body är kodat av SiteBlockRenderer; textblockets HTML är sanerad (SiteHtmlSanitizer). *@
     }
     else

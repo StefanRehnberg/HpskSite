@@ -1,0 +1,81 @@
+@using Umbraco.Cms.Core.Models.PublishedContent
+@using Umbraco.Extensions
+@inject HpskSite.Services.SitePages.SiteAppearanceService SiteAppearanceSvc
+@model (string OwnerType, IPublishedContent Node)
+@*
+    Klubbens/kretsens sidhuvud (namn, banner, logga) i det utseende ägaren valt under Hemsidan → Utseende.
+    EN ritväg för Hem och för egna sidor/nyheter, så att alla sidor ser ut som Hem. Klubben ritas av ClubHeader (läser ViewBag),
+    kretsen av samma markering som RegionalPage hade.
+*@
+@{
+    var node = Model.Node;
+    var isClub = Model.OwnerType == HpskSite.Services.SitePages.SiteTemplates.Club;
+    var regionName = node.Value<string>("regionName") ?? node.Name;
+    var welcomeTitle = node.Value<string>("welcomeTitle") ?? $"Välkommen till {regionName}";
+    var welcomeText = HpskSite.Extensions.RteHelper.SafeMarkup(node.Value<string>("welcomeText"));
+    var bannerImage = node.Value<IPublishedContent>("bannerImage");
+    var logo = node.Value<IPublishedContent>("logo");
+    var regionLook = isClub ? HpskSite.Services.SitePages.SiteAppearance.Look.Default : SiteAppearanceSvc.Get(HpskSite.Services.SitePages.SiteTemplates.Region, node.Id);
+    var heroOverlay = regionLook.HasCustomColor
+        ? "linear-gradient(135deg, rgba(var(--bs-primary-rgb),0.6) 0%, rgba(var(--bs-primary-rgb),0.65) 100%)"
+        : "linear-gradient(135deg, rgba(0,123,255,0.6) 0%, rgba(0,86,179,0.65) 100%)";
+    if (isClub)
+    {
+        ViewBag.clubId = node.Id;
+        ViewBag.clubName = node.Value<string>("clubName") ?? node.Name;
+        ViewBag.description = HpskSite.Extensions.RteHelper.SafeMarkup(node.Value<string>("description"));
+        ViewBag.logo = logo;
+        ViewBag.bannerImage = bannerImage;
+    }
+}
+
+@if (isClub)
+{
+    @await Html.PartialAsync("ClubHeader")
+}
+else
+{
+    <div class="mb-4">
+    @if (regionLook.Header != HpskSite.Services.SitePages.SiteAppearance.DefaultHeader)
+    {
+        @await Html.PartialAsync("_SiteHeaderVariant", new HpskSite.Services.SitePages.SiteHeaderModel(
+            regionLook.Header, regionLook.Palette, welcomeTitle, null, welcomeText, logo?.Url(), bannerImage?.Url()))
+    }
+    else if (bannerImage != null)
+    {
+        <div class="position-relative rounded overflow-hidden" style="height: 300px;">
+            <img src="@bannerImage.Url()" alt="@regionName" class="w-100 h-100" style="object-fit: cover;">
+            <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+                 style="background: @Html.Raw(heroOverlay);">
+                <div class="text-center text-white p-4">
+                    @if (logo != null)
+                    {
+                        <img src="@logo.Url()" alt="@regionName Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                    }
+                    <h1 class="display-4 fw-bold">@welcomeTitle</h1>
+                    @if (!string.IsNullOrEmpty(welcomeText))
+                    {
+                        <div class="lead mt-3 prose-wide">@Html.Raw(welcomeText)</div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="jumbotron bg-primary text-white p-5 rounded">
+            <div class="d-flex align-items-center justify-content-center flex-column">
+                @if (logo != null)
+                {
+                    <img src="@logo.Url()" alt="@regionName Logo" class="mb-3" style="max-height: 80px; max-width: 200px;">
+                }
+                <h1 class="display-4 fw-bold text-center">@welcomeTitle</h1>
+                @if (!string.IsNullOrEmpty(welcomeText))
+                {
+                    <div class="lead mt-3 text-center prose-wide">@Html.Raw(welcomeText)</div>
+                }
+            </div>
+        </div>
+    }
+    </div>
+}
