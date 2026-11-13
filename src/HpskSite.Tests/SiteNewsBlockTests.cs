@@ -76,7 +76,44 @@ namespace HpskSite.Tests
         {
             var d = new NewsData(); d.Items.Add(new SiteNewsInfo("Farlig", new DateTime(2027, 3, 1), "javascript:alert(1)"));
             var html = Render(new JsonObject { ["count"] = 3 }, Member, d);
-            Assert.Contains("Farlig", html); Assert.DoesNotContain("javascript:", html); Assert.DoesNotContain("<a ", html);
+            Assert.Contains("Farlig", html); Assert.DoesNotContain("javascript:", html); Assert.DoesNotContain(">Farlig</a>", html);
+        }
+
+        [Fact]
+        public void Blocket_länkar_till_arkivet_under_ägarens_adress()
+        {
+            var d = new NewsData(); d.Items.Add(new SiteNewsInfo("Hej", new DateTime(2027, 3, 1), "/halland/ankeborg/nyheter/hej/"));
+            Assert.Contains("href=\"/halland/ankeborg/nyheter/\"", Render(new JsonObject { ["count"] = 3 }, Member, d));
+        }
+
+        [Fact]
+        public void Sammanfattningen_visas_som_förval_kodad_och_kan_stängas_av()
+        {
+            var d = new NewsData(); d.Items.Add(new SiteNewsInfo("Hej", new DateTime(2027, 3, 1), "/x/", "Kort <i>text</i> & mer"));
+            var on = Render(new JsonObject { ["count"] = 3 }, Member, d);
+            Assert.Contains("Kort &lt;i&gt;text&lt;/i&gt; &amp; mer", on);
+            Assert.DoesNotContain("Kort", Render(new JsonObject { ["count"] = 3, ["showExcerpt"] = false }, Member, d));
+        }
+
+        [Fact]
+        public void Omslagsbilden_visas_bara_när_blocket_ber_om_den_och_bilden_hör_till_ägaren()
+        {
+            var d = new NewsData(); d.Items.Add(new SiteNewsInfo("Hej", new DateTime(2027, 3, 1), "/x/", null, 7));
+            Assert.DoesNotContain("<img", Render(new JsonObject { ["count"] = 3 }, Member, d));                        // förvalet: ingen bild
+            Assert.DoesNotContain("<img", Render(new JsonObject { ["count"] = 3, ["showImage"] = true }, Member, d));  // bilden finns inte hos ägaren (Images() ger inga)
+        }
+
+        [Theory]
+        [InlineData("{\"showExcerpt\":\"ja\"}")] [InlineData("{\"showImage\":1}")]
+        public void Visa_sammanfattning_och_bild_är_ja_eller_nej(string data) => Assert.False(Parse(data).Ok);
+
+        [Fact]
+        public void Visa_sammanfattning_och_bild_sparas_som_de_är()
+        {
+            var c = Parse("{\"showExcerpt\":false,\"showImage\":true}");
+            Assert.True(c.Ok);
+            Assert.False(c.Blocks[0].Data["showExcerpt"]!.GetValue<bool>());
+            Assert.True(c.Blocks[0].Data["showImage"]!.GetValue<bool>());
         }
 
         [Fact]

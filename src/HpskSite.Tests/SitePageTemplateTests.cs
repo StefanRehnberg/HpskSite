@@ -56,7 +56,7 @@ namespace HpskSite.Tests
             // Club.cshtml:192-296: inloggad Hem har Det här händer, Kommande, motioner, kontakt, snabblänkar — inte Om-texten
             // (den ligger på Om Klubben) och inte inloggningsrutan (bara för utloggade).
             var t = SiteTemplates.ClubTemplate;
-            Assert.Equal(new[] { "contact-card", "quicklink-docs", "whats-happening", "upcoming-events", "motions", "quicklinks" },
+            Assert.Equal(new[] { "contact-card", "quicklink-docs", "whats-happening", "upcoming-events", "motions" },
                 Keys(t.BlocksFor(t.PageByKey("home")!, LoggedIn)));
         }
 
@@ -104,7 +104,7 @@ namespace HpskSite.Tests
             var loggedIn = Keys(t.BlocksFor(t.PageByKey("home")!, LoggedIn));
             Assert.Contains("motions", loggedIn);
             Assert.Contains("champions", loggedIn);
-            Assert.Contains("quicklink-records", loggedIn);
+            Assert.DoesNotContain("quicklink-records", loggedIn);   // Kretsrekord-genvägen är borttagen (finns i menyn)
         }
 
         [Fact]

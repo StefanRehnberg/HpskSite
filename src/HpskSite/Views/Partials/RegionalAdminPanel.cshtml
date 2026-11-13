@@ -39,7 +39,6 @@
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
-                                <option value="Nyhet">Nyhet</option>
                                 <option value="Annat">Annat...</option>
                             </select>
                             <input type="text" class="form-control mt-2" id="regionEventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncRegionEventTypeValue(); checkRegionCompetitionTypeWarning()">
@@ -1228,7 +1227,7 @@
     };
 
     // Kretsar har ingen träning (beslut 2026-10-03) — typen finns inte här.
-    var knownRegionEventTypes = ['Städning', 'Möte', 'Socialt', 'Nyhet'];
+    var knownRegionEventTypes = ['Städning', 'Möte', 'Socialt'];   // Nyhet är inte längre en händelsetyp (Nyheter är en egen yta, 2026-11-13)
 
     window.onRegionEventTypeChange = function() {
         var select = document.getElementById('regionEventType');

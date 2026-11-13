@@ -169,7 +169,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("region-ranges", false, false, Set("title"), RegionOnly: true),   // skjutbanor kretsens klubbar använder (live, ur ClubRangeLink; begränsade banor utelämnas)
             new BlockType("region-series", false, false, Set("title", "count"), RegionOnly: true),   // kretsens egna serier (live)
             new BlockType("region-stats", false, false, Set("title"), RegionOnly: true),   // kretsens siffror: klubbar, banor, serier, kommande tävlingar
-            new BlockType("news", false, true, Set("title", "count")),   // klubbens senaste nyheter (live, lagras inte); även före/efter en systemsida
+            new BlockType("news", false, true, Set("title", "count", "showExcerpt", "showImage")),   // föreningens senaste nyheter (SitePost, live, lagras inte i blocket); även före/efter en systemsida
             new BlockType("competitions", false, false, Set("title", "count")),   // föreningens kommande tävlingar (live ur tävlingslagringen, lagras inte)
             new BlockType("records", false, false, Set("title")),   // föreningens gällande rekord (live ur rekordtabellen, lagras inte)
             new BlockType("ranges", false, false, Set("title")),   // skjutbanor (klubbens egna respektive kretsens klubbars), utan karta; begränsade banor utelämnas
@@ -182,7 +182,7 @@ namespace HpskSite.Services.SitePages
         }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         /// <summary>Händelsetyper ett händelseblock får filtrera på (klubbens vanliga typer; tävlingar har egna sidor).</summary>
-        public static readonly IReadOnlySet<string> EventTypes = new HashSet<string>(StringComparer.Ordinal) { "Möte", "Städning", "Socialt", "Nyhet" };
+        public static readonly IReadOnlySet<string> EventTypes = new HashSet<string>(StringComparer.Ordinal) { "Möte", "Städning", "Socialt" };   // Nyhet är inte längre en händelsetyp (Nyheter är en egen yta, 2026-11-13; prod hade inget events-block med typen)
 
         private static IReadOnlySet<string> Set(params string[] f) => new HashSet<string>(f, StringComparer.Ordinal);
 
@@ -190,6 +190,27 @@ namespace HpskSite.Services.SitePages
         /// Tolka och validera lagrad/inskickad JSON. <paramref name="pageVisibility"/> är sidans synlighet (blocket får inte
         /// vara öppnare), <paramref name="template"/> avgör vilka systemsidor ett <c>pagelink</c>-block får peka på.
         /// </summary>
+        /// <summary>Tar bort paneler ur <see cref="PanelCatalog.RetiredKeys"/> ur sidans block. Returnerar antalet borttagna. Rör inget annat.</summary>
+        public static int DropRetiredPanels(JsonObject root)
+        {
+            if (root["blocks"] is not JsonArray arr) return 0;
+            var drop = arr.Where(n => n is JsonObject o && Str(o["type"]) == "panel" && o["data"] is JsonObject d && Str(d["key"]) is string k && PanelCatalog.RetiredKeys.Contains(k)).ToList();
+            foreach (var n in drop) arr.Remove(n);
+            return drop.Count;
+        }
+
+        /// <summary>Samma sak på en sparad JSON-text (för editorn, som annars skulle få en panel den inte känner igen). Orörd text som inte har någon.</summary>
+        public static string? DropRetiredPanels(string? json)
+        {
+            if (string.IsNullOrEmpty(json) || !PanelCatalog.RetiredKeys.Any(k => json.Contains("\"" + k + "\"", StringComparison.Ordinal))) return json;
+            try
+            {
+                if (JsonNode.Parse(json) is not JsonObject root || DropRetiredPanels(root) == 0) return json;
+                return root.ToJsonString(new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            }
+            catch (JsonException) { return json; }
+        }
+
         public static SiteContentResult Parse(string? json, SiteContentKind kind, SiteVisibility pageVisibility, SiteTemplate template, string? pageKey = null)
         {
             var errors = new List<SiteContentError>();
@@ -207,6 +228,7 @@ namespace HpskSite.Services.SitePages
                 catch (JsonException) { errors.Add(new("", "Innehållet kunde inte läsas.")); }
             }
             if (root == null) return Fail(kind, errors);
+            DropRetiredPanels(root);   // en sparad Hem som har en borttagen panel (Snabblänkar) läses utan den i stället för att bli "kan inte visas"
 
             var hasBlocks = kind != SiteContentKind.TemplateCopy;   // fri sida och omvandlad sida har block; mallkopian har platser
             var allowedRoot = hasBlocks ? new[] { "schema", "blocks" } : new[] { "schema", "slots" };
@@ -441,6 +463,12 @@ namespace HpskSite.Services.SitePages
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;
                     if (count < 1 || count > 10) errors.Add(new($"{p}.count", "Antalet nyheter är 1 till 10."));
+                    foreach (var flag in new[] { "showExcerpt", "showImage" })
+                    {
+                        if (d[flag] == null) continue;
+                        if (d[flag] is JsonValue fv && fv.TryGetValue<bool>(out var on)) o[flag] = on;
+                        else errors.Add(new($"{p}.{flag}", "Visa utdrag och bild är ja eller nej."));
+                    }
                     if (title != null) o["title"] = title;
                     o["count"] = count;
                     break;

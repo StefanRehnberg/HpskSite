@@ -322,6 +322,8 @@
                         + '<small class="d-block text-muted">' + esc(doc.fileName) + '</small></div></a>';
                 });
                 container.innerHTML = html;
+                var docCard = document.getElementById('regionQuickLinkDocumentsCard');
+                if (docCard) docCard.style.display = '';
             }
         })
         .catch(function(err) { console.error('Region quick link documents error:', err); });
@@ -349,15 +351,11 @@
                 if (data.success && data.data && data.data.length > 0) {
                     var now = new Date();
                     var visibleEvents = data.data.filter(function(event) {
-                        return event.type === 'Nyhet' || (event.date && new Date(event.date) >= now);
+                        return event.date && new Date(event.date) >= now;   // kommande händelser (nyheter är en egen yta, Nyheter)
                     });
 
                     if (visibleEvents.length > 0) {
                         visibleEvents.sort(function(a, b) {
-                            var aIsNews = a.type === 'Nyhet';
-                            var bIsNews = b.type === 'Nyhet';
-                            if (aIsNews && !a.date) return -1;
-                            if (bIsNews && !b.date) return 1;
                             var aDate = a.date ? new Date(a.date) : new Date(0);
                             var bDate = b.date ? new Date(b.date) : new Date(0);
                             return aDate - bDate;
@@ -374,9 +372,7 @@
                             if (event.date) {
                                 var d = new Date(event.date);
                                 if (d.getFullYear() > 1900) {
-                                    dateText = event.type === 'Nyhet'
-                                        ? d.toLocaleDateString('sv-SE')
-                                        : d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
+                                    dateText = d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
                                 }
                             }
 

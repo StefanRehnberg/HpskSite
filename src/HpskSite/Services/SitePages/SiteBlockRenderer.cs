@@ -12,7 +12,7 @@ namespace HpskSite.Services.SitePages
     public sealed record SiteEventInfo(string Title, DateTime Start, string? Location, string Url, string? Type = null);
 
     /// <summary>En nyhet i nyhetsblocket (publicerad, synlig för tittaren). <see cref="Date"/> är nyhetens datum, annars skapad.</summary>
-    public sealed record SiteNewsInfo(string Title, DateTime Date, string Url);
+    public sealed record SiteNewsInfo(string Title, DateTime Date, string Url, string? Excerpt = null, int? CoverFileId = null);
 
     /// <summary>Klubbens kontaktuppgifter (läses live, lagras aldrig i blocket).</summary>
     public sealed record SiteContactInfo(string? Person, string? Email, string? Phone);
@@ -273,15 +273,29 @@ namespace HpskSite.Services.SitePages
             var items = ctx.Data.News(count).Take(count).ToList();
             if (items.Count == 0) return "";
             var title = b.Data["title"]?.GetValue<string>();
+            var showExcerpt = b.Data["showExcerpt"]?.GetValue<bool>() ?? true;
+            var showImage = b.Data["showImage"]?.GetValue<bool>() ?? false;
+            var covers = showImage
+                ? ctx.Data.Images(items.Where(i => i.CoverFileId != null).Select(i => i.CoverFileId!.Value).Distinct().ToList()).ToDictionary(i => i.Id)
+                : new Dictionary<int, SiteImageInfo>();
             var sb = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
             sb.Append("<ul class=\"list-unstyled\">");
             foreach (var n in items)
             {
-                var href = SiteHtmlSanitizer.IsAllowedLink(n.Url) ? $"<a href=\"{E(n.Url)}\">{E(n.Title)}</a>" : E(n.Title);
-                sb.Append($"<li class=\"mb-2\"><span class=\"text-muted me-2\">{E(n.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))}</span>{href}</li>");
+                var heading = SiteHtmlSanitizer.IsAllowedLink(n.Url) ? $"<a href=\"{E(n.Url)}\" class=\"fw-semibold\">{E(n.Title)}</a>" : E(n.Title);
+                var date = $"<span class=\"text-muted small d-block\">{E(n.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))}</span>";
+                var thumb = n.CoverFileId is int cid && covers.TryGetValue(cid, out var ci)
+                    ? $"<img class=\"rounded flex-shrink-0 me-3\" src=\"{E(SiteImages.ThumbUrlFor(ci.Id, 320))}\" width=\"96\" alt=\"\" role=\"presentation\" loading=\"lazy\" decoding=\"async\" style=\"height:auto;object-fit:cover\">"
+                    : "";
+                var excerpt = showExcerpt && !string.IsNullOrWhiteSpace(n.Excerpt) ? $"<span class=\"d-block\">{E(n.Excerpt)}</span>" : "";
+                sb.Append($"<li class=\"mb-3 d-flex\">{thumb}<span>{date}{heading}{excerpt}</span></li>");
             }
-            return Section(b.Id, sb.Append("</ul>").ToString());
+            sb.Append("</ul>");
+            // Arkivet ligger på en fast adress under ägaren: "Alla nyheter" leder dit (det som inte får plats här finns där, med bläddring).
+            var archiveUrl = ctx.OwnerUrl.TrimEnd('/') + "/nyheter/";
+            sb.Append($"<p class=\"mb-0\"><a href=\"{E(archiveUrl)}\">Alla nyheter <i class=\"bi bi-arrow-right\" aria-hidden=\"true\"></i></a></p>");
+            return Section(b.Id, sb.ToString());
         }
 
         // Kretsens block: bara på en kretsägare (klubbens mall avvisar dem vid skrivning, och renderingen prövar OCKSÅ: en lagrad rad är inte betrodd).

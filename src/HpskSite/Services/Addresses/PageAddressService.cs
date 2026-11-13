@@ -355,6 +355,7 @@ namespace HpskSite.Services.Addresses
         /// </summary>
         public static bool IsRegionTemplateSlug(string segment)
             => string.Equals(segment, "hemsidan", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(segment, "nyheter", StringComparison.OrdinalIgnoreCase)   // nyheternas arkiv (/{krets}/nyheter/): en klubb som heter så skulle skugga det
                || HpskSite.Services.SitePages.SiteTemplates.Slugs(HpskSite.Services.SitePages.SiteTemplates.Region)
                     .Contains(segment, StringComparer.OrdinalIgnoreCase);
 

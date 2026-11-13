@@ -109,7 +109,7 @@ namespace HpskSite.Services.SitePages
         private static readonly Dictionary<string, string> BlockLabels = new()
         {
             ["text"] = "Text", ["heading"] = "Rubrik", ["links"] = "Länkar", ["documents"] = "Dokument", ["contact"] = "Kontaktuppgifter",
-            ["events"] = "Kommande händelser", ["news"] = "Nyheter", ["about"] = "Presentationstext", ["competitions"] = "Kommande tävlingar", ["records"] = "Rekord", ["ranges"] = "Skjutbanor", ["champions"] = "Regerande mästare", ["stats"] = "Siffror", ["pagelink"] = "Länk till en sida", ["image"] = "Bild", ["gallery"] = "Bildgalleri", ["signup"] = "Anmälan",
+            ["events"] = "Kommande händelser", ["news"] = "Senaste nyheterna", ["about"] = "Presentationstext", ["competitions"] = "Kommande tävlingar", ["records"] = "Rekord", ["ranges"] = "Skjutbanor", ["champions"] = "Regerande mästare", ["stats"] = "Siffror", ["pagelink"] = "Länk till en sida", ["image"] = "Bild", ["gallery"] = "Bildgalleri", ["signup"] = "Anmälan",
             ["region-clubs"] = "Klubbar i kretsen", ["region-ranges"] = "Skjutbanor", ["region-series"] = "Serier", ["region-stats"] = "Kretsen i siffror",
         };
 

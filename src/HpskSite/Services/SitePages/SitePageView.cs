@@ -6,8 +6,15 @@ namespace HpskSite.Services.SitePages
     /// Finderns besked till vyn: den här begäran gäller sidan <see cref="PageKey"/> hos ägaren (en klubb eller krets).
     /// Ligger i <c>HttpContext.Items</c> under <see cref="ItemKey"/>. Saknas den är begäran ägarens rotadress (Hem).
     /// </summary>
-    public sealed record SitePageRequest(string OwnerType, int OwnerId, string PageKey, int? PageId = null)
+    public sealed record SitePageRequest(string OwnerType, int OwnerId, string PageKey, int? PageId = null, string? PostSlug = null)
     {
+        /// <summary>Nyheternas arkiv (<c>/{ägare}/nyheter/</c>), en enskild nyhet (<c>/{ägare}/nyheter/{adress}/</c>) och skrivytan (<c>/{ägare}/nyheter/skriv/</c>).</summary>
+        public const string NewsKey = "nyheter";
+        public const string NewsPostKey = "nyhet";
+        public const string NewsWriteKey = "nyheter-skriv";
+
+        public bool IsNews => PageKey is NewsKey or NewsPostKey or NewsWriteKey;
+
         public const string ItemKey = "Hpsk.SitePageRequest";
 
         /// <summary>Nyckeln för en fri sida i <see cref="PageKey"/> (sidan har ingen mallnyckel; <see cref="PageId"/> pekar ut den).</summary>
@@ -71,6 +78,7 @@ namespace HpskSite.Services.SitePages
             "records" => "bi-award",
             "documents" => "bi-archive",
             "board" => "bi-people",
+            "news" => "bi-newspaper",
             "admin" => ownerType == SiteTemplates.Region ? "bi-shield-check" : "bi-gear-fill",
             var k when k.StartsWith("page:", StringComparison.Ordinal) => "bi-file-earmark-text",
             _ => "bi-circle",
@@ -95,10 +103,12 @@ namespace HpskSite.Services.SitePages
         private readonly IReadOnlyList<SiteMenuPage> _extra;
         private readonly IReadOnlyList<SiteExternalLink> _links;
         private readonly int? _freePageId;
+        private readonly bool _newsEntry;
 
         private SitePageView(bool enabled, SiteTemplate? template, SitePageDef? page, string ownerUrl, SiteViewer viewer,
-            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, IReadOnlyList<SiteExternalLink>? links = null)
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, IReadOnlyList<SiteExternalLink>? links = null, bool newsEntry = false)
         {
+            _newsEntry = newsEntry;
             _links = links ?? Array.Empty<SiteExternalLink>();
             Enabled = enabled;
             _template = template;
@@ -110,6 +120,9 @@ namespace HpskSite.Services.SitePages
         }
 
         public bool Enabled { get; }
+
+        /// <summary>Begäran gäller Nyheter (arkiv, nyhet eller skrivyta): menyposten Nyheter är aktuell och ingen annan.</summary>
+        public bool NewsCurrent { get; init; }
         public string OwnerUrl { get; }
         public SiteViewer Viewer { get; }
         public string PageKey => _page?.Key ?? "home";
@@ -124,14 +137,14 @@ namespace HpskSite.Services.SitePages
         /// <param name="extra">Ägarens egna sidor som ligger i menyn (steg 2); tom när ägaren inte har egen redigering PÅ.</param>
         /// <param name="freePageId">Begäran gäller den här egna sidan (inte en systemsida): ingen systempost är då aktuell.</param>
         public static SitePageView On(string ownerType, string ownerUrl, string? pageKey, SiteViewer viewer,
-            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, SiteTemplate? template = null, IReadOnlyList<SiteExternalLink>? links = null)
+            IReadOnlyList<SiteMenuPage>? extra = null, int? freePageId = null, SiteTemplate? template = null, IReadOnlyList<SiteExternalLink>? links = null, bool newsEntry = false, bool newsCurrent = false)
         {
             // template: mallen med ägarens omvandlade sidor utbytta (SiteConvertedPages.Apply); utan den är det den vanliga mallen.
             template ??= SiteTemplates.For(ownerType);
             // En okänd nyckel (t.ex. en föråldrad Items-post) är Hem, aldrig en sida som inte finns.
             var page = (pageKey != null ? template.PageByKey(pageKey) : null) ?? template.Pages.First(p => p.IsHome);
             if (page.IsAdmin) page = template.Pages.First(p => p.IsHome); // Admin har ingen egen adress
-            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer, extra, freePageId, links);
+            return new SitePageView(true, template, page, Normalize(ownerUrl), viewer, extra, freePageId, links, newsEntry) { NewsCurrent = newsCurrent };
         }
 
         /// <summary>
@@ -214,6 +227,12 @@ namespace HpskSite.Services.SitePages
                 foreach (var child in _extra.Where(x => x.ParentPageId == top.PageId).OrderBy(x => x.Sort).ThenBy(x => x.PageId))
                     if (EntryFor(child) is { } childEntry) result.Add(childEntry);
             }
+            // Nyheter (egen sort, inte en sida): en post för ägare med egen redigering PÅ, öppen för alla (arkivet visar bara det tittaren får läsa).
+            if (_newsEntry)
+            {
+                var newsDef = new SitePageDef("news", "nyheter", "Nyheter", 900, new[] { new SiteBlockDef("page", SiteVisibility.Alla) });
+                result.Add(new SiteMenuEntry(newsDef, "siteNews", OwnerUrl + "nyheter/", Current: NewsCurrent, IsTabButton: false));
+            }
             if (admin != null) result.Add(admin);
             return result;
         }
@@ -248,7 +267,10 @@ namespace HpskSite.Services.SitePages
             var req = SitePageRequest.Current(_http.HttpContext);
             var key = req != null && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageKey : null;
             int? freeId = req is { IsFreePage: true } && req.OwnerType == ownerType && req.OwnerId == ownerId ? req.PageId : null;
-            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId, _converted?.Template(ownerType, ownerId), MenuLinks(ownerType, ownerId));
+            var news = req is { IsNews: true } && req.OwnerType == ownerType && req.OwnerId == ownerId;
+            if (news) freeId = -1;   // ingen systempost är aktuell (Hem är det annars när nyckeln är okänd); Nyheter-posten markeras i stället
+            return SitePageView.On(ownerType, ownerUrl, key, viewer, MenuPages(ownerType, ownerId), freeId, _converted?.Template(ownerType, ownerId), MenuLinks(ownerType, ownerId),
+                newsEntry: _reader != null && _owners.IsEditingEnabled(ownerType, ownerId), newsCurrent: news);
         }
 
         /// <summary>Ägarens externa länkar — bara när ägaren har egen redigering PÅ, och ett fel i läsningen ger en meny utan dem.</summary>

@@ -56,7 +56,6 @@ namespace HpskSite.Services.SitePages
             D("whats-happening", "Det här händer", "Klubbens senaste händelser, tävlingar och träningar. Hämtas automatiskt.", "_PanelClubWhatsHappening"),
             D("upcoming-events", "Kommande händelser", "Klubbens kommande händelser. Hämtas automatiskt.", "_PanelUpcomingEvents", PanelZone.Main),
             D("motions", "Motioner och styrelsens ärenden", "Medlemmarnas motioner och styrelsens ärenden.", "_PanelClubMotions", PanelZone.Side, required: true),
-            D("quicklinks", "Snabblänkar", "Genvägar till klubbens andra sidor.", "_PanelClubQuickLinks", PanelZone.Side),
             D("ranges", "Banor", "Klubbens banor med karta och fasta tider. Hämtas automatiskt.", "_PanelClubRanges", publicAllowed: true),
             D("calendar", "Kalender", "Klubbens kalender med händelser och träningar.", "_PanelClubCalendar", required: true, publicAllowed: true),
             D("competitions", "Tävlingar", "Tävlingar som klubben arrangerar.", "_PanelClubCompetitions", required: true, publicAllowed: true),
@@ -76,9 +75,7 @@ namespace HpskSite.Services.SitePages
             D("motions", "Motioner och styrelsens ärenden", "Kretsårsmötets motioner och kretsstyrelsens ärenden.", "_PanelRegionMotions", PanelZone.Main, required: true),
             D("upcoming-events", "Kommande händelser", "Kretsens kommande händelser. Hämtas automatiskt.", "_PanelUpcomingEvents", PanelZone.Main),
             D("contact-card", "Kontakt", "Kontaktperson, e-post och telefon. Hämtas automatiskt ur kretsens uppgifter.", "_PanelRegionContact", PanelZone.Side),
-            D("quicklinks", "Snabblänkar", "Genvägar till kretsens klubbar, tävlingar och rekord.", "_PanelRegionQuickLinks", PanelZone.Side),
-            D("quicklink-docs", "Dokument med snabblänk", "Dokument som kretsen valt att visa som snabblänk.", null, PanelZone.Side, required: true, hostedBy: "quicklinks"),
-            D("quicklink-records", "Kretsrekord (snabblänk)", "Genvägen till kretsens rekord.", null, PanelZone.Side, hostedBy: "quicklinks"),
+            D("quicklink-docs", "Dokument med snabblänk", "Dokument som kretsen valt att visa som snabblänk.", "_PanelRegionQuickLinkDocs", PanelZone.Side, required: true),
             D("champions", "Mästare", "Kretsens regerande mästare.", "_PanelRegionChampions", PanelZone.Side),
             D("about-region", "Om kretsen", "Kretsens presentation. Texten skrivs under Kretsens uppgifter och visas här automatiskt.", "_PanelRegionAbout"),
             D("region-instructors", "Instruktörer", "Kretsens instruktörer.", "_PanelRegionInstructors", personal: true),
@@ -88,6 +85,12 @@ namespace HpskSite.Services.SitePages
             D("document-archive", "Dokumentarkivet", "Kretsens dokument. Varje dokument har sin egen synlighet.", "_PanelRegionDocuments", required: true),
             D("board", "Styrelsen", "Kretsens styrelse.", "_PanelRegionBoard", personal: true, required: true),
         };
+
+        /// <summary>
+        /// Paneler som tagits bort ur appen (Snabblänkar och Kretsrekord-genvägen, Stefan 2026-11-13: samma länkar finns i menyn). En sparad omvandlad Hem som har dem läses som förut
+        /// men utan dem (de tas bort vid tolkningen, <see cref="SiteBlockSchema.DropRetiredPanels"/>), och sidan blir aldrig "kan inte visas".
+        /// </summary>
+        public static readonly IReadOnlySet<string> RetiredKeys = new HashSet<string>(StringComparer.Ordinal) { "quicklinks", "quicklink-records" };
 
         public static IReadOnlyList<PanelDef> For(string ownerType) => ownerType == SiteTemplates.Club ? Club : Region;
 
@@ -104,7 +107,7 @@ namespace HpskSite.Services.SitePages
             string[] keys = (ownerType, pageKey, loggedIn) switch
             {
                 (SiteTemplates.Club, "home", false) => new[] { "about-text", "contact-card", "quicklink-docs", "login-prompt" },
-                (SiteTemplates.Club, "home", true) => new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklinks" },
+                (SiteTemplates.Club, "home", true) => new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklink-docs" },
                 (SiteTemplates.Club, "about", _) => new[] { "about-text" },
                 (SiteTemplates.Club, "ranges", _) => new[] { "ranges" },
                 (SiteTemplates.Club, "calendar", _) => new[] { "calendar" },
@@ -112,7 +115,7 @@ namespace HpskSite.Services.SitePages
                 (SiteTemplates.Club, "members", _) => new[] { "instructors", "guldserie", "member-directory" },
                 (SiteTemplates.Club, "records", _) => new[] { "records" },
                 (SiteTemplates.Club, "documents", _) => new[] { "document-archive" },
-                (SiteTemplates.Region, "home", _) => new[] { "whats-happening", "stats-card", "motions", "upcoming-events", "contact-card", "quicklinks", "champions" },
+                (SiteTemplates.Region, "home", _) => new[] { "whats-happening", "stats-card", "motions", "upcoming-events", "contact-card", "quicklink-docs", "champions" },
                 (SiteTemplates.Region, "about", _) => new[] { "about-region", "region-instructors" },
                 (SiteTemplates.Region, "competitions", _) => new[] { "competitions" },
                 (SiteTemplates.Region, "calendar", _) => new[] { "calendar" },

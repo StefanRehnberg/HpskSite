@@ -74,7 +74,7 @@ namespace HpskSite.Tests
                 Assert.Equal(expected, actual.Where(expected.Contains).ToList());
                 // ... och det enda tillägget är de fristående snabblänkdokumenten för den som inte ser Snabblänkar (testet i läcktestmotorn tillåter exakt det).
                 var extra = actual.Except(expected).ToList();
-                Assert.True(extra.All(k => k == "quicklink-docs") && (extra.Count == 0 || !actual.Contains("quicklinks")),
+                Assert.True(extra.All(k => k == "quicklink-docs"),
                     $"{owner}/{page} {(v.LoggedIn ? "inloggad" : "utloggad")}: extra {string.Join(",", extra)}");
             }
         }

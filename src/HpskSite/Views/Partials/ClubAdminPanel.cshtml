@@ -1041,7 +1041,6 @@
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
-                                <option value="Nyhet">Nyhet</option>
                                 <option value="Annat">Annat...</option>
                             </select>
                             <input type="text" class="form-control mt-2" id="eventCustomType" placeholder="Ange typ, t.ex. Workshop" style="display: none;" oninput="syncEventTypeValue(); checkCompetitionTypeWarning()">
@@ -4164,7 +4163,7 @@ function toggleEventPageName(e) {
 
 // Fas B4: Träning är ingen händelsetyp längre — träningar skapas under Träningar. En gammal
 // träningshändelse hamnar därför på "Annat…" med typen i fritextfältet och sparas oförändrad.
-var knownEventTypes = ['Städning', 'Möte', 'Socialt', 'Nyhet'];
+var knownEventTypes = ['Städning', 'Möte', 'Socialt'];   // Nyhet är inte längre en händelsetyp (Nyheter är en egen yta, 2026-11-13)
 
 function onEventTypeChange() {
     var select = document.getElementById('eventType');

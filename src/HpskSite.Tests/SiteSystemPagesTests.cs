@@ -126,7 +126,7 @@ namespace HpskSite.Tests
         {
             // Klubbens Hem för en inloggad: Det här händer, Kommande händelser, Motioner, Kontakt, Snabblänkar — sedan det bara utloggad-listan ritar (Dokument med snabblänk).
             var keys = SiteSystemPages.InPageOrder("Club", "home").Select(d => d.Key).ToList();
-            Assert.Equal(new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklinks", "quicklink-docs" }, keys);
+            Assert.Equal(new[] { "whats-happening", "upcoming-events", "motions", "contact-card", "quicklink-docs" }, keys);
         }
 
         // ── Servern håller i reglerna (K5c) ──────────────────────────────────────

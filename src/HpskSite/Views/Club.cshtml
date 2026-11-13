@@ -352,18 +352,12 @@ function loadUpcomingEvents() {
             const container = document.getElementById('upcomingEventsContainer');
             if (data.success && data.data && data.data.length > 0) {
                 const now = new Date();
-                // Show future events + all Nyhet items (news persist regardless of date)
-                const visibleEvents = data.data.filter(event =>
-                    event.type === 'Nyhet' || (event.date && new Date(event.date) >= now)
-                );
+                // Kommande händelser (nyheter är en egen yta, Nyheter, och inte längre en händelsetyp)
+                const visibleEvents = data.data.filter(event => event.date && new Date(event.date) >= now);
 
                 if (visibleEvents.length > 0) {
-                    // Sort: Nyhet without date first, then by date ascending
+                    // Sortera på datum, närmast först
                     visibleEvents.sort((a, b) => {
-                        const aIsNews = a.type === 'Nyhet';
-                        const bIsNews = b.type === 'Nyhet';
-                        if (aIsNews && !a.date) return -1;
-                        if (bIsNews && !b.date) return 1;
                         const aDate = a.date ? new Date(a.date) : new Date(0);
                         const bDate = b.date ? new Date(b.date) : new Date(0);
                         return aDate - bDate;
@@ -381,9 +375,7 @@ function loadUpcomingEvents() {
                         if (event.date) {
                             const d = new Date(event.date);
                             if (d.getFullYear() > 1900) {
-                                dateText = event.type === 'Nyhet'
-                                    ? d.toLocaleDateString('sv-SE')
-                                    : d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
+                                dateText = d.toLocaleDateString('sv-SE') + (event.venue ? ' - ' + event.venue : '');
                             }
                         }
 
@@ -448,7 +440,11 @@ function loadClubQuickLinkDocuments() {
 
                 // Populate logged-in quick links section
                 const memberContainer = document.getElementById('clubQuickLinkDocuments');
-                if (memberContainer) memberContainer.innerHTML = html;
+                if (memberContainer) {
+                    memberContainer.innerHTML = html;
+                    const memberCard = document.getElementById('clubQuickLinkDocumentsCard');
+                    if (memberCard) memberCard.style.display = '';
+                }
 
                 // Populate public quick links section
                 const publicContainer = document.getElementById('publicQuickLinkDocuments');

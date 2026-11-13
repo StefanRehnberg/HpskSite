@@ -63,7 +63,7 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>
         /// Vad vyn ritar. Paneler som tittaren inte får se utelämnas helt (<see cref="SiteBlockRenderer.PanelVisible"/> är den enda frågan), likaså egna block som
-        /// ger tomt. <c>quicklink-docs</c> ligger i Snabblänkar för den som ser dem; den ritas fristående bara när tittaren inte ser Snabblänkar.
+        /// ger tomt. <c>quicklink-docs</c> är ett eget kort (Snabblänkar finns inte längre).
         /// </summary>
         public static ConvertedPlan Plan(ConvertedPage page, SiteRenderContext ctx)
         {
@@ -86,8 +86,6 @@ namespace HpskSite.Services.SitePages
                     if (html.Length > 0) items.Add(new ConvertedItem(null, zone, html));
                 }
             }
-            if (ctx.Template.OwnerType == SiteTemplates.Club && items.Any(i => i.PanelKey == "quicklinks"))
-                items.RemoveAll(i => i.PanelKey == "quicklink-docs");   // ritas av Snabblänkar
             return new ConvertedPlan(items, false);
         }
     }

@@ -242,13 +242,19 @@ namespace HpskSite.Services.SitePages
 
             public IReadOnlyList<SiteNewsInfo> News(int count)
             {
-                var type = _ownerType == SiteTemplates.Club ? ClubEventRecord.OwnerClub : ClubEventRecord.OwnerRegion;
-                return _f._events.ListForOwner(_ownerId, HpskSite.Services.Events.EventViewer.ForOwner(_viewer))   // läsnivån prövas i lagringen, per händelse
-                    .Where(e => e.EventType == "Nyhet" && e.IsActive && e.OwnerType == type && e.OwnerId == _ownerId)
-                    .OrderByDescending(e => e.StartsAt ?? e.CreatedDate)
-                    .Take(count)
-                    .Select(e => new SiteNewsInfo(e.DisplayName, e.StartsAt ?? e.CreatedDate, _f._urls.UrlFor(PageAddressKinds.Event, e.Id) ?? ""))
-                    .ToList();
+                // Nyheterna är en egen sort (SitePost): läsnivån prövas i frågan per nyhet, så en nyhet tittaren inte får läsa lämnar aldrig lagret.
+                var baseUrl = (_node?.Url() ?? "/").TrimEnd('/') + "/nyheter/";
+                try
+                {
+                    using var scope = _f._scopes.CreateScope(autoComplete: true);
+                    return SitePosts.List(scope.Database, _ownerType, _ownerId, _viewer, includeDrafts: false, 0, count).Rows
+                        .Select(p => new SiteNewsInfo(p.Title, p.PublishedDate ?? p.CreatedDate, baseUrl + p.Slug + "/", p.Excerpt, p.CoverFileId))
+                        .ToList();
+                }
+                catch (Microsoft.Data.SqlClient.SqlException)
+                {
+                    return Array.Empty<SiteNewsInfo>();   // migreringen är inte körd: blocket ritar ingenting i stället för att fälla sidan (startkontrollen larmar)
+                }
             }
 
             public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids)

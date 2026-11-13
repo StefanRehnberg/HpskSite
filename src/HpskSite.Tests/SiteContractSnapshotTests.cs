@@ -31,7 +31,7 @@ namespace HpskSite.Tests
                 "region-ranges|n|n|Y|n|title",
                 "region-series|n|n|Y|n|count,title",
                 "region-stats|n|n|Y|n|title",
-                "news|n|Y|n|n|count,title",
+                "news|n|Y|n|n|count,showExcerpt,showImage,title",   // Nyheter (SitePost): utdrag och omslagsbild valfria, 2026-11-13
                 "competitions|n|n|n|n|count,title",
                 "records|n|n|n|n|title",
                 "ranges|n|n|n|n|title",
@@ -55,7 +55,7 @@ namespace HpskSite.Tests
             var expected = new[]
             {
                 "about-text|Main|n|n||Y", "login-prompt|Side|n|Y||n", "contact-card|Side|n|n||n", "quicklink-docs|Side|n|Y||n",
-                "whats-happening|Full|n|n||n", "upcoming-events|Main|n|n||n", "motions|Side|n|Y||n", "quicklinks|Side|n|n||n",
+                "whats-happening|Full|n|n||n", "upcoming-events|Main|n|n||n", "motions|Side|n|Y||n",   // Snabblänkar finns inte längre (Stefan 2026-11-13)
                 "ranges|Full|n|n||Y", "calendar|Full|n|Y||Y", "competitions|Full|n|Y||Y", "instructors|Full|Y|n||n",
                 "guldserie|Full|Y|n||n", "member-directory|Full|Y|Y||n", "records|Full|n|n||Y", "document-archive|Full|n|Y||n",
             };
@@ -68,8 +68,8 @@ namespace HpskSite.Tests
             var expected = new[]
             {
                 "welcome|Full|n|n||n", "whats-happening|Full|n|n||n", "stats-card|Main|n|n||n", "motions|Main|n|Y||n",
-                "upcoming-events|Main|n|n||n", "contact-card|Side|n|n||n", "quicklinks|Side|n|n||n", "quicklink-docs|Side|n|Y|quicklinks|n",
-                "quicklink-records|Side|n|n|quicklinks|n", "champions|Side|n|n||n", "about-region|Full|n|n||n",
+                "upcoming-events|Main|n|n||n", "contact-card|Side|n|n||n", "quicklink-docs|Side|n|Y||n",
+                "champions|Side|n|n||n", "about-region|Full|n|n||n",
                 "region-instructors|Full|Y|n||n", "competitions|Full|n|Y||n", "calendar|Full|n|Y||n", "records|Full|n|n||Y",
                 "document-archive|Full|n|Y||n", "board|Full|Y|Y||n",
             };

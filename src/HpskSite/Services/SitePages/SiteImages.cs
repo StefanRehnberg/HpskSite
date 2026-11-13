@@ -232,7 +232,14 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>Ägarens bilder, nyast först, med antal sidor som använder dem (utkast och publicerat, ej raderade sidor).</summary>
-        public static List<FileListItem> List(IDatabase db, string ownerType, int ownerId) =>
+        public static List<FileListItem> List(IDatabase db, string ownerType, int ownerId)
+        {
+            var items = ListPages(db, ownerType, ownerId);
+            SitePosts.AddPostUse(db, items, ownerType, ownerId);   // nyheter som använder bilden räknas också (annars vägras raderingen utan att biblioteket säger varför)
+            return items;
+        }
+
+        private static List<FileListItem> ListPages(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<FileListItem>(
                 @"SELECT f.Id, f.FileName, f.Size, f.Width, f.Height, f.UploadedDate,
                          (SELECT COUNT(DISTINCT r.PageId) FROM dbo.SitePageRef r JOIN dbo.SitePage p ON p.Id = r.PageId
@@ -247,7 +254,7 @@ namespace HpskSite.Services.SitePages
             var inUse = db.ExecuteScalar<int>(
                 @"SELECT COUNT(*) FROM dbo.SitePageRef r JOIN dbo.SitePage p ON p.Id = r.PageId
                   WHERE r.RefKind = N'file' AND r.RefId = @0 AND p.OwnerType = @1 AND p.OwnerId = @2 AND p.DeletedDate IS NULL", id, ownerType, ownerId);
-            if (inUse > 0) return SiteFileStatus.InUse;
+            if (inUse > 0 || SitePosts.FileInUse(db, id, ownerType, ownerId)) return SiteFileStatus.InUse;
             db.Execute("UPDATE dbo.SiteFile SET DeletedDate = @3 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2", id, ownerType, ownerId, now);
             // En raderad bild ligger inte kvar i något album (tabellen finns inte förrän albummigreringen körts).
             db.Execute("IF OBJECT_ID(N'dbo.SiteImageAlbumItem', N'U') IS NOT NULL DELETE FROM dbo.SiteImageAlbumItem WHERE FileId = @0 AND OwnerType = @1 AND OwnerId = @2", id, ownerType, ownerId);
@@ -274,12 +281,26 @@ namespace HpskSite.Services.SitePages
     /// </summary>
     public static class SiteImageAccess
     {
-        public static SiteImageDecision Decide(int fileId, SiteViewer viewer, IEnumerable<(SiteVisibility PageVisibility, SiteContentResult Content)> publishedPages)
+        public static SiteImageDecision Decide(int fileId, SiteViewer viewer, IEnumerable<(SiteVisibility PageVisibility, SiteContentResult Content)> publishedPages) =>
+            Decide(fileId, viewer, publishedPages, Array.Empty<SitePostFileRef>());
+
+        /// <summary>
+        /// Samma regel, med nyheterna som också refererar bilden: en PUBLICERAD nyhet bidrar med sin läsnivå, precis som ett publicerat block. Ett UTKAST bidrar
+        /// aldrig till vad besökare får se, men skribenterna (ägarens styrelse och admin) ser bilder i utkast, annars syns de inte i editorn före publicering.
+        /// </summary>
+        public static SiteImageDecision Decide(int fileId, SiteViewer viewer, IEnumerable<(SiteVisibility PageVisibility, SiteContentResult Content)> publishedPages, IEnumerable<SitePostFileRef> postRefs)
         {
             var levels = new List<SiteVisibility>();
             foreach (var (pageVis, content) in publishedPages)
                 foreach (var b in content.AllBlocks.Where(b => SiteBlockSchema.FileIdsOf(b).Contains(fileId)))
                     levels.Add(SiteAccess.Strictest(b.Visibility, pageVis));
+            var draftSeenByWriter = false;
+            foreach (var p in postRefs)
+            {
+                if (p.Status == (byte)SitePostStatus.Published) levels.Add((SiteVisibility)p.ReadVisibility);
+                else if (viewer.LoggedIn && (viewer.IsOwnerBoard || viewer.IsOwnerAdmin)) draftSeenByWriter = true;
+            }
+            if (draftSeenByWriter) return SiteImageDecision.ServePrivate;
             if (!levels.Any(l => SiteAccess.CanSee(l, viewer))) return SiteImageDecision.NotFound;
             return levels.All(l => l == SiteVisibility.Alla) ? SiteImageDecision.ServePublic : SiteImageDecision.ServePrivate;
         }
@@ -307,7 +328,7 @@ namespace HpskSite.Services.SitePages
         /// <summary>Raden och beslutet för tittaren. <paramref name="viewerFor"/> bygger tittaren när ägaren är känd.</summary>
         public async Task<(SiteFileRow? File, SiteImageDecision Decision)> AuthorizeAsync(int fileId, Func<string, int, Task<SiteViewer>> viewerFor)
         {
-            SiteFileRow? file; List<int> pageIds;
+            SiteFileRow? file; List<int> pageIds; List<SitePostFileRef> postRefs;
             using (var scope = _scopes.CreateScope(autoComplete: true))
             {
                 file = SiteFiles.GetAny(scope.Database, fileId);
@@ -315,6 +336,7 @@ namespace HpskSite.Services.SitePages
                 pageIds = scope.Database.Fetch<int>(
                     @"SELECT DISTINCT TOP (@2) r.PageId FROM dbo.SitePageRef r JOIN dbo.SitePage p ON p.Id = r.PageId
                       WHERE r.RefKind = N'file' AND r.RefId = @0 AND p.OwnerType = @1 AND p.OwnerId = @3 AND p.DeletedDate IS NULL", fileId, file.OwnerType, MaxReferencingPages, file.OwnerId);
+                postRefs = SitePosts.RefsForFile(scope.Database, fileId, file.OwnerType, file.OwnerId);
             }
             // Brytare 2 av = ytan finns inte: ingen bild serveras (samma som sidorna).
             if (!_owners.IsEditingEnabled(file.OwnerType, file.OwnerId)) return (file, SiteImageDecision.NotFound);
@@ -328,7 +350,7 @@ namespace HpskSite.Services.SitePages
                 var loaded = _reader.LoadPublished(file.OwnerType, file.OwnerId, id);   // null = stoppad, ej publicerad eller ogiltig
                 if (loaded != null) pages.Add((loaded.Value.Page.VisibilityLevel, loaded.Value.Content));
             }
-            return (file, SiteImageAccess.Decide(fileId, viewer, pages));
+            return (file, SiteImageAccess.Decide(fileId, viewer, pages, postRefs));
         }
     }
 }

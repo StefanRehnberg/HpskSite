@@ -1,0 +1,208 @@
+@using Umbraco.Extensions
+@using HpskSite.Services.SitePages
+@using HpskSite.Extensions
+@inject SiteViewerResolver Viewers
+@inject SitePageViewFactory SitePages
+@inject Umbraco.Cms.Infrastructure.Scoping.IScopeProvider Scopes
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@*
+    Föreningens nyheter (en egen sort, SitePost): arkivet /{ägare}/nyheter/, en nyhet /{ägare}/nyheter/{adress}/ och skrivytan /{ägare}/nyheter/skriv/.
+    Modellen är ägarens nod. SitePageContentFinder har pekat ut vad det gäller (SitePageRequest) och SitePageAccessFilter har redan prövat att tittaren får se det
+    (en nyhet man inte får läsa gav 404 före vyn). Innehållet prövas om här: listan hämtas med tittarens läsnivå i frågan och texten saneras vid rendering.
+    Allt som skrivs ut är kodat; nyhetens HTML är sanerad (SiteHtmlSanitizer) vid skrivning och här.
+*@
+@{
+    Layout = "Master.cshtml";
+    var req = SitePageRequest.Current(Context);
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    var ownerName = Model?.Value<string>("clubName") ?? Model?.Value<string>("regionName") ?? Model?.Name ?? "";
+    var ownerUrl = (Model?.Url() ?? "/").TrimEnd('/') + "/";
+    var archiveUrl = ownerUrl + "nyheter/";
+    var ok = req != null && req.IsNews && Model != null;
+
+    SiteViewer viewer = SiteViewer.Anonymous;
+    var canWrite = false; var canDelete = false;
+    List<SitePostRow> rows = new(); var total = 0; var pageNo = 1; const int PageSize = 10;
+    SitePostRow? post = null;
+    string? regionCode = null;
+    var title = "Nyheter";
+
+    if (ok)
+    {
+        regionCode = req!.OwnerType == SiteTemplates.Region ? Model!.Value<string>("regionCode") : null;
+        viewer = await Viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
+        (canWrite, canDelete) = await Viewers.NewsRightsAsync(req.OwnerType, req.OwnerId, regionCode, viewer);
+        using var scope = Scopes.CreateScope(autoComplete: true);
+        if (req.PageKey == SitePageRequest.NewsKey)
+        {
+            int.TryParse(Context.Request.Query["sida"].ToString(), out pageNo);
+            pageNo = Math.Clamp(pageNo, 1, 1000);
+            try { (rows, total) = SitePosts.List(scope.Database, req.OwnerType, req.OwnerId, viewer, includeDrafts: canWrite, (pageNo - 1) * PageSize, PageSize); }
+            catch (Microsoft.Data.SqlClient.SqlException) { ok = false; }
+        }
+        else if (req.PageKey == SitePageRequest.NewsPostKey)
+        {
+            post = SitePosts.GetReadableBySlug(scope.Database, req.OwnerType, req.OwnerId, req.PostSlug ?? "", viewer, includeDrafts: canWrite);
+            if (post == null) ok = false; else title = post.Title;
+        }
+        else title = "Skriv en nyhet";
+    }
+    if (ok)
+    {
+        ViewBag.sitePageView = SitePages.For(req!.OwnerType, req.OwnerId, Model!.Url(), viewer);
+        ViewBag.clubId = req.OwnerId;
+        ViewBag.siteOwnerType = req.OwnerType;
+        ViewBag.siteOwnerId = req.OwnerId;
+        ViewBag.isClubAdmin = viewer.IsOwnerAdmin;
+        ViewBag.isRegionalAdmin = viewer.IsOwnerAdmin;
+        ViewBag.isLoggedIn = viewer.LoggedIn;
+        ViewBag.canEditSite = await Viewers.CanEditSiteAsync(req.OwnerType, req.OwnerId, regionCode);
+        if (req.OwnerType == SiteTemplates.Club)
+        {
+            var regionPage = Model.Parent?.Parent;
+            if (regionPage?.ContentType.Alias == "regionalPage") { ViewBag.regionUrl = regionPage.Url(); ViewBag.regionLabel = "Kretsens hemsida"; }
+        }
+    }
+    else Context.Response.StatusCode = 404;
+
+    ViewBag.Title = title + " – " + ownerName;
+    ViewBag.OgTitle = ownerName;
+    // En nyhet som inte är öppen för alla beskrivs inte i delningsförhandsvisningen (titel och utdrag får inte läcka via en delad länk).
+    ViewBag.OgDescription = post != null && post.IsPublished && post.Visibility == SiteVisibility.Alla && !string.IsNullOrWhiteSpace(post.Excerpt) ? post.Excerpt : $"Nyheter från {ownerName}";
+
+    string Level(SiteVisibility v) => v switch { SiteVisibility.Alla => "Alla", SiteVisibility.Inloggade => "Inloggade", SiteVisibility.Klubbmedlemmar => "Bara medlemmar", SiteVisibility.Styrelse => "Bara styrelsen", _ => "Bara administratören" };
+    string DateOf(SitePostRow p) => (p.PublishedDate ?? p.CreatedDate).ToString("d MMMM yyyy", sv);
+    var pages = (int)Math.Ceiling(total / (double)PageSize);
+}
+
+<div class="container-fluid my-4 site-page">
+    <p class="mb-2"><a href="@Model?.Url()" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>@ownerName</a></p>
+    @if (ok)
+    {
+        @Html.Raw("<div class=\"hpsk-sidelayout\">")
+        @await Html.PartialAsync(req!.OwnerType == SiteTemplates.Club ? "ClubNavigation" : "RegionalNavigation")
+        @Html.Raw("<div class=\"hpsk-sidebody\">")
+    }
+
+    @if (!ok)
+    {
+        <h1 class="h2">Nyheten finns inte</h1>
+        <p class="text-muted">Den här sidan finns inte eller har tagits bort.</p>
+    }
+    else if (req!.PageKey == SitePageRequest.NewsKey)
+    {
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <h1 class="h2 mb-0">Nyheter</h1>
+            @if (canWrite)
+            {
+                <a class="btn btn-primary" href="@(archiveUrl)skriv/"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Skriv en nyhet</a>
+            }
+        </div>
+        @if (rows.Count == 0)
+        {
+            <p class="text-muted">@(pageNo > 1 ? "Det finns inga fler nyheter." : "Det finns inga nyheter ännu.")</p>
+        }
+        <div class="list-group list-group-flush mb-3" id="siteNewsList">
+            @foreach (var p in rows)
+            {
+                <article class="list-group-item px-0 d-flex gap-3">
+                    @if (p.CoverFileId != null)
+                    {
+                        <img class="rounded flex-shrink-0" src="@SiteImages.ThumbUrlFor(p.CoverFileId.Value, 320)" width="120" alt="@(p.CoverAlt ?? "")" loading="lazy" decoding="async" style="height:auto;object-fit:cover;align-self:flex-start">
+                    }
+                    <div class="flex-grow-1">
+                        <div class="small text-muted">
+                            @DateOf(p)
+                            @if (!p.IsPublished) { <span class="badge text-bg-warning ms-1">Utkast</span> }
+                            @if (canWrite && p.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(p.Visibility)</span> }
+                        </div>
+                        <h2 class="h5 mb-1"><a href="@(archiveUrl)@(p.Slug)/" class="text-decoration-none">@p.Title</a></h2>
+                        @if (!string.IsNullOrWhiteSpace(p.Excerpt)) { <p class="mb-1">@p.Excerpt</p> }
+                        <a href="@(archiveUrl)@(p.Slug)/" class="small">Läs mer</a>
+                    </div>
+                </article>
+            }
+        </div>
+        @if (pages > 1)
+        {
+            <nav aria-label="Bläddra bland nyheter" class="d-flex gap-2 align-items-center">
+                @if (pageNo > 1) { <a class="btn btn-outline-secondary btn-sm" href="@(archiveUrl)?sida=@(pageNo - 1)">Nyare</a> }
+                <span class="small text-muted">Sida @pageNo av @pages</span>
+                @if (pageNo < pages) { <a class="btn btn-outline-secondary btn-sm" href="@(archiveUrl)?sida=@(pageNo + 1)">Äldre</a> }
+            </nav>
+        }
+    }
+    else if (req.PageKey == SitePageRequest.NewsPostKey && post != null)
+    {
+        <article id="sitePost" data-post-id="@post.Id" data-revision="@post.Revision">
+            <p class="mb-2"><a href="@archiveUrl" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Alla nyheter</a></p>
+            @if (!post.IsPublished) { <div class="alert alert-warning py-2">Det här är ett utkast. Bara skribenterna ser det.</div> }
+            <h1 class="h2 mb-1">@post.Title</h1>
+            <p class="text-muted mb-3">@DateOf(post)@(string.IsNullOrWhiteSpace(post.AuthorName) ? "" : " · " + post.AuthorName)
+                @if (canWrite && post.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(post.Visibility)</span> }</p>
+            @if (post.CoverFileId != null)
+            {
+                <figure class="mb-3"><img class="img-fluid rounded" src="@SiteImages.UrlFor(post.CoverFileId.Value)" alt="@(post.CoverAlt ?? "")" decoding="async" style="height:auto"></figure>
+            }
+            <div class="site-post-body">@Html.Raw(SiteHtmlSanitizer.Sanitize(post.BodyHtml))</div>
+            @if (canWrite)
+            {
+                <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">
+                    <a class="btn btn-outline-primary" href="@(archiveUrl)skriv/?id=@post.Id"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Ändra</a>
+                    @if (canDelete)
+                    {
+                        <button type="button" class="btn btn-outline-danger" id="sitePostDelete">Ta bort</button>
+                    }
+                </div>
+                @Html.AntiForgeryToken()
+                <div class="alert alert-danger py-2 mt-2 d-none" id="sitePostMsg" role="alert"></div>
+                @if (canDelete)
+                {
+                    <script>
+                        (function () {
+                        const btn = document.getElementById('sitePostDelete'); let armed = false;
+                        btn.addEventListener('click', async function () {
+                            // Två steg i stället för en bekräftelsedialog: första klicket frågar, andra tar bort.
+                            if (!armed) { armed = true; btn.textContent = 'Klicka igen för att ta bort'; btn.classList.replace('btn-outline-danger', 'btn-danger'); setTimeout(function () { armed = false; btn.textContent = 'Ta bort'; btn.classList.replace('btn-danger', 'btn-outline-danger'); }, 5000); return; }
+                            const fd = new FormData();
+                            fd.append('ownerType', '@req.OwnerType'); fd.append('ownerId', '@req.OwnerId'); fd.append('id', '@post.Id');
+                            const r = await fetch('/umbraco/surface/SiteNews/Delete', { method: 'POST', credentials: 'same-origin', headers: { 'RequestVerificationToken': document.querySelector('#sitePost input[name=__RequestVerificationToken]').value }, body: fd });
+                            const j = await r.json();
+                            if (j.success) location.href = j.url; else { const m = document.getElementById('sitePostMsg'); m.textContent = j.message || 'Det gick inte att ta bort.'; m.classList.remove('d-none'); }
+                        });
+                        })();
+                    </script>
+                }
+            }
+        </article>
+    }
+    else if (req.PageKey == SitePageRequest.NewsWriteKey)
+    {
+        <p class="mb-2"><a href="@archiveUrl" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Alla nyheter</a></p>
+        <h1 class="h2 mb-3">Skriv en nyhet</h1>
+        <div id="newsEditor" data-owner-type="@req.OwnerType" data-owner-id="@req.OwnerId" data-archive-url="@archiveUrl" data-can-delete="@(canDelete ? "1" : "0")" data-is-region="@(req.OwnerType == SiteTemplates.Region ? "1" : "0")">
+            @Html.AntiForgeryToken()
+            <noscript><div class="alert alert-warning">Skrivytan behöver JavaScript.</div></noscript>
+            <p class="text-muted">Laddar …</p>
+        </div>
+        <link rel="stylesheet" href="/css/hemsidan.css?v=9" />   @* bildväljarens rutnät (hs-imggrid, hs-imgtile): samma som Hemsidans *@
+        <style>
+            /* Textrutan går att dra större eller mindre med handtaget nere till höger (och att scrolla när texten är längre än rutan). */
+            #newsEditor .ck-editor__main > .ck-editor__editable { min-height: 320px; resize: vertical; overflow: auto; }
+            /* Samma som Hemsidan: mörk text på vit yta i editorn, även i mörkt läge (annars ärver texten sidans ljusa färg och syns knappt). */
+            #newsEditor .ck.ck-editor__editable:not(.ck-focused), #newsEditor .ck.ck-editor__editable.ck-focused { color: #212529; background: #fff; }
+            #newsEditor .ck-editor__editable.ck-content a { color: #0d6efd; }
+        </style>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+        <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+        <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
+        <script src="/js/planering-dates.js?v=1"></script>
+        <script src="/js/site-news-edit.js?v=5"></script>
+    }
+
+    @if (ok)
+    {
+        @Html.Raw("</div></div>")
+    }
+</div>

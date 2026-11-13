@@ -97,7 +97,7 @@ namespace HpskSite.Services.SitePages
         /// Klubben: dagens nio flikar. Utloggad ser bara startsidan (Om-text, kontaktkort, publika snabblänkdokument,
         /// inloggningsruta); alla andra flikar kräver bara inloggning (Club.cshtml:102-181, ClubNavigation.cshtml).
         /// </summary>
-        public static readonly SiteTemplate ClubTemplate = new(Club, Version: 1, MenuRequiresLogin: true, new[]
+        public static readonly SiteTemplate ClubTemplate = new(Club, Version: 2, MenuRequiresLogin: true, new[]
         {
             new SitePageDef("home", "", "Hem", 10, new[]
             {
@@ -106,9 +106,7 @@ namespace HpskSite.Services.SitePages
                 new SiteBlockDef("contact-card", All),          // inloggad Hem visar det bara när något är ifyllt
                 new SiteBlockDef("quicklink-docs", All),        // publika snabblänkdokument
                 new SiteBlockDef("whats-happening", Auth),
-                new SiteBlockDef("upcoming-events", Auth),      // inkl. händelsetypen Nyhet
-                new SiteBlockDef("motions", Auth),
-                new SiteBlockDef("quicklinks", Auth),
+                new SiteBlockDef("upcoming-events", Auth),                new SiteBlockDef("motions", Auth),
             }),
             new SitePageDef("about", "om-klubben", "Om Klubben", 20, new[] { new SiteBlockDef("about-text", Auth) }),
             new SitePageDef("ranges", "banor", "Banor", 30, new[] { new SiteBlockDef("ranges", Auth) }),
@@ -131,7 +129,7 @@ namespace HpskSite.Services.SitePages
         /// Kretsen: dagens åtta poster. Hem, Om, Tävlingar och Kalender är publika; Rekord, Dokument och Styrelsen
         /// kräver inloggning (RegionalNavigation.cshtml, RegionalPage.cshtml, _RegionPublicContent.cshtml).
         /// </summary>
-        public static readonly SiteTemplate RegionTemplate = new(Region, Version: 1, MenuRequiresLogin: false, new[]
+        public static readonly SiteTemplate RegionTemplate = new(Region, Version: 2, MenuRequiresLogin: false, new[]
         {
             new SitePageDef("home", "", "Hem", 10, new[]
             {
@@ -141,8 +139,6 @@ namespace HpskSite.Services.SitePages
                 new SiteBlockDef("upcoming-events", All),
                 new SiteBlockDef("contact-card", All),
                 new SiteBlockDef("quicklink-docs", All),        // kretsens snabblänkdokument
-                new SiteBlockDef("quicklinks", All),
-                new SiteBlockDef("quicklink-records", Auth),    // "Kretsrekord" är bara för inloggade
                 new SiteBlockDef("motions", Auth),
                 new SiteBlockDef("champions", Auth),
             }),

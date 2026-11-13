@@ -197,6 +197,9 @@ namespace HpskSite.Services
             ("SiteSupportGrant",                     "MemberId",          "CreatedDate = CreatedDate"),
             ("SiteFile",                             "UploadedByMemberId", "UploadedDate = UploadedDate"),   // bilden står kvar, uppladdaren släpps
             ("SiteFormEntry",                        "HandledByMemberId", "CreatedDate = CreatedDate"),      // anmälan står kvar (den hör till föreningen), bara vem som avgjorde släpps
+            // Nyheterna (2026-11-13): nyheten hör till föreningen och står kvar; författaren släpps och namnet på raden blir neutralt ("Tidigare medlem").
+            ("SitePost",                             "AuthorMemberId",    "AuthorName = N'Tidigare medlem'"),
+            ("SitePost",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
         };
 
         /// <summary>

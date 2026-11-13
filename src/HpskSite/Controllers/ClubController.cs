@@ -540,6 +540,13 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Create a new simple club event as child of club node
         /// </summary>
+        /// <summary>Nyhet är inte längre en händelsetyp (Nyheter är en egen yta, Stefan 2026-11-13). En befintlig Nyhet-händelse får sparas som den är tills den flyttats; ingen ny skapas och ingen annan blir en.</summary>
+        private static bool IsRetiredNewsType(string? requestedType, string? currentType) =>
+            string.Equals((requestedType ?? "").Trim(), "Nyhet", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(currentType, "Nyhet", StringComparison.Ordinal);
+
+        private const string RetiredNewsMessage = "Nyheter skrivs numera under Nyheter i menyn, inte som en händelse.";
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateClubEvent(int clubId, string eventName, string eventType = "Träning",
@@ -556,6 +563,7 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Club ID and event name are required" });
                 }
+                if (IsRetiredNewsType(eventType, null)) return Ok(new { success = false, message = RetiredNewsMessage });
 
                 // Authorization check - user must be club admin for this club or site admin
                 if (!await _authorizationService.IsClubAdminForClub(clubId))
@@ -1075,6 +1083,7 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
+                if (IsRetiredNewsType(eventType, e.EventType)) return Ok(new { success = false, message = RetiredNewsMessage });
 
                 // Behörigheten går via ägaren (EventOwnerResolver). En kretshändelse som når den här
                 // klubbendpointen får kretsens regel i stället för ett klubbuppslag på kretsnoden.
@@ -1152,158 +1161,6 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error deleting event: " + ex.Message });
-            }
-        }
-
-        /// <summary>
-        /// Create a new club news/announcement
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CreateClubNews(int clubId, string newsTitle, string newsContent,
-            string newsAuthor = "Klubben", bool isPinned = false)
-        {
-            try
-            {
-                if (clubId <= 0 || string.IsNullOrWhiteSpace(newsTitle) || string.IsNullOrWhiteSpace(newsContent))
-                {
-                    return Ok(new { success = false, message = "Club ID, title, and content are required" });
-                }
-
-                // Authorization check - user must be club admin for this club or site admin
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
-                {
-                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
-                }
-
-                if (UmbracoContext.Content == null)
-                {
-                    return Ok(new { success = false, message = "Umbraco context not available" });
-                }
-
-                // Get club node by ID
-                var clubNode = UmbracoContext.Content.GetById(clubId);
-                if (clubNode == null || clubNode.ContentType.Alias != "club")
-                {
-                    return Ok(new { success = false, message = "Club not found" });
-                }
-
-                // Create new news content as child of club
-                var newNews = _contentService.Create(
-                    newsTitle,
-                    clubId,  // Parent is the club node
-                    "clubNews"
-                );
-
-                // Set properties
-                newNews.SetValue("newsTitle", newsTitle);
-                newNews.SetValue("newsContent", newsContent);
-                newNews.SetValue("newsAuthor", newsAuthor);
-                newNews.SetValue("isPinned", isPinned);
-
-                // Save and publish
-                _contentService.Save(newNews);
-                _contentService.Publish(newNews, new[] { "*" }, -1);
-
-                return Ok(new
-                {
-                    success = true,
-                    message = "News created successfully",
-                    data = new
-                    {
-                        id = newNews.Id,
-                        title = newsTitle
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                return Ok(new { success = false, message = "Error creating news: " + ex.Message });
-            }
-        }
-
-        /// <summary>
-        /// Edit/update an existing club news item
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> EditClubNews(int newsId, string newsTitle, string newsContent,
-            string newsAuthor = "Klubben", bool isPinned = false)
-        {
-            try
-            {
-                if (newsId <= 0 || string.IsNullOrWhiteSpace(newsTitle) || string.IsNullOrWhiteSpace(newsContent))
-                {
-                    return Ok(new { success = false, message = "News ID, title, and content are required" });
-                }
-
-                var newsContent_item = _contentService.GetById(newsId);
-                if (newsContent_item == null || newsContent_item.ContentType.Alias != "clubNews")
-                {
-                    return Ok(new { success = false, message = "News item not found" });
-                }
-
-                // Authorization check - get parent club ID and verify user is club admin
-                int clubId = newsContent_item.ParentId;
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
-                {
-                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
-                }
-
-                // Update properties
-                newsContent_item.SetValue("newsTitle", newsTitle);
-                newsContent_item.SetValue("newsContent", newsContent);
-                newsContent_item.SetValue("newsAuthor", newsAuthor);
-                newsContent_item.SetValue("isPinned", isPinned);
-
-                // Save and publish
-                _contentService.Save(newsContent_item);
-                _contentService.Publish(newsContent_item, new[] { "*" }, -1);
-
-                return Ok(new { success = true, message = "News updated successfully" });
-            }
-            catch (Exception ex)
-            {
-                return Ok(new { success = false, message = "Error updating news: " + ex.Message });
-            }
-        }
-
-        /// <summary>
-        /// Delete a club news item
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteClubNews(int newsId)
-        {
-            try
-            {
-                if (newsId <= 0)
-                {
-                    return Ok(new { success = false, message = "News ID is required" });
-                }
-
-                var newsContent = _contentService.GetById(newsId);
-                if (newsContent == null || newsContent.ContentType.Alias != "clubNews")
-                {
-                    return Ok(new { success = false, message = "News item not found" });
-                }
-
-                // Authorization check - get parent club ID and verify user is club admin
-                int clubId = newsContent.ParentId;
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
-                {
-                    return Ok(new { success = false, message = "Access denied - insufficient permissions" });
-                }
-
-                // Unpublish and delete
-                _contentService.Unpublish(newsContent);
-                _contentService.Delete(newsContent);
-
-                return Ok(new { success = true, message = "News deleted successfully" });
-            }
-            catch (Exception ex)
-            {
-                return Ok(new { success = false, message = "Error deleting news: " + ex.Message });
             }
         }
 
@@ -2033,6 +1890,7 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Region ID and event name are required" });
                 }
+                if (IsRetiredNewsType(eventType, null)) return Ok(new { success = false, message = RetiredNewsMessage });
 
                 var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
                 if (rangeError != null) return Ok(new { success = false, message = rangeError });
@@ -2132,6 +1990,7 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
+                if (IsRetiredNewsType(eventType, e.EventType)) return Ok(new { success = false, message = RetiredNewsMessage });
 
                 // Behörigheten går via ägaren (EventOwnerResolver). Den här endpointen gäller
                 // kretsens händelser, så en klubbhändelse vägras här som förut.

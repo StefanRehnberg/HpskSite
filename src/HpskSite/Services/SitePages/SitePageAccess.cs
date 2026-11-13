@@ -108,6 +108,18 @@ namespace HpskSite.Services.SitePages
                 ? ownerId > 0 && await _auth.IsClubAdminForClub(ownerId)
                 : await _auth.IsCurrentUserAdminAsync();
 
+        /// <summary>
+        /// Skrivrätten till ägarens nyheter: ägarens egen admin, sajtadmin eller styrelsen (<see cref="SiteNewsRules"/>). Aldrig i förhandsläget (fliken är en besökare).
+        /// EN plats för frågan: filtret, vyn och skriv-kontrollern frågar samma sak.
+        /// </summary>
+        public async Task<(bool Write, bool Delete)> NewsRightsAsync(string ownerType, int ownerId, string? regionCode, SiteViewer viewer)
+        {
+            if (!viewer.LoggedIn || PreviewFor(ownerType, ownerId) != null) return (false, false);
+            var own = await IsOwnAdminAsync(ownerType, ownerId, regionCode);
+            var site = await IsSiteAdminAsync();
+            return (SiteNewsRules.CanWrite(true, own, site, viewer.IsOwnerBoard), SiteNewsRules.CanDelete(true, own, site));
+        }
+
         /// <param name="regionCode">Kretsens kod (krets-ägare); behövs för kretsens admin.</param>
         /// <summary>Förhandsläget för just den här ägaren, om begäran har ett (satt av <see cref="SitePreviewMiddleware"/> efter att biljetten godkänts).</summary>
         private SitePreviewTicket? PreviewFor(string ownerType, int ownerId)
@@ -157,9 +169,12 @@ namespace HpskSite.Services.SitePages
 
         private readonly SiteConvertedSource _converted;
 
+        private readonly Umbraco.Cms.Infrastructure.Scoping.IScopeProvider _scopes;
+
         public SitePageAccessFilter(SiteViewerResolver viewers, IUmbracoContextAccessor ctx, SitePageReader reader, AdminAuthorizationService auth,
-            ILogger<SitePageAccessFilter> logger, SiteConvertedSource converted)
+            ILogger<SitePageAccessFilter> logger, SiteConvertedSource converted, Umbraco.Cms.Infrastructure.Scoping.IScopeProvider scopes)
         {
+            _scopes = scopes;
             _converted = converted;
             _viewers = viewers;
             _ctx = ctx;
@@ -174,6 +189,42 @@ namespace HpskSite.Services.SitePages
             var req = SitePageRequest.Current(http);
             if (req != null && !await AllowsAsync(context, http, req)) return;
             await next();
+        }
+
+        /// <summary>
+        /// Nyheterna. Arkivet är öppet (listan visar bara det tittaren får läsa, prövat i frågan). En enskild nyhet som tittaren inte får läsa ger 404, precis som en som
+        /// inte finns — ingen skillnad i svaret avslöjar den. Skrivytan: en utloggad skickas till inloggning, en inloggad utan skrivrätt får 404.
+        /// Svaren cachas aldrig delat: innehållet beror på tittaren.
+        /// </summary>
+        private async Task<bool> AllowsNewsAsync(ResourceExecutingContext context, HttpContext http, SitePageRequest req)
+        {
+            string? regionCode = null;
+            if (req.OwnerType == SiteTemplates.Region && _ctx.TryGetUmbracoContext(out var uc) && uc.Content != null)
+                regionCode = uc.Content.GetById(req.OwnerId)?.Value<string>("regionCode");
+            var viewer = await _viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
+            var (canWrite, _) = await _viewers.NewsRightsAsync(req.OwnerType, req.OwnerId, regionCode, viewer);
+            http.Response.Headers["Cache-Control"] = "private, no-store";
+
+            if (req.PageKey == SitePageRequest.NewsWriteKey)
+            {
+                http.Response.Headers["X-Robots-Tag"] = "noindex";
+                if (!viewer.LoggedIn)
+                {
+                    context.Result = new RedirectResult("/login-register/?tab=login&returnUrl=" + Uri.EscapeDataString(http.Request.Path.Value!.TrimEnd('/') + "/"));
+                    return false;
+                }
+                if (!canWrite) { context.Result = new NotFoundResult(); return false; }
+                return true;
+            }
+            if (req.PageKey == SitePageRequest.NewsPostKey)
+            {
+                SitePostRow? post;
+                using (var scope = _scopes.CreateScope(autoComplete: true))
+                    post = SitePosts.GetReadableBySlug(scope.Database, req.OwnerType, req.OwnerId, req.PostSlug ?? "", viewer, includeDrafts: canWrite);
+                if (post == null) { context.Result = new NotFoundResult(); return false; }
+                if (post.Visibility != SiteVisibility.Alla || !post.IsPublished) http.Response.Headers["X-Robots-Tag"] = "noindex";
+            }
+            return true;
         }
 
         private async Task<bool> AllowsAsync(ResourceExecutingContext context, HttpContext http, SitePageRequest req)
@@ -191,6 +242,8 @@ namespace HpskSite.Services.SitePages
                     if (!own && !await _viewers.IsSupportEligibleAsync(req.OwnerType, req.OwnerId)) { context.Result = new NotFoundResult(); return false; }
                     return true;
                 }
+
+                if (req.IsNews) return await AllowsNewsAsync(context, http, req);
 
                 // Mallen med ägarens omvandlade sidor utbytta: en omvandlad sida syns för den som får se minst ett av DESS block.
                 var template = _converted.Template(req.OwnerType, req.OwnerId);

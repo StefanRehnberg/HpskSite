@@ -26,7 +26,7 @@ namespace HpskSite.Services.SitePages
         private static readonly Regex Shape = new("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.Compiled);
 
         /// <summary>Segment som aldrig är en egen sida, oavsett ägare (redigeringsytan och sajtens egna adresser).</summary>
-        private static readonly string[] AlwaysReserved = { "hemsidan", "admin", "api", "umbraco", "media", "css", "js", "images", "login-register" };
+        private static readonly string[] AlwaysReserved = { "hemsidan", "nyheter", "admin", "api", "umbraco", "media", "css", "js", "images", "login-register" };
 
         /// <summary>
         /// Gör en titel till ett slugförslag: gemener, å/ä/ö blir a/a/o, allt utom a–z, 0–9 blir bindestreck, kortas till

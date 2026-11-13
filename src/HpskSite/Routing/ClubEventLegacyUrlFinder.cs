@@ -103,6 +103,7 @@ namespace HpskSite.Routing
             builder.Services.AddScoped<SitePanelReadGate>();   // blockets egen nivå gäller också dess data (medlemskatalogen, styrelsen)
             builder.Services.AddSingleton<SitePreviewTickets>();   // förhandsläget i Hemsidan: signerade biljetter (SitePreviewMiddleware läser dem)
             builder.Services.AddScoped<SiteImageService>();   // serverar bilderna på egna sidor (åtkomst per anrop, SiteImageAccess)
+            builder.Services.AddScoped<SiteNewsMailer>();   // Mejla till medlemmarna: en gång per nyhet, claim före utskick
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o => o.Filters.Add<SitePageAccessFilter>());
         }
     }

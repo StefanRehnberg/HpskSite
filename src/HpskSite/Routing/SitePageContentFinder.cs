@@ -63,6 +63,7 @@ namespace HpskSite.Routing
                 // Billigast först: finns sluggen i någon mall alls? Annars kan det vara en egen sida (steg 2) — bara när ägaren har
                 // brytare 2 PÅ, och bara för en adress som ser ut som en slugg (ingen SQL för skräp).
                 var last = seg[^1];
+                if (IsNewsPath(seg)) return TryFindNews(request, seg);
                 if (SiteTemplates.ClubTemplate.PageBySlug(last) == null && SiteTemplates.RegionTemplate.PageBySlug(last) == null)
                 {
                     if (string.Equals(last, HemsidanSlug, StringComparison.OrdinalIgnoreCase)) return TryFindHemsidan(request, seg);
@@ -124,6 +125,45 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "SitePageContentFinder: {Path} kunde inte avgöras", request.Uri.AbsolutePath);
                 return false;
             }
+        }
+
+        /// <summary>Nyheternas ord i adressen (<c>/{ägare}/nyheter/</c>). Reserverat: aldrig en egen sida och aldrig en klubb under en krets.</summary>
+        public const string NewsSlug = "nyheter";
+
+        /// <summary>Skrivytans adressdel (<c>/{ägare}/nyheter/skriv/</c>). Reserverad som nyhetsadress (<see cref="SitePostRules"/>).</summary>
+        public const string NewsWriteSlug = "skriv";
+
+        /// <summary>Ser adressen ut som nyheternas arkiv, skrivytan eller en nyhet? Billig form-kontroll, ingen SQL.</summary>
+        private static bool IsNewsPath(string[] seg) =>
+            string.Equals(seg[^1], NewsSlug, StringComparison.OrdinalIgnoreCase)
+            || (seg.Length >= 3 && string.Equals(seg[^2], NewsSlug, StringComparison.OrdinalIgnoreCase) && IsSlugShaped(seg[^1]));
+
+        /// <summary>
+        /// Nyheterna: arkivet, en nyhet eller skrivytan — bara när ägaren har brytare 2 PÅ och ingen riktig nod ligger på adressen. Findern avgör inte vem som
+        /// får se något: filtret efter inloggningen prövar nyhetens läsnivå (en nyhet man inte får läsa ger 404, precis som en som inte finns) och skrivytans
+        /// skribenter. En ägare utan egen redigering har inga nyheter (404).
+        /// </summary>
+        private bool TryFindNews(IPublishedRequestBuilder request, string[] seg)
+        {
+            var isArchive = string.Equals(seg[^1], NewsSlug, StringComparison.OrdinalIgnoreCase);
+            var ownerSeg = isArchive ? seg[..^1] : seg[..^2];
+            if (ownerSeg.Length < 1 || !_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return false;
+            var cache = uc.Content;
+            var owner = _routes.Owner(cache, ownerSeg);
+            var ownerType = owner?.ContentType.Alias switch { "club" => SiteTemplates.Club, "regionalPage" => SiteTemplates.Region, _ => null };
+            if (owner == null || ownerType == null || !_owners.IsEditingEnabled(ownerType, owner.Id)) return false;
+            if (_routes.TreeRoute(cache, seg) != null) return false;   // en riktig nod på adressen har företräde
+            var http = _http.HttpContext;
+            if (http == null) return false;
+
+            var last = seg[^1].ToLowerInvariant();
+            var req = isArchive ? new SitePageRequest(ownerType, owner.Id, SitePageRequest.NewsKey)
+                    : last == NewsWriteSlug ? new SitePageRequest(ownerType, owner.Id, SitePageRequest.NewsWriteKey)
+                    : new SitePageRequest(ownerType, owner.Id, SitePageRequest.NewsPostKey, PostSlug: last);
+            http.Items[SitePageRequest.ItemKey] = req;
+            request.SetPublishedContent(owner);
+            request.SetTemplate(new Umbraco.Cms.Core.Models.Template(_shortStrings, PageViews.News, PageViews.News));
+            return true;
         }
 
         /// <summary>Redigeringsytans adress: <c>/{ägare}/hemsidan/</c>. Ett reserverat ord (<see cref="SitePageSlugRules"/>), aldrig en egen sida.</summary>

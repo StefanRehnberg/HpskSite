@@ -48,6 +48,7 @@ namespace HpskSite.Services.SitePages
             db.Execute("DELETE FROM dbo.SitePage WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             db.Execute("DELETE FROM dbo.SiteSupportGrant WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);
             db.Execute("IF OBJECT_ID(N'dbo.SiteImageAlbum', N'U') IS NOT NULL DELETE FROM dbo.SiteImageAlbum WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);   // albumen före bilderna (medlemskapen följer med, CASCADE)
+            SitePosts.DeleteAllForOwner(db, ownerType, ownerId);   // nyheterna före bilderna: omslagets nyckel mot SiteFile har ingen ON DELETE-regel (referenserna följer med, CASCADE)
             SiteFiles.DeleteAllForOwner(db, ownerType, ownerId);   // filerna i lagringen tas bort av SiteOwnerCleanupHandler
             db.Execute("DELETE FROM dbo.SiteFormEntry WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);   // anmälningarna är personuppgifter: de följer med ägaren
             return db.Execute("DELETE FROM dbo.SiteOwner WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId);

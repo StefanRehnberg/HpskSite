@@ -24,6 +24,9 @@ namespace HpskSite.Routing
         /// <summary>Redigeringsytan "Hemsidan" (<c>/{ägare}/hemsidan/</c>), som <see cref="SitePage"/> utan Umbraco-mall.</summary>
         public const string Hemsidan = "Hemsidan";
 
+        /// <summary>Nyheterna (arkiv, en nyhet och skrivytan): en vy, utan Umbraco-mall.</summary>
+        public const string News = "SiteNews";
+
         public static readonly string[] All ={ Competition, Series, Result, StartList, FinalsStartList, Event };
 
         /// <summary>Vyn för en nods mall: sidans egen vy när mallen är en av de gamla, annars mallen själv.</summary>

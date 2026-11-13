@@ -55,7 +55,7 @@ namespace HpskSite.Tests
         public void Klubbens_Hem_bevarar_både_inloggad_och_utloggad_sida_i_rätt_ordning()
         {
             var keys = SiteConversion.Build(Club, "home", null).Blocks.Select(b => b.Data["key"]!.GetValue<string>()).ToList();
-            Assert.Equal(new[] { "about-text", "whats-happening", "upcoming-events", "motions", "contact-card", "quicklink-docs", "login-prompt", "quicklinks" }, keys);
+            Assert.Equal(new[] { "about-text", "whats-happening", "upcoming-events", "motions", "contact-card", "quicklink-docs", "login-prompt" }, keys);
             // Kretsens Hem är oförändrad ordning (utloggad och inloggad har samma lista).
             Assert.Equal(PanelCatalog.Standard(SiteTemplates.Region, "home", true).Select(p => p.Key),
                 SiteConversion.Build(SiteTemplates.Region, "home", null).Blocks.Select(b => b.Data["key"]!.GetValue<string>()));

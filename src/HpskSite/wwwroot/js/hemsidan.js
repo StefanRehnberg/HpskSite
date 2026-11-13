@@ -82,7 +82,7 @@
     { group: 1, type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill', desc: 'Kontaktperson, e-post och telefon. Visas aldrig för alla.' },
     { group: 1, type: 'signup', label: 'Anmälan / ansökan', icon: 'bi-clipboard-check', desc: 'Ett formulär där besökare anmäler sig till en kurs eller ansöker om medlemskap. Ni hanterar anmälningarna under Anmälningar.' },
     { group: 2, type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event', desc: 'De närmaste händelserna i kalendern.' },
-    { group: 2, type: 'news', label: 'Nyheter', icon: 'bi-newspaper', desc: 'De senaste nyheterna.' },
+    { group: 2, type: 'news', label: 'Senaste nyheterna', icon: 'bi-newspaper', desc: 'De senaste nyheterna, med länk till alla.' },
     { group: 3, type: 'links', label: 'Länkar', icon: 'bi-link-45deg', desc: 'Knappar som leder till andra webbplatser.' },
     { group: 3, type: 'documents', label: 'Dokument', icon: 'bi-file-earmark-text', desc: 'Utvalda dokument ur dokumentarkivet.' },
     { group: 3, type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right', desc: 'En knapp till en av ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' andra sidor.' },
@@ -1206,7 +1206,7 @@
     const floorOf = type => (S.st && S.st.blockFloors && S.st.blockFloors[type]) || 0;   // serverns golv-tabell
     const blk = (type, data) => ({ id: newId(), type, visibility: Math.max(vis, floorOf(type)), data });
     const noun = IS_REGION ? 'Kretsrekord' : 'Klubbrekord';
-    if (tpl === 'welcome') return [blk('about', { title: '' }), blk('events', { title: 'Kommande händelser', count: 5 }), blk('news', { title: 'Nyheter', count: 3 }), blk('competitions', { title: 'Kommande tävlingar', count: 3 })];
+    if (tpl === 'welcome') return [blk('about', { title: '' }), blk('events', { title: 'Kommande händelser', count: 5 }), blk('news', { title: 'Senaste nyheterna', count: 3 }), blk('competitions', { title: 'Kommande tävlingar', count: 3 })];
     if (tpl === 'aboutus') return [blk('about', { title: '' }), blk('contact', { title: 'Kontakt' })];
     if (tpl === 'competitions') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('records', { title: noun }), blk('champions', { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' })];
     if (tpl === 'ranges') return [text(), blk('ranges', { title: 'Skjutbanor' })];
@@ -1625,7 +1625,7 @@
       markDirty(); drawBlocks(); return;
     }
     const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Nyheter', count: 5 } : type === 'about' ? { title: '' } : type === 'signup' ? { title: 'Anmälan', intro: '', choices: [] } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
+      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Senaste nyheterna', count: 5 } : type === 'about' ? { title: '' } : type === 'signup' ? { title: 'Anmälan', intro: '', choices: [] } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
       : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
     S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
     S.hint = null; markDirty(); drawBlocks();
@@ -1866,7 +1866,13 @@
         h('p', { class: 'text-muted small mb-0' }, 'Visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' presentationstext. Texten skriver ni under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och den hämtas vid varje besök, så ändrar ni den där ändras den här också.')];
       case 'news': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många nyheter', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
-          'Visar de senaste nyheterna ni publicerat som händelsetypen Nyhet. Varje nyhet har sin egen nivå (vem som får läsa den); den som inte får läsa en nyhet ser den inte i listan.')];
+          'Visar de senaste nyheterna ni skrivit under Nyheter (menyn), med en länk till alla. Varje nyhet har sin egen nivå (vem som får läsa den); den som inte får läsa en nyhet ser den inte i listan.'),
+        h('div', { class: 'form-check' },
+          (() => { const c = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsNwEx' + b.id, checked: d.showExcerpt !== false }); c.addEventListener('change', () => { d.showExcerpt = c.checked; markDirty(); }); return c; })(),
+          h('label', { class: 'form-check-label', for: 'hsNwEx' + b.id }, 'Visa en kort sammanfattning under rubriken')),
+        h('div', { class: 'form-check' },
+          (() => { const c = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsNwIm' + b.id, checked: d.showImage === true }); c.addEventListener('change', () => { d.showImage = c.checked; markDirty(); }); return c; })(),
+          h('label', { class: 'form-check-label', for: 'hsNwIm' + b.id }, 'Visa omslagsbilden'))];
       case 'events': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många händelser', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           'Visar de närmaste kommande händelserna i kalendern.'),

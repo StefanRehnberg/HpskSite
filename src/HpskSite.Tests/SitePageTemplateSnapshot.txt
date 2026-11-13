@@ -1,4 +1,4 @@
-Club v1 menyKräverInloggning=True
+Club v2 menyKräverInloggning=True
   home / "Hem" #10
     about-text Utloggad
     login-prompt Utloggad
@@ -7,7 +7,6 @@ Club v1 menyKräverInloggning=True
     whats-happening Inloggade
     upcoming-events Inloggade
     motions Inloggade
-    quicklinks Inloggade
   about /om-klubben "Om Klubben" #20
     about-text Inloggade
   ranges /banor "Banor" #30
@@ -26,7 +25,7 @@ Club v1 menyKräverInloggning=True
     document-archive Inloggade
   admin / "Admin" #90 ADMIN
     admin-panel Dold
-Region v1 menyKräverInloggning=False
+Region v2 menyKräverInloggning=False
   home / "Hem" #10
     welcome Alla
     whats-happening Alla
@@ -34,8 +33,6 @@ Region v1 menyKräverInloggning=False
     upcoming-events Alla
     contact-card Alla
     quicklink-docs Alla
-    quicklinks Alla
-    quicklink-records Inloggade
     motions Inloggade
     champions Inloggade
   about /om "Om" #20
