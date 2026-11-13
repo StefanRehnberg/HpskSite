@@ -487,32 +487,56 @@
         }
     }
 
-    function renderPatrols() {
-        // Group by weapon group
-        var byGroup = {};
-        allPatrols.forEach(function(p) {
-            var wg = p.weaponGroup || '?';
-            if (!byGroup[wg]) byGroup[wg] = [];
-            byGroup[wg].push(p);
+    // En patrulls vapengrupper som enskilda koder ("A+A_Opt" → A; A_Opt räknas som A). Etiketten räknas fram ur
+    // vilka klasser som sitter i patrullen, så den kan inte användas som rubrik: varje kombination blev ett eget kort.
+    function patrolFamilies(p) {
+        var seen = {}, out = [];
+        String(p.weaponGroup || '').split('+').forEach(function(c) {
+            c = c.trim(); if (!c || c === '?') return;
+            if (c === 'A_Opt') c = 'A';
+            if (!seen[c]) { seen[c] = true; out.push(c); }
         });
+        return out;
+    }
+    var faltPatrolFilter = '';
+
+    window.faltSetPatrolFilter = function(code) {
+        faltPatrolFilter = code || '';
+        renderPatrols();
+    };
+
+    function renderPatrols() {
+        // EN rak lista i patrullordning (som numren). Vapengruppen är en etikett på varje patrull; filtret ersätter korten.
+        var codes = [];
+        allPatrols.forEach(function(p) { patrolFamilies(p).forEach(function(c) { if (codes.indexOf(c) < 0) codes.push(c); }); });
+        if (faltPatrolFilter && codes.indexOf(faltPatrolFilter) < 0) faltPatrolFilter = '';
 
         var groupsEl = document.getElementById('faltPatrolGroups');
         groupsEl.innerHTML = '';
 
-        Object.keys(byGroup).forEach(function(wg) {
-            var grpPatrols = byGroup[wg];
-            var totalShooters = grpPatrols.reduce(function(s, p) { return s + p.members.filter(function(m) { return m.status !== 'DNS'; }).length; }, 0);
+        var grpPatrols = allPatrols.filter(function(p) { return !faltPatrolFilter || patrolFamilies(p).indexOf(faltPatrolFilter) >= 0; });
+        var totalShooters = grpPatrols.reduce(function(s, p) { return s + p.members.filter(function(m) { return m.status !== 'DNS'; }).length; }, 0);
 
+        var filterBtns = '';
+        if (codes.length > 1) {
+            filterBtns = '<span class="btn-group btn-group-sm ms-3" role="group" aria-label="Visa vapengrupp">' +
+                [''].concat(codes).map(function(c) {
+                    var on = (c === faltPatrolFilter);
+                    return '<button type="button" class="btn ' + (on ? 'btn-primary' : 'btn-outline-primary') + '" aria-pressed="' + on + '" onclick="faltSetPatrolFilter(\'' + c.replace(/'/g, "\\'") + '\')">' + (c ? hpskEsc(window.formatWeaponGroups(c)) : 'Alla') + '</button>';
+                }).join('') + '</span>';
+        }
+
+        {
             var html = '<div class="card mb-3">' +
-                '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
-                '<span><strong>Vapengrupp ' + hpskEsc(window.formatWeaponGroups(wg)) + '</strong>' +
-                '<span class="badge bg-primary ms-2">' + grpPatrols.length + ' patruller</span>' +
-                '<span class="badge bg-secondary ms-2">' + totalShooters + ' skyttar</span></span>' +
-                '<button class="btn btn-outline-danger btn-sm py-0" onclick="faltDeleteGroupPatrols(\'' + wg.replace(/'/g, "\\'") + '\')" title="Ta bort">' +
-                '<i class="bi bi-trash"></i></button>' +
+                '<div class="card-header py-2 d-flex flex-wrap align-items-center gap-1">' +
+                '<span class="badge bg-primary">' + grpPatrols.length + ' patruller</span>' +
+                '<span class="badge bg-secondary">' + totalShooters + ' skyttar</span>' +
+                filterBtns +
                 '</div><div class="card-body p-0">';
 
             grpPatrols.forEach(function(patrol) {
+                var wg = patrol.weaponGroup || '';
+                var famBadges = patrolFamilies(patrol).map(function(c) { return '<span class="badge bg-info-subtle text-info-emphasis ms-1">' + hpskEsc(window.formatWeaponGroups(c)) + '</span>'; }).join('');
                 var startTimeStr = patrol.startTime ? new Date(patrol.startTime).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
                 var wgEsc = (wg || '').replace(/'/g, "\\'");
                 var labelStr = patrol.label || '';
@@ -523,7 +547,7 @@
                 html += '<div class="border-bottom px-3 py-2" data-patrol-id="' + patrol.patrolId + '">' +
                     '<div class="d-flex justify-content-between align-items-center mb-1">' +
                     '<span>' +
-                    '<strong>Patrull ' + patrol.patrolNumber + labelSuffix + '</strong>' +
+                    '<strong>Patrull ' + patrol.patrolNumber + labelSuffix + '</strong>' + famBadges +
                     (startTimeStr ? '<span class="text-muted ms-2"><i class="bi bi-clock me-1"></i>' + startTimeStr +
                         ' <button class="btn btn-link btn-sm px-1 py-0 text-muted" ' + editAttrs + ' onclick="faltEditPatrolFromButton(this)" title="Redigera patrull (starttid och namn)"><i class="bi bi-pencil"></i></button></span>' :
                         ' <button class="btn btn-link btn-sm px-1 py-0 text-muted ms-2" ' + editAttrs + ' onclick="faltEditPatrolFromButton(this)" title="Redigera patrull (starttid och namn)"><i class="bi bi-pencil"></i></button>') +
@@ -595,7 +619,7 @@
 
             html += '</div></div>';
             groupsEl.insertAdjacentHTML('beforeend', html);
-        });
+        }
 
         // Update bulk move target dropdown
         var bulkTarget = document.getElementById('faltBulkTarget');
@@ -1052,13 +1076,6 @@
     window.faltPrintPatrolList = function() {
         if (allPatrols.length === 0) return;
 
-        var byGroup = {};
-        allPatrols.forEach(function(p) {
-            var wg = p.weaponGroup || '?';
-            if (!byGroup[wg]) byGroup[wg] = [];
-            byGroup[wg].push(p);
-        });
-
         var w = window.open('', '_blank');
         w.document.write('<html><head><title>Patrullista</title>');
         w.document.write('<style>');
@@ -1079,24 +1096,27 @@
         w.document.write('<' + '/style><' + '/head><body>');
         w.document.write('<h1>Patrullista</h1>');
 
-        Object.keys(byGroup).forEach(function(wg) {
-            var grp = byGroup[wg];
+        // EN rak lista i patrullordning; vapengruppen st\u00e5r vid varje patrull (kombinationerna \u00e4r inga rubriker).
+        {
+            var grp = allPatrols;
             var total = grp.reduce(function(s,p){return s+p.members.length;},0);
-            w.document.write('<h2>Vapengrupp ' + hpskEsc(window.formatWeaponGroups(wg)) + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
+            w.document.write('<h2>' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
             grp.forEach(function(p) {
+                var fams = patrolFamilies(p).map(function(c){ return window.formatWeaponGroups(c); }).join(' + ');
                 var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
                 // Was a hand-rolled three-replace escape that missed both quote kinds.
                 var lblHtml = p.label ? ' &mdash; ' + hpskEsc(p.label) : '';
                 w.document.write('<div class="patrol">');
                 w.document.write('<div class="patrol-header">Patrull ' + p.patrolNumber + lblHtml
                     + (t ? '<span class="patrol-time">' + t + '</span>' : '')
+                    + (fams ? '<span class="patrol-time">' + hpskEsc(fams) + '</span>' : '')
                     + '<span class="patrol-writein"></span></div>');
                 p.members.forEach(function(m) {
                     w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(window.getShootingClassName(m.shootingClass)) + (m.outOfCompetition ? ' – utanför mästerskapet' : '') + '</span></div>');
                 });
                 w.document.write('</div>');
             });
-        });
+        }
 
         w.document.write('<' + '/body><' + '/html>');
         w.document.close();
