@@ -1,21 +1,15 @@
 @using HpskSite.Controllers
-@model FaltskytteCardEntryPageModel
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
-    // Sekretariatets kortinmatning (/kortinmatning/{id}). Staff-grindad, chromeless, full bredd, öppnas i ny flik
-    // från Stationer-fliken. Statusvy (alla patruller) och kortvy (en patrull: skyttar x stationer) i samma sida.
+    // Sekretariatets kortinmatning (/kortinmatning/{id}). Personal-grindad, i sajtens Master-layout (meny, tema,
+    // full bredd). Statusvy (alla patruller) och kortvy (en patrull: skyttar x stationer) i samma sida.
+    // Master.cshtml (UmbracoViewPage) behöver en IPublishedContent som Model — sidans egen modell ligger i ViewData["Card"].
     // Sparar via /umbraco/surface/FaltskytteCardEntry/SaveCard (egen väg, rör inte SaveStationResult).
-    Layout = null;
+    Layout = "Master.cshtml";
+    var m = (FaltskytteCardEntryPageModel)ViewData["Card"]!;
+    ViewBag.Title = "Kortinmatning" + (string.IsNullOrEmpty(m.CompetitionName) ? "" : " — " + m.CompetitionName);
 }
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1.0">
-    <title>Kortinmatning@(string.IsNullOrEmpty(Model.CompetitionName) ? "" : " — " + Model.CompetitionName)</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.min.css">
-    <style>
-        body { background: #f5f6f8; }
+<style>
         /* Kortet ska rymmas i bredd utan sidscroll: fast tabelllayout, stationskolumnerna delar på resten. */
         .ke-grid { table-layout: fixed; width: 100%; }
         .ke-grid th, .ke-grid td { padding-left: .35rem; padding-right: .35rem; vertical-align: top; }
@@ -24,38 +18,35 @@
         .ke-grid th.nm, .ke-grid td.nm { width: 168px; }
         .ke-grid th.sm { width: 64px; text-align: center; }
         .ke-grid th.rs { width: 92px; }
-        .ke-grid tr.ke-dns td { background: #eceff3; color: #6c757d; }
+        .ke-grid thead th, #keStatus thead th { background: var(--bs-tertiary-bg); }
+        .ke-grid tr.ke-dns td { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
         .ke-cell { width: 100%; padding-left: 2px; padding-right: 2px; font-variant-numeric: tabular-nums; }
         .ke-pmrow { display: flex; gap: 3px; align-items: center; margin-top: 4px; }
-        .ke-pmlab { font-size: 11px; color: #6c757d; margin-right: 1px; }
+        .ke-pmlab { font-size: 11px; color: var(--bs-secondary-color); margin-right: 1px; }
         .ke-pm { flex: 1 1 0; min-width: 0; width: 100%; padding-left: 2px; padding-right: 2px; border-style: dashed; }
         .ke-msg { font-size: 11.5px; min-height: 16px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; margin-top: 2px; }
         .ke-msg .btn { font-size: 11.5px; padding: 1px 6px; margin-top: 3px; white-space: normal; text-align: left; }
-        .ke-cell.ke-saved { border-color: #198754; }
-        .ke-cell.ke-dirty { border-color: #ffc107; background: #fffbea; }
-        .ke-cell.ke-conflict { border-color: #dc3545; background: #fdecea; }
+        .ke-cell.ke-saved { border-color: var(--bs-success); }
+        .ke-cell.ke-dirty { border-color: var(--bs-warning); background: var(--bs-warning-bg-subtle); }
+        .ke-cell.ke-conflict { border-color: var(--bs-danger); background: var(--bs-danger-bg-subtle); }
         .ke-sum { font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .ke-rowstate { font-size: 12px; color: #6c757d; }
+        .ke-rowstate { font-size: 12px; color: var(--bs-secondary-color); }
         .ke-scroll { overflow-x: auto; }
         #keStatus td, #keStatus th { white-space: nowrap; }
     </style>
-    @await Html.PartialAsync("_ShootingClassesBootstrap")
-</head>
-<body>
-<div class="container-fluid py-3">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3 border-bottom pb-2">
+<div class="container-fluid px-lg-4 py-4" style="padding-bottom:5rem">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
-            <div class="small text-uppercase text-muted" style="letter-spacing:.06em">Tävlingshantering</div>
-            <h2 class="mb-0"><i class="bi bi-ui-checks-grid me-2"></i>Kortinmatning</h2>
-            <div class="text-muted">@Model.CompetitionName · mata in patrullernas papperskort</div>
+            <h1 class="h3 mb-0"><i class="bi bi-ui-checks-grid me-2 text-primary"></i>Kortinmatning</h1>
+            <div class="text-muted">@m.CompetitionName · mata in patrullernas papperskort</div>
         </div>
         <div class="d-flex gap-2 align-items-center flex-wrap">
             <span id="keConn" class="badge bg-secondary" title="Anslutning"><i class="bi bi-wifi"></i></span>
-            <a class="btn btn-outline-secondary btn-sm" href="/competitionmanagement?competitionId=@Model.CompetitionId">Tillbaka till tävlingen</a>
+            <a class="btn btn-outline-secondary btn-sm" href="/competitionmanagement?competitionId=@m.CompetitionId">Tillbaka till tävlingen</a>
         </div>
     </div>
 
-    @if (!Model.CanEnter)
+    @if (!m.CanEnter)
     {
         <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Du har inte behörighet till kortinmatningen. Logga in med ett konto som är funktionär på tävlingen.</div>
     }
@@ -97,7 +88,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle mb-0" id="keStatus">
-                            <thead class="table-light"><tr>
+                            <thead><tr>
                                 <th>Patrull</th><th>Vapengrupp</th><th class="text-center">Skyttar</th><th class="text-center">Stationer inmatade</th>
                                 <th>Läge</th><th>Senast ändrad av</th><th></th>
                             </tr></thead>
@@ -119,7 +110,7 @@
                 </div>
                 <div class="d-flex gap-2 align-items-center flex-wrap">
                     <span id="keStamp" class="small text-muted"></span>
-                    <button type="button" class="btn btn-primary" id="keSaveAll"><i class="bi bi-check2-circle me-1"></i>Spara kortet</button>
+                    <button type="button" class="btn btn-primary d-none" id="keSaveAll" title="Rutorna sparas av sig själva när du lämnar dem. Knappen sparar det som av någon anledning ligger kvar."><i class="bi bi-check2-circle me-1"></i>Spara det som återstår</button>
                 </div>
             </div>
             <div id="keCardBanner"></div>
@@ -141,11 +132,11 @@
     }
 </div>
 
-@if (Model.CanEnter)
+@if (m.CanEnter)
 {
 <script>
 (function () {
-    var COMP = @Model.CompetitionId;
+    var COMP = @m.CompetitionId;
     var POLL = 15000;
     var $ = function (s) { return document.querySelector(s); };
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -318,7 +309,7 @@
 
     function drawGrid() {
         var sts = allStationNumbers();
-        var h = '<thead class="table-light"><tr><th class="nm">Skytt</th>';
+        var h = '<thead><tr><th class="nm">Skytt</th>';
         sts.forEach(function (s) {
             h += '<th class="st">Station ' + s.station + '<small class="text-muted">' + (s.name ? esc(s.name) + '<br>' : '') + s.slots + (s.slots === 1 ? ' figur' : ' figurer') + (s.poangmal ? ' + poäng' : '') + '</small></th>';
         });
@@ -405,6 +396,13 @@
         var s = document.getElementById('sum_' + mid); if (s) s.textContent = n ? hits + '/' + figs : '';
         var rs = document.getElementById('rs_' + mid);
         if (rs) rs.innerHTML = bad ? '<span class="text-danger">' + bad + ' att rätta</span>' : pending ? '<span class="text-warning">' + pending + ' ej sparade</span>' : (n + ' av ' + total + ' stationer');
+        updateSaveBtn();
+    }
+    // Rutorna sparas av sig själva när man lämnar dem; knappen visas bara när något ligger kvar osparat eller felaktigt.
+    function updateSaveBtn() {
+        var b = $('#keSaveAll'); if (!b || !card) return;
+        var any = Object.keys(cells).some(function (k) { var s = cells[k].state; return s === 'dirty' || s === 'error'; });
+        b.classList.toggle('d-none', !any);
     }
     function refreshAll() {
         Object.keys(cells).forEach(function (k) { paint(cells[k]); });
@@ -443,7 +441,7 @@
             if (d[k].text === c.serverText && JSON.stringify(d[k].pm) === JSON.stringify(c.serverPm)) return;
             c.text = d[k].text; c.pm = d[k].pm; c.state = 'dirty'; n++;
         });
-        if (n) $('#keCardBanner').innerHTML = '<div class="alert alert-warning py-2">Det fanns ' + n + ' osparade rutor från den här webbläsaren. De ligger kvar gulmarkerade. Tryck <em>Spara kortet</em> för att spara dem.</div>';
+        if (n) $('#keCardBanner').innerHTML = '<div class="alert alert-warning py-2">Det fanns ' + n + ' osparade rutor från den här webbläsaren. De ligger kvar gulmarkerade. Tryck <em>Spara det som återstår</em> för att spara dem.</div>';
     }
 
     // ───────── sparning ─────────
@@ -580,5 +578,3 @@
 })();
 </script>
 }
-</body>
-</html>
