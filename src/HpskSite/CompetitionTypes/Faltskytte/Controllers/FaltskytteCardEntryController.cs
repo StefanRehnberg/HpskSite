@@ -450,6 +450,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         await db.UpdateAsync(existing);
                         _logger.LogInformation("Kortinmatning: uppdaterade tävling {Comp} patrull {Patrol} station {Station} skytt {Member} av {By} ({Hits}/{Figs})",
                             request.CompetitionId, request.PatrolNumber, row.Station, row.MemberId, enteredBy, c.Hits, c.Figures);
+                        // Läs tillbaka raden: versionen ska vara exakt det databasen lagrade (kolumnens precision), annars krockar nästa sparning med sig själv.
+                        existing = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                            "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2 AND ShootingClass = @3",
+                            request.CompetitionId, row.Station, row.MemberId, member.ShootingClass) ?? existing;
                         names = NamesFor(new[] { enteredBy });
                         outcomes.Add(new { memberId = row.MemberId, station = row.Station, status = "saved", version = VersionOf(existing), row = RowView(existing, names) });
                     }
@@ -482,6 +486,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         await db.InsertAsync(entry);
                         _logger.LogInformation("Kortinmatning: ny rad tävling {Comp} patrull {Patrol} station {Station} skytt {Member} av {By} ({Hits}/{Figs})",
                             request.CompetitionId, request.PatrolNumber, row.Station, row.MemberId, enteredBy, c.Hits, c.Figures);
+                        entry = await db.FirstOrDefaultAsync<FaltskytteResultEntry>(
+                            "WHERE CompetitionId = @0 AND StationNumber = @1 AND MemberId = @2 AND ShootingClass = @3",
+                            request.CompetitionId, row.Station, row.MemberId, member.ShootingClass) ?? entry;
                         names = NamesFor(new[] { enteredBy });
                         outcomes.Add(new { memberId = row.MemberId, station = row.Station, status = "saved", version = VersionOf(entry), row = RowView(entry, names) });
                     }

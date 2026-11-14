@@ -449,6 +449,7 @@
         var p = parseCell(c.text, c.slots, c.maxPer);
         var pm = c.pmN ? c.pm.map(function (v) { return v === '' ? null : parseInt(v, 10); }) : null;
         if (pm && pm.every(function (v) { return v === null; })) pm = null;
+        c.sentText = c.text; c.sentPm = c.pm.slice();
         var r = { memberId: c.mid, station: c.st, mode: p.mode, expectedVersion: c.version, poangmalScores: pm };
         if (p.mode === 'fig') r.hitsPerFigure = p.arr; else { r.hits = p.hits; r.figures = p.figs; }
         return r;
@@ -465,17 +466,21 @@
             }).then(function (r) { return r.json(); }).then(function (d) {
                 setConn(true);
                 if (!d.success) { list.forEach(function (c) { c.state = 'error'; c.msg = d.message || 'Sparningen misslyckades.'; paint(c); }); return; }
+                var resave = [];
                 d.results.forEach(function (res) {
                     var c = cells[key(res.memberId, res.station)]; if (!c) return;
                     if (res.status === 'saved') {
                         var row = res.row; c.version = res.version; c.state = 'saved'; c.msg = '';
-                        c.serverText = c.text; c.serverPm = c.pm.slice(); c.current = null;
+                        c.serverText = c.sentText; c.serverPm = c.sentPm.slice(); c.current = null;
+                        // Rutan ändrades medan sparningen pågick (t.ex. poäng efter träffar): spara om med den nya versionen.
+                        if (c.text !== c.sentText || JSON.stringify(c.pm) !== JSON.stringify(c.sentPm)) { c.state = 'dirty'; resave.push(c); }
                         $('#keStamp').innerHTML = '<span class="text-success">Sparat ' + nowHm() + '</span>';
                     } else if (res.status === 'conflict') { c.state = 'conflict'; c.current = res.current; c.msg = res.message || ''; }
                     else { c.state = 'error'; c.msg = res.message || 'Nekad.'; }
                     paint(c); refreshRow(c.mid);
                 });
                 saveDrafts(); drawWarns();
+                if (resave.length) saveCells(resave);
             }).catch(function () {
                 setConn(false);
                 list.forEach(function (c) { if (c.state === 'saving') { c.state = 'error'; c.msg = 'Nådde inte servern. Värdet finns kvar i webbläsaren, försök igen.'; paint(c); refreshRow(c.mid); } });
