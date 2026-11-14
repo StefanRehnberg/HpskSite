@@ -286,6 +286,9 @@
             competitionConfig = data.config;
             maxReshoots = data.maxReshoots || 0;
             scoringMode = data.scoringMode || 'Normal';
+            if (data.cardEntryOnly && containerEl) {
+                containerEl.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger"><i class="bi bi-slash-circle me-1"></i><strong>Stationsinmatningen är stängd.</strong> Den här tävlingen matas in via Kortinmatning i sekretariatet. Resultat som skrivs här sparas inte.</div>');
+            }
             var stationNums = new Set();
             Object.values(competitionConfig.weaponConfigs || {}).forEach(function(wc) {
                 (wc.stations || []).forEach(function(s) { stationNums.add(s.station); });

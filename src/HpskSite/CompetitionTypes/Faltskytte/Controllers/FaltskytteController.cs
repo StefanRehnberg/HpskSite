@@ -49,6 +49,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags _outOfCompetition;
         private readonly FaltskytteOutsideCorrectionService _outsideCorrection;
         private readonly HpskSite.Services.CompetitionTeamService _teamService;
+        private readonly HpskSite.Services.SiteSettings.SiteSettingService _siteSettings;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -79,10 +80,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             FaltskytteMedalLedger medalLedger,
             HpskSite.CompetitionTypes.Common.OutOfCompetitionFlags outOfCompetition,
             FaltskytteOutsideCorrectionService outsideCorrection,
-            HpskSite.Services.CompetitionTeamService teamService)
+            HpskSite.Services.CompetitionTeamService teamService,
+            HpskSite.Services.SiteSettings.SiteSettingService siteSettings)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _teamService = teamService;
+            _siteSettings = siteSettings;
             _officialFalt = officialFalt;
             _outOfCompetition = outOfCompetition;
             _outsideCorrection = outsideCorrection;
@@ -268,7 +271,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
             var maxReshoots = competition.MaxReshoots;
 
-            return Json(new { success = true, config, scoringMode, maxReshoots });
+            var cardEntryOnly = FaltskytteCardEntryOnly.IsOn(_siteSettings, competitionId);
+            return Json(new { success = true, config, scoringMode, maxReshoots, cardEntryOnly });
         }
 
         /// <summary>Sort order for class names in result lists. Regeln bor i
@@ -864,6 +868,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
+                // Spärren "bara kortinmatning" (sekretariatet matar in papperskorten): vägra spara härifrån.
+                if (request != null && FaltskytteCardEntryOnly.IsOn(_siteSettings, request.CompetitionId))
+                    return Json(new FaltskylteSaveResultResponse { Success = false, Message = FaltskytteCardEntryOnly.Message });
+
                 // Staff bypass via the standard four-tier check; otherwise allow self-service
                 // writes when the competition has self-service on, the writer is logged in and
                 // in the patrol, and the patrol's cursor is either NULL (first save for this

@@ -46,6 +46,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
+        private readonly HpskSite.Services.SiteSettings.SiteSettingService _siteSettings;
 
         public FaltskytteCardEntryController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -59,7 +60,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             ILogger<FaltskytteCardEntryController> logger,
             AdminAuthorizationService auth,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Hosting.DatabaseLock dbLock)
+            HpskSite.Services.Hosting.DatabaseLock dbLock,
+            HpskSite.Services.SiteSettings.SiteSettingService siteSettings)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _dbFactory = umbracoDatabaseFactory;
@@ -69,6 +71,30 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _auth = auth;
             _competitions = competitions;
             _dbLock = dbLock;
+            _siteSettings = siteSettings;
+        }
+
+        // ── Spärren: stäng stationsinmatningen när sekretariatet matar in korten ──
+
+        public class LockRequest { public int CompetitionId { get; set; } public bool Locked { get; set; } }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetStationEntryLock([FromBody] LockRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Saknar parametrar." });
+            if (!await IsStaff(request.CompetitionId)) return Json(new { success = false, message = "Du har inte behörighet." });
+            var by = await GetCurrentMemberIdAsync();
+            try
+            {
+                _siteSettings.Set(FaltskytteCardEntryOnly.Key(request.CompetitionId), request.Locked ? "1" : "0", by > 0 ? by : null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte sätta spärren för tävling {Comp}", request.CompetitionId);
+                return Json(new { success = false, message = "Det gick inte att spara inställningen." });
+            }
+            return Json(new { success = true, locked = FaltskytteCardEntryOnly.IsOn(_siteSettings, request.CompetitionId) });
         }
 
         // Samma grind som övriga skjutledarytor (arrangören, tävlingsansvariga, bemanning med appåtkomst,
@@ -191,6 +217,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 success = true,
                 competitionName = competition.CompetitionName ?? competition.Name ?? "",
                 patrols = rows,
+                stationEntryLocked = FaltskytteCardEntryOnly.IsOn(_siteSettings, competitionId),
                 serverNow = DateTime.UtcNow
             });
         }
