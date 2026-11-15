@@ -1,7 +1,45 @@
 @model HpskSite.Controllers.LedgerReceiptViewModel
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     Layout = null;
     var r = Model.Receipt;
+
+    // Vad kvittot avser. Kvittoraden bär bara slaget ("Anmälningsavgift") och är oföränderlig,
+    // så tävlingens namn läses ur tävlingen. Gäller inte föreningens uppgifter (de är snapshots).
+    var subject = "";
+    var pay = Model.Payment;
+    if (pay?.SourceId is int competitionId
+        && (pay.SourceType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionRegistration
+            || pay.SourceType == HpskSite.Models.Ledger.LedgerSourceType.TeamFee
+            || pay.SourceType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionInvoice))
+    {
+        try
+        {
+            var comp = Competitions.GetSaved(competitionId);
+            if (comp is not null)
+            {
+                var kind = comp.TypeId switch
+                {
+                    "Precision" => "Precisionstävling",
+                    "Milsnabb" => "Milsnabbtävling",
+                    "Duell" => "Duelltävling",
+                    "NationellHelmatch" => "Nationell helmatch",
+                    "Springskytte" => "Springskyttetävling",
+                    "Faltskytte" => "Fältskyttetävling",
+                    "MagnumPrecision" => "Magnum precisionstävling",
+                    "MagnumFalt" => "Magnum fältskyttetävling",
+                    "Standardpistol" => "Standardpistoltävling",
+                    "Sportpistol" => "Sportpistoltävling",
+                    _ => "Tävling"
+                };
+                subject = kind + " " + comp.DisplayName;
+            }
+        }
+        catch
+        {
+            // Utan namn visas kvittot som förut.
+        }
+    }
 }
 @*
     Kvitto på en mottagen betalning.
@@ -132,7 +170,13 @@
         </thead>
         <tbody>
             <tr>
-                <td>@r.Description</td>
+                <td>
+                    @r.Description
+                    @if (!string.IsNullOrWhiteSpace(subject))
+                    {
+                        <div>@subject</div>
+                    }
+                </td>
                 <td class="amount">@r.Amount.ToString("N2") kr</td>
             </tr>
 
