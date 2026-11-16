@@ -154,6 +154,40 @@ namespace HpskSite.Services.Staffing
             return result.OrderBy(r => r.CompDate == null).ThenBy(r => r.CompDate, StringComparer.Ordinal).ToList();
         }
 
+        /// <summary>
+        /// Kommande tävlingar som söker funktionärer bland en förenings medlemmar (klubbsidans och kretssidans block "Funktionärer sökes"). Till skillnad från
+        /// <see cref="GetOpenSignups"/> är svaret INTE per person: det gäller föreningen, och en tävling där någon redan anmält sig står kvar (den söker fortfarande).
+        /// En tävling räknas när något av funktionärsurvalen (<c>StaffingSourceScope</c>) pekar ut en av <paramref name="clubIds"/> eller <paramref name="regionCode"/>,
+        /// oavsett vilken klubb som arrangerar. Bara planeringar kopplade till en synlig, kommande tävling tas med: en planering utan tävling är en privat grupp
+        /// vars namn aldrig lämnar den. En klubbintern tävling visas bara när <paramref name="includeClubOnlyOfClub"/> är dess egen klubb.
+        /// </summary>
+        public List<StaffSeekView> GetSeekingFor(IReadOnlyCollection<int> clubIds, string? regionCode, int includeClubOnlyOfClub = 0)
+        {
+            var clubKeys = clubIds.Select(c => c.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (clubKeys.Count == 0 && string.IsNullOrWhiteSpace(regionCode)) return new();
+
+            List<StaffingSourceScope> scopes;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                scopes = scope.Database.Fetch<StaffingSourceScope>("SELECT * FROM StaffingSourceScope");
+
+            var today = DateTime.Today;
+            var result = new List<StaffSeekView>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var s in scopes)
+            {
+                var hit = (string.Equals(s.ScopeType, SourceScopeType.Club, StringComparison.OrdinalIgnoreCase) && clubKeys.Contains(s.ScopeKey))
+                       || (string.Equals(s.ScopeType, SourceScopeType.Region, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(regionCode) && string.Equals(s.ScopeKey, regionCode, StringComparison.OrdinalIgnoreCase));
+                if (!hit) continue;
+                var owner = _owners.OfRow(s.PlanningId, s.CompetitionId);
+                if (owner == null || !owner.HasCompetition || !seen.Add(owner.MemoKey)) continue;
+                var comp = _competitions.GetSaved(owner.Comp);
+                if (comp == null || !comp.IsVisible || !comp.CompetitionDate.HasValue || comp.CompetitionDate.Value.Date < today) continue;
+                if (comp.IsClubOnly && !(includeClubOnlyOfClub > 0 && comp.ClubId == includeClubOnlyOfClub)) continue;
+                result.Add(new StaffSeekView { CompetitionId = owner.Comp, PlanningId = owner.PlanningId, CompName = comp.DisplayName, Date = comp.CompetitionDate.Value, SignupPath = owner.SignupPath });
+            }
+            return result.OrderBy(r => r.Date).ThenBy(r => r.CompName, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+
         public (bool Ok, string? Message) SelfSignUp(int memberId, StaffOwner owner, string roleKey)
         {
             // Re-check eligibility server-side.

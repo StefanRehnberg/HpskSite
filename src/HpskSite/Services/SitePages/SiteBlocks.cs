@@ -171,6 +171,7 @@ namespace HpskSite.Services.SitePages
             new BlockType("region-stats", false, false, Set("title"), RegionOnly: true),   // kretsens siffror: klubbar, banor, serier, kommande tävlingar
             new BlockType("news", false, true, Set("title", "count", "showExcerpt", "showImage")),   // föreningens senaste nyheter (SitePost, live, lagras inte i blocket); även före/efter en systemsida
             new BlockType("competitions", false, false, Set("title", "count")),   // föreningens kommande tävlingar (live ur tävlingslagringen, lagras inte)
+            new BlockType("staff-seeking", false, false, Set("title", "count")),   // tävlingar som söker funktionärer bland föreningens medlemmar (live ur funktionärsurvalen, lagras inte); gäller föreningen, inte tittaren
             new BlockType("records", false, false, Set("title")),   // föreningens gällande rekord (live ur rekordtabellen, lagras inte)
             new BlockType("ranges", false, false, Set("title")),   // skjutbanor (klubbens egna respektive kretsens klubbars), utan karta; begränsade banor utelämnas
             new BlockType("champions", Personal: true, false, Set("title")),   // regerande mästare (live): namn på personer, aldrig Alla (som mästarpanelen, bara inloggade)
@@ -558,6 +559,7 @@ namespace HpskSite.Services.SitePages
                     break;
                 }
                 case "competitions":
+                case "staff-seeking":
                 {
                     var title = Short(d["title"], $"{p}.title", 120, required: false, errors);
                     var count = d["count"] == null ? 5 : Int(d["count"]) ?? -1;

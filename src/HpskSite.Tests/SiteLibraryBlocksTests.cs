@@ -15,7 +15,7 @@ namespace HpskSite.Tests
         }
 
         [Theory]
-        [InlineData("competitions")] [InlineData("records")] [InlineData("ranges")] [InlineData("champions")] [InlineData("stats")]
+        [InlineData("competitions")] [InlineData("staff-seeking")] [InlineData("records")] [InlineData("ranges")] [InlineData("champions")] [InlineData("stats")]
         public void Blocken_gäller_både_klubb_och_krets_har_bara_rubrik_och_lagrar_inga_id(string type)
         {
             Assert.True(Parse(type, "{}").Ok);
@@ -40,6 +40,8 @@ namespace HpskSite.Tests
             public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count) => Array.Empty<SiteEventInfo>();
             public SiteContactInfo? Contact() => null;
             public IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count) => Comps;
+            public List<SiteStaffSeekInfo> Seeking = new();
+            public IReadOnlyList<SiteStaffSeekInfo> StaffSeeking(int count) => Seeking;
             public IReadOnlyList<SiteRecordInfo> Records() => Recs;
             public IReadOnlyList<SiteRangeInfo> OwnerRanges() => Ranges;
             public List<SiteChampionInfo> Champs = new();
@@ -66,6 +68,29 @@ namespace HpskSite.Tests
             Assert.Contains("Tävling 3", html);
             Assert.DoesNotContain("Tävling 4", html);                                   // antalet gäller även om källan lämnar fler
             Assert.DoesNotContain("<b>", html);
+        }
+
+        [Fact]
+        public void Funktionärer_sökes_ritar_en_klickbar_rad_per_tävling_med_kodad_titel_till_anmälan_och_högst_så_många_som_valts()
+        {
+            var d = new LibData();
+            for (var i = 1; i <= 6; i++) d.Seeking.Add(new SiteStaffSeekInfo(i == 1 ? "SM <b>&</b> Co" : "Tävling " + i, new DateTime(2027, 5, i), "/bemanna?p=" + i));
+            var html = Render("staff-seeking", new JsonObject { ["title"] = "Hjälp <oss>", ["count"] = 3 }, d);
+            Assert.Contains("SM &lt;b&gt;&amp;&lt;/b&gt; Co", html);
+            Assert.Contains("Hjälp &lt;oss&gt;", html);
+            Assert.Contains("href=\"/bemanna?p=1\"", html);                              // varje tävling är klickbar, till anmälan
+            Assert.Contains("href=\"/bemanna?p=3\"", html);
+            Assert.DoesNotContain("Tävling 4", html);                                   // antalet gäller även om källan lämnar fler
+            Assert.DoesNotContain("<b>", html);
+            Assert.Contains("söker funktionärer", html);
+        }
+
+        [Fact]
+        public void Funktionärer_sökes_ger_inget_block_när_ingen_tävling_söker_och_visar_inga_egna_uppdrag()
+        {
+            Assert.Equal("", Render("staff-seeking", new JsonObject { ["title"] = "Funktionärer sökes" }, new LibData()));   // ingen tom ruta, ingen ensam rubrik
+            var html = Render("staff-seeking", new JsonObject(), new LibData { Seeking = { new SiteStaffSeekInfo("T", new DateTime(2027, 1, 1), "/bemanna?p=9") } });
+            Assert.DoesNotContain("Dina funktionärsuppdrag", html);                      // personens egna uppdrag hör inte hit
         }
 
         [Fact]
@@ -111,17 +136,18 @@ namespace HpskSite.Tests
         }
 
         [Theory]
-        [InlineData("competitions")] [InlineData("records")] [InlineData("ranges")]
+        [InlineData("competitions")] [InlineData("staff-seeking")] [InlineData("records")] [InlineData("ranges")]
         public void Inga_poster_ger_tomt_svar_inte_en_tom_ruta_eller_en_ensam_rubrik(string type)
             => Assert.Equal("", Render(type, new JsonObject { ["title"] = "Rubrik" }, new LibData()));
 
         [Theory]
-        [InlineData("competitions")] [InlineData("records")] [InlineData("ranges")]
+        [InlineData("competitions")] [InlineData("staff-seeking")] [InlineData("records")] [InlineData("ranges")]
         public void Blocket_följer_sin_nivå_en_icke_medlem_och_en_utloggad_ser_inget(string type)
         {
             var d = new LibData
             {
                 Comps = { new SiteCompetitionInfo("T", new DateTime(2027, 1, 1), "/t/") },
+                Seeking = { new SiteStaffSeekInfo("T", new DateTime(2027, 1, 1), "/bemanna?p=1") },
                 Recs = { new SiteRecordInfo("Precision", "K", false, "1 / 300", "H", new DateTime(2026, 1, 1)) },
                 Ranges = { new SiteRangeInfo(1, "B", null, "/skjutbana/1") },
             };

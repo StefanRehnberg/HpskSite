@@ -23,10 +23,23 @@
 #hemsidan-app .hs-who > summary:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: .375rem; }
 #hemsidan-app .hs-who .hs-chev { transition: transform .15s; }
 #hemsidan-app .hs-who[open] .hs-chev { transform: rotate(180deg); }
-#hemsidan-app .hs-badge-0 { background: var(--bs-success); }
-#hemsidan-app .hs-badge-1, #hemsidan-app .hs-badge-2 { background: var(--bs-primary); }
-#hemsidan-app .hs-badge-3 { background: var(--bs-warning); color: #000; }
-#hemsidan-app .hs-badge-4 { background: var(--bs-secondary); }
+/* Nivåmärkena: en ordnad skala från mest öppen till mest sluten, med fasta färger (klubbens egen färg ändrar aldrig vad en nivå betyder). Ordet och ikonen bär nivån, färgen förstärker.
+   Text och bakgrund är valda så att texten klarar 4,5:1 i både ljust och mörkt läge. "Alla" är gul, inte grön: den är den mest exponerade nivån. */
+.hs-badge-0, #hemsidan-app .hs-badge-0 { background: #ffc107; color: #000; }
+.hs-badge-1, #hemsidan-app .hs-badge-1 { background: #0dcaf0; color: #000; }
+.hs-badge-2, #hemsidan-app .hs-badge-2 { background: #0b5ed7; color: #fff; }
+.hs-badge-3, #hemsidan-app .hs-badge-3 { background: #6f42c1; color: #fff; }
+.hs-badge-4, #hemsidan-app .hs-badge-4 { background: #6c757d; color: #fff; }
+#hemsidan-app [class*="hs-badge-"] { border: 1px solid rgba(0, 0, 0, .2); font-size: .8rem; font-weight: 600; }
+/* Märket som knapp: ser ut som ett märke men är en knapp (pil, fokusram, stor träffyta på telefon). */
+#hemsidan-app .hs-lvl { cursor: pointer; display: inline-flex; align-items: center; min-height: 1.75rem; padding: .25rem .6rem; }
+#hemsidan-app .hs-lvl:hover { filter: brightness(1.08); }
+#hemsidan-app .hs-lvl:focus-visible, #hemsidan-app .hs-insert:focus-visible, #hemsidan-app .hs-type:focus-visible { outline: 3px solid var(--bs-primary); outline-offset: 2px; }
+#hemsidan-app .hs-lvl-menu { min-width: min(22rem, 92vw); }
+#hemsidan-app .hs-lvl-item { white-space: normal; padding-top: .45rem; padding-bottom: .45rem; }
+#hemsidan-app .hs-lvl-item.disabled, #hemsidan-app .hs-lvl-item[aria-disabled="true"] { color: var(--bs-body-color); opacity: .8; cursor: not-allowed; pointer-events: auto; background: transparent; }
+#hemsidan-app .hs-lvl-item[aria-disabled="true"] .badge { opacity: .55; }
+@media (forced-colors: active) { #hemsidan-app [class*="hs-badge-"] { border: 1px solid CanvasText; } }
 @media (max-width: 767.98px) {
   #hemsidan-app .hs-block-head .btn { min-width: 2.75rem; min-height: 2.75rem; }
   #hemsidan-app table.hs-list thead { display: none; }
@@ -105,6 +118,56 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 /* K5c: panel cards on a converted page and a grey row for a removed panel. */
 #hemsidan-app .hs-panelcard .hs-block-head { background: var(--bs-body-bg); }
 #hemsidan-app .hs-removed { background: var(--bs-tertiary-bg); border-style: dashed; }
+
+/* Redigeraren: kort som sammanfattar sig själva, platsknappar mellan blocken, markering av det nya blocket och meddelanderaden under det klibbiga fältet. */
+#hemsidan-app .hs-bar { padding: .5rem 0 .35rem; }
+#hemsidan-app #hsBlocks .hs-block { margin-bottom: .25rem; }
+#hemsidan-app [data-block-id], #hemsidan-app .hs-insert, #hemsidan-app #hsEmpty { scroll-margin-top: calc(var(--hs-bar-h, 6rem) + .75rem); }
+#hemsidan-app .hs-block-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title actions" "marks marks"; gap: .5rem .75rem; align-items: start; }
+#hemsidan-app .hs-block-title { grid-area: title; display: flex; gap: .65rem; align-items: flex-start; min-width: 0; }
+#hemsidan-app .hs-block-actions { grid-area: actions; display: flex; gap: .4rem; align-items: center; }
+#hemsidan-app .hs-block-marks { grid-area: marks; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+#hemsidan-app .hs-block-icon { font-size: 1.25rem; color: var(--bs-secondary-color); margin-top: .1rem; }
+#hemsidan-app .hs-block-text { min-width: 0; }
+#hemsidan-app .hs-block-head .hs-type { display: block; flex: none; }
+#hemsidan-app .hs-summary { font-size: .9rem; overflow-wrap: anywhere; }
+#hemsidan-app .hs-thumb { width: 3rem; height: 3rem; object-fit: cover; border-radius: .35rem; border: 1px solid var(--bs-border-color); flex: 0 0 auto; background: var(--bs-tertiary-bg); }
+#hemsidan-app .hs-block:not(.open) .hs-block-head { border-bottom: 0; border-radius: .5rem; }
+#hemsidan-app .hs-insert { display: block; width: 100%; min-height: 2.5rem; margin: .1rem 0 .35rem; border: 1px dashed var(--bs-border-color); border-radius: .5rem; background: transparent; color: var(--bs-secondary-color); font-size: .9rem; }
+#hemsidan-app .hs-insert:hover { border-color: var(--bs-primary); color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+#hemsidan-app .hs-new { border-color: var(--bs-primary); box-shadow: 0 0 0 3px var(--bs-primary-border-subtle); }
+#hemsidan-app .hs-toast { display: none; align-items: center; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; padding: .4rem .75rem; border: 1px solid var(--bs-primary-border-subtle); background: var(--bs-primary-bg-subtle); color: var(--bs-body-color); border-radius: .5rem; font-size: .95rem; }
+#hemsidan-app .hs-toast.on { display: flex; }
+#hemsidan-app .hs-pagemarks .hs-state { font-size: .85rem; }
+/* Valkorten i dialoger: dialogerna ligger utanför #hemsidan-app, så kortformen (som annars bara gäller inne i appen) upprepas för dem. */
+.modal .hs-choice { display: block; border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem 1rem; cursor: pointer; margin-bottom: .5rem; }
+.modal .hs-choice:hover { border-color: var(--bs-primary); }
+.modal .hs-choice input { margin-right: .6rem; }
+.modal .hs-choice.active { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+.modal .hs-choice .hs-sub { display: block; font-size: .875rem; color: var(--bs-secondary-color); margin-left: 1.6rem; }
+.modal .hs-choice:has(input:focus-visible) { outline: 3px solid var(--bs-primary); outline-offset: 2px; }
+/* Väljaren (modal utanför #hemsidan-app, så reglerna är inte avgränsade till den). */
+#hsChooser .hs-choice { margin-bottom: .4rem; }
+#hsChooser .hs-choice-off { background: var(--bs-tertiary-bg); cursor: not-allowed; }
+#hsChooser .hs-choice-off .hs-sub { color: var(--bs-body-color); }
+#hsChooser .hs-chooser-group > summary { cursor: pointer; list-style: none; min-height: 2.5rem; display: flex; align-items: center; }
+#hsChooser .hs-chooser-group > summary::-webkit-details-marker { display: none; }
+#hsChooser .hs-chooser-group > summary::before { content: "\F285"; font-family: "bootstrap-icons"; margin-right: .5rem; font-size: .85rem; transition: transform .15s; display: inline-block; }
+#hsChooser .hs-chooser-group[open] > summary::before { transform: rotate(90deg); }
+#hsChooser .hs-chooser-group > summary:focus-visible { outline: 3px solid var(--bs-primary); outline-offset: 2px; border-radius: .375rem; }
+/* Förhandsgranskningen: en iframe utan skript. Telefonbredd = en smal ram i mitten. */
+#hsPvModal .hs-pv-wrap { margin-top: .5rem; display: flex; justify-content: center; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem; }
+#hsPvModal .hs-pv-frame { width: 100%; height: 62vh; min-height: 22rem; border: 0; background: #fff; border-radius: .35rem; }
+#hsPvModal .hs-pv-wrap.narrow .hs-pv-frame { width: 390px; max-width: 100%; }
+@media (max-width: 767.98px) {
+  #hemsidan-app .hs-lvl { min-height: 2.75rem; padding: .5rem .8rem; }
+  #hemsidan-app .hs-insert { min-height: 2.75rem; }
+  #hemsidan-app .hs-block-head .btn { min-height: 2.75rem; }
+  #hsPvModal .hs-pv-frame { height: calc(100vh - 17rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #hemsidan-app .hs-who .hs-chev, #hsChooser .hs-chooser-group > summary::before { transition: none; }
+}
 
 /* Utseende: grunddesign (korten med en liten skiss) och grundfarg (farg-rutor). */
 #hemsidan-app .hs-ap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .75rem; }

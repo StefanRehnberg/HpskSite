@@ -71,33 +71,12 @@
     3: IS_REGION ? 'Bara kretsstyrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara styrelsen kan läsa sidan. Andra får beskedet att sidan inte finns.',
     4: IS_REGION ? 'Bara kretsens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.' : 'Bara klubbens administratörer kan läsa sidan. Andra får beskedet att sidan inte finns.',
   };
-  // Grupperna följer besökarens vy: vad besökaren ser, inte hur blocket är byggt. `desc` = en rad som säger vad blocket visar.
-  const BLOCK_GROUPS = ['Text och bilder', 'Kontakt', 'Händelser', 'Länkar och dokument', 'Tävlingar och resultat', IS_REGION ? 'Kretsen' : 'Klubben'];
-  const BLOCK_TYPES = [
-    { group: 0, type: 'text', label: 'Text', icon: 'bi-text-paragraph', desc: 'Egen text med rubriker, listor och bilder.' },
-    { group: 0, type: 'heading', label: 'Rubrik', icon: 'bi-type-h2', desc: 'En mellanrubrik som delar upp sidan.' },
-    { group: 0, type: 'image', label: 'Bild', icon: 'bi-image', desc: 'En bild med bildtext.' },
-    { group: 0, type: 'gallery', label: 'Bildgalleri', icon: 'bi-images', desc: 'Flera bilder som miniatyrer. Ett klick öppnar bilden i full storlek.' },
-    { group: 0, type: 'about', label: IS_REGION ? 'Om kretsen' : 'Om klubben', icon: 'bi-info-circle', desc: 'Presentationstexten. Den skrivs under ' + (IS_REGION ? 'Kretsens' : 'Klubbens') + ' uppgifter och hämtas vid varje besök.' },
-    { group: 1, type: 'contact', label: 'Kontaktuppgifter', icon: 'bi-person-lines-fill', desc: 'Kontaktperson, e-post och telefon. Visas aldrig för alla.' },
-    { group: 1, type: 'signup', label: 'Anmälan / ansökan', icon: 'bi-clipboard-check', desc: 'Ett formulär där besökare anmäler sig till en kurs eller ansöker om medlemskap. Ni hanterar anmälningarna under Anmälningar.' },
-    { group: 2, type: 'events', label: 'Kommande händelser', icon: 'bi-calendar-event', desc: 'De närmaste händelserna i kalendern.' },
-    { group: 2, type: 'news', label: 'Senaste nyheterna', icon: 'bi-newspaper', desc: 'De senaste nyheterna, med länk till alla.' },
-    { group: 3, type: 'links', label: 'Länkar', icon: 'bi-link-45deg', desc: 'Knappar som leder till andra webbplatser.' },
-    { group: 3, type: 'documents', label: 'Dokument', icon: 'bi-file-earmark-text', desc: 'Utvalda dokument ur dokumentarkivet.' },
-    { group: 3, type: 'pagelink', label: 'Länk till en sida', icon: 'bi-box-arrow-up-right', desc: 'En knapp till en av ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' andra sidor.' },
-    { group: 4, type: 'competitions', label: 'Kommande tävlingar', icon: 'bi-trophy', desc: 'De närmaste tävlingarna med datum och länk.' },
-    { group: 4, type: 'records', label: IS_REGION ? 'Kretsrekord' : 'Klubbrekord', icon: 'bi-award', desc: 'Gällande rekord per gren och klass.' },
-    { group: 4, type: 'champions', label: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare', icon: 'bi-trophy-fill', desc: 'Senaste årets mästare per gren och klass. Visas aldrig för alla, bara för inloggade eller strängare.' },
-    { group: 5, type: 'stats', label: IS_REGION ? 'Kretsen i siffror' : 'Klubben i siffror', icon: 'bi-bar-chart', desc: IS_REGION ? 'Antal klubbar, banor, serier och kommande tävlingar.' : 'Antal medlemmar, banor och kommande tävlingar.' },
-    { group: 5, type: 'ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', desc: IS_REGION ? 'Banorna kretsens klubbar använder.' : 'Klubbens banor, utan karta.' },
-    // Kretsens egna block (2d): läses live ur kretsens data, lagrar inget i sidan.
-    { group: 5, type: 'region-clubs', label: 'Klubbar i kretsen', icon: 'bi-people', region: true, desc: 'Kretsens klubbar med länk till deras sidor.' },
-    { group: -1, type: 'region-ranges', label: 'Skjutbanor', icon: 'bi-geo-alt', region: true, desc: '' },   // äldre block: nya sidor väljer Skjutbanor ovan; typen finns kvar så att befintliga block ritas
-    { group: 5, type: 'region-series', label: 'Serier', icon: 'bi-trophy', region: true, desc: 'Kretsens egna serier.' },
-    { group: -1, type: 'region-stats', label: 'Kretsen i siffror', icon: 'bi-bar-chart', region: true, desc: '' },   // äldre block: nya sidor väljer "Kretsen i siffror" (stats) ovan
-  ].filter(t => !t.region || IS_REGION);
-  const typeInfo = t => BLOCK_TYPES.find(x => x.type === t) || { label: t, icon: 'bi-square' };
+  // Blockregistret kommer ur servern (State.blockGroups / blockTypes / blockTasks, SiteBlockCatalog): grupper, etiketter, ikoner, beskrivningar, standardinnehåll och uppgiftskort.
+  // Ingen egen lista här, så ett block heter samma sak i väljaren, i redigeraren och i "Vem ser sidan?". `description` = en rad som säger vad blocket visar.
+  const blockGroups = () => (S.st && S.st.blockGroups) || [];
+  const blockTypes = () => (S.st && S.st.blockTypes) || [];
+  const blockTasks = () => (S.st && S.st.blockTasks) || [];
+  const typeInfo = t => blockTypes().find(x => x.type === t) || { type: t, label: t, icon: 'bi-square', description: '', group: -1, slot: false, live: false };
   const minVisFor = type => Math.max(S.visibility, ((S.st && S.st.blockFloors && S.st.blockFloors[type]) || 0));   // golvet kommer ur serverns golv-tabell (State.blockFloors), aldrig en egen regel här   // personblock aldrig "Alla"; ett block aldrig öppnare än sidan
   const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
   const pad = n => String(n).padStart(2, '0');
@@ -107,14 +86,19 @@
     st: null, page: null, blocks: [], title: '', visibility: 2, revision: 0, published: false, hasUnpublished: false,
     kind: 'free', minVis: 0, templateKey: null,
     dirty: false, editVersion: 0, saving: false, timer: null, ack: new Set(), editors: [], docs: null, banner: null, statusText: '', statusErr: false, hint: null,
+    // Redigeraren: högst ett block är öppet (bara det har en textredigerare), det öppna blockets innehåll återanvänds när listan ritas om, ändringarna går att ångra,
+    // och det senast tillagda blocket är markerat tills nästa ändring.
+    openId: null, bodyCache: new Map(), undo: [], justAdded: null, toastTimer: null, focusAfterRte: null,
   };
 
   // ── Dialoger (bootstrap-modal, aldrig alert/confirm) ────────────────────────
+  let modalSeq = 0;
   function modal(title, bodyNodes, buttons, wide) {
     return new Promise(resolve => {
-      const el = h('div', { class: 'modal fade', tabindex: '-1' },
+      const tid = 'hsModalT' + (++modalSeq);   // dialogen får ett tillgängligt namn (rubriken)
+      const el = h('div', { class: 'modal fade', tabindex: '-1', 'aria-labelledby': tid },
         h('div', { class: 'modal-dialog modal-dialog-centered' + (wide ? ' modal-xl' : '') }, h('div', { class: 'modal-content' },
-          h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5' }, title), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+          h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5', id: tid }, title), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
           h('div', { class: 'modal-body' }, bodyNodes),
           h('div', { class: 'modal-footer' }, buttons.map(b => h('button', {
             type: 'button', class: 'btn ' + (b.cls || 'btn-secondary'), disabled: b.disabled,
@@ -122,7 +106,8 @@
           }, b.label))))));
       document.body.append(el);
       const bs = new bootstrap.Modal(el);
-      el.addEventListener('hidden.bs.modal', () => { el.remove(); resolve(null); });
+      const opener = document.activeElement;   // fokus tillbaka till det som öppnade dialogen (Bootstrap gör det bara för data-attribut), om det finns kvar
+      el.addEventListener('hidden.bs.modal', () => { el.remove(); resolve(null); if (opener && opener.isConnected && opener !== document.body) opener.focus(); });
       bs.show();
     });
   }
@@ -130,13 +115,18 @@
     { label: 'Avbryt', value: false }, { label: ok, value: true, cls: danger ? 'btn-danger' : 'btn-primary' }]).then(v => v === true);
 
   // ── Vyer ───────────────────────────────────────────────────────────────────
-  function clearEditors() { for (const e of S.editors) { try { e.destroy(); } catch { /* redan borta */ } } S.editors = []; }
+  function clearEditors() { for (const e of S.editors) { try { e.destroy(); } catch { /* redan borta */ } } S.editors = []; S.bodyCache.clear(); }
+  /** Städar textredigerarna utom det öppna blockets (som lever kvar när listan ritas om, så fokus och markör finns kvar). */
+  function pruneEditors(keepId) {
+    S.editors = S.editors.filter(e => { if (e._blockId === keepId && keepId != null) return true; try { e.destroy(); } catch { /* redan borta */ } return false; });
+    for (const id of [...S.bodyCache.keys()]) if (id !== keepId) S.bodyCache.delete(id);
+  }
   // Förhandsvisningen av en färg (Utseende) lever bara medan Utseende-vyn visas: varje annan vy städar bort den.
   function clearAppearancePreview() {
     const el = document.getElementById('hsApPreview'); if (el) el.remove();
     if (S.apBodyAdded) { document.body.classList.remove('owner-themed'); S.apBodyAdded = false; }
   }
-  function view(nodes) { clearEditors(); clearAppearancePreview(); clearTimeout(S.timer); S.refreshWho = null; body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
+  function view(nodes) { clearEditors(); clearAppearancePreview(); clearTimeout(S.timer); clearTimeout(S.toastTimer); S.refreshWho = null; document.documentElement.style.scrollPaddingTop = ''; body.replaceChildren(...[].concat(nodes).filter(Boolean)); }
   const header = (sub) => h('div', { class: 'mb-3' },
     h('p', { class: 'mb-1' }, h('a', { href: OWNER.url, class: 'text-decoration-none' }, h('i', { class: 'bi bi-arrow-left me-1' }), OWNER.name)),
     h('h1', { class: 'h3 mb-1' }, 'Hemsidan'), sub ? h('p', { class: 'text-muted mb-0' }, sub) : null, supportBanner());
@@ -254,9 +244,9 @@
         target: it[2] && it[2].href ? '_blank' : null, rel: it[2] && it[2].href ? 'noopener' : null,
         onclick: e => { if (it[2] && it[2].href) return; e.preventDefault(); if (!(it[2] && it[2].disabled)) it[1](); } }, it[0]))));
   }
-  /** Grå Åtgärder per rad (menyn är fixed-positionerad så att den inte klipps i tabellen). */
-  const rowMenu = items => h('div', { class: 'dropdown' },
-    h('button', { class: 'btn btn-sm btn-outline-secondary dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
+  /** Grå Åtgärder per rad (menyn är fixed-positionerad så att den inte klipps i tabellen). `label` ger knappen ett eget namn ("Åtgärder för Rubrik, block 3 av 8") så att åtta lika knappar går att skilja åt. */
+  const rowMenu = (items, label) => h('div', { class: 'dropdown' },
+    h('button', { class: 'btn btn-sm btn-outline-secondary dropdown-toggle hs-menu-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false', 'aria-label': label || null }, 'Åtgärder'),
     menuList(items));
 
   async function load() {
@@ -294,7 +284,45 @@
   }
 
   function statusBadge(p) { return h('span', { class: 'badge ' + (p.status === 'Utkast' ? 'bg-secondary' : p.status === 'Publicerad' ? 'bg-success' : 'bg-warning text-dark') }, p.status); }
-  const visBadge = v => h('span', { class: 'badge hs-badge-' + v }, visLabel(v));
+  // Nivåmärket: ordet bär nivån, ikonen och färgen förstärker (färg är aldrig ensam bärare). EN funktion för sidlistan, blocken och panelerna.
+  const LEVEL_ICON = ['bi-globe2', 'bi-person-check-fill', 'bi-people-fill', 'bi-shield-fill', 'bi-lock-fill'];
+  const levelIcon = v => h('i', { class: 'bi ' + (LEVEL_ICON[v] || 'bi-lock-fill') + ' me-1', 'aria-hidden': 'true' });
+  const visBadge = v => h('span', { class: 'badge hs-badge-' + v }, levelIcon(v), visLabel(v));
+  /** Små tillståndsmärken på ett blockkort (samma form som sidlistans hs-state). */
+  const stateMark = (cls, text, title) => h('span', { class: 'hs-state ' + cls, title: title || null }, text);
+
+  /**
+   * Nivåmärket på ett kort, som en knapp: ordet (och ikonen) visar nivån, ett klick öppnar valet med en förklaring under varje nivå. Nivåer som blocket inte får ha visas nedtonade med
+   * skälet (aldrig dolda). Ändringen uppdaterar BARA märket (ingen omritning, så textredigeraren och fokus lever kvar). opts: { min, extraAllowed(v), reason(v), onPick(v) → true/false }.
+   * Golvet kommer ur serverns tabell (minVisFor); komponenten har ingen egen regel.
+   */
+  function levelPicker(item, name, opts) {
+    const btn = h('button', { type: 'button', class: 'badge hs-lvl', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false', 'data-block-level': item.id });
+    const paint = () => {
+      btn.className = 'badge hs-lvl hs-badge-' + item.visibility;
+      btn.dataset.level = String(item.visibility);
+      btn.setAttribute('aria-label', 'Syns för: ' + visLabel(item.visibility) + '. Ändra.');
+      btn.title = 'Syns för: ' + visLabel(item.visibility) + '. Klicka för att ändra.';
+      btn.replaceChildren(levelIcon(item.visibility), visLabel(item.visibility), h('i', { class: 'bi bi-chevron-down ms-1', 'aria-hidden': 'true' }));
+    };
+    paint();
+    const allowed = v => v >= opts.min || (opts.extraAllowed ? opts.extraAllowed(v) : false);
+    const rows = visOptions().map(o => {
+      const ok = allowed(o.v), on = item.visibility === o.v;
+      return h('li', {}, h('button', { type: 'button', class: 'dropdown-item hs-lvl-item' + (ok ? '' : ' disabled'), 'aria-disabled': ok ? null : 'true', 'aria-current': on ? 'true' : null, 'data-level-pick': o.v,
+        onclick: async e => {
+          if (!ok) { e.stopPropagation(); return; }
+          if (on) return;
+          if (await opts.onPick(o.v) === false) return;
+          paint();
+        } },
+        h('span', { class: 'd-flex align-items-center gap-1' }, h('span', { class: 'badge hs-badge-' + o.v }, levelIcon(o.v), o.t), on ? h('i', { class: 'bi bi-check-lg ms-auto', 'aria-hidden': 'true' }) : null),
+        h('span', { class: 'd-block small ' + (ok ? 'text-body-secondary' : 'text-body-secondary fst-italic') }, ok ? o.s : (opts.reason ? opts.reason(o.v) : 'Går inte att välja här.'))));
+    });
+    return h('div', { class: 'dropdown d-inline-block' }, btn,
+      h('ul', { class: 'dropdown-menu hs-lvl-menu' }, rows, h('li', {}, h('hr', { class: 'dropdown-divider' })),
+        h('li', {}, h('button', { type: 'button', class: 'dropdown-item small', onclick: () => modal('Vem ser vad?', levelHelp(), [{ label: 'Stäng', value: true, cls: 'btn-primary' }]) }, 'Vad betyder nivåerna?'))));
+  }
 
   // Kolumnrubrik med en (i)-knapp som öppnar en förklaring. Knappen har en egen etikett så att den går att nå och förstå med tangentbord och skärmläsare.
   const infoBtn = (label, title, body, extra) => h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline hs-info ' + (extra || 'ms-1'), 'aria-label': 'Förklaring av ' + label, 'data-info': label,
@@ -1151,16 +1179,7 @@
       setTimeout(() => inp.focus(), 0);
     } else if (w.step === 2) {
       // Färdiga sidor = sidor som redan är byggda av blocken (och hämtar sitt innehåll live); Egen sida = börja med text eller tomt.
-      const ready = [
-        ['welcome', 'Välkomstsida', 'Presentationstext, kommande händelser, nyheter och tävlingar. Allt utom texten hämtas automatiskt.'],
-        ['aboutus', 'Om oss och kontakt', 'Föreningens presentation och kontaktuppgifter, hämtade ur ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' uppgifter.'],
-        ['competitions', 'Tävlingar och resultat', 'Kommande tävlingar, ' + (IS_REGION ? 'kretsrekord' : 'klubbrekord') + ' och regerande mästare.'],
-        ['ranges', 'Skjutbanor', IS_REGION ? 'Text och en lista över banorna kretsens klubbar använder.' : 'Text och en lista över klubbens banor, utan karta.'],
-        ['docs', 'Sida med dokument', 'Text och dokument som medlemmarna kan ladda ned, till exempel blanketter.'],
-        ['contact', 'Hitta hit & kontakt', 'Text om hur man hittar, och föreningens kontaktuppgifter.'],
-        ['meetings', 'Möten och kallelser', 'Kommande möten från kalendern, och plats för kallelser och protokoll.'],
-        ...(IS_REGION ? [['overview', 'Klubbar, banor och serier', 'Kretsens klubbar, skjutbanor och serier i en lista, hämtade ur kretsens data.']] : []),
-      ];
+      const ready = readyTemplates();
       const own = [
         ['text', 'Textsida', 'En sida där du skriver fri text. Passar det mesta.'],
         ['empty', 'Tom sida', 'Börja helt utan innehåll.'],
@@ -1182,7 +1201,7 @@
         if (!create.success) { err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return; }
         // Mallens startinnehåll sparas som första utkast, därefter öppnas redigeraren.
         const blocks = templateBlocks(w.template, w.visibility);
-        S.hint = w.template === 'docs' ? 'Lägg till dokumenten med knappen "Dokument" här under.' : w.template === 'meetings' ? 'Mötena hämtas ur kalendern (händelser av typen Möte). Lägg till kallelser och protokoll med knappen "Dokument" här under.' : null;
+        S.hint = w.template === 'docs' ? 'Välj vilka dokument som ska visas i blocket Dokument (Ändra på kortet).' : w.template === 'meetings' ? 'Mötena hämtas ur kalendern (händelser av typen Möte). Välj kallelser och protokoll i blocket Dokument (Ändra på kortet).' : null;
         if (blocks.length) {
           const save = await api('POST', 'SavePage', { pageId: create.pageId, expectedRevision: create.revision, title: w.title.trim(), blocksJson: JSON.stringify({ schema: 1, blocks }), visibility: w.visibility });
           if (!save.success) { err.replaceChildren(alertBox('danger', save.message || 'Sidan skapades men mallen kunde inte läggas in.')); }
@@ -1197,17 +1216,45 @@
         h('div', { class: 'd-flex gap-2 mt-3' }, back ? h('button', { class: 'btn btn-outline-secondary', onclick: back }, 'Tillbaka') : h('button', { class: 'btn btn-outline-secondary', onclick: renderList }, 'Avbryt'), nextBtn))));
   }
 
+  /** Färdiga sidor: EN lista för guiden Ny sida och för "börja från en färdig sida" på en tom sida. Varje nyckel har sin gren i templateBlocks. */
+  function readyTemplates() {
+    const who = IS_REGION ? 'kretsens' : 'klubbens';
+    return [
+      ['welcome', 'Välkomstsida', 'Presentationstext, kommande händelser, nyheter och tävlingar. Allt utom texten hämtas automatiskt.'],
+      ['member', 'Bli medlem / Prova på', 'Text och ett anmälningsformulär för den som vill prova eller bli medlem, med kontaktuppgifter.'],
+      ['news', 'Nyheter', 'Text och de senaste nyheterna. Nyheterna skriver ni under Nyheter på ' + who + ' sida.'],
+      ['staff', 'Funktionärer', 'Text, de tävlingar som söker funktionärer och ett formulär för den som vill hjälpa till.'],
+      ['aboutus', 'Om oss och kontakt', 'Föreningens presentation och kontaktuppgifter, hämtade ur ' + who + ' uppgifter.'],
+      ['competitions', 'Tävlingar och resultat', 'Kommande tävlingar, ' + (IS_REGION ? 'kretsrekord' : 'klubbrekord') + ' och regerande mästare.'],
+      ['tourney', 'Årets tävlingar', 'Kommande tävlingar och dokument som inbjudningar och programblad.'],
+      ['ranges', 'Skjutbanor', IS_REGION ? 'Text och en lista över banorna kretsens klubbar använder.' : 'Text och en lista över klubbens banor, utan karta.'],
+      ['photos', 'Fotoalbum', 'Text och ett bildgalleri. Bilderna väljer ni efteråt ur bildbiblioteket.'],
+      ['board', 'Styrelse och stadgar', 'Text, dokument som stadgar och protokoll, och kontaktuppgifter.'],
+      ['docs', 'Sida med dokument', 'Text och dokument som medlemmarna kan ladda ned, till exempel blanketter.'],
+      ['contact', 'Hitta hit & kontakt', 'Text om hur man hittar, och föreningens kontaktuppgifter.'],
+      ['meetings', 'Möten och kallelser', 'Kommande möten från kalendern, och dokument för kallelser och protokoll.'],
+      ...(IS_REGION ? [['overview', 'Klubbar, banor och serier', 'Kretsens klubbar, skjutbanor och serier i en lista, hämtade ur kretsens data.']] : []),
+    ];
+  }
+
   function templateBlocks(tpl, vis) {
     const text = () => ({ id: newId(), type: 'text', visibility: vis, data: { html: '' } });
     if (tpl === 'empty') return [];
     if (tpl === 'contact') return [text(), { id: newId(), type: 'contact', visibility: Math.max(vis, ((S.st && S.st.blockFloors) || {}).contact || 0), data: { title: 'Kontakt' } }];
-    if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }];
+    if (tpl === 'meetings') return [text(), { id: newId(), type: 'events', visibility: vis, data: { title: 'Nästa möten', count: 3, type: 'Möte' } }, { id: newId(), type: 'documents', visibility: vis, data: { title: 'Kallelser och protokoll', refs: [] } }];
+    if (tpl === 'docs') return [text(), { id: newId(), type: 'documents', visibility: vis, data: { title: 'Dokument', refs: [] } }];
     // Färdiga sidor ur biblioteket. Personblock (kontakt, mästare) får aldrig vara öppnare än Inloggade, och ett block aldrig öppnare än sidan.
     const floorOf = type => (S.st && S.st.blockFloors && S.st.blockFloors[type]) || 0;   // serverns golv-tabell
     const blk = (type, data) => ({ id: newId(), type, visibility: Math.max(vis, floorOf(type)), data });
     const noun = IS_REGION ? 'Kretsrekord' : 'Klubbrekord';
     if (tpl === 'welcome') return [blk('about', { title: '' }), blk('events', { title: 'Kommande händelser', count: 5 }), blk('news', { title: 'Senaste nyheterna', count: 3 }), blk('competitions', { title: 'Kommande tävlingar', count: 3 })];
     if (tpl === 'aboutus') return [blk('about', { title: '' }), blk('contact', { title: 'Kontakt' })];
+    if (tpl === 'member') return [text(), blk('signup', { title: 'Bli medlem', intro: '', choices: [] }), blk('contact', { title: 'Kontakt' })];
+    if (tpl === 'news') return [text(), blk('news', { title: 'Senaste nyheterna', count: 10 })];
+    if (tpl === 'staff') return [text(), blk('staff-seeking', { title: 'Funktionärer sökes', count: 10 }), blk('signup', { title: 'Anmäl intresse', intro: '', choices: [] })];
+    if (tpl === 'tourney') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('documents', { title: 'Inbjudningar och programblad', refs: [] })];
+    if (tpl === 'photos') return [text(), blk('gallery', { title: '', items: [] })];
+    if (tpl === 'board') return [text(), blk('documents', { title: 'Stadgar och protokoll', refs: [] }), blk('contact', { title: 'Kontakt' })];
     if (tpl === 'competitions') return [text(), blk('competitions', { title: 'Kommande tävlingar', count: 10 }), blk('records', { title: noun }), blk('champions', { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' })];
     if (tpl === 'ranges') return [text(), blk('ranges', { title: 'Skjutbanor' })];
     if (tpl === 'overview') return [text(),
@@ -1262,11 +1309,13 @@
     Object.assign(S, { page: r, blocks, title: r.title, visibility: r.visibility, revision: r.revision, published: r.published, hasUnpublished: r.hasUnpublishedChanges,
       dirty: false, editVersion: 0, banner: S.nextBanner && S.nextBanner.until > Date.now() ? S.nextBanner.banner : null, statusText: 'Sparat', statusErr: false });   // setHash utlöser en andra laddning som annars nollställer meddelandet
     if (!S.docs) { const d = await api('GET', 'Documents'); S.docs = d.success ? d.documents : []; }
+    Object.assign(S, { openId: null, undo: [], justAdded: null, focusAfterRte: null });   // inget kvar från förra sidan (öppet kort, ångra-logg, markering)
+    S.bodyCache.clear();
     renderEditor();
   }
 
   function markDirty() {
-    S.dirty = true; S.editVersion++; S.statusText = 'Inte sparat'; S.statusErr = false; paintStatus();
+    S.dirty = true; S.editVersion++; S.statusText = 'Inte sparat'; S.statusErr = false; paintStatus(); paintCardLive();
     // "Sidan är publicerad." får inte stå kvar när man ändrar igen: då visas i stället att ändringarna inte är publicerade (uppgiftsprovet: en nybörjare tror annars att "Sparat" betyder att det syns).
     if (S.banner && S.banner.cls === 'success') S.banner = null;
     paintEditorBanner();
@@ -1275,11 +1324,21 @@
   function paintStatus() {
     const el = document.getElementById('hsStatus'); if (el) { el.textContent = S.statusText; el.className = 'hs-status' + (S.statusErr ? ' err' : ''); }
     const pub = document.getElementById('hsPublish'); if (pub) pub.disabled = S.saving || !(S.dirty || S.hasUnpublished);
-    // "Öppna sidan": bara när sidan finns publicerad och har en adress (en utkastsida kan ingen annan öppna).
-    const open = document.getElementById('hsOpenPage'); if (open) { const url = S.page && S.page.url; open.hidden = !(S.published && url); if (url) open.href = url; }
+    // Raderna i Åtgärder-menyn visas bara när de gäller; hela menyn göms när ingen rad gäller.
+    const item = (id, on) => { const e = document.getElementById(id); if (e && e.closest('li')) e.closest('li').hidden = !on; };
+    // "Öppna den publicerade sidan": bara när sidan finns publicerad och har en adress (en utkastsida kan ingen annan öppna).
+    const open = document.getElementById('hsOpenPage'); if (open) { const url = S.page && S.page.url; item('hsOpenPage', !!(S.published && url)); if (url) open.href = url; }
     // En omvandling som inte är publicerad avbryts med "Avbryt omvandlingen" (inte "Kasta ändringarna", som skulle lämna sidan i ett halvt läge).
-    const dis = document.getElementById('hsDiscard'); if (dis) dis.hidden = !(S.published && (S.dirty || S.hasUnpublished)) || (S.kind === 'converted' && !S.convertedLive);
-    const cc = document.getElementById('hsCancelConv'); if (cc) cc.hidden = !(S.kind === 'converted' && !S.convertedLive);
+    item('hsDiscard', !!(S.published && (S.dirty || S.hasUnpublished)) && !(S.kind === 'converted' && !S.convertedLive));
+    item('hsCancelConv', S.kind === 'converted' && !S.convertedLive);
+    const menu = document.getElementById('hsActions'); if (menu) menu.hidden = [...menu.querySelectorAll('li')].every(li => li.hidden);
+    // Sidans läge som märke (samma ord som i listan).
+    const ps = document.getElementById('hsPageState');
+    if (ps) {
+      const live = S.kind === 'converted' ? S.convertedLive : S.published;
+      const [cls, txt] = !live ? ['wait', S.kind === 'converted' ? 'Utkast, besökarna ser standardsidan' : 'Utkast, inte publicerad'] : (S.dirty || S.hasUnpublished) ? ['wait', 'Ändringar inte publicerade'] : ['ok', 'Publicerad'];
+      ps.className = 'hs-state ' + cls; ps.textContent = txt;
+    }
   }
 
   function setBanner(cls, text, extra) { S.banner = { cls, text, extra }; paintEditorBanner(); }
@@ -1298,10 +1357,26 @@
     el.replaceChildren(...kids);
   }
 
+  /**
+   * Det som sparas av ett block, eller null när blocket inte går att spara än. Servern vägrar ett länkblock utan en komplett länk, ett dokumentblock utan dokument och en tom rubrik, och en sida
+   * med ett sådant block sparas inte alls (felet hamnade förut i en ruta högst upp). Därför sparas det som är komplett och det ofärdiga blocket ligger kvar på skärmen med märket "Tomt"
+   * tills det fyllts i. Ett ofärdigt block som inte hann fyllas i före en omladdning är alltså borta, och det är det enda som går förlorat.
+   */
+  function savableBlock(b) {
+    const d = b.data || {};
+    if (b.type === 'links') {
+      const items = (d.items || []).filter(it => String(it.label || '').trim() && String(it.url || '').trim());
+      return items.length ? { ...b, data: { ...d, items } } : null;
+    }
+    if (b.type === 'documents') return (d.refs || []).length ? b : null;
+    if (b.type === 'heading') return String(d.text || '').trim() ? b : null;
+    return b;
+  }
   function collectJson() {
     const plain = b => ({ id: b.id, type: b.type, visibility: b.visibility, data: b.data });
-    if (S.kind === 'slots') return JSON.stringify({ schema: 1, slots: { before: S.blocks.filter(b => b.pos === 'before').map(plain), after: S.blocks.filter(b => b.pos === 'after').map(plain) } });
-    return JSON.stringify({ schema: S.kind === 'converted' ? 2 : 1, blocks: S.blocks.map(plain) });
+    const saved = S.blocks.map(savableBlock).filter(Boolean);
+    if (S.kind === 'slots') return JSON.stringify({ schema: 1, slots: { before: saved.filter(b => b.pos === 'before').map(plain), after: saved.filter(b => b.pos === 'after').map(plain) } });
+    return JSON.stringify({ schema: S.kind === 'converted' ? 2 : 1, blocks: saved.map(plain) });
   }
 
   // Sparar utkastet. Returnerar true när servern tog emot det.
@@ -1387,7 +1462,7 @@
 
   function renderEditor() {
     const slots = S.kind === 'slots', conv = S.kind === 'converted';
-    const titleInp = h('input', { class: 'form-control form-control-lg', maxlength: '120', value: S.title, 'aria-label': 'Sidans rubrik' });
+    const titleInp = h('input', { class: 'form-control form-control-lg', maxlength: '120', value: S.title, 'aria-label': 'Sidans rubrik', id: 'hsTitle' });
     titleInp.addEventListener('input', () => { S.title = titleInp.value; markDirty(); });
     const visSel = h('select', { class: 'form-select', 'aria-label': 'Vem ser sidan' }, visOptions().filter(o => o.v >= S.minVis).map(o => h('option', { value: o.v, selected: o.v === S.visibility ? true : null }, o.s)));
     visSel.addEventListener('change', async () => {
@@ -1403,6 +1478,8 @@
     // Inställningen och resultatet är EN sektion, "Vem ser sidan?" (egen text på en vanlig sida har bara inställningen).
     const who = slots ? null : whoSeesCard(() => ({ pageId: S.page.id }), {
       beforeLoad: async () => { if (S.dirty) await saveNow(); }, fallbackUrl: () => (S.page && S.page.url) || null, hint: visLabel(S.visibility),
+      collapsed: !S.blocks.length && !S.published,   // en ny, tom sida: först blocken, inte en tabell som trycker ned dem (sidans nivå syns som märke i rubrikraden)
+      defaultOpen: false,                             // och på en sida med innehåll ligger tabellen hopfälld tills man öppnar den, så att blocken syns utan rullning
       setting: [
         h('label', { class: 'form-label small text-muted mb-1', for: 'hsVisSel' }, 'Vem får läsa sidan?'), visSel, consequence,
         !conv && S.page.url ? h('div', { class: 'small mt-1 text-muted' }, 'Adress: ', h('code', {}, S.page.url)) : null,
@@ -1411,21 +1488,30 @@
     });
     visSel.id = 'hsVisSel';
 
-    const bar = h('div', { class: 'hs-bar d-flex flex-wrap gap-2 align-items-center' },
-      h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : conv ? '#sida=' + S.pageKey : '#sidor'); load(); } },
-        h('i', { class: 'bi bi-arrow-left me-1' }), slots || conv ? 'Tillbaka till sidan' : 'Sidor'),
-      h('span', { id: 'hsStatus', class: 'hs-status ms-auto' }, S.statusText),
-      h('button', { id: 'hsCancelConv', class: 'btn btn-outline-secondary', hidden: true, onclick: () => cancelConversionFlow(S.pageKey, S.page.id, S.revision, true) }, 'Avbryt omvandlingen'),
-      h('button', { id: 'hsDiscard', class: 'btn btn-outline-secondary', hidden: true, onclick: async () => {
-        if (!await confirmDialog('Kasta ändringarna?', 'Ändringarna sedan senaste publiceringen försvinner. Den publicerade sidan påverkas inte.', 'Kasta ändringarna', true)) return;
-        clearTimeout(S.timer); S.dirty = false;
-        const r = await api('POST', 'DiscardDraft', { pageId: S.page.id, expectedRevision: S.revision });
-        if (!r.success) { setBanner('danger', r.message || 'Det gick inte att kasta ändringarna.'); return; }
-        openEditor(S.page.id);
-      } }, 'Kasta ändringarna'),
-      h('a', { id: 'hsOpenPage', class: 'btn btn-outline-secondary', href: (S.page && S.page.url) || '#', target: '_blank', rel: 'noopener', hidden: true, title: 'Öppna sidan i en ny flik' },
-        h('i', { class: 'bi bi-box-arrow-up-right me-1' }), 'Öppna sidan'),
-      h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar'));
+    // Fältet: Sidor, status, Ångra, Förhandsgranska, EN grå Åtgärder-meny (sajtens regel: tre eller fler kontroller blir en meny) och den enda blå knappen, Publicera ändringar.
+    // Under raden ligger meddelanderaden (en live-region): det som just hände och Ångra, så att man ser det där man står.
+    const actions = h('div', { class: 'dropdown', id: 'hsActions', hidden: true },
+      h('button', { class: 'btn btn-outline-secondary dropdown-toggle', type: 'button', 'data-bs-toggle': 'dropdown', 'data-bs-popper-config': '{"strategy":"fixed"}', 'aria-expanded': 'false' }, 'Åtgärder'),
+      h('ul', { class: 'dropdown-menu dropdown-menu-end' },
+        h('li', { hidden: true }, h('a', { id: 'hsOpenPage', class: 'dropdown-item', href: (S.page && S.page.url) || '#', target: '_blank', rel: 'noopener', title: 'Öppna den publicerade sidan i en ny flik' }, 'Öppna den publicerade sidan')),
+        h('li', { hidden: true }, h('button', { id: 'hsCancelConv', type: 'button', class: 'dropdown-item', onclick: () => cancelConversionFlow(S.pageKey, S.page.id, S.revision, true) }, 'Avbryt omvandlingen')),
+        h('li', { hidden: true }, h('button', { id: 'hsDiscard', type: 'button', class: 'dropdown-item text-danger', onclick: async () => {
+          if (!await confirmDialog('Kasta ändringarna?', 'Ändringarna sedan senaste publiceringen försvinner. Den publicerade sidan påverkas inte.', 'Kasta ändringarna', true)) return;
+          clearTimeout(S.timer); S.dirty = false;
+          const r = await api('POST', 'DiscardDraft', { pageId: S.page.id, expectedRevision: S.revision });
+          if (!r.success) { setBanner('danger', r.message || 'Det gick inte att kasta ändringarna.'); return; }
+          openEditor(S.page.id);
+        } }, 'Kasta ändringarna'))));
+    const bar = h('div', { class: 'hs-bar' },
+      h('div', { class: 'd-flex flex-wrap gap-2 align-items-center' },
+        h('button', { class: 'btn btn-outline-secondary', onclick: async () => { if (S.dirty) await saveNow(); setHash(slots ? '#sida=' + S.templateKey : conv ? '#sida=' + S.pageKey : '#sidor'); load(); } },
+          h('i', { class: 'bi bi-arrow-left me-1' }), slots || conv ? 'Tillbaka till sidan' : 'Sidor'),
+        h('span', { id: 'hsStatus', class: 'hs-status ms-auto' }, S.statusText),
+        h('button', { id: 'hsUndo', type: 'button', class: 'btn btn-outline-secondary', disabled: true, onclick: () => undoLast() }, h('i', { class: 'bi bi-arrow-counterclockwise me-1', 'aria-hidden': 'true' }), 'Ångra'),
+        h('button', { id: 'hsPreview', type: 'button', class: 'btn btn-outline-secondary', onclick: () => openPreview() }, h('i', { class: 'bi bi-eye me-1', 'aria-hidden': 'true' }), 'Förhandsgranska'),
+        actions,
+        h('button', { id: 'hsPublish', class: 'btn btn-primary', onclick: () => publishNow() }, 'Publicera ändringar')),
+      h('div', { id: 'hsToast', class: 'hs-toast', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }));
 
     view(shell(slots ? 'sys:' + S.templateKey : conv ? 'sys:' + S.pageKey : 'sidor', bar, h('div', { id: 'hsBanner' }),
       slots
@@ -1434,12 +1520,13 @@
         : conv
           ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Ändra sidan "' + S.title + '"'),
               h('p', { class: 'text-muted mb-0' }, 'Här bestämmer ni hur sidan ser ut. Det som hämtas automatiskt visas som kort som ni kan flytta, och ta bort om det inte är obligatoriskt. Ni kan också lägga till eget innehåll. Ändringarna syns för besökarna först när ni publicerar.'))
-          : h('div', { class: 'mb-3' }, treeInfo(), h('label', { class: 'form-label fw-semibold' }, 'Rubrik'), titleInp),
+          : h('div', { class: 'mb-3' }, treeInfo(), h('label', { class: 'form-label fw-semibold', for: 'hsTitle' }, 'Rubrik'), titleInp),
+      h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-3 hs-pagemarks' }, h('span', { class: 'small text-muted' }, 'Sidan:'), h('span', { id: 'hsPageState' }), visBadge(S.visibility)),   // sidans läge och nivå, med samma märken som listan
       who || h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser texten?'), visSel, consequence),
-      blocksEl, slots ? null : addBlockBar(), moreCard()));
+      h('h2', { class: 'visually-hidden' }, 'Sidans innehåll'), blocksEl, moreCard()));
     S.refreshWho = who ? who._refresh : null;
     drawBlocks();
-    paintStatus(); paintEditorBanner();
+    paintStatus(); paintEditorBanner(); paintUndo(); setBarHeight();
   }
 
   // "Vem ser sidan?": EN sektion med inställningen (opts.setting: rullgardinen, förklaringen, adressen, menyvalet) och resultatet som tabell över vad varje besökare ser (sidan i menyn,
@@ -1500,6 +1587,8 @@
     const OPEN_KEY = 'hsWhoSeesOpen';
     let isOpen = true;
     try { isOpen = localStorage.getItem(OPEN_KEY) !== '0'; } catch { /* ingen lagring: öppen */ }
+    if (opts.collapsed) isOpen = false;
+    else if (opts.defaultOpen === false) { try { isOpen = localStorage.getItem(OPEN_KEY) === '1'; } catch { isOpen = false; } }   // redigeraren: blocken är arbetsytan, tabellen öppnas när man vill se den (valet kommer ihåg)
     const el = h('details', { class: 'hs-card hs-who p-3 mb-3', id: 'hsWhoSees', open: isOpen ? true : null },
       h('summary', { class: 'd-flex align-items-center gap-2' },
         h('i', { class: 'bi bi-eye text-primary', 'aria-hidden': 'true' }),
@@ -1592,43 +1681,173 @@
     return '';
   }
 
-  // Väljaren: blocken grupperade efter vad besökaren ser, med en rad om vad varje block visar. Ingen ny design: samma kort och knappar som resten av sidan.
-  function addBlockBar() {
-    const retired = new Set((S.st && S.st.retiredBlocks) || []);   // en utgången typ erbjuds inte, men en sida som har den ritas som förut
-    const groups = BLOCK_GROUPS.map((title, gi) => {
-      const items = BLOCK_TYPES.filter(t => t.group === gi && !retired.has(t.type));
-      if (!items.length) return null;
-      // Ett block som inte går att lägga på just den här sidan göms aldrig: det visas nedtonat med förklaringen, så att ingen letar efter det.
-      return h('div', { class: 'mb-3' }, h('p', { class: 'text-muted small fw-semibold mb-1' }, title),
-        h('div', { class: 'd-flex flex-column gap-1' }, items.map(t => {
-          const why = blockUnavailable(t);
-          return h('button', { type: 'button', class: 'btn btn-outline-primary text-start d-flex align-items-start gap-2' + (why ? ' disabled' : ''), 'data-add-block': t.type, ...(why ? { 'aria-disabled': 'true', 'data-unavailable': why, tabindex: '-1' } : {}), onclick: () => { if (!why) addBlock(t.type); } },
-            h('i', { class: 'bi ' + t.icon + ' mt-1' }), h('span', {}, h('span', { class: 'fw-semibold d-block' }, t.label), h('span', { class: 'small ' + (why ? 'text-body-secondary fst-italic' : 'text-muted') }, why || t.desc)));
-        })));
-    }).filter(Boolean);
-    return h('div', { class: 'hs-card p-3', id: 'hsAddBlocks' }, h('p', { class: 'fw-semibold mb-2' }, 'Lägg till'), ...groups);
+  // ── Lägga till block: plats först, sedan block ───────────────────────────────
+  // "＋ Lägg till här" finns före första blocket, mellan alla block och efter sista. Ett klick öppnar väljaren (sökbar, uppgifter överst, alla block under) som säger var blocket hamnar.
+  // Samma väg för varje tillägg (en uppgift, ett block, en mall): golvet (minVisFor), platsen och otillgängliga block prövas på ETT ställe, aldrig i en parallell väg.
+  const reducedMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const OPENS_ON_ADD = new Set(['text', 'heading', 'links', 'documents', 'signup', 'pagelink', 'image', 'gallery']);   // blocken som behöver fyllas i öppnas direkt; övriga fungerar som de är
+  const blockNo = i => 'block ' + (i + 1) + ' av ' + S.blocks.length;
+
+  /** Ett platsknapp-element. `ctx`: { index (där i S.blocks blocket läggs), pos (slots: 'before'/'after'), after (blocket före, för texten) }. */
+  function insertSlot(ctx) {
+    // Namnet är unikt (blockets namn och nummer), så att en skärmläsare kan skilja åt tio lika knappar; den synliga texten "Lägg till här" ingår.
+    const label = ctx.after ? 'efter ' + blockTitle(ctx.after) + ' (' + blockNo(indexOfId(ctx.after.id)) + ')' : S.blocks.some(b => !ctx.pos || b.pos === ctx.pos) ? 'först' : '';
+    return h('button', { type: 'button', class: 'hs-insert', 'data-insert-at': ctx.index, 'data-insert-pos': ctx.pos || null,
+      'aria-label': 'Lägg till här' + (label ? ', ' + label : ''), onclick: e => startAdd(ctx, e.currentTarget) },
+      h('i', { class: 'bi bi-plus-lg me-1', 'aria-hidden': 'true' }), 'Lägg till här');
   }
 
-  async function addBlock(type, pos) {
-    if (type === 'image') {   // en bild utan vald fil kan inte sparas: välj först, lägg till sedan
-      const f = await pickImage();
-      if (!f) return;
-      S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data: { ref: 'file:' + f.id, alt: '', decorative: false, caption: '' } });
+  /** Öppnar väljaren för platsen och lägger det som väljs. */
+  async function startAdd(ctx, opener) {
+    const r = await openChooser({
+      subtitle: ctx.after ? 'Läggs in efter "' + blockTitle(ctx.after) + '"' : ctx.pos ? (ctx.pos === 'before' ? 'Läggs in före sidans vanliga innehåll' : 'Läggs in efter sidans vanliga innehåll') : S.blocks.length ? 'Läggs in först på sidan' : 'Läggs in på sidan',
+      slotOnly: S.kind === 'slots', zone: S.kind === 'converted' && S.pageKey === 'home',
+    });
+    if (!r) { afterModals(() => { const el = typeof opener === 'function' ? opener() : opener; if (el && el.isConnected) el.focus(); }); return; }   // avbrutet: fokus tillbaka där man var
+    await addBlocks(r.types, ctx, r.zone);
+  }
+
+  /** Ett nytt block av en typ. Bild och galleri väljer fil först (avbryter man läggs inget till). Null = avbrutet. */
+  async function makeBlock(type, zone) {
+    const m = typeInfo(type);
+    let data;
+    if (type === 'image') {
+      const f = await pickImage(); if (!f) return null;
+      data = { ref: 'file:' + f.id, alt: '', decorative: false, caption: '' };
       S.hint = 'Beskriv bilden med några ord, så att den som inte ser bilden förstår vad den visar.';
-      markDirty(); drawBlocks(); paintEditorBanner(); return;
-    }
-    if (type === 'gallery') {   // ett galleri börjar med bilderna: välj dem först, lägg till sedan (avbryter du läggs inget till)
-      const fs = await pickImage(null, { multi: true });
-      if (!fs || !fs.length) return;
-      S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data: { title: '', items: fs.slice(0, 24).map(f => ({ ref: 'file:' + f.id, alt: '', caption: '' })) }, ...(S.kind === 'slots' ? { pos } : {}) });
+    } else if (type === 'gallery') {
+      const fs = await pickImage(null, { multi: true }); if (!fs || !fs.length) return null;
+      data = { title: '', items: fs.slice(0, 24).map(f => ({ ref: 'file:' + f.id, alt: '', caption: '' })) };
       S.hint = 'Beskriv varje bild med några ord, så att den som inte ser bilderna förstår vad de visar.';
-      markDirty(); drawBlocks(); return;
-    }
-    const data = type === 'text' ? { html: '' } : type === 'heading' ? { text: '', level: 2 } : type === 'links' ? { items: [{ label: '', url: '' }] }
-      : type === 'documents' ? { title: '', refs: [] } : type === 'events' ? { title: 'Kommande händelser', count: 5 } : type === 'news' ? { title: 'Senaste nyheterna', count: 5 } : type === 'about' ? { title: '' } : type === 'signup' ? { title: 'Anmälan', intro: '', choices: [] } : type === 'competitions' ? { title: 'Kommande tävlingar', count: 5 } : type === 'records' ? { title: IS_REGION ? 'Kretsrekord' : 'Klubbrekord' } : type === 'ranges' ? { title: 'Skjutbanor' } : type === 'champions' ? { title: IS_REGION ? 'Regerande kretsmästare' : 'Regerande klubbmästare' } : type === 'stats' ? { title: '' } : type === 'pagelink' ? { key: (S.st.systemPages[0] || {}).key, label: '' }
-      : type === 'region-clubs' ? { title: 'Klubbar i kretsen' } : type === 'region-ranges' ? { title: 'Skjutbanor' } : type === 'region-series' ? { title: 'Serier', count: 10 } : type === 'region-stats' ? { title: '' } : { title: 'Kontakt' };
-    S.blocks.push({ id: newId(), type, visibility: minVisFor(type), data, ...(S.kind === 'slots' ? { pos } : {}) });
-    S.hint = null; markDirty(); drawBlocks();
+    } else if (type === 'pagelink') data = { key: (S.st.systemPages[0] || {}).key, label: '' };
+    else data = JSON.parse(JSON.stringify(m.defaults || {}));
+    if (zone && zone !== 'full') data.zone = zone;
+    return { id: newId(), type, visibility: minVisFor(type), data };
+  }
+
+  /** Lägger blocken av `types` på platsen `ctx`, rullar till dem, markerar och fokuserar det första, och säger vad som hände (med Ångra). Alla eller inget: avbryts ett bildval läggs inget till. */
+  async function addBlocks(types, ctx, zone) {
+    const made = [];
+    for (const t of types) { const b = await makeBlock(t, zone); if (!b) return; made.push(b); }
+    if (!made.length) return;
+    if (!types.some(t => typeInfo(t).needsImage)) S.hint = null;
+    pushUndo('tillägg av ' + typeInfo(made[0].type).label);
+    let at = ctx && ctx.index != null ? ctx.index : S.blocks.length;
+    for (const b of made) { if (S.kind === 'slots') b.pos = ctx.pos || 'after'; S.blocks.splice(at++, 0, b); }
+    S.justAdded = made.map(b => b.id);
+    const first = made[0];
+    if (OPENS_ON_ADD.has(first.type)) S.openId = first.id;   // ett block som behöver fyllas i öppnas (och tar över det som var öppet); ett som fungerar som det är lämnar det öppna kortet som det var
+    S.focusAfterRte = first.type === 'text' ? first.id : null;
+    markDirty(); drawBlocks();
+    const i = S.blocks.indexOf(first);
+    const names = made.map(b => typeInfo(b.type).label).join(' och ');
+    toast('Lade till ' + names + ' som ' + blockNo(i) + '. ' + (typeInfo(first.type).live ? 'Innehållet hämtas automatiskt.' : OPENS_ON_ADD.has(first.type) ? 'Fyll i det nu.' : ''), true);
+    revealCard(first.id, true);
+  }
+
+  /** Rullar till blockets kort, så att det syns under det klibbiga fältet, och flyttar fokus dit (till första fältet i ett öppet kort, annars till kortets namn). */
+  function revealCard(id, focus) {
+    afterModals(() => {
+      const card = body.querySelector('[data-block-id="' + id + '"]'); if (!card) return;
+      card.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      if (!focus) return;
+      const bodyEl = card.querySelector('.hs-block-body');
+      if (bodyEl && !bodyEl.hidden) {
+        if (card.querySelector('[data-rte]')) return;   // textredigeraren fokuseras när den är klar (initRte)
+        const f = bodyEl.querySelector('input:not([type=hidden]):not([type=checkbox]),textarea,select,button');
+        if (f) { f.focus({ preventScroll: true }); if (f.select && f.tagName === 'INPUT' && f.type === 'text') f.select(); return; }
+      }
+      const t = card.querySelector('.hs-type'); if (t) t.focus({ preventScroll: true });
+    });
+  }
+  /** Väntar tills ingen dialog är öppen (Bootstrap flyttar annars fokus tillbaka till knappen som öppnade dialogen) och kör sedan `fn`. */
+  function afterModals(fn) {
+    let tries = 0;
+    const tick = () => { if (document.querySelector('.modal.show') && tries++ < 30) { setTimeout(tick, 60); return; } fn(); };
+    setTimeout(tick, 0);
+  }
+
+  // Blockets namn i texter ("Rubrik: Välkommen"): typens namn, och för text/rubrik de första orden.
+  function blockTitle(b) { const s = summaryOf(b); return blockName(b) + (s && (b.type === 'heading' || b.type === 'text') ? ': ' + (s.length > 30 ? s.slice(0, 30) + '…' : s) : ''); }
+
+  // ── Väljaren (modal) ────────────────────────────────────────────────────────
+  /** Svarar { types: [...], zone } eller null (avbrutet). `slotOnly` = bara blocken som får ligga före/efter en systemsida; `zone` = Hem: välj plats på sidan. */
+  function openChooser(ctx) {
+    return new Promise(resolve => {
+      const retired = new Set((S.st && S.st.retiredBlocks) || []);
+      const types = blockTypes().filter(t => t.group >= 0 && !retired.has(t.type) && (!ctx.slotOnly || t.slot));
+      const tasks = ctx.slotOnly ? [] : blockTasks().filter(t => t.blocks.every(b => types.some(x => x.type === b)));
+      let sel = null, result = null;   // sel = { kind: 'block'|'task', key }
+      const phone = window.matchMedia && window.matchMedia('(max-width: 767.98px)').matches;
+      const tid = 'hsModalT' + (++modalSeq);
+      const search = h('input', { type: 'search', class: 'form-control', id: 'hsChSearch', 'aria-label': 'Sök block', placeholder: 'Sök, till exempel "nyheter" eller "bild"', autocomplete: 'off' });
+      const list = h('div', { class: 'hs-chooser-list mt-3', id: 'hsChList' });
+      const addBtn = h('button', { type: 'button', class: 'btn btn-primary', disabled: true }, 'Lägg till');
+      const zoneSel = ctx.zone ? h('select', { class: 'form-select form-select-sm w-auto', id: 'hsChZone', 'aria-label': 'Plats på sidan' }, ['full', 'main', 'side'].map(z => h('option', { value: z }, ZONE_LABEL[z]))) : null;
+      const unavailable = t => blockUnavailable(t);
+
+      const chosenTypes = () => !sel ? [] : sel.kind === 'task' ? blockTasks().find(t => t.key === sel.key).blocks : [sel.key];
+      const syncBtn = () => {
+        const ts = chosenTypes();
+        addBtn.disabled = !ts.length;
+        addBtn.textContent = ts.some(t => typeInfo(t).needsImage) ? 'Nästa: välj bild' : 'Lägg till';
+      };
+      const pick = (kind, key) => {
+        sel = { kind, key };
+        list.querySelectorAll('label.hs-choice').forEach(l => l.classList.toggle('active', l.dataset.pick === kind + ':' + key));
+        syncBtn();
+      };
+      const choice = (kind, key, icon, label, desc, why, note) => {
+        const did = 'hsChD' + kind + key;
+        const input = h('input', { type: 'radio', name: 'hsch', value: kind + ':' + key, 'aria-disabled': why ? 'true' : null, 'aria-describedby': why ? did : null, checked: sel && sel.kind === kind && sel.key === key,
+          onchange: e => { if (why) { e.target.checked = false; return; } pick(kind, key); } });
+        return h('label', { class: 'hs-choice' + (why ? ' hs-choice-off' : '') + (sel && sel.kind === kind && sel.key === key ? ' active' : ''), 'data-pick': kind + ':' + key, 'data-add-block': kind === 'block' ? key : null, 'data-add-task': kind === 'task' ? key : null },
+          input, h('i', { class: 'bi ' + icon + ' me-1', 'aria-hidden': 'true' }), h('strong', {}, label),
+          h('span', { class: 'hs-sub' + (why ? ' fst-italic' : ''), id: did }, why || desc), !why && note ? h('span', { class: 'hs-sub' }, note) : null);
+      };
+      const paint = () => {
+        const q = search.value.trim().toLowerCase();
+        const match = (...s) => !q || s.join(' ').toLowerCase().includes(q);
+        const nodes = [];
+        const ts = tasks.filter(t => match(t.title, t.description));
+        if (ts.length) nodes.push(h('section', { class: 'mb-3', 'aria-labelledby': 'hsChTasks' }, h('h3', { class: 'h6 text-muted mb-2', id: 'hsChTasks' }, 'Vad vill du göra?'),
+          ts.map(t => choice('task', t.key, t.icon, t.title, t.description, '', t.note))));
+        const groups = blockGroups().map((title, gi) => {
+          const items = types.filter(t => t.group === gi && match(t.label, t.description, title));
+          if (!items.length) return null;
+          const id = 'hsChG' + gi;
+          return h('details', { class: 'mb-2 hs-chooser-group', open: (!phone || q) ? true : null }, h('summary', { class: 'fw-semibold py-1' }, h('h3', { class: 'h6 d-inline mb-0', id }, title)),
+            h('div', { class: 'mt-1', role: 'group', 'aria-labelledby': id }, items.map(t => choice('block', t.type, t.icon, t.label, t.description, unavailable(t)))));
+        }).filter(Boolean);
+        if (groups.length) nodes.push(h('section', { 'aria-labelledby': 'hsChAll' }, h('h3', { class: 'h6 text-muted mb-2', id: 'hsChAll' }, ts.length || !q ? 'Alla block' : 'Block'), groups));
+        if (!nodes.length) nodes.push(h('p', { class: 'text-muted' }, 'Inget block matchar "' + search.value.trim() + '".'));
+        list.replaceChildren(...nodes);
+      };
+      search.addEventListener('input', paint);
+
+      const finish = () => { const ts = chosenTypes(); if (!ts.length) return; result = { types: ts, zone: zoneSel ? zoneSel.value : null }; bs.hide(); };
+      addBtn.addEventListener('click', finish);
+      search.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (!sel) { const only = [...list.querySelectorAll('label.hs-choice:not(.hs-choice-off)')]; if (only.length === 1) { const [k, v] = only[0].dataset.pick.split(':'); pick(k, v); } }
+        finish();
+      });
+
+      const el = h('div', { class: 'modal fade', tabindex: '-1', 'aria-labelledby': tid, id: 'hsChooser' },
+        h('div', { class: 'modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg modal-fullscreen-sm-down' }, h('div', { class: 'modal-content' },
+          h('div', { class: 'modal-header' }, h('div', {}, h('h2', { class: 'modal-title h5', id: tid }, 'Lägg till på sidan'), h('div', { class: 'small text-muted', id: 'hsChWhere' }, ctx.subtitle)),
+            h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+          h('div', { class: 'modal-body' }, search,
+            zoneSel ? h('div', { class: 'd-flex align-items-center gap-2 mt-2 small' }, h('label', { for: 'hsChZone' }, 'Plats på sidan'), zoneSel) : null, list),
+          h('div', { class: 'modal-footer' }, h('button', { type: 'button', class: 'btn btn-secondary', 'data-bs-dismiss': 'modal' }, 'Avbryt'), addBtn))));
+      document.body.append(el);
+      const bs = new bootstrap.Modal(el);
+      el.addEventListener('shown.bs.modal', () => search.focus());
+      el.addEventListener('hidden.bs.modal', () => { el.remove(); resolve(result); });   // svaret först när dialogen är helt stängd, så att fokus inte rycks tillbaka av Bootstrap
+      paint();
+      bs.show();
+    });
   }
 
   // Närmaste granne åt det håll i samma grupp (en slots före/efter är två egna listor); fri sida: bara nästa.
@@ -1636,35 +1855,202 @@
     for (let j = i + d; j >= 0 && j < S.blocks.length; j += d) if (S.kind !== 'slots' || S.blocks[j].pos === S.blocks[i].pos) return j;
     return -1;
   }
-  function move(i, d) { const j = neighbour(i, d); if (j < 0) return; [S.blocks[i], S.blocks[j]] = [S.blocks[j], S.blocks[i]]; markDirty(); drawBlocks(); }
+  const indexOfId = id => S.blocks.findIndex(b => b.id === id);
+  /** Flyttar blocket inom sin grupp (hela sidan, eller före/efter på en systemsida): 'up' | 'down' | 'first' | 'last'. Ritar om, säger var det hamnade och behåller fokus på kortets Åtgärder. */
+  function moveBlock(id, how) {
+    const i = indexOfId(id); if (i < 0) return;
+    const grp = S.blocks.map((b, k) => [b, k]).filter(([b]) => S.kind !== 'slots' || b.pos === S.blocks[i].pos);
+    const at = grp.findIndex(([b]) => b.id === id);
+    const to = how === 'up' ? at - 1 : how === 'down' ? at + 1 : how === 'first' ? 0 : grp.length - 1;
+    if (to < 0 || to >= grp.length || to === at) return;
+    const order = grp.map(([b]) => b); const [x] = order.splice(at, 1); order.splice(to, 0, x);
+    pushUndo('flytt av ' + blockName(x));
+    grp.forEach(([, k], n) => { S.blocks[k] = order[n]; });
+    S.justAdded = null; markDirty(); drawBlocks();
+    const now = grp.length > 1 ? to + 1 : 1;
+    toast('Flyttade ' + blockTitle(x) + ', nu nummer ' + now + ' av ' + grp.length + '.', true);
+    afterModals(() => { const t = body.querySelector('[data-block-id="' + id + '"] .hs-menu-toggle'); if (t) { t.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }); t.focus({ preventScroll: true }); } });
+  }
+  /** Tar bort blocket direkt (ingen spärrfråga: Ångra finns i fältet, i Åtgärder och i meddelandet). Fokus går till nästa kort, annars platsknappen där det satt. */
+  function removeBlock(id) {
+    const i = indexOfId(id); if (i < 0) return;
+    const b = S.blocks[i], label = blockTitle(b);
+    pushUndo('borttagning av ' + blockName(b));
+    S.blocks.splice(i, 1);
+    if (S.openId === id) S.openId = null;
+    S.justAdded = null; markDirty(); drawBlocks();
+    toast('Tog bort ' + label + '.', true);
+    afterModals(() => {
+      const next = S.blocks[i] || null;
+      const t = next ? body.querySelector('[data-block-id="' + next.id + '"] .hs-type') : body.querySelector('[data-insert-at="' + Math.max(0, i) + '"], #hsEmpty button');
+      if (t) t.focus({ preventScroll: true });
+    });
+  }
+  function toggleOpen(id) {
+    S.justAdded = null;
+    const wasOpen = S.openId === id;
+    S.openId = wasOpen ? null : id;
+    S.focusAfterRte = wasOpen ? null : id;
+    drawBlocks();
+    if (!wasOpen) revealCard(id, true);
+    else afterModals(() => { const t = body.querySelector('[data-block-id="' + id + '"] .hs-open-toggle'); if (t) t.focus({ preventScroll: true }); });
+  }
+
+  // ── Ångra och meddelanden ───────────────────────────────────────────────────
+  // Ångra gäller blocken (lägga till, ta bort, flytta, mallar): en lokal logg med högst 30 steg som töms när redigeraren lämnas. Texten inne i ett textblock ångras av textredigeraren själv.
+  function pushUndo(label) {
+    S.undo.push({ label, blocks: JSON.parse(JSON.stringify(S.blocks)), openId: S.openId });
+    if (S.undo.length > 30) S.undo.shift();
+    paintUndo();
+  }
+  function undoLast() {
+    const u = S.undo.pop(); if (!u) return;
+    clearEditors();
+    S.blocks = u.blocks; S.openId = S.blocks.some(b => b.id === u.openId) ? u.openId : null; S.justAdded = null;
+    for (const b of S.blocks) if (b.type !== 'panel') b.visibility = Math.max(b.visibility, minVisFor(b.type));   // sidan kan ha blivit strängare sedan dess
+    markDirty(); drawBlocks(); paintUndo();
+    toast('Ångrade ' + u.label + '.', false);
+  }
+  function paintUndo() {
+    const b = document.getElementById('hsUndo'); if (!b) return;
+    const last = S.undo[S.undo.length - 1];
+    b.disabled = !last;
+    b.title = last ? 'Ångra ' + last.label : 'Det finns inget att ångra';
+    b.setAttribute('aria-label', last ? 'Ångra ' + last.label : 'Ångra (inget att ångra)');
+  }
+  /** Ett kort meddelande i det klibbiga fältet (en live-region som finns i sidan innan texten byts, så att en skärmläsare läser upp den). Med Ångra-knapp när något gått att ångra. */
+  function toast(text, withUndo) {
+    const el = document.getElementById('hsToast'); if (!el) return;
+    clearTimeout(S.toastTimer);
+    el.replaceChildren(h('span', { class: 'hs-toast-text' }, text),
+      withUndo && S.undo.length ? h('button', { type: 'button', class: 'btn btn-sm btn-outline-primary ms-2', id: 'hsToastUndo', onclick: () => undoLast() }, 'Ångra') : null);
+    el.classList.add('on');
+    S.toastTimer = setTimeout(() => { el.classList.remove('on'); el.replaceChildren(); }, 12000);
+  }
+
+  /** Listan: platsknapp, kort, platsknapp, kort … (ett kort är stängt tills man väljer Ändra; högst ett är öppet). */
+  function cardNodes(filterPos) {
+    const nodes = [], items = S.blocks.map((b, i) => [b, i]).filter(([b]) => !filterPos || b.pos === filterPos);
+    const groupIndex = k => k < items.length ? items[k][1] : items.length ? items[items.length - 1][1] + 1 : (filterPos === 'before' ? 0 : S.blocks.length);
+    nodes.push(insertSlot({ index: groupIndex(0), pos: filterPos }));
+    items.forEach(([b], k) => {
+      nodes.push(b.type === 'panel' ? panelCard(b) : blockCard(b));
+      nodes.push(insertSlot({ index: groupIndex(k + 1), pos: filterPos, after: b }));
+    });
+    return nodes;
+  }
 
   function drawBlocks() {
-    clearEditors(); S.refreshWho && S.refreshWho();   // blocken (och deras nivåer) styr tabellen i Vem ser sidan?
+    pruneEditors(S.openId); S.refreshWho && S.refreshWho();   // blocken (och deras nivåer) styr tabellen i Vem ser sidan?; bara det öppna blockets textredigerare lever kvar
     const el = document.getElementById('hsBlocks'); if (!el) return;
     if (S.kind === 'slots') {
       const group = (pos, title, help) => {
-        const items = S.blocks.map((b, i) => [b, i]).filter(([b]) => b.pos === pos);
-        return h('section', { class: 'mb-4', dataset: undefined },
+        const has = S.blocks.some(b => b.pos === pos);
+        return h('section', { class: 'mb-4', 'aria-label': title },
           h('h2', { class: 'h5' }, title), h('p', { class: 'text-muted small' }, help),
-          ...(items.length ? items.map(([b, i]) => blockCard(b, i)) : [h('div', { class: 'hs-card p-3 text-center text-muted mb-3' }, 'Ingen text här än.')]),
-          h('div', { class: 'd-flex flex-wrap gap-2' }, ['text', 'links', 'news'].map(t => h('button', { class: 'btn btn-outline-primary', onclick: () => addBlock(t, pos) }, h('i', { class: 'bi ' + typeInfo(t).icon + ' me-1' }), typeInfo(t).label))));
+          ...(has ? cardNodes(pos) : [h('div', { class: 'hs-card p-3 text-center text-muted mb-2' }, 'Ingen text här än.'), insertSlot({ index: pos === 'before' ? 0 : S.blocks.length, pos })]));
       };
-      el.replaceChildren(group('before', 'Före sidans innehåll', 'Visas överst på sidan.'), group('after', 'Efter sidans innehåll', 'Visas längst ner på sidan.'));
-      el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
-      return;
-    }
-    if (S.kind === 'converted') {
+      el.replaceChildren(group('before', 'Före sidans innehåll', 'Visas överst på sidan.'),
+        h('div', { class: 'hs-card hs-removed p-2 px-3 mb-4 text-muted small' }, h('i', { class: 'bi bi-layout-text-window me-2', 'aria-hidden': 'true' }), 'Sidans vanliga innehåll visas här. Det ändras inte.'),
+        group('after', 'Efter sidans innehåll', 'Visas längst ner på sidan.'));
+    } else if (S.kind === 'converted') {
       // En omgjord sida: paneler (kort med Åtgärder) och egna block i EN lista; borttagna paneler som grå rader med Lägg tillbaka.
-      const present = new Set(S.blocks.filter(b => b.type === 'panel').map(b => b.data.key));
-      const removed = removedPanels();
-      el.replaceChildren(...S.blocks.map((b, i) => b.type === 'panel' ? panelCard(b, i) : blockCard(b, i)),
-        ...removed.map(removedRow));
-      el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
-      return;
+      el.replaceChildren(...cardNodes(), ...removedPanels().map(removedRow));
+    } else {
+      el.replaceChildren(...(S.blocks.length ? cardNodes() : [emptyState()]));
     }
-    el.replaceChildren(...(S.blocks.length ? S.blocks.map(blockCard) : [h('div', { class: 'hs-card p-4 text-center text-muted mb-3' }, 'Sidan har inget innehåll än. Lägg till ett block här under.')]));
-    // CKEditor skapas först när elementen sitter i dokumentet.
-    el.querySelectorAll('[data-rte]').forEach(node => initRte(node, S.blocks.find(b => b.id === node.dataset.rte)));
+    // CKEditor skapas först när elementen sitter i dokumentet, och bara en gång per öppet block (det öppna blockets innehåll återanvänds).
+    el.querySelectorAll('[data-rte]:not([data-rte-init])').forEach(node => { node.dataset.rteInit = '1'; initRte(node, S.blocks.find(b => b.id === node.dataset.rte)); });
+    setBarHeight();
+  }
+  /** Det klibbiga fältets höjd (för `scroll-margin-top`): ett block som rullas fram får aldrig hamna under fältet, inte heller på telefon där fältet har flera rader. */
+  function setBarHeight() { const bar = root.querySelector('.hs-bar'); if (bar) { root.style.setProperty('--hs-bar-h', bar.offsetHeight + 'px'); document.documentElement.style.scrollPaddingTop = (bar.offsetHeight + 12) + 'px'; } }
+  window.addEventListener('resize', () => { if (root.querySelector('.hs-bar')) setBarHeight(); });
+
+  /** Sidan är tom: tre snabbstarter, alla block, och färdiga sidor (som annars bara nås i guiden Ny sida). */
+  function emptyState() {
+    const quick = ['text', 'image', 'events'].filter(t => blockTypes().some(x => x.type === t));
+    return h('div', { class: 'hs-card p-4 mb-3', id: 'hsEmpty' },
+      h('h2', { class: 'h5' }, 'Sidan är tom'),
+      h('p', { class: 'text-muted' }, 'Börja med ett block. Blocken visas i den ordning ni lägger dem, och ni kan lägga till fler var som helst på sidan.'),
+      h('div', { class: 'd-flex flex-wrap gap-2 mb-3' },
+        quick.map(t => h('button', { type: 'button', class: 'btn btn-outline-primary', 'data-quick': t, onclick: () => addBlocks([t], { index: 0 }) }, h('i', { class: 'bi ' + typeInfo(t).icon + ' me-1', 'aria-hidden': 'true' }), typeInfo(t).label)),
+        h('button', { type: 'button', class: 'btn btn-primary', id: 'hsEmptyMore', onclick: e => startAdd({ index: 0 }, e.currentTarget) }, 'Fler block …')),
+      h('p', { class: 'mb-0 small' }, 'Eller ', h('button', { type: 'button', class: 'btn btn-link p-0 align-baseline', id: 'hsEmptyTemplate', onclick: () => startTemplate() }, 'börja från en färdig sida'), '.'));
+  }
+
+  // ── Förhandsgranska utkastet ────────────────────────────────────────────────
+  // Sparar utkastet, ber servern rita det för en vald besökare (samma renderare och åtkomstregler som besökarna möter) och visar det i en iframe utan skript och utan formulär.
+  // Aldrig ensam väg: allt går att göra och läsa i redigeraren. Länkar i förhandsvisningen är döda (ingen navigering härifrån).
+  async function openPreview() {
+    if (S.dirty && !await saveNow()) { toast('Utkastet kunde inte sparas, så det går inte att förhandsgranska än.', false); return; }
+    const theme = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'dark' : 'light';
+    let personaKey = S.visibility === 0 ? 'anon' : 'member', width = 'wide';
+    const tid = 'hsModalT' + (++modalSeq);
+    const who = h('select', { class: 'form-select form-select-sm w-auto', id: 'hsPvWho', 'aria-label': 'Se sidan som' });
+    const notice = h('div', { class: 'small text-muted', id: 'hsPvNotice', role: 'status', 'aria-live': 'polite' });
+    const frameWrap = h('div', { class: 'hs-pv-wrap' });
+    const frame = h('iframe', { class: 'hs-pv-frame', id: 'hsPvFrame', title: 'Förhandsgranskning av sidan', sandbox: 'allow-same-origin', 'data-preview': '1' });
+    const msg = h('div', { class: 'hs-pv-msg alert alert-secondary', hidden: true });
+    const widthBtn = (key, label, icon) => h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary' + (key === width ? ' active' : ''), 'data-pv-width': key, 'aria-pressed': String(key === width),
+      onclick: () => { width = key; paintWidth(); } }, h('i', { class: 'bi ' + icon + ' me-1', 'aria-hidden': 'true' }), label);
+    const wBtns = [widthBtn('wide', 'Dator', 'bi-display'), widthBtn('narrow', 'Telefon', 'bi-phone')];
+    const paintWidth = () => { frameWrap.classList.toggle('narrow', width === 'narrow'); wBtns.forEach(b => { const on = b.dataset.pvWidth === width; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }); };
+    const openLive = h('a', { class: 'btn btn-link btn-sm', href: (S.page && S.page.url) || '#', target: '_blank', rel: 'noopener', hidden: !(S.published && S.page && S.page.url) }, 'Öppna den publicerade sidan i en ny flik');
+    let seq = 0;
+    async function show() {
+      const mine = ++seq;
+      notice.textContent = 'Ritar förhandsgranskningen …';
+      const r = await api('POST', 'RenderPreview', { pageId: S.page.id, persona: personaKey, theme });
+      if (mine !== seq) return;   // ett nyare val har tagit över
+      if (!r.success) { frame.hidden = true; msg.hidden = false; msg.textContent = r.message || 'Förhandsgranskningen gick inte att rita.'; notice.textContent = ''; return; }
+      if (!who.options.length) r.personas.forEach(p => who.append(h('option', { value: p.key }, p.label)));
+      who.value = r.persona;
+      const base = r.basis === 'draft' ? 'Det sparade utkastet.' : 'Sidan har inget utkast, så det här är den publicerade versionen.';
+      notice.textContent = r.notice + ' ' + base + (r.hiddenPersonal ? ' ' + r.hiddenPersonal + (r.hiddenPersonal === 1 ? ' block med personuppgifter visas inte i stödläge.' : ' block med personuppgifter visas inte i stödläge.') : '');
+      if (!r.document) { frame.srcdoc = ''; frame.hidden = true; msg.hidden = false; msg.textContent = r.notice; return; }   // tömmer också ramen: den förra besökarens innehåll får inte ligga kvar dolt
+      msg.hidden = true; frame.hidden = false;
+      frame.srcdoc = r.document;
+    }
+    frame.addEventListener('load', () => {   // inga länkar leder någonstans härifrån
+      try { frame.contentDocument.addEventListener('click', e => { if (e.target.closest && e.target.closest('a')) e.preventDefault(); }); } catch { /* ingen åtkomst: sandlådan stänger ändå navigeringen */ }
+    });
+    who.addEventListener('change', () => { personaKey = who.value; show(); });
+    frameWrap.append(frame);
+    const el = h('div', { class: 'modal fade', tabindex: '-1', 'aria-labelledby': tid, id: 'hsPvModal' },
+      h('div', { class: 'modal-dialog modal-dialog-centered modal-xl modal-fullscreen-md-down modal-dialog-scrollable' }, h('div', { class: 'modal-content' },
+        h('div', { class: 'modal-header' }, h('h2', { class: 'modal-title h5', id: tid }, 'Förhandsgranska utkastet'), h('button', { type: 'button', class: 'btn-close', 'data-bs-dismiss': 'modal', 'aria-label': 'Stäng' })),
+        h('div', { class: 'modal-body' },
+          h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-2' }, h('label', { for: 'hsPvWho', class: 'small fw-semibold' }, 'Se sidan som'), who,
+            h('span', { class: 'btn-group ms-auto', role: 'group', 'aria-label': 'Bredd' }, wBtns)),
+          notice, msg, frameWrap),
+        h('div', { class: 'modal-footer' }, openLive, h('button', { type: 'button', class: 'btn btn-primary', 'data-bs-dismiss': 'modal' }, 'Stäng')))));
+    document.body.append(el);
+    const bs = new bootstrap.Modal(el);
+    const opener = document.activeElement;   // Bootstrap lämnar bara tillbaka fokus för dialoger som öppnas med data-attribut: här görs det själv
+    el.addEventListener('hidden.bs.modal', () => { el.remove(); if (opener && opener.isConnected && opener !== document.body) opener.focus(); });
+    paintWidth();
+    bs.show();
+    show();
+  }
+
+  /** Lägger in en färdig sidas block i en tom sida (samma mallar som guiden Ny sida). */
+  async function startTemplate() {
+    let chosen = 'welcome';
+    const opts = readyTemplates().map(([k, t, s]) => h('label', { class: 'hs-choice' + (k === chosen ? ' active' : ''), 'data-template': k },
+      h('input', { type: 'radio', name: 'hsTpl', checked: k === chosen, onchange: e => { chosen = k; e.target.closest('.modal').querySelectorAll('label.hs-choice').forEach(l => l.classList.toggle('active', l.dataset.template === k)); } }),
+      h('strong', {}, t), h('span', { class: 'hs-sub' }, s)));
+    const ok = await modal('Börja från en färdig sida', [h('p', { class: 'text-muted small' }, 'Blocken läggs in på sidan och går att ändra, flytta och ta bort.'), ...opts],
+      [{ label: 'Avbryt', value: false }, { label: 'Använd den här', value: true, cls: 'btn-primary' }], true);
+    if (ok !== true) return;
+    const blocks = templateBlocks(chosen, S.visibility);
+    if (!blocks.length) return;
+    pushUndo('den färdiga sidan');
+    S.blocks.push(...blocks);
+    S.justAdded = blocks.map(b => b.id); S.openId = null;
+    markDirty(); drawBlocks();
+    toast('Lade in ' + blocks.length + (blocks.length === 1 ? ' block' : ' block') + ' från den färdiga sidan.', true);
+    revealCard(blocks[0].id, true);
   }
 
   // ── Omgjorda sidor: panelkort ────────────────────────────────────────────────
@@ -1675,57 +2061,79 @@
     const present = new Set(S.blocks.filter(b => b.type === 'panel').map(b => b.data.key));
     return (S.panelCat || []).filter(c => !c.systemOnly && !present.has(c.key));
   }
-  function setZone(b, zone) { b.data.zone = zone; markDirty(); drawBlocks(); }
-  async function removePanel(b, i) {
-    const c = catOf(b.data.key);
-    if (!await confirmDialog('Ta bort "' + c.name + '"?', '"' + c.name + '" visas inte längre på sidan för besökarna när ni har publicerat. Ni kan lägga tillbaka den när ni vill, och när ni publicerar ser ni vad som har tagits bort.', 'Ta bort', true)) return;
-    S.blocks.splice(i, 1); markDirty(); drawBlocks();
+  function setZone(b, zone) {
+    pushUndo('flytt av ' + blockName(b));
+    if (zone === 'full') delete b.data.zone; else b.data.zone = zone;   // "Hela bredden" lagras aldrig (ingen zon)
+    markDirty(); drawBlocks();
+    toast(blockName(b) + ' ligger nu i ' + ZONE_LABEL[zone].toLowerCase() + '.', true);
   }
   function restorePanel(c) {
     // Tillbaka på sin vanliga plats: före den första panel som ligger efter den i standardordningen, annars sist.
     const order = (S.panelCat || []).map(x => x.key), mine = order.indexOf(c.key);
     let at = S.blocks.findIndex(b => b.type === 'panel' && order.indexOf(b.data.key) > mine);
     if (at < 0) at = S.blocks.length;
-    S.blocks.splice(at, 0, { id: newId(), type: 'panel', visibility: Math.max(c.level, S.visibility), data: { key: c.key, zone: c.zone } });
+    pushUndo('att ' + c.name + ' lades tillbaka');
+    const nb = { id: newId(), type: 'panel', visibility: Math.max(c.level, S.visibility), data: { key: c.key, zone: c.zone } };
+    S.blocks.splice(at, 0, nb);
+    S.justAdded = [nb.id];
     markDirty(); drawBlocks();
+    toast('Lade tillbaka ' + c.name + '.', true);
+    revealCard(nb.id, true);
   }
   function removedRow(c) {
     return h('div', { class: 'hs-card hs-removed p-2 px-3 mb-3 d-flex align-items-center gap-2 flex-wrap text-muted' },
       h('span', { class: 'me-auto' }, c.name + ' är borttagen.'),
       h('button', { class: 'btn btn-sm btn-outline-secondary', onclick: () => restorePanel(c) }, 'Lägg tillbaka'));
   }
-  function panelCard(b, i) {
-    const c = catOf(b.data.key), isHome = S.pageKey === 'home';
+  /** Blockets namn i texter: en panels eget namn, annars typens namn ur registret. */
+  const blockName = b => b.type === 'panel' ? catOf(b.data.key).name : typeInfo(b.type).label;
+  const pageLevelReason = () => 'Sidan är bara öppen för ' + visLabel(S.visibility).toLowerCase() + ', så blocket kan inte vara öppnare.';
+
+  // ── Kort: panel och block har samma huvud (namn + sammanfattning, märken, Åtgärder) ─────────────────────────
+  function cardHead(b, i, o) {
+    return h('div', { class: 'hs-block-head' },
+      h('div', { class: 'hs-block-title' }, o.thumb || h('i', { class: 'bi ' + o.icon + ' hs-block-icon', 'aria-hidden': 'true' }),
+        h('div', { class: 'hs-block-text' }, h('span', { class: 'hs-type', tabindex: '-1' }, o.name), h('div', { class: 'hs-summary' + (o.summaryMuted ? ' text-muted fst-italic' : ' text-muted') }, o.summary))),
+      h('div', { class: 'hs-block-actions' }, o.open || null, o.menu),
+      h('div', { class: 'hs-block-marks' }, o.marks));
+  }
+
+  function panelCard(b) {
+    const c = catOf(b.data.key), isHome = S.pageKey === 'home', i = indexOfId(b.id);
     // Aldrig öppnare än panelen är idag, än sidan, och aldrig "Alla" för personuppgifter (servern prövar samma sak).
     const min = Math.max(c.level, S.visibility, c.personalData ? 1 : 0);
-    // "Visa publikt": en panel som får visas för alla kan väljas som Alla även när sidan inte är det än (då öppnas sidan också, efter en bekräftelse).
-    const levels = visOptions().filter(o => o.v >= min || (c.publicAllowed && o.v === 0));
-    const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser ' + c.name },
-      levels.map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.v === 0 && c.publicAllowed ? 'Alla, även utloggade' : o.t)));
-    visSel.addEventListener('change', async () => {
-      const v = parseInt(visSel.value, 10);
-      if (v === 0) {
-        if (!await confirmPublic(c)) { visSel.value = b.visibility; return; }
-        if (S.visibility > 0) { S.visibility = 0; }   // sidan måste själv vara öppen för alla, annars syns panelen inte
-        b.visibility = 0; markDirty(); renderEditor(); return;
-      }
-      b.visibility = v; markDirty(); renderEditor();
-    });
+    const marks = [];
+    if (c.systemOnly) marks.push(stateMark('off', 'Visas bara för den som inte är inloggad'));
+    else marks.push(levelPicker(b, c.name, {
+      min,
+      // "Visa publikt": en panel som får visas för alla kan väljas som Alla även när sidan inte är det än (då öppnas sidan också, efter en bekräftelse).
+      extraAllowed: v => v === 0 && c.publicAllowed,
+      reason: v => c.personalData && v < 1 ? 'Innehåller personuppgifter och kan inte visas för alla.' : v < c.level ? '"' + c.name + '" är inte öppnare än så här idag.' : pageLevelReason(),
+      onPick: async v => {
+        if (v === 0) {
+          if (!await confirmPublic(c)) return false;
+          b.visibility = 0;
+          if (S.visibility > 0) { S.visibility = 0; markDirty(); renderEditor(); return false; }   // sidan måste själv vara öppen för alla, annars syns panelen inte (hela vyn ritas om)
+        } else b.visibility = v;
+        markDirty(); S.refreshWho && S.refreshWho();
+        toast(c.name + ' syns nu för ' + visLabel(v).toLowerCase() + '.', false);
+        return true;
+      },
+    }));
+    marks.push(stateMark('off', 'Hämtas automatiskt', 'Innehållet hämtas vid varje besök.'));
+    if (c.personalData) marks.push(stateMark('off', 'Personuppgifter', 'Visar personuppgifter och kan aldrig vara öppen för alla.'));
+    if (isHome) marks.push(stateMark('own', ZONE_LABEL[b.data.zone] || ZONE_LABEL.full));
     const menu = rowMenu([
-      ['Flytta upp', () => move(i, -1), { disabled: neighbour(i, -1) < 0 }],
-      ['Flytta ner', () => move(i, 1), { disabled: neighbour(i, 1) < 0 }],
-      isHome ? (b.data.zone === 'side' ? ['Flytta till huvudkolumnen', () => setZone(b, 'main')] : ['Flytta till sidokolumnen', () => setZone(b, 'side')]) : null,
-      c.mustKeep ? null : '-', c.mustKeep ? null : ['Ta bort', () => removePanel(b, i), { danger: true }]]);
-    return h('div', { class: 'hs-block hs-panelcard' },
-      h('div', { class: 'hs-block-head' },
-        h('span', { class: 'hs-type' }, h('i', { class: 'bi bi-grid-1x2 me-2', 'aria-hidden': 'true' }), c.name),
-        c.systemOnly ? h('span', { class: 'small text-muted' }, 'Visas bara för den som inte är inloggad')
-          : levels.length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : h('span', { class: 'small text-muted' }, 'Syns för ' + visLabel(b.visibility)),
-        menu),
-      h('div', { class: 'hs-block-body' },
-        h('div', {}, c.description || ''),
-        b.visibility === 0 ? h('div', { class: 'small mt-1 text-warning-emphasis' }, h('i', { class: 'bi bi-globe2 me-1', 'aria-hidden': 'true' }), 'Visas publikt: alla på internet kan se den här delen.') : null,
-        h('div', { class: 'text-muted small mt-1' }, 'Hämtas automatiskt vid varje besök.' + (isHome ? ' Plats: ' + (ZONE_LABEL[b.data.zone] || ZONE_LABEL.full) + '.' : '') + (c.mustKeep ? ' Kan flyttas men inte tas bort.' : ''))));
+      ['Flytta upp', () => moveBlock(b.id, 'up'), { disabled: neighbour(i, -1) < 0 }],
+      ['Flytta ner', () => moveBlock(b.id, 'down'), { disabled: neighbour(i, 1) < 0 }],
+      ['Flytta först', () => moveBlock(b.id, 'first'), { disabled: neighbour(i, -1) < 0 }],
+      ['Flytta sist', () => moveBlock(b.id, 'last'), { disabled: neighbour(i, 1) < 0 }],
+      ...(isHome ? ['full', 'main', 'side'].filter(z => z !== (b.data.zone || 'full')).map(z => ['Flytta till ' + ZONE_LABEL[z].toLowerCase(), () => setZone(b, z)]) : []),
+      '-', ['Lägg till block under', () => startAdd({ index: i + 1, after: b }, () => body.querySelector('[data-block-id="' + b.id + '"] .hs-menu-toggle'))],
+      c.mustKeep ? null : '-', c.mustKeep ? null : ['Ta bort', () => removeBlock(b.id), { danger: true }]], 'Åtgärder för ' + c.name + ', ' + blockNo(i));
+    const hl = S.justAdded && S.justAdded.includes(b.id);
+    return h('div', { class: 'hs-block hs-panelcard' + (hl ? ' hs-new' : ''), 'data-block-id': b.id, 'data-block-type': 'panel', 'data-panel-key': b.data.key },
+      cardHead(b, i, { icon: 'bi-grid-1x2', name: c.name, summary: (c.description || '') + (c.mustKeep ? ' Kan flyttas men inte tas bort.' : ''), marks, menu }));
   }
 
   // Bildens bredd i procent: ett eget attribut på bildblocket som skrivs som style="width:N%" på bildens ram (figure) och läses tillbaka därifrån.
@@ -1783,7 +2191,9 @@
       node.parentNode.insertBefore(h('div', { class: 'mb-2 d-flex flex-wrap align-items-center gap-1' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: () => insertImage(ed) },
         h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), widthBar(() => ed)), node);
       ed.model.document.on('change:data', () => { block.data.html = ed.getData(); markDirty(); });
+      ed._blockId = block.id;   // pruneEditors behåller det öppna blockets textredigerare när listan ritas om
       S.editors.push(ed);
+      if (S.focusAfterRte === block.id) { S.focusAfterRte = null; ed.editing.view.focus(); }   // ett nytt eller öppnat textblock får fokus först när textredigeraren är klar
     }).catch(err => { console.error('CKEditor kunde inte startas:', err && (err.message || err)); node.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte startas.')); });
   }
 
@@ -1809,29 +2219,96 @@
     }
   }
 
-  function blockCard(b, i) {
-    const info = typeInfo(b.type), min = minVisFor(b.type);
-    const visSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Vem ser blocket' },
-      visOptions().filter(o => o.v >= min).map(o => h('option', { value: o.v, selected: o.v === b.visibility ? true : null }, o.t)));
-    visSel.addEventListener('change', () => { b.visibility = parseInt(visSel.value, 10); markDirty(); S.refreshWho && S.refreshWho(); });
-    // Plats på Hem (bara en omgjord Hem): hela bredden, huvudkolumnen (2/3) eller sidokolumnen (1/3). Hela bredden lagras aldrig (ingen zon).
-    let zoneSel = null;
-    if (S.kind === 'converted' && S.pageKey === 'home') {
-      zoneSel = h('select', { class: 'form-select form-select-sm w-auto', 'aria-label': 'Plats på sidan', 'data-block-zone': b.id },
-        ['full', 'main', 'side'].map(z => h('option', { value: z, selected: (b.data.zone || 'full') === z ? true : null }, ZONE_LABEL[z])));
-      zoneSel.addEventListener('change', () => { if (zoneSel.value === 'full') delete b.data.zone; else b.data.zone = zoneSel.value; markDirty(); });
+  // ── Blockkortet: stängt visar det vad det är (namn, sammanfattning, märken); Ändra öppnar fälten. ────────────────────
+  const plainText = html => { const d = new DOMParser().parseFromString(html || '', 'text/html'); return (d.body.textContent || '').replace(/\s+/g, ' ').trim(); };
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  /** Det som skrivs ut på kortet: texten i ett textblock, rubriken, antalet länkar/dokument/bilder, annars vad blocket visar. */
+  function summaryOf(b) {
+    const d = b.data || {};
+    switch (b.type) {
+      case 'text': return plainText(d.html);
+      case 'heading': return (d.text || '').trim();
+      case 'image': return String(d.alt || d.caption || '').trim();
+      case 'gallery': return plural((d.items || []).length, 'bild', 'bilder') + (d.title ? ' · ' + d.title : '');
+      case 'links': return plural((d.items || []).filter(it => it.label || it.url).length, 'länk', 'länkar');
+      case 'documents': return plural((d.refs || []).length, 'dokument', 'dokument') + (d.title ? ' · ' + d.title : '');
+      case 'signup': return d.title || 'Anmälan';
+      case 'pagelink': { const p = (S.st.systemPages || []).find(x => x.key === d.key); return d.label || (p ? 'Knapp till ' + p.label : 'Knapp till en sida'); }
+      case 'events': case 'news': case 'competitions': case 'staff-seeking': return 'Visar upp till ' + (d.count || 5) + (d.type === 'Möte' ? ' · bara möten' : '');
+      default: return d.title || '';
     }
-    const head = h('div', { class: 'hs-block-head' },
-      h('span', { class: 'hs-type' }, h('i', { class: 'bi ' + info.icon + ' me-2' }), info.label),
-      visOptions().filter(o => o.v >= min).length > 1 ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Syns för', visSel) : null,
-      zoneSel ? h('span', { class: 'd-flex align-items-center gap-1 small' }, 'Plats', zoneSel) : null,
-      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, -1) < 0, 'aria-label': 'Flytta upp', onclick: () => move(i, -1) }, h('i', { class: 'bi bi-arrow-up' })),
-      h('button', { class: 'btn btn-sm btn-outline-secondary', disabled: neighbour(i, 1) < 0, 'aria-label': 'Flytta ner', onclick: () => move(i, 1) }, h('i', { class: 'bi bi-arrow-down' })),
-      h('button', { class: 'btn btn-sm btn-outline-danger', 'aria-label': 'Ta bort blocket', onclick: async () => {
-        if (!await confirmDialog('Ta bort blocket?', 'Blocket "' + info.label + '" tas bort från sidan.', 'Ta bort', true)) return;
-        S.blocks.splice(i, 1); markDirty(); drawBlocks();
-      } }, h('i', { class: 'bi bi-trash' })));
-    return h('div', { class: 'hs-block', dataset: undefined }, head, h('div', { class: 'hs-block-body' }, blockBody(b)));
+  }
+  const cardSummary = b => {
+    const s = summaryOf(b);
+    if (b.type === 'text') return { text: s ? (s.length > 140 ? s.slice(0, 140) + '…' : s) : 'Ingen text än.', muted: !s };
+    if (b.type === 'heading') return { text: s || 'Ingen rubrik än.', muted: !s };
+    if (b.type === 'image') return { text: s || 'Bilden saknar beskrivning.', muted: !s };
+    if (['gallery', 'links', 'documents', 'signup', 'pagelink', 'events', 'news', 'competitions', 'staff-seeking'].includes(b.type)) {
+      const info = typeInfo(b.type);
+      return { text: s + (['events', 'news', 'competitions', 'staff-seeking'].includes(b.type) ? '. ' + info.description : ''), muted: false };
+    }
+    return { text: typeInfo(b.type).description, muted: false };
+  };
+  /** Har blocket inget innehåll än? Då visas det inte för besökarna förrän det har något (märket "Tomt"). */
+  function isEmptyBlock(b) {
+    const d = b.data || {};
+    switch (b.type) {
+      case 'text': return !plainText(d.html) && !/<img\b/i.test(d.html || '');
+      case 'heading': return !String(d.text || '').trim();
+      case 'links': return !(d.items || []).some(it => String(it.label || '').trim() && String(it.url || '').trim());
+      case 'documents': return !(d.refs || []).length;
+      case 'gallery': return !(d.items || []).length;
+      default: return false;
+    }
+  }
+
+  const emptyMark = () => h('span', { class: 'hs-state wait', 'data-mark-empty': '1', title: 'Blocket har inget innehåll än. Det sparas och visas för besökarna först när det har något.' }, 'Tomt');
+  /** Medan man skriver i det öppna kortet följer sammanfattningen och märket "Tomt" med (ingen omritning: textredigerare och fokus lever kvar). */
+  function paintCardLive() {
+    const b = S.openId && S.blocks.find(x => x.id === S.openId); if (!b || b.type === 'panel') return;
+    const card = body.querySelector('[data-block-id="' + b.id + '"]'); if (!card) return;
+    const sum = cardSummary(b), el = card.querySelector('.hs-summary');
+    if (el) { el.textContent = sum.text; el.classList.toggle('fst-italic', !!sum.muted); }
+    const marks = card.querySelector('.hs-block-marks'), has = marks && marks.querySelector('[data-mark-empty]');
+    const empty = isEmptyBlock(b) || savableBlock(b) === null;
+    if (marks && empty && !has) marks.querySelector('.dropdown') ? marks.querySelector('.dropdown').after(emptyMark()) : marks.append(emptyMark());
+    else if (!empty && has) has.remove();
+  }
+
+  function blockCard(b) {
+    const info = typeInfo(b.type), i = indexOfId(b.id), open = S.openId === b.id, min = minVisFor(b.type);
+    const floor = ((S.st && S.st.blockFloors) || {})[b.type] || 0;
+    const isHome = S.kind === 'converted' && S.pageKey === 'home';
+    const marks = [levelPicker(b, info.label, {
+      min,
+      reason: v => v < floor ? 'Det här blocket visar personuppgifter och kan inte vara öppnare än ' + visLabel(floor).toLowerCase() + '.' : pageLevelReason(),
+      onPick: v => { b.visibility = v; markDirty(); S.refreshWho && S.refreshWho(); toast(info.label + ' syns nu för ' + visLabel(v).toLowerCase() + '.', false); return true; },
+    })];
+    if (isEmptyBlock(b) || savableBlock(b) === null) marks.push(emptyMark());
+    if (floor > 0) marks.push(stateMark('off', 'Personuppgifter', 'Visar personuppgifter och kan aldrig vara öppet för alla.'));
+    if (info.live) marks.push(stateMark('off', 'Hämtas automatiskt', 'Innehållet hämtas vid varje besök.'));
+    if (isHome) marks.push(stateMark('own', ZONE_LABEL[b.data.zone] || ZONE_LABEL.full));
+    const addUnder = () => startAdd({ index: i + 1, pos: b.pos, after: b }, () => body.querySelector('[data-block-id="' + b.id + '"] .hs-menu-toggle'));
+    const menu = rowMenu([
+      ['Flytta upp', () => moveBlock(b.id, 'up'), { disabled: neighbour(i, -1) < 0 }],
+      ['Flytta ner', () => moveBlock(b.id, 'down'), { disabled: neighbour(i, 1) < 0 }],
+      ['Flytta först', () => moveBlock(b.id, 'first'), { disabled: neighbour(i, -1) < 0 }],
+      ['Flytta sist', () => moveBlock(b.id, 'last'), { disabled: neighbour(i, 1) < 0 }],
+      ...(isHome ? ['full', 'main', 'side'].filter(z => z !== (b.data.zone || 'full')).map(z => ['Flytta till ' + ZONE_LABEL[z].toLowerCase(), () => setZone(b, z)]) : []),
+      '-', ['Lägg till block under', addUnder],
+      '-', ['Ta bort', () => removeBlock(b.id), { danger: true }]], 'Åtgärder för ' + blockTitle(b) + ', ' + blockNo(i));
+    const openBtn = h('button', { type: 'button', class: 'btn btn-sm hs-open-toggle ' + (open ? 'btn-primary' : 'btn-outline-primary'), 'aria-expanded': String(open), 'aria-controls': 'hsBody' + b.id,
+      'aria-label': (open ? 'Klar med ' : 'Ändra ') + blockTitle(b) + ', ' + blockNo(i), onclick: () => toggleOpen(b.id) }, open ? 'Klar' : 'Ändra');
+    const sum = cardSummary(b);
+    const thumb = b.type === 'image' && b.data.ref ? h('img', { class: 'hs-thumb', src: imgUrl(b.data.ref) + '&w=320', alt: '', loading: 'lazy' }) : null;
+    let bodyEl = null;
+    if (open) {
+      bodyEl = S.bodyCache.get(b.id);   // det öppna blockets innehåll (och dess textredigerare) återanvänds när listan ritas om: fokus och markör finns kvar
+      if (!bodyEl) { bodyEl = h('div', { class: 'hs-block-body', id: 'hsBody' + b.id }, blockBody(b)); S.bodyCache.set(b.id, bodyEl); }
+    }
+    const hl = S.justAdded && S.justAdded.includes(b.id);
+    return h('div', { class: 'hs-block' + (open ? ' open' : '') + (hl ? ' hs-new' : ''), 'data-block-id': b.id, 'data-block-type': b.type },
+      cardHead(b, i, { icon: info.icon, thumb, name: info.label, summary: sum.text, summaryMuted: sum.muted, marks, menu, open: openBtn }), bodyEl);
   }
 
   // Etiketten kopplas till fältet (for/id), så att en skärmläsare säger vad fältet är och ett klick på etiketten går till fältet.
@@ -1880,6 +2357,9 @@
       case 'competitions': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många tävlingar', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           IS_REGION ? 'Visar de närmaste kommande tävlingarna i kretsen. Klubbinterna tävlingar visas aldrig här.' : 'Visar de närmaste kommande tävlingarna där klubben är arrangör. Klubbinterna tävlingar ser bara klubbens medlemmar.')];
+      case 'staff-seeking': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
+        field('Så många tävlingar', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
+          'Visar kommande tävlingar som söker funktionärer bland ' + (IS_REGION ? 'kretsens klubbar' : 'klubbens medlemmar') + ', även när en annan klubb i kretsen arrangerar. Varje tävling länkar till anmälan. Finns ingen visas inget för besökaren.')];
       case 'records': case 'ranges': case 'champions': case 'stats': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         h('p', { class: 'text-muted small mb-0' }, b.type === 'records' ? 'Visar ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' gällande rekord per gren och klass. Listan hämtas vid varje besök.'
           : b.type === 'champions' ? 'Visar senaste årets mästare per gren och klass, som de är inmatade under ' + (IS_REGION ? 'kretsens' : 'klubbens') + ' Mästare. Mästarna är personuppgifter, så blocket kan aldrig visas för alla.'

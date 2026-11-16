@@ -67,6 +67,17 @@ namespace HpskSite.Models.Staffing
         public List<RoleOption> Roles { get; set; } = new();
     }
 
+    /// <summary>En tävling som söker funktionärer bland en förenings medlemmar (blocket "Funktionärer sökes"). Gäller föreningen, inte en enskild person.</summary>
+    public class StaffSeekView
+    {
+        public int CompetitionId { get; set; }
+        public int PlanningId { get; set; }
+        public string CompName { get; set; } = "";
+        public DateTime Date { get; set; }
+        /// <summary>Anmälningssidan (/bemanna?p=…).</summary>
+        public string SignupPath { get; set; } = "";
+    }
+
     public class RoleOption
     {
         public string Key { get; set; } = "";

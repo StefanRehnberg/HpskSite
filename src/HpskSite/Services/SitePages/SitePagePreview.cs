@@ -46,7 +46,7 @@ namespace HpskSite.Services.SitePages
             ? $"{persona.Label} ser sidan i menyn med ett hänglås och får beskedet att sidan är för medlemmar."
             : $"{persona.Label} ser sidan i menyn med ett hänglås och får en ruta med Logga in i stället för innehållet.";
 
-        public static PreviewResult Build(string ownerType, string title, SiteVisibility pageVisibility, SiteContentResult content, PreviewPersona persona, ISiteBlockData data, string ownerUrl)
+        public static PreviewResult Build(string ownerType, string title, SiteVisibility pageVisibility, SiteContentResult content, PreviewPersona persona, ISiteBlockData data, string ownerUrl, PreviewStyle? style = null)
         {
             var template = SiteTemplates.For(ownerType);
             var def = new SitePageDef(SitePageRequest.FreePageKey, "x", title, 0, new[] { new SiteBlockDef("page", pageVisibility) });
@@ -61,8 +61,31 @@ namespace HpskSite.Services.SitePages
             var ctx = new SiteRenderContext(persona.Viewer, ownerUrl, template, data);
             var body = SiteBlockRenderer.RenderAll(content.Blocks, pageVisibility, ctx);
             if (body.Length == 0)
-                return new PreviewResult(decision, $"{persona.Label} kan öppna sidan men ser inget av innehållet: alla block är för någon annan.", Document(title, ""));
-            return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan.", Document(title, body));
+                return new PreviewResult(decision, $"{persona.Label} kan öppna sidan men ser inget av innehållet: alla block är för någon annan.", Document(title, "", style));
+            return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan.", Document(title, body, style));
+        }
+
+        /// <summary>
+        /// Förhandsvisning av en systemsidas EGEN TEXT före och efter sidans vanliga innehåll (slots). Sidans vanliga innehåll är levande data med session och ritas inte här: det visas som ett
+        /// namnkort mellan texterna. Åtkomsten prövas mot systemsidan själv (samma regel som besökarna), blocken mot textens egen nivå.
+        /// </summary>
+        public static PreviewResult BuildSlots(string ownerType, string templateKey, SiteVisibility copyVisibility, SiteContentResult content, PreviewPersona persona, ISiteBlockData data, string ownerUrl, PreviewStyle? style = null)
+        {
+            var template = SiteTemplates.For(ownerType);
+            var def = template.PageByKey(templateKey) ?? throw new ArgumentException("Okänd sida: " + templateKey, nameof(templateKey));
+            switch (SitePageAccessRules.Decide(template, def, persona.Viewer))
+            {
+                case SitePageDecision.Locked: return new PreviewResult(SitePageDecision.Locked, LockedNotice(persona), "");
+                case SitePageDecision.NotFound: return new PreviewResult(SitePageDecision.NotFound, $"{persona.Label} får beskedet att sidan inte finns. Ingen kan se att den finns.", "");
+            }
+            var ctx = new SiteRenderContext(persona.Viewer, ownerUrl, template, data);
+            var before = SiteBlockRenderer.RenderAll(content.Before, copyVisibility, ctx);
+            var after = SiteBlockRenderer.RenderAll(content.After, copyVisibility, ctx);
+            var card = "<div class=\"card mb-3\"><div class=\"card-body\"><div class=\"fw-semibold\">" + Encoder.Encode(def.Label) + "</div><div class=\"text-muted small\">Sidans vanliga innehåll visas här. Det ändras inte.</div></div></div>";
+            var notice = before.Length + after.Length == 0
+                ? $"{persona.Label} ser sidans vanliga innehåll, men ingen av texterna före eller efter (de är för någon annan eller tomma)."
+                : $"Så ser {persona.Label.ToLowerInvariant()} sidan. Sidans vanliga innehåll visas bara som ett namnkort.";
+            return new PreviewResult(SitePageDecision.Serve, notice, Document(def.Label, before + card + after, style));
         }
 
         /// <summary>
@@ -71,7 +94,7 @@ namespace HpskSite.Services.SitePages
         /// levande data och ritas inte här: den visas som ett kort med sitt namn och vad den visar, men bara för den tittare som får se den.
         /// </summary>
         public static PreviewResult BuildConverted(string ownerType, string title, string templateKey, SiteVisibility pageVisibility, SiteContentResult content,
-            PreviewPersona persona, ISiteBlockData data, string ownerUrl)
+            PreviewPersona persona, ISiteBlockData data, string ownerUrl, PreviewStyle? style = null)
         {
             var converted = new ConvertedPage(templateKey, ConvertedState.Ok, pageVisibility, false, content);
             var template = SiteConvertedPages.Apply(SiteTemplates.For(ownerType), new Dictionary<string, ConvertedPage> { [templateKey] = converted });
@@ -94,8 +117,8 @@ namespace HpskSite.Services.SitePages
                   .Append("</div><div class=\"text-muted small\">").Append(Encoder.Encode(d?.Description ?? "")).Append("</div></div></div>");
             }
             if (sb.Length == 0)
-                return new PreviewResult(decision, $"{persona.Label} kan öppna sidan men ser inget av innehållet: alla block är för någon annan.", Document(title, ""));
-            return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan. Rutor med automatiskt innehåll visas här bara med namn.", Document(title, sb.ToString()));
+                return new PreviewResult(decision, $"{persona.Label} kan öppna sidan men ser inget av innehållet: alla block är för någon annan.", Document(title, "", style));
+            return new PreviewResult(decision, $"Så ser {persona.Label.ToLowerInvariant()} sidan. Rutor med automatiskt innehåll visas här bara med namn.", Document(title, sb.ToString(), style));
         }
 
         /// <summary>En kolumn i "Vem ser sidan?": en av de fasta tittarna.</summary>
@@ -105,13 +128,6 @@ namespace HpskSite.Services.SitePages
         public sealed record VisibilityRow(string Kind, string Label, string Detail, IReadOnlyList<string> States);
 
         public sealed record VisibilityMatrix(IReadOnlyList<VisibilityColumn> Columns, IReadOnlyList<VisibilityRow> Rows, string Summary);
-
-        private static readonly Dictionary<string, string> BlockLabels = new()
-        {
-            ["text"] = "Text", ["heading"] = "Rubrik", ["links"] = "Länkar", ["documents"] = "Dokument", ["contact"] = "Kontaktuppgifter",
-            ["events"] = "Kommande händelser", ["news"] = "Senaste nyheterna", ["about"] = "Presentationstext", ["competitions"] = "Kommande tävlingar", ["records"] = "Rekord", ["ranges"] = "Skjutbanor", ["champions"] = "Regerande mästare", ["stats"] = "Siffror", ["pagelink"] = "Länk till en sida", ["image"] = "Bild", ["gallery"] = "Bildgalleri", ["signup"] = "Anmälan",
-            ["region-clubs"] = "Klubbar i kretsen", ["region-ranges"] = "Skjutbanor", ["region-series"] = "Serier", ["region-stats"] = "Kretsen i siffror",
-        };
 
         private static string BlockDetail(SiteBlock b)
         {
@@ -155,7 +171,7 @@ namespace HpskSite.Services.SitePages
             foreach (var b in content.Blocks)
             {
                 var isPanel = b.Type == "panel";
-                var label = isPanel ? (PanelCatalog.Find(ownerType, SiteBlockSchema.PanelKeyOf(b.Data) ?? "")?.Name ?? "Del av sidan") : BlockLabels.GetValueOrDefault(b.Type, b.Type);
+                var label = isPanel ? (PanelCatalog.Find(ownerType, SiteBlockSchema.PanelKeyOf(b.Data) ?? "")?.Name ?? "Del av sidan") : SiteBlockCatalog.LabelOf(b.Type, ownerType);   // ett namn överallt: samma register som väljaren och redigeraren
                 rows.Add(new(isPanel ? "panel" : "block", label, isPanel ? "" : BlockDetail(b),
                     personas.Select((p, i) => decisions[i] == SitePageDecision.Serve && SiteBlockRenderer.BlockVisible(b, pageVisibility, ownerType, p.Viewer) ? "see" : "no").ToList()));
             }
@@ -170,12 +186,25 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>
-        /// Ett komplett dokument för en <c>&lt;iframe sandbox srcdoc&gt;</c>. Titeln kodas; brödtexten är redan renderarens (kodad och sanerad). Bara bootstrap-stilen laddas utifrån;
-        /// inga skript. Iframen har <c>sandbox=""</c>, så inget skript kan köras i den ändå.
+        /// Ett komplett dokument för en <c>&lt;iframe sandbox srcdoc&gt;</c>. Titeln kodas; brödtexten är redan renderarens (kodad och sanerad). Utan <paramref name="style"/> laddas bara
+        /// bootstrap-stilen; med den även sajtens tema, ikoner och föreningens färg. Inga skript. Redigerarens iframe har <c>sandbox="allow-same-origin"</c> (utan allow-scripts, allow-forms och
+        /// allow-popups): det ger bilderna sin inloggade session men inget skript, inget formulär och ingen navigering kan köras i den.
         /// </summary>
-        public static string Document(string title, string bodyHtml) =>
-            "<!doctype html><html lang=\"sv\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-            "<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css\" rel=\"stylesheet\"></head><body class=\"p-3\">" +
-            $"<h1 class=\"h2 mb-4\">{Encoder.Encode(title)}</h1>{bodyHtml}</body></html>";
+        public static string Document(string title, string bodyHtml, PreviewStyle? style = null)
+        {
+            // Sajtens egna stilar (theme.css har bland annat .site-block) och klubbens valda färg (samma CSS som besökarsidan får, ur en vitlista) så att förhandsvisningen ser ut som sidan.
+            // Ljust eller mörkt läge följer redigeraren. Inga skript: iframen har aldrig allow-scripts.
+            var theme = style?.Theme == "dark" ? "dark" : "light";
+            var css = style == null || string.IsNullOrEmpty(style.PaletteCss) ? "" : "<style>" + style.PaletteCss + "</style>";
+            var bodyClass = "bg-body" + (style != null && !string.IsNullOrEmpty(style.BodyClass) ? " " + style.BodyClass : "");
+            return $"<!doctype html><html lang=\"sv\" data-bs-theme=\"{theme}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                "<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css\" rel=\"stylesheet\">" +
+                (style == null ? "" : "<link href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" rel=\"stylesheet\"><link href=\"/css/theme.css\" rel=\"stylesheet\">") +
+                css + $"</head><body class=\"{bodyClass} p-3\"><main class=\"container\" style=\"max-width:60rem\">" +
+                $"<h1 class=\"h2 mb-4\">{Encoder.Encode(title)}</h1>{bodyHtml}</main></body></html>";
+        }
     }
+
+    /// <summary>Utseendet förhandsvisningen ritas med: klubbens palett-CSS (<see cref="SiteAppearance.Css"/>), klassen på &lt;body&gt; som CSS:en hänger på, och ljust/mörkt läge ("light"/"dark").</summary>
+    public sealed record PreviewStyle(string PaletteCss, string BodyClass, string Theme);
 }

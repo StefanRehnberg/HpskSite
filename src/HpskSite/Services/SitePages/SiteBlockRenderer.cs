@@ -55,6 +55,9 @@ namespace HpskSite.Services.SitePages
         /// <summary>Ägarens kommande tävlingar som tittaren får se (klubbens egna, kretsens egna och klubbarnas icke klubbinterna). Standard: inga.</summary>
         IReadOnlyList<SiteCompetitionInfo> UpcomingCompetitions(int count) => Array.Empty<SiteCompetitionInfo>();
 
+        /// <summary>Kommande tävlingar som söker funktionärer bland ägarens medlemmar (klubbens, eller kretsens och dess klubbars). Gäller föreningen, inte tittaren. Standard: inga.</summary>
+        IReadOnlyList<SiteStaffSeekInfo> StaffSeeking(int count) => Array.Empty<SiteStaffSeekInfo>();
+
         /// <summary>Ägarens gällande rekord (klubbens respektive kretsens). Standard: inga.</summary>
         IReadOnlyList<SiteRecordInfo> Records() => Array.Empty<SiteRecordInfo>();
 
@@ -73,6 +76,9 @@ namespace HpskSite.Services.SitePages
 
     /// <summary>En kommande tävling i tävlingsblocket.</summary>
     public sealed record SiteCompetitionInfo(string Title, DateTime Date, string Url);
+
+    /// <summary>En tävling som söker funktionärer (blocket "Funktionärer sökes"). <see cref="Url"/> är anmälningssidan.</summary>
+    public sealed record SiteStaffSeekInfo(string Title, DateTime Date, string Url);
 
     /// <summary>Ett gällande rekord: gren, klass, resultat, innehavare och datum. <see cref="Result"/> är den färdiga strängen med enheten på ("285 / 300"): talet reser aldrig utan sin enhet.</summary>
     public sealed record SiteRecordInfo(string Discipline, string Class, bool IsTeam, string Result, string Holder, DateTime Date);
@@ -154,6 +160,7 @@ namespace HpskSite.Services.SitePages
                 "gallery" => Gallery(block, ctx),
                 "signup" => Signup(block, ctx),
                 "competitions" => Competitions(block, ctx),
+                "staff-seeking" => StaffSeeking(block, ctx),
                 "records" => Records(block, ctx),
                 "ranges" => Ranges(block, ctx),
                 "champions" => Champions(block, ctx),
@@ -494,6 +501,22 @@ namespace HpskSite.Services.SitePages
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             foreach (var c in items)
                 sb.Append($"<li class=\"mb-2\"><strong>{E(c.Date.ToString("d MMM yyyy", sv))}</strong> {LinkOrText(c.Title, c.Url)}</li>");
+            return Section(b.Id, sb.Append("</ul>").ToString());
+        }
+
+        /// <summary>Tävlingar som söker funktionärer: en klickbar rad per tävling (till anmälan). Ingen tävling ger inget block (editorn visar en platshållare, besökaren inget).</summary>
+        private static string StaffSeeking(SiteBlock b, SiteRenderContext ctx)
+        {
+            var count = Math.Clamp(b.Data["count"]?.GetValue<int>() ?? 5, 1, 10);
+            var items = ctx.Data.StaffSeeking(count).Take(count).ToList();
+            if (items.Count == 0) return "";
+            var title = b.Data["title"]?.GetValue<string>();
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append($"<h3>{E(title)}</h3>");
+            sb.Append("<ul class=\"list-unstyled\">");
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            foreach (var c in items)
+                sb.Append($"<li class=\"mb-2\"><strong>{E(c.Date.ToString("d MMM yyyy", sv))}</strong> {LinkOrText(c.Title, c.Url)} <span class=\"text-muted small\">söker funktionärer – anmäl dig</span></li>");
             return Section(b.Id, sb.Append("</ul>").ToString());
         }
 

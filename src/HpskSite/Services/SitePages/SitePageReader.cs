@@ -150,12 +150,15 @@ namespace HpskSite.Services.SitePages
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+        private readonly HpskSite.Services.Staffing.StaffingSignupService _staffSignup;
 
         public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.ICompetitionSeriesStore series,
             HpskSite.Services.Competitions.CompetitionLinks links, ClubRosterService roster,
-            Microsoft.AspNetCore.Http.IHttpContextAccessor http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery)
+            Microsoft.AspNetCore.Http.IHttpContextAccessor http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
+            HpskSite.Services.Staffing.StaffingSignupService staffSignup)
         {
+            _staffSignup = staffSignup;
             _http = http;
             _antiforgery = antiforgery;
             _roster = roster;
@@ -339,6 +342,31 @@ namespace HpskSite.Services.SitePages
                     .OrderBy(c => c.CompetitionDate)
                     .Select(c => new SiteCompetitionInfo(c.DisplayName, c.CompetitionDate!.Value, _f._links.Url(c.Id)))
                     .Take(count).ToList();
+            }
+
+            /// <summary>
+            /// Tävlingar som söker funktionärer bland ägarens medlemmar. Klubb: urval som pekar ut klubben eller klubbens krets. Krets: urval som pekar ut kretsen
+            /// eller någon av dess klubbar. Ägaren kommer ur begäran, aldrig ur blocket; svaret är detsamma för alla tittare (en klubbintern tävling visas bara för
+            /// klubbens egna medlemmar).
+            /// </summary>
+            public IReadOnlyList<SiteStaffSeekInfo> StaffSeeking(int count)
+            {
+                try
+                {
+                    List<int> clubIds; string? region;
+                    if (_ownerType == SiteTemplates.Club) { clubIds = new List<int> { _ownerId }; region = _node?.Value<string>("regionalFederation"); }
+                    else
+                    {
+                        if (!IsRegion || RegionCode.Length == 0) return Array.Empty<SiteStaffSeekInfo>();
+                        clubIds = SiteRegion.Clubs(_node).Select(c => c.Id).ToList(); region = RegionCode;
+                    }
+                    return _f._staffSignup.GetSeekingFor(clubIds, region, _ownerType == SiteTemplates.Club && _viewer.IsOwnerMember ? _ownerId : 0)
+                        .Take(count).Select(s => new SiteStaffSeekInfo(s.CompName, s.Date, s.SignupPath)).ToList();
+                }
+                catch (Microsoft.Data.SqlClient.SqlException)
+                {
+                    return Array.Empty<SiteStaffSeekInfo>();   // bemanningstabellerna saknas (migrering ej körd): blocket ritar inget i stället för att fälla sidan
+                }
             }
 
             public IReadOnlyList<SiteRecordInfo> Records()

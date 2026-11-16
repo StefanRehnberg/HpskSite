@@ -258,6 +258,10 @@ namespace HpskSite.Controllers
                 // Golv-tabellen (det öppnaste varje blocktyp får vara hos den här ägartypen) och utgångna typer: editorn har ingen egen kopia av reglerna.
                 blockFloors = SiteBlockSchema.FloorTable(g.OwnerType).ToDictionary(kv => kv.Key, kv => (int)kv.Value),
                 retiredBlocks = SiteBlockSchema.Types.Values.Where(t => t.Retired).Select(t => t.Name),
+                // Blockregistret (ENDA källan för väljarens grupper, etiketter, ikoner, beskrivningar och standardinnehåll) och uppgiftskorten överst i väljaren.
+                blockGroups = SiteBlockCatalog.Groups(g.OwnerType),
+                blockTypes = SiteBlockCatalog.For(g.OwnerType).Select(m => new { type = m.Type, group = m.Group, icon = m.Icon, label = m.Label, description = m.Description, slot = m.Slot, needsImage = m.NeedsImage, live = m.Live, defaults = m.Defaults }),
+                blockTasks = SiteBlockCatalog.Tasks(g.OwnerType).Select(t => new { key = t.Key, title = t.Title, description = t.Description, icon = t.Icon, blocks = t.Blocks, note = t.Note }),
                 systemPages = sysStates.Select(s => new
                 {
                     key = s.Key, label = s.Label, mode = SiteSystemPages.Code(s.Mode), word = SiteSystemPages.Word(s.Mode),
@@ -652,6 +656,67 @@ namespace HpskSite.Controllers
                 if (d != null) url = g.OwnerUrl + (d.IsHome ? "" : d.Slug + "/");
             }
             return Json(new { success = true, kind = kind == SiteContentKind.ConvertedPage ? "converted" : "free", basis = isDraft ? "draft" : "published", published = page.PublishedVersionId != null, columns = m.Columns, rows = m.Rows, summary = m.Summary, publicUrl = url });
+        }
+
+        /// <summary>
+        /// "Förhandsgranska utkastet": sidans SPARADE utkast (annars den publicerade versionen) ritat på servern för en vald tittare, som ett komplett dokument att lägga i en
+        /// <c>&lt;iframe sandbox="allow-same-origin"&gt;</c> (inga skript, inga formulär). Samma <see cref="SiteBlockRenderer"/> och samma åtkomstregler som besökarna möter, mot de FASTA
+        /// tittarna (<see cref="SitePagePreview.Personas"/>); dokumentet har sajtens tema och föreningens valda färg. Inget rått innehåll kommer från klienten: bara sid-id och tittare.
+        /// POST med antiforgery, <c>no-store</c> och takt. Ett stödläge (en annan förenings administratör som hjälper till) får aldrig se personblock här: de utelämnas och det sägs.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör eller öppet stödläge, brytare 2 PÅ")]
+        public async Task<IActionResult> RenderPreview(string ownerType, int ownerId, int pageId, string persona, string? theme, [FromServices] SiteBlockDataFactory data)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            Response.Headers["Cache-Control"] = "private, no-store";
+            if (Throttled($"sitepreview:{g.OwnerType}:{g.OwnerId}", 60, TimeSpan.FromMinutes(1))) return Fail("För många förfrågningar på kort tid.", "rate");
+            var who = SitePagePreview.Persona(g.OwnerType, persona);
+            if (who == null) return Fail("Okänd besökare.");
+
+            SitePageRow? page; SitePageVersionRow? version; bool isDraft;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+            {
+                page = SitePageStore.GetPage(scope.Database, pageId, g.OwnerType, g.OwnerId);   // id:t prövas mot ägaren
+                var draft = page == null ? null : SitePageStore.GetDraft(scope.Database, pageId, g.OwnerType, g.OwnerId);
+                version = draft ?? (page == null ? null : SitePageStore.GetPublished(scope.Database, pageId, g.OwnerType, g.OwnerId));
+                isDraft = draft != null;
+            }
+            if (page == null || version == null) return Fail("Sidan finns inte.");
+            var template = SiteTemplates.For(g.OwnerType);
+            var kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson);
+            var content = SiteBlockSchema.Parse(version.BlocksJson, kind, page.VisibilityLevel, template, page.TemplateKey);
+            if (!content.Ok) return Fail("Sidan kan inte förhandsgranskas ännu: " + content.Errors[0].Message);
+
+            // Stödläge: personblock (kontakt, mästare) visas aldrig för en stödperson, inte ens ritade för en annan tittare.
+            var hiddenPersonal = 0;
+            if (g.Grant != null)
+            {
+                bool Personal(SiteBlock b) => SiteBlockSchema.IsPersonalBlock(b.Type, g.OwnerType, b.Data);
+                hiddenPersonal = content.AllBlocks.Count(Personal);
+                if (hiddenPersonal > 0)
+                    content = new SiteContentResult { Kind = content.Kind, Blocks = content.Blocks.Where(b => !Personal(b)).ToList(), Before = content.Before.Where(b => !Personal(b)).ToList(), After = content.After.Where(b => !Personal(b)).ToList() };
+            }
+
+            var node = UmbracoContext.Content?.GetById(g.OwnerId);
+            var look = _appearance.Get(g.OwnerType, g.OwnerId);
+            var paletteCss = SiteAppearance.Css(look.Palette);
+            var style = new PreviewStyle(paletteCss, paletteCss.Length > 0 ? SiteAppearance.BodyClass : "", theme == "dark" ? "dark" : "light");
+            var blockData = data.For(g.OwnerType, g.OwnerId, node, who.Viewer);
+            PreviewResult r;
+            if (kind == SiteContentKind.ConvertedPage && page.TemplateKey != null)
+                r = SitePagePreview.BuildConverted(g.OwnerType, version.Title, page.TemplateKey, page.VisibilityLevel, content, who, blockData, g.OwnerUrl, style);
+            else if (kind == SiteContentKind.TemplateCopy && page.TemplateKey != null)
+                r = SitePagePreview.BuildSlots(g.OwnerType, page.TemplateKey, page.VisibilityLevel, content, who, blockData, g.OwnerUrl, style);
+            else
+                r = SitePagePreview.Build(g.OwnerType, version.Title, page.VisibilityLevel, content, who, blockData, g.OwnerUrl, style);
+            return Json(new
+            {
+                success = true, basis = isDraft ? "draft" : "published", persona = who.Key, personas = SitePagePreview.Personas(g.OwnerType).Select(p => new { key = p.Key, label = p.Label }),
+                decision = r.Decision.ToString(), notice = r.Notice, document = r.Document, hiddenPersonal,
+            });
         }
 
         /// <summary>

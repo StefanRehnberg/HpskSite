@@ -26,7 +26,7 @@ namespace HpskSite.Tests
             "pagelink" => new JsonObject { ["key"] = t.Pages.First(p => !p.IsAdmin).Key, ["label"] = "x" },
             "image" => new JsonObject { ["ref"] = "file:5", ["alt"] = "x", ["decorative"] = false },
             "events" => new JsonObject { ["title"] = "x", ["count"] = 3 },
-            "news" or "competitions" or "region-series" => new JsonObject { ["title"] = "x", ["count"] = 3 },
+            "news" or "competitions" or "staff-seeking" or "region-series" => new JsonObject { ["title"] = "x", ["count"] = 3 },
             _ => new JsonObject { ["title"] = "x" },
         };
 

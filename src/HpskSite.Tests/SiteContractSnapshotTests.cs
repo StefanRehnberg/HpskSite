@@ -33,6 +33,7 @@ namespace HpskSite.Tests
                 "region-stats|n|n|Y|n|title",
                 "news|n|Y|n|n|count,showExcerpt,showImage,title",   // Nyheter (SitePost): utdrag och omslagsbild valfria, 2026-11-13
                 "competitions|n|n|n|n|count,title",
+                "staff-seeking|n|n|n|n|count,title",   // Funktionärer sökes: tävlingar som söker funktionärer bland föreningens medlemmar (gäller föreningen, inte tittaren: ingen personuppgift)
                 "records|n|n|n|n|title",
                 "ranges|n|n|n|n|title",
                 "champions|Y|n|n|n|title",
