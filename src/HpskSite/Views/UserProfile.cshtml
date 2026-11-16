@@ -5307,7 +5307,7 @@ function renderCompetitionsTable() {
                                         ` : ''}
                                         ${comp.canUnregister ? `
                                             <li><hr class="dropdown-divider"></li>
-                                            <li><button class="dropdown-item text-danger" type="button" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
+                                            <li><button class="dropdown-item text-danger" type="button" onclick="unregisterFromCompetition(${comp.competitionId}, '${escapeHtml(comp.competitionName)}', ${comp.paymentStatus === 'paid' ? 'true' : 'false'})">
                                                 <i class="bi bi-x-circle me-2"></i>Avanmäl mig från tävlingen</button></li>
                                         ` : ''}
                                     </ul>
@@ -5369,7 +5369,7 @@ function renderCompetitionsCards() {
                                 </a>
                             ` : ''}
                             ${comp.canUnregister ? `
-                                <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
+                                <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.competitionId}, '${escapeHtml(comp.competitionName)}', ${comp.paymentStatus === 'paid' ? 'true' : 'false'})">
                                     <i class="bi bi-x-circle"></i> Avanmäl
                                 </button>
                             ` : ''}
@@ -5607,25 +5607,30 @@ function markMinaSidorPaymentSent(invoiceId, btn) {
     });
 }
 
-function unregisterFromCompetition(registrationId, competitionName) {
-    if (!confirm(`Är du säker på att du vill avanmäla dig från "${competitionName}"?\n\nOBS: Detta går inte att ångra.`)) {
+// Avanmälan går per TÄVLING (alla skyttens anmälningar i den), inte per anmälningsrad, och servern avgör vems
+// anmälan det är — klienten skickar bara tävlingen. Är avgiften betald får arrangören besked om återbetalningen.
+function unregisterFromCompetition(competitionId, competitionName, isPaid) {
+    const paidNote = isPaid
+        ? '\n\nDu har redan betalat avgiften. Arrangören får besked om att du ska få pengarna tillbaka och hör av sig till dig.'
+        : '';
+    if (!confirm(`Vill du avanmäla dig från "${competitionName}"?${paidNote}\n\nDu kan anmäla dig igen så länge anmälan är öppen.`)) {
         return;
     }
 
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
 
-    fetch(`/umbraco/surface/Competition/UnregisterFromCompetition`, {
+    fetch(`/umbraco/surface/Competition/WithdrawFromCompetition`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'RequestVerificationToken': token
         },
-        body: JSON.stringify({ registrationId: registrationId })
+        body: JSON.stringify({ competitionId: competitionId })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Du har framgångsrikt avanmält dig från tävlingen.');
+            alert(data.message || 'Du har avanmält dig från tävlingen.');
             loadCompetitionRegistrations(); // Reload list
         } else {
             alert('Fel vid avanmälan: ' + (data.message || 'Okänt fel'));

@@ -361,6 +361,15 @@
         <button type="button" class="btn btn-sm btn-warning" id="regOocShowBtn"
                 onclick="showOocSuggested()">Visa dem</button>
     </div>
+    @* Skyttar som avanmält sig SJÄLVA med betald avgift: de ska ha pengarna tillbaka. Fylls av loadWithdrawals() (RegistrationAdmin/GetWithdrawals)
+       och syns bara när det finns något. Sajten återbetalar inte — den påminner tills arrangören markerat raden som gjord. *@
+    <div class="alert alert-warning d-none mb-3" id="regWithdrawalCard" role="status">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-cash-coin"></i>
+            <strong id="regWithdrawalTitle" class="flex-grow-1">Ska få pengarna tillbaka</strong>
+        </div>
+        <div id="regWithdrawalBody"></div>
+    </div>
     <div class="card mb-3" id="regFilterCard">
         <div class="card-body">
             <div class="row g-2">
@@ -1748,6 +1757,81 @@ function loadCompetitionRegistrations() {
     // Teams/relay live in their own section; load them alongside individuals so they also
     // refresh after a payment is recorded (which re-runs loadCompetitionRegistrations).
     loadCompetitionTeams();
+    loadWithdrawals();
+}
+
+// ==================== Avanmälda som ska få pengarna tillbaka ====================
+// Skytten avanmäler sig själv (även med betald avgift) → raden hamnar här tills arrangören markerat återbetalningen.
+// Sajten rör inga pengar: den påminner. Ledger-tävlingar har dessutom en rad "(borttagen)" i avgiftslistan som ska ångras
+// för bokföringen (texten säger det).
+function loadWithdrawals() {
+    const card = document.getElementById('regWithdrawalCard');
+    if (!card) return;
+    const compId = $('.competition-registration-management').data('competition-id');
+    fetch(`/umbraco/surface/RegistrationAdmin/GetWithdrawals?competitionId=${compId}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.success || !(d.items || []).length) { card.classList.add('d-none'); return; }
+            paintWithdrawals(d);
+        })
+        .catch(() => { card.classList.add('d-none'); });
+}
+
+function paintWithdrawals(d) {
+    const card = document.getElementById('regWithdrawalCard');
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const kr = v => (Math.round(Number(v) * 100) / 100).toLocaleString('sv-SE') + ' kr';
+    const pending = d.items.filter(i => i.status === 'Pending');
+    const done = d.items.filter(i => i.status === 'Done');
+
+    card.classList.toggle('alert-warning', pending.length > 0);
+    card.classList.toggle('alert-secondary', pending.length === 0);
+    document.getElementById('regWithdrawalTitle').textContent = pending.length
+        ? `Ska få pengarna tillbaka (${pending.length})`
+        : 'Återbetalda avanmälningar';
+
+    const money = i => {
+        const parts = [];
+        if (i.paidAmount > 0) parts.push(`${kr(i.paidAmount)} betalt`);
+        if (i.claimedAmount > 0) parts.push(`${kr(i.claimedAmount)} angivet som betalt — kontrollera Swish/bank`);
+        return parts.join(' · ');
+    };
+    const row = i => {
+        const who = `<strong>${esc(i.memberName)}</strong>${i.clubName ? ` <span class="text-body-secondary">(${esc(i.clubName)})</span>` : ''}`;
+        const cls = i.classes ? ` · ${esc(i.classes)}` : '';
+        const hint = (i.status === 'Pending' && i.ledger)
+            ? '<div class="small text-body-secondary">Bokföring: ångra betalningen på raden "(borttagen)" i avgiftslistan när ni återbetalat.</div>' : '';
+        const note = i.note ? `<div class="small text-body-secondary">${esc(i.note)}</div>` : '';
+        const noMail = (i.status === 'Pending' && !i.mailed) ? '<div class="small text-danger">Mejlet till arrangören gick inte iväg — den här rutan är notisen.</div>' : '';
+        const action = i.status === 'Pending'
+            ? `<button type="button" class="btn btn-sm btn-success" data-wd-done="${i.id}"><i class="bi bi-check2 me-1"></i>Markera som återbetald</button>`
+            : `<span class="small text-body-secondary me-2">Återbetald ${esc(i.refundedAt || '')}</span><button type="button" class="btn btn-sm btn-outline-secondary" data-wd-undo="${i.id}">Ångra</button>`;
+        return `<div class="d-flex flex-wrap align-items-center gap-2 py-2 border-top">
+            <div class="flex-grow-1">${who}${cls}<div class="small">${money(i)} · avanmäld ${esc(i.withdrawnAt)}</div>${note}${hint}${noMail}</div>
+            <div class="text-nowrap">${action}</div></div>`;
+    };
+
+    let html = pending.map(row).join('');
+    if (pending.length) html += '<div class="small text-body-secondary pt-2 border-top">Skytten har avanmält sig själv. Svara på mejlet till er (svaret går direkt till skytten) för att fråga efter Swish-nummer eller kontonummer.</div>';
+    if (done.length) html += `<div class="small text-body-secondary pt-2">Redan återbetalda (senaste 90 dagarna)</div>` + done.map(row).join('');
+    document.getElementById('regWithdrawalBody').innerHTML = html;
+    card.classList.remove('d-none');
+
+    card.querySelectorAll('[data-wd-done],[data-wd-undo]').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        const id = parseInt(b.getAttribute('data-wd-done') || b.getAttribute('data-wd-undo'), 10);
+        const isDone = b.hasAttribute('data-wd-done');
+        const compId = $('.competition-registration-management').data('competition-id');
+        try {
+            const r = await fetch('/umbraco/surface/RegistrationAdmin/SetWithdrawalRefunded', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+                body: JSON.stringify({ competitionId: parseInt(compId, 10), withdrawalId: id, done: isDone })
+            }).then(x => x.json());
+            if (!r.success) { b.disabled = false; alert(r.message || 'Kunde inte spara.'); return; }
+            loadWithdrawals();
+        } catch (e) { b.disabled = false; alert('Kunde inte spara. Försök igen.'); }
+    }));
 }
 
 // ==================== Lag (teams + stafett) ====================

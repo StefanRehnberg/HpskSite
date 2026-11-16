@@ -2092,21 +2092,10 @@ namespace HpskSite.Controllers
         /// </summary>
         private bool CanUnregister(DateTime competitionDate, string paymentStatus)
         {
-            // Can't unregister if:
-            // 1. Competition has already started
-            // 2. Payment has been made (needs refund process)
-
-            if (competitionDate <= DateTime.Now)
-            {
-                return false; // Competition already started or past
-            }
-
-            if (paymentStatus == "paid")
-            {
-                return false; // Payment already made - needs admin intervention
-            }
-
-            return true; // Can unregister if future competition and not paid
+            // Skytten kan avanmäla sig tills tävlingen börjar — ÄVEN när avgiften är betald (Stefan 2026-11-16):
+            // då får arrangören besked om att skytten ska ha pengarna tillbaka (RegistrationWithdrawalService).
+            // Samma regel som RegistrationWithdrawalService.CanWithdraw; servern prövar den igen vid avanmälan.
+            return competitionDate > DateTime.Now;
         }
 
         /// <summary>

@@ -673,56 +673,19 @@ namespace HpskSite.Controllers
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
-                // Cancel any Pending invoices linked to this registration BEFORE deleting it.
-                // Otherwise they orphan and Bokföringsunderlag keeps listing them as
-                // "Utestående betalningar" — no shooter exists to chase. Paid invoices stay
-                // untouched: the money was actually collected and bookkeeping needs to see it.
-                if (competition != null)
+                // Själva städflödet bor i RegistrationWithdrawalService — arrangörens och skyttens egen avanmälan går
+                // genom SAMMA kod: makulera öppna fakturor (betalda rörs inte — pengarna är faktiskt inbetalda och
+                // bokföringen ska se dem), ta bort anmälan, räkna om liggarens avgifter (pengar och fakturor rörs inte,
+                // de syns som "för mycket betalt" tills arrangören ångrar eller krediterar) och ta skytten ur startlistor
+                // och resultat (efteråt och best-effort: anmälan är redan borta; springskytte städar via klientanropet).
+                var (actorId, actorName) = await GetCurrentActorAsync();
+                var withdrawal = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+                var outcome = await withdrawal.DeleteRegistrationAsync(competition, registration, actorId, actorName);
+                if (!outcome.Deleted)
                 {
-                    var (actorId, actorName) = await GetCurrentActorAsync();
-                    var linkedInvoices = GetAllInvoicesForRegistration(competition, request.RegistrationId);
-                    foreach (var inv in linkedInvoices)
-                    {
-                        var status = inv.GetValue<string>("paymentStatus") ?? "Pending";
-                        if (status.Trim().Trim('[', ']').Trim('"', '\'').Trim() == "Pending")
-                        {
-                            await _paymentService.UpdatePaymentStatusAsync(
-                                invoiceId: inv.Id,
-                                paymentStatus: "Cancelled",
-                                notes: "Anmälan borttagen",
-                                actorMemberId: actorId,
-                                actorMemberName: actorName,
-                                sendReceiptOnPaid: false);
-                        }
-                    }
+                    return Json(new { success = false, message = outcome.Error ?? "Kunde inte ta bort anmälan." });
                 }
-
-                // Captured BEFORE the delete — afterwards there is no registration to read it from.
-                var deletedMemberId = registration.MemberId;
-
-                if (!_registrations.Delete(competitionId, registration.Id))
-                {
-                    return Json(new { success = false, message = "Kunde inte ta bort anmälan." });
-                }
-
-                // Den nya modellen: öppna avgiftsbegäranden makuleras. Pengar och fakturor rörs inte —
-                // de syns som "för mycket betalt" på raden tills arrangören ångrar eller krediterar.
-                if (competitionId > 0)
-                    _paymentService.SyncLedgerFees(competitionId, registrationId: request.RegistrationId);
-
-                // Take the shooter off the start list and drop their result rows. Without this the
-                // deleted shooter stays on the generated list with orphaned result rows behind them
-                // — half of the known class-change orphaning issue. Springskytte has done this since
-                // 2026-08-05 from the client; the precision family and Fältskytte now do it here,
-                // server-side, so it cannot be skipped by a client that never makes the second call.
-                //
-                // Deliberately AFTER the delete and best-effort: the registration is already gone, so
-                // failing the response would report a failed deletion that actually succeeded.
-                // Springskytte is not handled here (no source registered) — its own client call still
-                // owns that path.
-                var cleanup = competition != null && deletedMemberId > 0
-                    ? await _startListCleanupService.CleanupAsync(competition, deletedMemberId)
-                    : new HpskSite.Services.StartListCleanup.CleanupOutcome { Supported = false };
+                var cleanup = outcome.Cleanup;
 
                 var messages = new List<string> { "Anmälan borttagen." };
                 if (cleanup.Regenerated)
@@ -750,6 +713,88 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Kunde inte ta bort anmälan: " + ex.Message });
             }
         }
+
+        /// <summary>
+        /// Rutan <b>"Ska få pengarna tillbaka"</b> i Anmälningar: skyttar som avanmält sig själva med betald (eller angiven)
+        /// avgift, väntande först. Samma behörighet som övriga anmälningar — arrangören, inte skytten.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetWithdrawals(int competitionId)
+        {
+            try
+            {
+                if (!await CanManageRegistrationsAsync(competitionId))
+                    return Json(new { success = false, message = "Access denied" });
+
+                var withdrawal = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+                var rows = withdrawal.ListForOrganiser(competitionId);
+                return Json(new
+                {
+                    success = true,
+                    items = rows.Select(r => new
+                    {
+                        id = r.Id,
+                        memberName = r.MemberName,
+                        clubName = r.ClubName,
+                        classes = r.Classes,
+                        withdrawnAt = r.WithdrawnAt.ToString("yyyy-MM-dd HH:mm"),
+                        paidAmount = r.PaidAmount,
+                        claimedAmount = r.ClaimedAmount,
+                        ledger = r.PaymentModel == "ledger",
+                        note = r.Note,
+                        status = r.RefundStatus,
+                        refundedAt = r.RefundedAt?.ToString("yyyy-MM-dd HH:mm"),
+                        refundNote = r.RefundNote,
+                        mailed = r.OrganiserMailedAt != null
+                    }).ToList(),
+                    pending = rows.Count(r => r.RefundStatus == HpskSite.Models.Registrations.RefundStatuses.Pending)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa avanmälningar för tävling {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Kunde inte läsa avanmälningarna." });
+            }
+        }
+
+        /// <summary>Arrangören markerar en återbetalning som gjord — eller ångrar markeringen. Pengarna rörs inte här.</summary>
+        [HttpPost]
+        public async Task<IActionResult> SetWithdrawalRefunded([FromBody] SetWithdrawalRefundedRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0 || request.WithdrawalId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+                if (!await CanManageRegistrationsAsync(request.CompetitionId))
+                    return Json(new { success = false, message = "Access denied" });
+
+                var (actorId, _) = await GetCurrentActorAsync();
+                var withdrawal = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+                var ok = withdrawal.SetRefunded(request.CompetitionId, request.WithdrawalId, request.Done, actorId, request.Note);
+                return Json(ok
+                    ? new { success = true, message = request.Done ? "Markerad som återbetald." : "Markeringen är borttagen." }
+                    : new { success = false, message = "Raden finns inte eller har redan det läget." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte uppdatera återbetalningen {WithdrawalId}", request?.WithdrawalId);
+                return Json(new { success = false, message = "Kunde inte spara." });
+            }
+        }
+
+        public sealed class SetWithdrawalRefundedRequest
+        {
+            public int CompetitionId { get; set; }
+            public int WithdrawalId { get; set; }
+            public bool Done { get; set; }
+            public string? Note { get; set; }
+        }
+
+        /// <summary>Samma behörighet som borttagning av en anmälan: sajtadmin eller funktionär på tävlingen.</summary>
+        private async Task<bool> CanManageRegistrationsAsync(int competitionId)
+            => await _authService.IsCurrentUserAdminAsync()
+               || (competitionId > 0 && _competitions.GetSaved(competitionId) != null
+                   && await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved));
 
         /// <summary>
         /// Add a late registration for a competition after results entry has started

@@ -23,6 +23,8 @@ namespace HpskSite.Services.Hosting
             // anmälnings-id hade annars fått gamla lograder. Beslutstabellen följer anmälan (cascade) men listas för fullständighetens skull.
             new("dbo.ChampionshipDecisionLog", "SELECT MAX(RegistrationId) FROM dbo.ChampionshipDecisionLog"),
             new("dbo.CompetitionRegistrationClassDecision", "SELECT MAX(RegistrationId) FROM dbo.CompetitionRegistrationClassDecision"),
+            // Avanmälan: raden bär den BORTTAGNA anmälans id och överlever den — ett återanvänt id hade fått en gammal avanmälan att se ut som den nya anmälans.
+            new("dbo.CompetitionWithdrawal", "SELECT MAX(RegistrationId) FROM dbo.CompetitionWithdrawal"),
             IdentityFloor.NodesOfType("competitionRegistration"),
             IdentityFloor.NodesOfType("competitionTeamRegistration"),
             new("dbo.umbracoPropertyData", @"SELECT MAX(COALESCE(pd.intValue, TRY_CONVERT(int, LEFT(pd.varcharValue, 20))))

@@ -1360,6 +1360,23 @@
 								<i class="bi bi-wallet2 me-1"></i>Betala anmälningsavgift
 							</button>
 						</div>
+
+						@* Din anmälan + Avanmäl mig. Fylls av skriptet längre ned (GetMyWithdrawalInfo) och syns BARA för den som är anmäld.
+						   Står utanför if/else-kedjan ovan med flit: avanmälan ska gå hela vägen fram till tävlingsdagen, även när
+						   sista anmälningsdag har passerat eller startlistan är publicerad (de stänger nyanmälan, inte avanmälan). *@
+						@if (regMemberId > 0)
+						{
+							<div id="myRegistrationBox" class="d-none mt-3">
+								@Html.AntiForgeryToken()
+								<div class="border rounded p-2 small">
+									<div><i class="bi bi-check-circle-fill text-success me-1"></i><strong>Du är anmäld</strong><span id="myRegClasses" class="text-muted"></span></div>
+									<div id="myRegNote" class="text-muted mt-1 d-none"></div>
+									<button type="button" id="myRegWithdrawBtn" class="btn btn-outline-danger btn-sm w-100 mt-2 d-none">
+										<i class="bi bi-x-circle me-1"></i>Avanmäl mig
+									</button>
+								</div>
+							</div>
+						}
 					</div>
 				</div>
 
@@ -2010,6 +2027,116 @@ window.CompetitionConfig = {
     // competition-fees.js — gamla GetUnpaidInvoices ser inga fakturor för en sådan tävling.
     var ledgerFees = PaymentModels.IsLedger(Model.Id);
 }
+@* ======================================== Avanmäl mig ========================================
+   Skyttens egen avanmälan. Bekräftelsen är en Bootstrap-dialog (aldrig confirm()/alert()) och säger vad som händer med
+   pengarna när avgiften redan är betald: arrangören får besked om att skytten ska ha pengarna tillbaka. Servern
+   (Competition/WithdrawFromCompetition) prövar allt igen — knappens läge här är bara en hjälp. *@
+@if (regMemberId > 0)
+{
+    <div class="modal fade" id="withdrawModal" tabindex="-1" aria-labelledby="withdrawModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="withdrawModalLabel"><i class="bi bi-x-circle me-2"></i>Avanmäl dig</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body" id="withdrawModalBody"></div>
+                <div class="modal-footer" id="withdrawModalFooter">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Behåll min anmälan</button>
+                    <button type="button" class="btn btn-danger" id="withdrawConfirmBtn"><i class="bi bi-x-circle me-1"></i>Avanmäl mig</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const cid = @Model.Id;
+        const box = document.getElementById('myRegistrationBox');
+        if (!box) return;
+        const btn = document.getElementById('myRegWithdrawBtn');
+        const note = document.getElementById('myRegNote');
+        const modalEl = document.getElementById('withdrawModal');
+        const body = document.getElementById('withdrawModalBody');
+        const footer = document.getElementById('withdrawModalFooter');
+        const confirmBtn = document.getElementById('withdrawConfirmBtn');
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const kr = v => (Math.round(Number(v) * 100) / 100).toLocaleString('sv-SE') + ' kr';
+        let info = null;
+
+        fetch('/umbraco/surface/Competition/GetMyWithdrawalInfo?competitionId=' + cid, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.success || !d.registered) return;
+                info = d;
+                box.classList.remove('d-none');
+                document.getElementById('myRegClasses').textContent = d.classes && d.classes.length ? ' · ' + d.classes.join(', ') : '';
+                if (d.canWithdraw) {
+                    btn.classList.remove('d-none');
+                } else if (d.reason) {
+                    note.textContent = d.reason;
+                    note.classList.remove('d-none');
+                }
+            })
+            .catch(() => { /* rutan är en hjälp; utan den finns ingen avanmälningsknapp, men inget annat går sönder */ });
+
+        function paintQuestion() {
+            let html = '<p class="mb-2">Vill du avanmäla dig från <strong>' + esc(info.competitionName) + '</strong>?</p>';
+            if (info.classes && info.classes.length) html += '<p class="mb-2 small text-muted">Din anmälan: ' + esc(info.classes.join(', ')) + '</p>';
+            if (info.paid > 0) {
+                html += '<div class="alert alert-warning small mb-2"><i class="bi bi-wallet2 me-1"></i>Du har redan betalat <strong>' + kr(info.paid) +
+                    '</strong>. När du avanmäler dig får arrangören besked om att du ska få pengarna tillbaka, och hör av sig till dig om hur.</div>';
+            } else if (info.claimed > 0) {
+                html += '<div class="alert alert-warning small mb-2"><i class="bi bi-wallet2 me-1"></i>Du har angett att du betalat <strong>' + kr(info.claimed) +
+                    '</strong>. Arrangören får besked, kontrollerar om pengarna kommit och återbetalar i så fall.</div>';
+            }
+            html += '<p class="mb-0 small text-muted">Du kan anmäla dig igen så länge anmälan är öppen.</p>';
+            body.innerHTML = html;
+            footer.innerHTML = '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Behåll min anmälan</button>' +
+                '<button type="button" class="btn btn-danger" id="withdrawConfirmBtn"><i class="bi bi-x-circle me-1"></i>Avanmäl mig</button>';
+            document.getElementById('withdrawConfirmBtn').addEventListener('click', doWithdraw);
+        }
+
+        function paintResult(ok, message, warnings) {
+            if (ok) modalEl.dataset.done = '1';
+            let html = '<div class="alert ' + (ok ? 'alert-success' : 'alert-danger') + ' mb-0"><i class="bi ' + (ok ? 'bi-check-circle' : 'bi-exclamation-triangle') + ' me-1"></i>' + esc(message) + '</div>';
+            if (warnings && warnings.length) html += '<ul class="small mt-2 mb-0">' + warnings.map(w => '<li>' + esc(w) + '</li>').join('') + '</ul>';
+            body.innerHTML = html;
+            footer.innerHTML = '<button type="button" class="btn btn-primary" id="withdrawCloseBtn">Stäng</button>';
+            document.getElementById('withdrawCloseBtn').addEventListener('click', () => {
+                if (ok) { window.location.reload(); return; }
+                bootstrap.Modal.getInstance(modalEl).hide();
+            });
+        }
+
+        async function doWithdraw() {
+            const b = document.getElementById('withdrawConfirmBtn');
+            if (b) { b.disabled = true; b.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Avanmäler…'; }
+            try {
+                const token = box.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                const r = await fetch('/umbraco/surface/Competition/WithdrawFromCompetition', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    body: JSON.stringify({ competitionId: cid })
+                });
+                const d = await r.json();
+                paintResult(!!d.success, d.message || (d.success ? 'Du är avanmäld.' : 'Kunde inte avanmäla dig.'), d.warnings);
+            } catch (e) {
+                paintResult(false, 'Kunde inte avanmäla dig just nu. Försök igen, eller kontakta arrangören.');
+            }
+        }
+
+        // Stäng efter ett lyckat svar laddar om sidan (antal anmälda, knappar) — även när dialogen stängs med krysset.
+        modalEl.addEventListener('hidden.bs.modal', () => { if (modalEl.dataset.done === '1') window.location.reload(); });
+
+        btn.addEventListener('click', () => {
+            if (!info) return;
+            paintQuestion();
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    })();
+    </script>
+}
+
 <script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
 @if (regMemberId > 0 && ledgerFees)
 {

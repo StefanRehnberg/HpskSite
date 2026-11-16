@@ -132,6 +132,8 @@ namespace HpskSite.Services
             // Utanför mästerskapet: beslutsloggen (vem som fick sin flagga satt/borttagen) hör till skytten och rensas bara med en
             // GDPR-rensning av medlemmen (Stefan 2026-11-04, beslut 13). Beslutsraden själv hör till anmälan (CASCADE) — bara vem som satte den släpps (AssignmentColumns).
             ("ChampionshipDecisionLog",      "MemberId"),
+            // Avanmälan (2026-11-16): raden bär skyttens namn, klubb och klasser — en uppgift om skytten. WithdrawnByMemberId/RefundedByMemberId är aktörer och räknas inte.
+            ("CompetitionWithdrawal",        "MemberId"),
 
             // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
             // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.

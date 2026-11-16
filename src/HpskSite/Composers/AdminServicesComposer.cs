@@ -58,6 +58,12 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.FaltskytteStartListCleanupSource>();
             builder.Services.AddScoped<HpskSite.Services.StartListCleanup.IStartListCleanupSource, HpskSite.Services.StartListCleanup.PrecisionFamilyStartListCleanupSource>();
 
+            // Avanmälan — EN väg för både arrangörens och skyttens egen (2026-11-16). Springskyttens städning för
+            // skyttens egen avanmälan är en egen klass; arrangörens springborttagning städar fortfarande via klientanropet.
+            builder.Services.AddScoped<HpskSite.CompetitionTypes.Springskytte.Services.SpringskytteWithdrawalCleanup>();
+            builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+            builder.Services.AddHostedService<HpskSite.Services.CompetitionWithdrawalSchemaGuardHostedService>();
+
             // "Är självanmälan stängd för att startlistan är publicerad?" — asked by the public
             // competition page AND by RegisterForCompetition, so both must ask the same object.
             // No per-discipline sources: the question is answered by two published flags, not by

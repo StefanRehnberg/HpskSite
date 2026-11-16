@@ -2444,6 +2444,108 @@ namespace HpskSite.Controllers
 
         #endregion
 
+        #region Avanmälan (skyttens egen)
+
+        /// <summary>
+        /// Vad skytten ser innan hen avanmäler sig: är hen anmäld, får hen avanmäla sig (tävlingen har inte börjat),
+        /// och vad är redan betalt — så att bekräftelsen kan säga att arrangören får besked om återbetalningen.
+        /// Bara den inloggade skyttens EGNA anmälningar; ett id från klienten används aldrig för att peka ut en annan skytt.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMyWithdrawalInfo(int competitionId)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var me = currentMember == null ? null : _memberService.GetById(currentMember.Key);
+                if (me == null) return Json(new { success = true, registered = false });
+
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null) return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
+
+                var regs = _registrations.ListForMemberInCompetition(competitionId, me.Id);
+                if (regs.Count == 0) return Json(new { success = true, registered = false });
+
+                var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+                var (allowed, reason) = HpskSite.Services.Registrations.RegistrationWithdrawalService.CanWithdraw(competition, DateTime.Now);
+
+                decimal paid = 0, claimed = 0;
+                foreach (var reg in regs)
+                {
+                    var m = svc.MeasureMoney(competition, reg);
+                    paid += m.Paid;
+                    claimed += m.Claimed;
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    registered = true,
+                    canWithdraw = allowed,
+                    reason,
+                    paid,
+                    claimed,
+                    classes = regs.SelectMany(r => r.Classes).Select(c => HpskSite.Models.ShootingClasses.DisplayName(c.Class))
+                        .Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList(),
+                    competitionName = competition.DisplayName
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting withdrawal info for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, message = "Ett fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Skytten avanmäler SIG SJÄLV från tävlingen — alla sina anmälningar i den. Även när avgiften är betald:
+        /// då får arrangören en notis om att skytten ska ha pengarna tillbaka (<see cref="HpskSite.Services.Registrations.RegistrationWithdrawalService"/>).
+        /// <para>Det finns ingen <c>memberId</c> i anropet med flit: skytten kan bara avanmäla sig själv. Att avanmäla någon
+        /// annan är arrangörens väg (<c>RegistrationAdmin/DeleteCompetitionRegistration</c>).</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> WithdrawFromCompetition([FromBody] WithdrawFromCompetitionRequest request)
+        {
+            try
+            {
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var me = currentMember == null ? null : _memberService.GetById(currentMember.Key);
+                if (me == null)
+                    return Json(new { success = false, message = "Du måste vara inloggad för att avanmäla dig." });
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran." });
+
+                var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Registrations.RegistrationWithdrawalService>();
+                var r = await svc.WithdrawSelfAsync(request.CompetitionId, me.Id, me.Name ?? currentMember!.Name ?? "");
+
+                // Profilens lista är cachad i 30 s — utan det här står den avanmälda tävlingen kvar.
+                AppCaches.RuntimeCache.Clear($"member_competitions_{me.Id}");
+
+                return Json(new
+                {
+                    success = r.Success,
+                    message = r.Message,
+                    paidAmount = r.PaidAmount,
+                    claimedAmount = r.ClaimedAmount,
+                    organiserNotified = r.OrganiserNotified,
+                    warnings = r.Warnings
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error withdrawing member from competition {CompetitionId}", request?.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte avanmäla dig. Försök igen, eller kontakta arrangören." });
+            }
+        }
+
+        public sealed class WithdrawFromCompetitionRequest
+        {
+            public int CompetitionId { get; set; }
+        }
+
+        #endregion
+
         #region Direktplacering
 
         [HttpGet]
