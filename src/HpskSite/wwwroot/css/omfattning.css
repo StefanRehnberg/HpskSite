@@ -41,6 +41,11 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font-b);font-size:1
 .hdr h1{font-family:var(--font-d);font-weight:700;font-size:clamp(22px,3vw,34px);letter-spacing:-.01em;margin:0;line-height:1.05;text-wrap:balance}
 .hdr p{margin:0;color:var(--muted);max-width:46ch;line-height:1.4}
 .hdr b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+/* Stor knapp till filmen (bara när tutorial-noden finns). .hdr har pointer-events:none, så knappen slår på dem själv. */
+.film-btn{pointer-events:auto;align-self:flex-start;display:inline-flex;align-items:center;gap:10px;margin-top:10px;font:700 18px var(--font-b);padding:14px 24px;border-radius:14px;background:var(--accent);border:1px solid var(--accent);color:#fff;text-decoration:none;white-space:nowrap;box-shadow:0 6px 20px rgb(0 0 0 / .18)}
+.film-btn:hover{filter:brightness(1.08)}
+.film-btn:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+:root[data-theme="dark"] .film-btn{color:#0f1413}
 .crumbs{position:absolute;left:16px;bottom:16px;right:16px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;pointer-events:none}
 .crumbs button{pointer-events:auto}
 .chip{font:500 13px var(--font-b);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer}
@@ -75,6 +80,7 @@ text.l.p{font-family:var(--font-d);font-weight:700}
   .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
   .panel{border-left:0;border-top:1px solid var(--line);max-height:42vh}
   .hdr p{display:none}
+  .film-btn{font-size:16px;padding:12px 20px;margin-top:6px}
   .info h2{font-size:21px}
   .tools{bottom:56px}
   .crumbs{bottom:10px}

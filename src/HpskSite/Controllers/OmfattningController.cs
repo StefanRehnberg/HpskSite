@@ -19,6 +19,15 @@ namespace HpskSite.Controllers
 
         public bool IsLoggedIn { get; init; }
         public string LoginUrl { get; init; } = "/login-register";
+
+        /// <summary>
+        /// Finns filmen om sidan som tutorial-nod under /tutorials? Knappen "Se filmen" visas bara då, så att
+        /// den aldrig leder till en tom lista (före noden skapats, eller om den tas bort).
+        /// </summary>
+        public bool HasFilm { get; init; }
+
+        /// <summary>Filmens adress: /tutorials öppnar filmen direkt när ?tutorial= är ett id som finns i listan.</summary>
+        public string FilmUrl => $"/tutorials?tutorial={OmfattningController.FilmTutorialId}";
     }
 
     /// <summary>
@@ -37,6 +46,12 @@ namespace HpskSite.Controllers
     [Route("allt")]
     public class OmfattningController : Controller
     {
+        /// <summary>
+        /// <c>tutorialId</c> på tutorial-noden med filmen "Pistol.nu är större än du tror" (skapas i backoffice under
+        /// Tutorials, /tutorials, med youtubeId). Exakt den här strängen: knappen på /allt och noden hittar varandra på den.
+        /// </summary>
+        public const string FilmTutorialId = "tutorial-allt";
+
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
 
@@ -55,6 +70,7 @@ namespace HpskSite.Controllers
 
             // Samma uppslag av inloggningssidan som Master.cshtml och Om-sidan gör.
             var loginUrl = "/login-register";
+            var hasFilm = false;
             if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
             {
                 var root = ctx.Content.GetAtRoot().FirstOrDefault();
@@ -62,6 +78,12 @@ namespace HpskSite.Controllers
                                 ?? root?.Children?.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
                 var url = loginPage?.Url();
                 if (!string.IsNullOrEmpty(url)) loginUrl = url;
+
+                // Samma uppslag som TutorialController.GetAll: tutorial-noderna under tutorialPage, ur publicerade cachen.
+                var tutorialsRoot = root?.Children?.FirstOrDefault(x => x.ContentType.Alias == "tutorialPage");
+                hasFilm = tutorialsRoot?.Children?.Any(x => x.ContentType.Alias == "tutorial"
+                              && x.Value<string>("tutorialId") == FilmTutorialId
+                              && !string.IsNullOrWhiteSpace(x.Value<string>("youtubeId"))) ?? false;
             }
 
             var model = new OmfattningViewModel
@@ -71,6 +93,7 @@ namespace HpskSite.Controllers
                 QrSvg = QrSvg(pageUrl),
                 IsLoggedIn = await _memberManager.GetCurrentMemberAsync() != null,
                 LoginUrl = loginUrl,
+                HasFilm = hasFilm,
             };
 
             return View("Omfattning", model);
