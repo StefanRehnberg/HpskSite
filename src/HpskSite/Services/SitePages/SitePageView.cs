@@ -44,7 +44,7 @@ namespace HpskSite.Services.SitePages
 
     /// <summary>En egen sida i menyn: sidan, etiketten (publicerad titel), adressen, synligheten och ordningen.</summary>
     /// <param name="ParentPageId">Sidan den ligger under i menyn (null = egen nivå).</param>
-    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort, int? ParentPageId = null, string? ParentTemplateKey = null);
+    public sealed record SiteMenuPage(int PageId, string Label, string Slug, SiteVisibility Visibility, int Sort, int? ParentPageId = null, string? ParentTemplateKey = null, string? Icon = null);
 
     /// <summary>En post i den nya menyn.</summary>
     /// <param name="Page">Mallsidan.</param>
@@ -55,7 +55,7 @@ namespace HpskSite.Services.SitePages
     /// <param name="Locked">Sidan finns men tittaren får inte se den (en vanlig medlem skulle): raden visas med hänglås och leder till en ruta, aldrig till sidans innehåll.</param>
     /// <param name="FreePageId">Id:t på en egen sida (null för en systemsida).</param>
     /// <param name="ParentPageId">Posten är en undersida till den egna sidan med det id:t; den följer direkt efter sin förälder i listan.</param>
-    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false, int? FreePageId = null, int? ParentPageId = null, string? ParentKey = null);
+    public sealed record SiteMenuEntry(SitePageDef Page, string PaneId, string Href, bool Current, bool IsTabButton, bool Locked = false, int? FreePageId = null, int? ParentPageId = null, string? ParentKey = null, string? Icon = null);
 
     /// <summary>Vad vänstermenyn (<c>_SiteSideMenu</c>) ritas ur: posterna, ägarens adress, om Hemsidan-knappen och Guide ska visas och en eventuell extern länk längst ned.</summary>
     /// <param name="ListId">Menylistans id (<c>clubPageTabs</c>/<c>regionPageTabs</c>): dagens skript och djuplänkar slår upp flikarna i den.</param>
@@ -216,7 +216,7 @@ namespace HpskSite.Services.SitePages
                 if (!visible && !locked) return null;
                 // En utloggad ser bara en egen sida ägaren gett nivån Alla (visible är då sant); en sida på lägre nivå är osynlig och låst bara för en inloggad.
                 var def = new SitePageDef("page:" + e.PageId, e.Slug, e.Label, 1000 + e.Sort, new[] { new SiteBlockDef("page", e.Visibility) });
-                return new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked, FreePageId: e.PageId, ParentPageId: e.ParentPageId);
+                return new SiteMenuEntry(def, "sitePage" + e.PageId, OwnerUrl + e.Slug + "/", Current: _freePageId == e.PageId, IsTabButton: false, Locked: locked, FreePageId: e.PageId, ParentPageId: e.ParentPageId, Icon: SitePageIcons.Resolve(e.Icon));
             }
             foreach (var top in _extra.Where(x => x.ParentPageId == null).OrderBy(x => x.Sort).ThenBy(x => x.PageId))
             {

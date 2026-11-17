@@ -433,6 +433,7 @@
       return h('tr', {},
         h('td', { class: depth ? 'ps-4' : '' },
           depth ? h('span', { class: 'text-muted me-1', 'aria-hidden': 'true' }, '↳') : null,
+          h('span', { class: 'hs-pageicon me-2' }, iconEl(p.icon)),
           h('a', { href: '#redigera=' + p.id, class: 'fw-semibold text-decoration-none', onclick: e => { e.preventDefault(); go('#redigera=' + p.id); } }, p.title),
           depth ? h('span', { class: 'visually-hidden' }, ' (undersida)') : null,
           p.childCount ? h('span', { class: 'text-muted small ms-2' }, p.childCount + (p.childCount === 1 ? ' undersida' : ' undersidor')) : null),
@@ -1160,6 +1161,51 @@
     renderBanner();
   }
 
+  // ── Sidans ikon (visas i menyn) ─────────────────────────────────────────────
+  // Biblioteket kommer från servern (State.pageIcons, ENDA källan). Ikonen sparas direkt, utan publicering, och prövas av servern mot samma lista.
+  const pageIcons = () => (S.st && S.st.pageIcons) || [];
+  const defaultIcon = () => (S.st && S.st.defaultIcon) || 'bi-file-earmark-text';
+  const iconLabel = key => { const i = pageIcons().find(x => x.key === key); return i ? i.label.split(' ')[0] : 'Standard'; };
+  const iconEl = key => h('i', { class: 'bi ' + (key || defaultIcon()), 'aria-hidden': 'true' });
+  /** Väljarens dialog: sökbart rutnät över alla ikoner. Svarar med nyckeln, '' för standardikonen, eller null om man avbröt. */
+  async function chooseIcon(current) {
+    let picked;
+    const grid = h('div', { class: 'hs-icongrid', role: 'group', 'aria-label': 'Ikoner' });
+    const search = h('input', { type: 'search', class: 'form-control mb-3', placeholder: 'Sök ikon, till exempel pokal, karta, kalender', 'aria-label': 'Sök ikon' });
+    const live = h('p', { class: 'visually-hidden', role: 'status' });
+    const draw = () => {
+      const q = search.value.trim().toLowerCase();
+      const hits = pageIcons().filter(i => !q || i.label.toLowerCase().includes(q) || i.group.toLowerCase().includes(q) || i.key.includes(q));
+      const groups = [...new Set(hits.map(i => i.group))];
+      grid.replaceChildren(...(hits.length ? groups.flatMap(g => [
+        h('p', { class: 'small fw-semibold text-muted mb-1 mt-2 hs-icongroup' }, g),
+        h('div', { class: 'hs-iconrow' }, hits.filter(i => i.group === g).map(i => h('button', {
+          type: 'button', class: 'hs-iconbtn' + (i.key === current ? ' active' : ''), title: i.label, 'aria-label': i.label.split(' ')[0] + (i.key === current ? ' (vald)' : ''), 'aria-pressed': i.key === current ? 'true' : 'false', 'data-icon': i.key,
+          onclick: () => { picked = i.key; const x = document.querySelector('.modal.show .btn-close'); if (x) x.click(); },
+        }, iconEl(i.key))))]) : [h('p', { class: 'text-muted' }, 'Ingen ikon matchar "' + search.value + '".')]));
+      live.textContent = hits.length + (hits.length === 1 ? ' ikon' : ' ikoner');
+    };
+    search.addEventListener('input', draw);
+    draw();
+    setTimeout(() => { const el = document.querySelector('.modal.show input[type=search]'); if (el) el.focus(); }, 400);
+    const v = await modal('Välj ikon för sidan', [search, live, grid], [{ label: 'Avbryt', value: false }, { label: 'Använd standardikonen', value: 'default', cls: 'btn-outline-secondary' }], true);
+    if (picked) return picked;
+    return v === 'default' ? '' : null;
+  }
+  /** Raden "Ikon: [symbol] Byt ikon" som visar nuvarande ikon och öppnar biblioteket. onPick(nyckel) anropas med det som valts ('' = standard). */
+  function iconRow(current, onPick) {
+    const holder = h('span', { class: 'hs-iconcur', 'data-page-icon': current || '' }, iconEl(current));
+    const btn = h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', id: 'hsPageIconBtn', 'aria-label': 'Byt ikon för sidan' }, 'Byt ikon …');
+    btn.addEventListener('click', async () => {
+      const pick = await chooseIcon(current);
+      if (pick === null) return;
+      const ok = await onPick(pick);
+      if (ok === false) return;
+      current = pick; holder.dataset.pageIcon = pick; holder.replaceChildren(iconEl(pick));
+    });
+    return h('div', { class: 'd-flex align-items-center gap-2 hs-iconrowline' }, h('span', { class: 'form-label fw-semibold mb-0' }, 'Ikon i menyn'), holder, btn);
+  }
+
   // ── Ny sida i tre steg ──────────────────────────────────────────────────────
   function renderNew(w, parentId) {
     // En ny undersida (parentId): föräldern måste vara en egen sida på egen nivå, och undersidan får aldrig vara öppnare än den.
@@ -1174,7 +1220,8 @@
       const inp = h('input', { class: 'form-control', maxlength: '120', value: w.title, placeholder: 'Till exempel: Regler för banan', 'aria-label': 'Sidans namn' });
       inp.addEventListener('input', () => { w.title = inp.value; });
       content = [parentRow ? h('p', { class: 'text-muted' }, 'Undersida till ', h('strong', {}, parentRow.title), '.') : null,
-        h('label', { class: 'form-label fw-semibold' }, parentRow ? 'Vad ska undersidan heta?' : 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text' }, 'Namnet blir sidans rubrik och en del av adressen.'), err];
+        h('label', { class: 'form-label fw-semibold' }, parentRow ? 'Vad ska undersidan heta?' : 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text mb-3' }, 'Namnet blir sidans rubrik och en del av adressen.'),
+        iconRow(w.icon || '', pick => { w.icon = pick; return true; }), h('div', { class: 'form-text' }, 'Ikonen syns bredvid sidans namn i menyn. Du kan byta den när som helst.'), err];
       next = () => { if (!w.title.trim()) { err.replaceChildren(alertBox('warning', 'Skriv ett namn på sidan.')); return; } w.step = 2; renderNew(w); };
       setTimeout(() => inp.focus(), 0);
     } else if (w.step === 2) {
@@ -1197,7 +1244,7 @@
       back = () => { w.step = 2; renderNew(w); };
       next = async () => {
         if (w.visibility === 0 && !await confirmPublic()) return;
-        const create = await api('POST', 'CreatePage', { title: w.title.trim(), visibility: w.visibility, parentPageId: parentRow ? parentRow.id : undefined });
+        const create = await api('POST', 'CreatePage', { title: w.title.trim(), visibility: w.visibility, parentPageId: parentRow ? parentRow.id : undefined, icon: w.icon || undefined });
         if (!create.success) { err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return; }
         // Mallens startinnehåll sparas som första utkast, därefter öppnas redigeraren.
         const blocks = templateBlocks(w.template, w.visibility);
@@ -1520,7 +1567,13 @@
         : conv
           ? h('div', { class: 'mb-3' }, h('h1', { class: 'h3 mb-1' }, 'Ändra sidan "' + S.title + '"'),
               h('p', { class: 'text-muted mb-0' }, 'Här bestämmer ni hur sidan ser ut. Det som hämtas automatiskt visas som kort som ni kan flytta, och ta bort om det inte är obligatoriskt. Ni kan också lägga till eget innehåll. Ändringarna syns för besökarna först när ni publicerar.'))
-          : h('div', { class: 'mb-3' }, treeInfo(), h('label', { class: 'form-label fw-semibold', for: 'hsTitle' }, 'Rubrik'), titleInp),
+          : h('div', { class: 'mb-3' }, treeInfo(), h('label', { class: 'form-label fw-semibold', for: 'hsTitle' }, 'Rubrik'), titleInp,
+              h('div', { class: 'mt-2' }, iconRow(S.page.icon === defaultIcon() ? '' : S.page.icon, async pick => {
+                const r = await api('POST', 'SetIcon', { pageId: S.page.id, icon: pick });
+                if (!r.success) { setBanner('danger', r.message || 'Det gick inte att byta ikon.'); return false; }
+                S.page.icon = pick || defaultIcon();
+                return true;
+              }))),
       h('div', { class: 'd-flex flex-wrap align-items-center gap-2 mb-3 hs-pagemarks' }, h('span', { class: 'small text-muted' }, 'Sidan:'), h('span', { id: 'hsPageState' }), visBadge(S.visibility)),   // sidans läge och nivå, med samma märken som listan
       who || h('div', { class: 'mb-4' }, h('label', { class: 'form-label fw-semibold' }, 'Vem ser texten?'), visSel, consequence),
       h('h2', { class: 'visually-hidden' }, 'Sidans innehåll'), blocksEl, moreCard()));

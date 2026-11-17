@@ -241,7 +241,7 @@ namespace HpskSite.Controllers
             {
                 id = p.Id, title = p.Title, visibility = p.Visibility, status = p.Status, slug = p.Slug, revision = p.Revision, inMenu = p.InMenu, suspended = p.SuspendedDate != null,
                 url = p.Slug == null ? null : g.OwnerUrl + p.Slug + "/", updated = p.UpdatedDate, deleted = p.DeletedDate,
-                parentId = p.ParentPageId, sortOrder = p.SortOrder, childCount = p.ChildCount,
+                parentId = p.ParentPageId, sortOrder = p.SortOrder, childCount = p.ChildCount, icon = SitePageIcons.Resolve(p.Icon),
             };
             // Antal nya anmälningar (märket vid Anmälningar i rälsen). Saknas tabellen (migreringen inte körd) faller inte Hemsidan: platsen visar ett fel i stället.
             int signupNew = 0; var signupReady = true;
@@ -259,6 +259,7 @@ namespace HpskSite.Controllers
                 blockFloors = SiteBlockSchema.FloorTable(g.OwnerType).ToDictionary(kv => kv.Key, kv => (int)kv.Value),
                 retiredBlocks = SiteBlockSchema.Types.Values.Where(t => t.Retired).Select(t => t.Name),
                 // Blockregistret (ENDA källan för väljarens grupper, etiketter, ikoner, beskrivningar och standardinnehåll) och uppgiftskorten överst i väljaren.
+                pageIcons = SitePageIcons.All.Select(i => new { key = i.Key, label = i.Label, group = i.Group }), defaultIcon = SitePageIcons.Default,
                 blockGroups = SiteBlockCatalog.Groups(g.OwnerType),
                 blockTypes = SiteBlockCatalog.For(g.OwnerType).Select(m => new { type = m.Type, group = m.Group, icon = m.Icon, label = m.Label, description = m.Description, slot = m.Slot, needsImage = m.NeedsImage, live = m.Live, defaults = m.Defaults }),
                 blockTasks = SiteBlockCatalog.Tasks(g.OwnerType).Select(t => new { key = t.Key, title = t.Title, description = t.Description, icon = t.Icon, blocks = t.Blocks, note = t.Note }),
@@ -304,7 +305,7 @@ namespace HpskSite.Controllers
             var childCount = page.IsFree ? SitePageStore.ChildCount(scope.Database, pageId) : 0;
             return Json(new
             {
-                success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug,
+                success = true, id = page.Id, title = page.Title, visibility = page.Visibility, revision = page.Revision, slug, icon = SitePageIcons.Resolve(page.Icon),
                 parentId = parentRow?.Id, parentTitle = parentRow == null ? null : (parentRow.PublishedTitle ?? parentRow.Title), childCount,
                 kind = SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) switch { SiteContentKind.FreePage => "free", SiteContentKind.ConvertedPage => "converted", _ => "slots" }, templateKey = page.TemplateKey,
                 minVisibility = page.IsFree ? (int?)parentRow?.Visibility ?? 0 : (int)(SiteBlockSchema.KindOf(page.IsFree, version.BlocksJson) == SiteContentKind.ConvertedPage ? SiteConversion.PageFloor(g.OwnerType, page.TemplateKey!) : SiteTemplates.For(g.OwnerType).MostOpenLevel(page.TemplateKey!)!.Value), inMenu = SitePageStore.ListFree(scope.Database, g.OwnerType, g.OwnerId).Any(x => x.Id == pageId && x.InMenu),
@@ -808,7 +809,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
-        public async Task<IActionResult> CreatePage(string ownerType, int ownerId, string title, string? slug, int visibility, int? parentPageId = null)
+        public async Task<IActionResult> CreatePage(string ownerType, int ownerId, string title, string? slug, int visibility, int? parentPageId = null, string? icon = null)
         {
             var g = await Gate(ownerType, ownerId, write: true);
             if (g.Error != null) return g.Error;
@@ -819,7 +820,26 @@ namespace HpskSite.Controllers
             SiteWriteResult r;
             using (var scope = _scopes.CreateScope())
             {
-                r = SitePageWriter.CreatePage(scope.Database, _facts, g.OwnerType, g.OwnerId, title, slug, (SiteVisibility)visibility, g.Actor!, DateTime.Now, parentPageId is > 0 ? parentPageId : null);
+                r = SitePageWriter.CreatePage(scope.Database, _facts, g.OwnerType, g.OwnerId, title, slug, (SiteVisibility)visibility, g.Actor!, DateTime.Now, parentPageId is > 0 ? parentPageId : null, icon);
+                if (r.Ok) scope.Complete();
+            }
+            return Map(r);
+        }
+
+        /// <summary>Byter ikonen i menyn för en egen sida (<c>icon</c> = en nyckel ur <see cref="SitePageIcons"/>, tom = standardikonen). Gäller direkt.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SetIcon(string ownerType, int ownerId, int pageId, string? icon)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitewrite:{g.OwnerType}:{g.OwnerId}:{pageId}", WritesPerMinute, TimeSpan.FromMinutes(1)))
+                return Fail("För många ändringar på kort tid. Vänta en stund.", "rate");
+            SiteWriteResult r;
+            using (var scope = _scopes.CreateScope())
+            {
+                r = SitePageWriter.SetIcon(scope.Database, pageId, g.OwnerType, g.OwnerId, icon, g.Actor!, DateTime.Now);
                 if (r.Ok) scope.Complete();
             }
             return Map(r);

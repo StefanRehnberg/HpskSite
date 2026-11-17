@@ -27,6 +27,8 @@ namespace HpskSite.Services.SitePages
         public DateTime? SuspendedDate { get; set; }
         /// <summary>Den egna sida den här sidan ligger under (null = egen nivå). Två nivåer: se <see cref="SitePageTree"/>.</summary>
         public int? ParentPageId { get; set; }
+        /// <summary>Sidans ikon i menyn (Bootstrap Icons-namn ur <see cref="SitePageIcons"/>); null = standardikonen. Ingen del av texten: ändras direkt, utan publicering.</summary>
+        public string? Icon { get; set; }
         /// <summary>Ordningen bland syskon (samma förälder). Lägre först.</summary>
         public int SortOrder { get; set; }
 
@@ -69,6 +71,7 @@ namespace HpskSite.Services.SitePages
         public bool InMenu { get; set; }
         public int? ParentPageId { get; set; }
         public int SortOrder { get; set; }
+        public string? Icon { get; set; }
         /// <summary>Antal undersidor (ej raderade). Bara <see cref="SitePageStore.ListFree"/> fyller det.</summary>
         public int ChildCount { get; set; }
         /// <summary>Schemat i den publicerade respektive utkastversionen (1 = vanlig, 2 = omgjord sida); null = ingen sådan version. Bara <see cref="SitePageStore.ListTemplateCopies"/> fyller dem.</summary>
@@ -88,6 +91,7 @@ namespace HpskSite.Services.SitePages
         public byte Visibility { get; set; }
         public int SortOrder { get; set; }
         public int? ParentPageId { get; set; }
+        public string? Icon { get; set; }
         /// <summary>Mallnyckeln när föräldern är en omgjord systemsida (Om klubben), annars null: undersidan ritas då under systemposten i menyn.</summary>
         public string? ParentTemplateKey { get; set; }
     }
@@ -136,7 +140,7 @@ namespace HpskSite.Services.SitePages
 
         private const string PageColumns =
             "Id, OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, PublishedTitle, Visibility, PublishedVersionId, DraftVersionId, " +
-            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate, SuspendedDate, ParentPageId, SortOrder";
+            "Revision, UpdatedByMemberId, LastVisibleLevel, CreatedDate, UpdatedDate, DeletedDate, SuspendedDate, ParentPageId, SortOrder, Icon";
 
         private const string VersionColumns =
             "Id, PageId, Revision, Title, BlocksJson, SchemaVersion, ContentHash, IsBaseline, IsPublish, SavedByMemberId, SavedAsSupport, SavedDate";
@@ -157,7 +161,7 @@ namespace HpskSite.Services.SitePages
         /// Synligheten måste vara en av 0–4. Adressen (sluggen) sätts av anroparen i samma transaktion.
         /// </summary>
         public static SiteStoreResult Create(IDatabase db, string ownerType, int ownerId, string title, SiteVisibility visibility,
-            string? templateKey, int? templateVersion, int? byMemberId, bool asSupport, DateTime now, int? parentPageId = null)
+            string? templateKey, int? templateVersion, int? byMemberId, bool asSupport, DateTime now, int? parentPageId = null, string? icon = null)
         {
             if (!SiteAccess.IsSelectable(visibility) || visibility > SiteVisibility.Dold)
                 throw new ArgumentOutOfRangeException(nameof(visibility), visibility, "Ogiltig synlighet");
@@ -174,16 +178,21 @@ namespace HpskSite.Services.SitePages
             // En ny egen sida läggs sist bland sina syskon (egen nivå eller under samma förälder); en mallkopia har ingen ordning.
             var sort = templateKey == null ? NextSortOrder(db, ownerType, ownerId, parentPageId) : 0;
             var pageId = db.ExecuteScalar<int>(
-                @"INSERT INTO dbo.SitePage (OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, Visibility, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, ParentPageId, SortOrder)
-                  VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @7, @7, @8, @9);
+                @"INSERT INTO dbo.SitePage (OwnerType, OwnerId, TemplateKey, TemplateVersion, Title, Visibility, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, ParentPageId, SortOrder, Icon)
+                  VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @7, @7, @8, @9, @10);
                   SELECT CAST(SCOPE_IDENTITY() AS int)",
-                ownerType, ownerId, templateKey, templateVersion, title.Trim(), (byte)visibility, byMemberId, now, parentPageId, sort);
+                ownerType, ownerId, templateKey, templateVersion, title.Trim(), (byte)visibility, byMemberId, now, parentPageId, sort, SitePageIcons.Normalize(icon));
 
             var content = EmptyContent(templateKey != null);
             var versionId = InsertVersion(db, pageId, ownerType, ownerId, 1, title.Trim(), content, isBaseline: true, isPublish: false, byMemberId, asSupport, now);
             db.Execute("UPDATE dbo.SitePage SET DraftVersionId = @1 WHERE Id = @0", pageId, versionId);
             return new SiteStoreResult(SiteStoreOutcome.Ok, pageId, 1);
         }
+
+        /// <summary>Byter sidans ikon (null = standardikonen). Prövas mot ägaren (id-lagen); en okänd nyckel blir standardikonen. Rör inte revisionen: ikonen är inte en del av texten.</summary>
+        public static bool SetIcon(IDatabase db, int pageId, string ownerType, int ownerId, string? icon, DateTime now) =>
+            db.Execute("UPDATE dbo.SitePage SET Icon = @3, UpdatedDate = @4 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND TemplateKey IS NULL AND DeletedDate IS NULL",
+                pageId, ownerType, ownerId, SitePageIcons.Normalize(icon), now) > 0;
 
         private static int InsertVersion(IDatabase db, int pageId, string ownerType, int ownerId, int revision, string title, string blocksJson,
             bool isBaseline, bool isPublish, int? byMemberId, bool asSupport, DateTime now) =>
@@ -330,7 +339,7 @@ namespace HpskSite.Services.SitePages
                 @"SELECT p.Id, p.Title, p.PublishedTitle, p.Visibility, p.PublishedVersionId, p.DraftVersionId, p.Revision, p.UpdatedDate, p.DeletedDate, p.SuspendedDate,
                          (SELECT TOP 1 a.Slug FROM dbo.PageAddress a WHERE a.TargetKind = 'sitepage' AND a.TargetId = p.Id AND a.IsCurrent = 1) AS Slug,
                          CASE WHEN EXISTS (SELECT 1 FROM dbo.SiteMenuItem m WHERE m.Kind = 1 AND m.PageId = p.Id AND m.IsRemoved = 0) THEN 1 ELSE 0 END AS InMenu,
-                         p.ParentPageId, p.SortOrder,
+                         p.ParentPageId, p.SortOrder, p.Icon,
                          (SELECT COUNT(*) FROM dbo.SitePage c WHERE c.ParentPageId = p.Id AND c.DeletedDate IS NULL) AS ChildCount
                   FROM dbo.SitePage p
                   WHERE p.OwnerType = @0 AND p.OwnerId = @1 AND p.TemplateKey IS NULL AND p.DeletedDate IS " + (deleted ? "NOT NULL" : "NULL") + @"
@@ -412,7 +421,7 @@ namespace HpskSite.Services.SitePages
         /// </summary>
         public static List<SiteMenuPageRow> MenuPages(IDatabase db, string ownerType, int ownerId) =>
             db.Fetch<SiteMenuPageRow>(
-                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, p.SortOrder AS SortOrder, p.ParentPageId AS ParentPageId, pp.TemplateKey AS ParentTemplateKey
+                @"SELECT p.Id AS PageId, COALESCE(p.PublishedTitle, p.Title) AS Title, a.Slug AS Slug, p.Visibility AS Visibility, p.SortOrder AS SortOrder, p.ParentPageId AS ParentPageId, p.Icon AS Icon, pp.TemplateKey AS ParentTemplateKey
                   FROM dbo.SiteMenuItem m
                   JOIN dbo.SitePage p ON p.Id = m.PageId AND p.OwnerType = m.OwnerType AND p.OwnerId = m.OwnerId
                   LEFT JOIN dbo.SitePage pp ON pp.Id = p.ParentPageId AND pp.OwnerType = p.OwnerType AND pp.OwnerId = p.OwnerId

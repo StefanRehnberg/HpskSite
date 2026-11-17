@@ -2,7 +2,7 @@
 @model (HpskSite.Services.SitePages.SiteMenuEntry Item, string OwnerType)
 @{
     var item = Model.Item;
-    var icon = HpskSite.Services.SitePages.SiteMenuIcons.For(Model.OwnerType, item.Page.Key);
+    var icon = item.Icon ?? HpskSite.Services.SitePages.SiteMenuIcons.For(Model.OwnerType, item.Page.Key);
 }
 @if (item.Locked)
 {

@@ -1104,7 +1104,38 @@
             <div class="small text-muted mt-2">Ansökningar: totalt (väntar hos kretsen). Resultat och banor: totalt (väntar på kretsen). Utkast räknas inte — dem har kretsen inte sett.</div>
         </div></div>
 
-        <!-- Section O: Tävlingsplanering och patrullgenerator. Laddas separat (GetPlaneringStats), som ekonomin.
+        <!-- Section P: Hemsidan (klubbarnas och kretsarnas egna sidor). Laddas separat (GetHemsidanStats). Bara tal och ägarnamn. -->
+        <h5 class="mt-4 mb-2"><i class="bi bi-window-sidebar me-2"></i>Hemsidan (klubb- och kretssidor)</h5>
+        <p class="text-muted small mb-3">
+            Hur många klubbar och kretsar som slagit på nya Hemsidan och hur den används. Demoklubben Ankeborg räknas inte.
+            "Egna sidor" = sidor de byggt själva (inte systemsidornas kopior). "Publicerat" = minst en sida har publicerats.
+        </p>
+        <div id="hsStatError" class="alert alert-warning d-none small"></div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Klubbar med Hemsidan</div><div class="fs-3 fw-bold" id="statHsClubs">–</div><div class="small text-muted" id="statHsClubsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Kretsar med Hemsidan</div><div class="fs-3 fw-bold" id="statHsRegions">–</div><div class="small text-muted" id="statHsRegionsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Egna sidor</div><div class="fs-3 fw-bold" id="statHsPages">–</div><div class="small text-muted" id="statHsPagesSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Inlägg och anmälningar</div><div class="fs-3 fw-bold" id="statHsPosts">–</div><div class="small text-muted" id="statHsPostsSub"></div>
+            </div></div></div>
+        </div>
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">Vilka som använder den</h6>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Förening</th><th>Typ</th><th class="text-end">Egna sidor</th><th class="text-end">Publicerade</th><th class="text-end">Inlägg</th><th class="text-end">Anmälningar</th><th>På sedan</th><th>Senast ändrad</th></tr></thead>
+                    <tbody id="hsStatBody"><tr><td colspan="8" class="text-muted">Hämtar…</td></tr></tbody>
+                </table>
+            </div>
+        </div></div>
+
+        <!-- Section O:Tävlingsplanering och patrullgenerator. Laddas separat (GetPlaneringStats), som ekonomin.
              Bara tal — en planering är privat för dem som är med, så inga namn eller innehåll visas. -->
         <h5 class="mt-4 mb-2"><i class="bi bi-clipboard-check me-2"></i>Tävlingsplanering och patrullgenerator</h5>
         <p class="text-muted small mb-3">
@@ -1325,6 +1356,7 @@
                 loadEkonomiStats(force);
                 loadKretsgranskningStats(force);
                 loadPlaneringStats(force);
+                loadHemsidanStats(force);
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -2118,7 +2150,7 @@
     // laddtiden blev summan av dem i stället för den längsta. Svaret ritas först när huvudsidan är
     // synlig (diagram i en dold ruta får fel storlek), så loadX tar den förhämtade förfrågan.
     const statPrefetched = {};
-    const STAT_PARTS = ['GetVisitorStats', 'GetEkonomiStats', 'GetKretsgranskningStats', 'GetPlaneringStats'];
+    const STAT_PARTS = ['GetVisitorStats', 'GetEkonomiStats', 'GetKretsgranskningStats', 'GetPlaneringStats', 'GetHemsidanStats'];
     function statUrl(name, force) { return '/umbraco/surface/AdminStatistics/' + name + '?force=' + (force ? 'true' : 'false'); }
     function prefetchStats(force) { STAT_PARTS.forEach(function (n) { statPrefetched[n] = fetch(statUrl(n, force)); }); }
     function statFetch(name, force) {
@@ -2207,6 +2239,43 @@
                 + '<td class="text-end">' + num(r.courses.total, r.courses.pending) + '</td>'
                 + '<td class="text-end small text-nowrap">' + e(r.lastActivity || '—') + '</td></tr>';
         }).join('') || '<tr><td colspan="7" class="text-muted">Inga kretsar.</td></tr>';
+    }
+
+    // ── Section P: Hemsidan ───────────────────────────────────────────────────────────────────────
+    function loadHemsidanStats(force) {
+        const err = document.getElementById('hsStatError');
+        if (!err) return;
+        const fail = m => { err.textContent = 'Hemsidans statistik kunde inte läsas: ' + m; err.classList.remove('d-none'); };
+        statFetch('GetHemsidanStats', force)
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) { fail(resp.message || 'okänt fel'); return; }
+                const d = resp.data;
+                if (d.warnings && d.warnings.length) { err.textContent = d.warnings.join(' '); err.classList.remove('d-none'); } else err.classList.add('d-none');
+                renderHemsidan(d);
+            })
+            .catch(e => fail(e.message || 'nätverksfel'));
+    }
+
+    function renderHemsidan(d) {
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        const nf = n => Number(n || 0).toLocaleString('sv-SE');
+        const e = x => (x == null ? '' : String(x)).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const sub = o => nf(o.editing) + ' får redigera · ' + nf(o.withPublished) + ' har publicerat · ' + nf(o.converting) + ' får göra om systemsidor · ' + nf(o.new30) + ' nya senaste 30 dagarna';
+        set('statHsClubs', nf(d.club.enabled));
+        set('statHsClubsSub', sub(d.club));
+        set('statHsRegions', nf(d.region.enabled));
+        set('statHsRegionsSub', sub(d.region));
+        set('statHsPages', nf(d.club.pages + d.region.pages));
+        set('statHsPagesSub', nf(d.club.withOwnPages + d.region.withOwnPages) + ' föreningar har byggt egna sidor');
+        set('statHsPosts', nf(d.club.posts + d.region.posts) + ' · ' + nf(d.club.forms + d.region.forms));
+        set('statHsPostsSub', 'publicerade inlägg · inkomna anmälningar/ansökningar');
+        const body = document.getElementById('hsStatBody');
+        if (body) body.innerHTML = (d.owners || []).map(r => '<tr><td>' + e(r.name) + '</td><td>' + e(r.type) + '</td>'
+            + '<td class="text-end">' + nf(r.ownPages) + '</td><td class="text-end">' + nf(r.published) + '</td>'
+            + '<td class="text-end">' + nf(r.posts) + '</td><td class="text-end">' + nf(r.forms) + '</td>'
+            + '<td class="small text-nowrap">' + e(r.enabled || '—') + '</td><td class="small text-nowrap">' + e(r.lastUpdate || '—') + '</td></tr>').join('')
+            || '<tr><td colspan="8" class="text-muted">Ingen har slagit på Hemsidan ännu.</td></tr>';
     }
 
     // ── Section O: tävlingsplanering och patrullgenerator ─────────────────────────────────────────

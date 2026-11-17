@@ -200,7 +200,7 @@ namespace HpskSite.Services.SitePages
 
         /// <summary>Skapa en fri sida med adress. Sluggen utelämnad = ur titeln (numrerad om upptagen).</summary>
         public static SiteWriteResult CreatePage(IDatabase db, ISiteOwnerFacts facts, string ownerType, int ownerId, string title,
-            string? requestedSlug, SiteVisibility visibility, SiteActor actor, DateTime now, int? parentPageId = null)
+            string? requestedSlug, SiteVisibility visibility, SiteActor actor, DateTime now, int? parentPageId = null, string? icon = null)
         {
             title = (title ?? "").Trim();
             if (title.Length is 0 or > 120)
@@ -237,7 +237,7 @@ namespace HpskSite.Services.SitePages
                 if (!check.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, Message: check.Reason);
             }
 
-            var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, null, null, actor.MemberId, actor.AsSupport, now, parentPageId);
+            var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, null, null, actor.MemberId, actor.AsSupport, now, parentPageId, icon);
             if (created.Outcome != SiteStoreOutcome.Ok) return From(created);
 
             var addr = PageAddressService.SetCurrentFlat(db, PageAddressKinds.SitePage, created.PageId, new PageAddressOwner(ownerType, ownerId), slug);
@@ -475,6 +475,18 @@ namespace HpskSite.Services.SitePages
             // Tas en förälder ur menyn tas dess undersidor ur den med (de hänger på föräldern i menyn).
             var removed = inMenu ? 0 : SitePageStore.RemoveChildrenFromMenu(db, ownerType, ownerId, pageId);
             return new SiteWriteResult(SiteWriteStatus.Ok, pageId, Affected: removed);
+        }
+
+        /// <summary>Byt ikonen i menyn för en egen sida. Gäller direkt (ingen publicering) och loggas. Tom eller okänd nyckel = standardikonen.</summary>
+        public static SiteWriteResult SetIcon(IDatabase db, int pageId, string ownerType, int ownerId, string? icon, SiteActor actor, DateTime now)
+        {
+            var page = SitePageStore.GetPage(db, pageId, ownerType, ownerId);
+            if (page == null || !page.IsFree) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            if (!string.IsNullOrWhiteSpace(icon) && !SitePageIcons.IsValid(icon.Trim()) && icon.Trim() != SitePageIcons.Default)
+                return Invalid("icon", "Ikonen finns inte i biblioteket.");
+            if (!SitePageStore.SetIcon(db, pageId, ownerType, ownerId, icon, now)) return new SiteWriteResult(SiteWriteStatus.NotFound);
+            Audit(db, ownerType, ownerId, actor, "page", pageId, "page-icon", null, now);
+            return new SiteWriteResult(SiteWriteStatus.Ok, pageId, page.Revision);
         }
 
         public static SiteWriteResult SoftDelete(IDatabase db, int pageId, string ownerType, int ownerId, int expectedRevision, SiteActor actor, DateTime now)

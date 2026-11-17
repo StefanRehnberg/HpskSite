@@ -43,7 +43,7 @@ namespace HpskSite.Services.SitePages
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             return SitePageStore.MenuPages(scope.Database, ownerType, ownerId)
-                .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder, r.ParentPageId, r.ParentTemplateKey)).ToList();
+                .Select(r => new SiteMenuPage(r.PageId, r.Title, r.Slug, (SiteVisibility)r.Visibility, r.SortOrder, r.ParentPageId, r.ParentTemplateKey, r.Icon)).ToList();
         }
 
         /// <summary>Ägarens externa länkar i menyn, i ordning. En SQL-fråga; körs bara när ägaren har egen redigering PÅ. Nivån prövas för tittaren i <see cref="SitePageView.Links"/>.</summary>
