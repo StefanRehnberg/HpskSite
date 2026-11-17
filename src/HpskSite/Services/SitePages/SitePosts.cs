@@ -155,7 +155,8 @@ namespace HpskSite.Services.SitePages
             if (db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SiteOwner WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1", ownerType, ownerId) != 1)
                 return new SitePostWrite(SitePostResult.NotFound);
 
-            var body = SiteHtmlSanitizer.Sanitize(input.BodyHtml);
+            // En ny nyhet kan bara bära skribentens egen signatur (SiteSignatures): ingenting stod där förut.
+            var body = SiteSignatures.Restrict(SiteHtmlSanitizer.Sanitize(input.BodyHtml), actor.MemberId, new HashSet<int>());
             var refError = CheckFiles(db, ownerType, ownerId, input.CoverFileId, body, out var fileIds);
             if (refError != null) return new SitePostWrite(SitePostResult.Invalid, Error: refError);
 
@@ -182,7 +183,8 @@ namespace HpskSite.Services.SitePages
             var cur = Get(db, id, ownerType, ownerId);
             if (cur == null) return new SitePostWrite(SitePostResult.NotFound);
 
-            var body = SiteHtmlSanitizer.Sanitize(input.BodyHtml);
+            // Skribentens egen signatur, och de som redan stod i nyheten (en annan skribents bevaras när någon redigerar).
+            var body = SiteSignatures.Restrict(SiteHtmlSanitizer.Sanitize(input.BodyHtml), actor.MemberId, SiteSignatures.Ids(SiteHtmlSanitizer.Sanitize(cur.BodyHtml)).ToHashSet());
             var refError = CheckFiles(db, ownerType, ownerId, input.CoverFileId, body, out var fileIds);
             if (refError != null) return new SitePostWrite(SitePostResult.Invalid, Error: refError);
 

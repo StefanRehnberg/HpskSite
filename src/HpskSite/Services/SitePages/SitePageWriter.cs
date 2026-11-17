@@ -302,6 +302,14 @@ namespace HpskSite.Services.SitePages
                     return Invalid("visibility", $"Sidan får inte vara öppnare än sidan den ligger under ({SlotLevelLabel(parent.VisibilityLevel)} eller strängare).");
             }
 
+            // Man signerar bara som sig själv: en signatur som varken är skribentens egen eller redan stod på sidan tas bort (SiteSignatures).
+            if (blocksJson != null && blocksJson.Contains(SiteSignatures.Tag, StringComparison.Ordinal))
+            {
+                var already = SiteSignatures.IdsInBlocksJson(SitePageStore.GetDraft(db, pageId, ownerType, ownerId)?.BlocksJson);
+                already.UnionWith(SiteSignatures.IdsInBlocksJson(SitePageStore.GetPublished(db, pageId, ownerType, ownerId)?.BlocksJson));
+                blocksJson = SiteSignatures.RestrictBlocksJson(blocksJson, actor.MemberId, already);
+            }
+
             var v = Validate(db, facts, page, ownerType, ownerId, title, blocksJson, vis, allowPersonalNumber, out var content);
             if (v != null) return v;
 

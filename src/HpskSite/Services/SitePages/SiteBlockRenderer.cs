@@ -37,6 +37,9 @@ namespace HpskSite.Services.SitePages
         /// <summary>Ägarens senaste publicerade nyheter som tittaren får se (händelsens egen läsnivå prövas i lagringen). Standard: inga.</summary>
         IReadOnlyList<SiteNewsInfo> News(int count) => Array.Empty<SiteNewsInfo>();
 
+        /// <summary>Signaturen för en medlem (avatar, namn, roll hos ägaren), eller null när medlemmen inte får visas. Gäller ENDAST denna ägare. Standard: ingen.</summary>
+        SiteSignature? Signature(int memberId) => null;
+
         /// <summary>Kretsens klubbar (bara för en kretsägare). Standard: inga.</summary>
         IReadOnlyList<SiteRegionClub> RegionClubs() => Array.Empty<SiteRegionClub>();
 
@@ -147,7 +150,7 @@ namespace HpskSite.Services.SitePages
             return block.Type switch
             {
                 "panel" => "",   // en panel är en delvy: vyn ritar den (efter PanelVisible), den här rena koden skriver aldrig ut den
-                "text" => Text(block),
+                "text" => Text(block, ctx),
                 "heading" => Heading(block),
                 "links" => Links(block),
                 "pagelink" => PageLink(block, ctx),
@@ -181,7 +184,7 @@ namespace HpskSite.Services.SitePages
 
         private static string Section(string id, string inner) => $"<section class=\"site-block mb-4\" data-block=\"{E(id)}\">{inner}</section>";
 
-        private static string Text(SiteBlock b)
+        private static string Text(SiteBlock b, SiteRenderContext ctx)
         {
             var html = SiteHtmlSanitizer.Sanitize(b.Data["html"]?.GetValue<string>());
             if (html.Length == 0) return "";
@@ -191,6 +194,9 @@ namespace HpskSite.Services.SitePages
             // Bilder i texten: aldrig bredare än sidan, och en figur utan webbläsarens inbyggda sidomarginal.
             html = html.Replace("<img ", "<img class=\"img-fluid\" loading=\"lazy\" ", StringComparison.Ordinal)
                        .Replace("<figure>", "<figure class=\"mb-3\">", StringComparison.Ordinal);
+            // Signaturerna ritas sist: avataren är en egen bild och ska inte få textbildernas klasser.
+            html = SiteSignatures.Resolve(html, ctx.Data.Signature);
+            if (string.IsNullOrWhiteSpace(Regex.Replace(html, "<[^>]+>", "")) && !html.Contains("<img", StringComparison.OrdinalIgnoreCase)) return "";   // en text som bara bestod av signaturer som inte får visas ger inget block
             return Section(b.Id, $"<div class=\"site-text\">{html}</div>");
         }
 

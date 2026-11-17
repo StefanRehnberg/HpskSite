@@ -95,6 +95,16 @@ namespace HpskSite.Services
                 memberId, regionId, "Utträdd", "Avliden") > 0;
         }
 
+        /// <summary>Är medlemmen aktiv i just den här klubben? Samma källa och samma statusregel som <see cref="Active"/>.</summary>
+        public bool IsActiveInClub(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return false;
+            using var db = _databaseFactory.CreateDatabase();
+            return db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM ClubMembership WHERE MemberId = @0 AND ClubId = @1 AND MembershipStatus NOT IN (@2, @3)",
+                memberId, clubId, "Utträdd", "Avliden") > 0;
+        }
+
         /// <summary>Bara medlems-id:na — för frågor som går vidare till andra tabeller.</summary>
         public List<int> ActiveMemberIds(int clubId)
         {

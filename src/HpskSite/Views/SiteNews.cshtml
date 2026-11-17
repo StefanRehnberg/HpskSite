@@ -2,6 +2,7 @@
 @using HpskSite.Services.SitePages
 @using HpskSite.Extensions
 @inject SiteViewerResolver Viewers
+@inject SiteSignatureService Signatures
 @inject SitePageViewFactory SitePages
 @inject Umbraco.Cms.Infrastructure.Scoping.IScopeProvider Scopes
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -152,7 +153,7 @@
             {
                 <figure class="mb-3"><img class="img-fluid rounded" src="@SiteImages.UrlFor(post.CoverFileId.Value)" alt="@(post.CoverAlt ?? "")" decoding="async" style="height:auto"></figure>
             }
-            <div class="site-post-body">@Html.Raw(SiteHtmlSanitizer.Sanitize(post.BodyHtml))</div>
+            <div class="site-post-body">@Html.Raw(Signatures.Resolve(SiteHtmlSanitizer.Sanitize(post.BodyHtml), post.OwnerType, post.OwnerId))</div>
             @if (canWrite)
             {
                 <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">
@@ -206,7 +207,8 @@
         <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
         <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
         <script src="/js/planering-dates.js?v=1"></script>
-        <script src="/js/site-news-edit.js?v=5"></script>
+        <script src="/js/site-signature.js?v=2"></script>
+        <script src="/js/site-news-edit.js?v=6"></script>
     }
 
     @if (ok)

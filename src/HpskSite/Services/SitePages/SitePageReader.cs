@@ -151,13 +151,15 @@ namespace HpskSite.Services.SitePages
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
         private readonly HpskSite.Services.Staffing.StaffingSignupService _staffSignup;
+        private readonly SiteSignatureService _signatures;
 
         public SiteBlockDataFactory(DocumentService documents, IClubEventStore events, PageAddressUrls urls, IScopeProvider scopes,
             HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.ICompetitionSeriesStore series,
             HpskSite.Services.Competitions.CompetitionLinks links, ClubRosterService roster,
             Microsoft.AspNetCore.Http.IHttpContextAccessor http, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
-            HpskSite.Services.Staffing.StaffingSignupService staffSignup)
+            HpskSite.Services.Staffing.StaffingSignupService staffSignup, SiteSignatureService signatures)
         {
+            _signatures = signatures;
             _staffSignup = staffSignup;
             _http = http;
             _antiforgery = antiforgery;
@@ -213,6 +215,9 @@ namespace HpskSite.Services.SitePages
                 }
                 return new SiteFormContext(_pageId, token, flash);
             }
+
+            /// <summary>Signaturen hos DENNA ägare (aldrig ett ägar-id ur texten): medlemmen måste höra till föreningen, annars null.</summary>
+            public SiteSignature? Signature(int memberId) => _f._signatures.Find(memberId, _ownerType, _ownerId);
 
             public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids)
             {

@@ -2223,6 +2223,9 @@
       h('span', { class: 'small text-muted' }, 'Bildens storlek:'), set('25%', '25 %'), set('50%', '50 %'), set('75%', '75 %'), set(null, 'Hela bredden'), hint);
   }
 
+  // Signaturen (avatar, namn, roll) i texten: se site-signature.js. Man skriver bara under som sig själv; servern prövar det vid sparning.
+  const SIG = window.HpskSignature ? window.HpskSignature.create({ get: ids => api('GET', 'Signatures', { ids: ids.join(',') }) }) : null;
+
   function initRte(node, block) {
     if (!window.ClassicEditor || !block) { node.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte laddas. Ladda om sidan.')); return; }
     ClassicEditor.create(node, {
@@ -2238,11 +2241,13 @@
         toolbar: ['imageStyle:alignLeft', 'imageStyle:alignCenter', 'imageStyle:alignRight', '|', 'imageTextAlternative'],
         styles: { options: ['alignLeft', 'alignCenter', 'alignRight'] },
       },
-      extraPlugins: [SiteImageWidth],
+      extraPlugins: SIG ? [SiteImageWidth, SIG.plugin] : [SiteImageWidth],
     }).then(ed => {
       ed.setData(block.data.html || '');
+      const sigUi = SIG ? SIG.controls(h) : null;
       node.parentNode.insertBefore(h('div', { class: 'mb-2 d-flex flex-wrap align-items-center gap-1' }, h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: () => insertImage(ed) },
-        h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), widthBar(() => ed)), node);
+        h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), sigUi && sigUi.node, widthBar(() => ed)), node);
+      if (sigUi) sigUi.bind(ed, block.data.html || '');
       ed.model.document.on('change:data', () => { block.data.html = ed.getData(); markDirty(); });
       ed._blockId = block.id;   // pruneEditors behåller det öppna blockets textredigerare när listan ritas om
       S.editors.push(ed);
@@ -2279,7 +2284,7 @@
   function summaryOf(b) {
     const d = b.data || {};
     switch (b.type) {
-      case 'text': return plainText(d.html);
+      case 'text': return plainText(d.html) || (/<hpsk-signatur\b/i.test(d.html || '') ? 'Signatur' : '');
       case 'heading': return (d.text || '').trim();
       case 'image': return String(d.alt || d.caption || '').trim();
       case 'gallery': return plural((d.items || []).length, 'bild', 'bilder') + (d.title ? ' · ' + d.title : '');
@@ -2306,7 +2311,7 @@
   function isEmptyBlock(b) {
     const d = b.data || {};
     switch (b.type) {
-      case 'text': return !plainText(d.html) && !/<img\b/i.test(d.html || '');
+      case 'text': return !plainText(d.html) && !/<img\b/i.test(d.html || '') && !/<hpsk-signatur\b/i.test(d.html || '');
       case 'heading': return !String(d.text || '').trim();
       case 'links': return !(d.items || []).some(it => String(it.label || '').trim() && String(it.url || '').trim());
       case 'documents': return !(d.refs || []).length;

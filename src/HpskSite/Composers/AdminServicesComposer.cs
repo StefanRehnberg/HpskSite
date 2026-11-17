@@ -305,6 +305,7 @@ namespace HpskSite.Composers
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Results.CompetitionResultNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.ClubRosterService>();
+            builder.Services.AddScoped<HpskSite.Services.SitePages.SiteSignatureService>();
             builder.Services.AddScoped<HpskSite.Services.MemberDirectoryService>();
             builder.Services.AddScoped<HpskSite.Services.MemberPropertyReader>();
             builder.Services.AddScoped<HpskSite.Services.MemberTokenService>();

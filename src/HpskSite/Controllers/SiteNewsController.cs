@@ -33,13 +33,15 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _members;
         private readonly IMemberService _memberService;
         private readonly SiteViewerResolver _viewers;
+        private readonly SiteSignatureService _signatures;
 
         public SiteNewsController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             IScopeProvider scopes, SiteOwnerService owners, RateCounterService rate, IContentService content, IMemberManager members,
-            IMemberService memberService, SiteViewerResolver viewers)
+            IMemberService memberService, SiteViewerResolver viewers, SiteSignatureService signatures)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _signatures = signatures;
             _scopes = scopes; _owners = owners; _rate = rate; _content = content; _members = members; _memberService = memberService; _viewers = viewers;
         }
 
@@ -98,6 +100,16 @@ namespace HpskSite.Controllers
             using var scope = _scopes.CreateScope(autoComplete: true);
             var p = SitePosts.Get(scope.Database, id, g.OwnerType, g.OwnerId);
             return p == null ? Fail("Nyheten finns inte.", "notfound") : Json(new { success = true, post = Dto(g, p) });
+        }
+
+        /// <summary>Skribentens egen signatur och förhandsvisningen av dem som redan står i texten (knappen Infoga signatur).</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin, sajtadmin eller styrelsen (SiteNewsRules), brytare 2 PÅ")]
+        public async Task<IActionResult> Signatures(string ownerType, int ownerId, string? ids)
+        {
+            var g = await GateAsync(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            return Json(_signatures.ForEditor(g.Actor!.MemberId, g.OwnerType, g.OwnerId, SiteSignatures.ParseIds(ids)));
         }
 
         /// <summary>Skapar (id 0) eller ändrar en nyhet. En gammal flik (fel revision) får ett besked och ändrar ingenting.</summary>

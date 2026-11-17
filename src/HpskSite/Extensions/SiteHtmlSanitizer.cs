@@ -27,11 +27,12 @@ namespace HpskSite.Extensions
                 "p", "br", "strong", "b", "em", "i", "u", "s", "ul", "ol", "li", "a",
                 "h2", "h3", "h4", "blockquote", "hr", "sup", "sub",
                 "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
-                "img", "figure"
+                "img", "figure",
+                HpskSite.Services.SitePages.SiteSignatures.Tag   // signaturen: bara ett medlemsnummer, se PostProcessNode
             }) s.AllowedTags.Add(t);
 
             s.AllowedAttributes.Clear();
-            foreach (var a in new[] { "href", "title", "colspan", "rowspan", "src", "alt", "class", "style" }) s.AllowedAttributes.Add(a);
+            foreach (var a in new[] { "href", "title", "colspan", "rowspan", "src", "alt", "class", "style", "member" }) s.AllowedAttributes.Add(a);
 
             // class och style finns bara för en bilds ram (figure): en placering ur en fast lista och en bredd i procent. Allt annat tas bort,
             // och på alla andra element tas båda bort i PostProcessNode nedan.
@@ -55,6 +56,19 @@ namespace HpskSite.Extensions
             {
                 if (e.Node is AngleSharp.Dom.IElement el)
                 {
+                    // Attributet member finns bara på signaturen, och signaturen bär bara ett medlemsnummer: inga andra attribut, inget innehåll.
+                    if (el.LocalName == HpskSite.Services.SitePages.SiteSignatures.Tag)
+                    {
+                        var id = el.GetAttribute("member");
+                        foreach (var name in el.Attributes.Select(x => x.Name).ToList()) el.RemoveAttribute(name);
+                        if (id != null && id.Length is > 0 and <= 9 && id.All(char.IsAsciiDigit) && id[0] != '0')
+                        {
+                            el.SetAttribute("member", id);
+                            el.InnerHtml = "";
+                        }
+                        else { e.ReplacementNodes.Clear(); el.Remove(); return; }
+                    }
+                    else el.RemoveAttribute("member");
                     if (el.LocalName != "figure") { el.RemoveAttribute("class"); el.RemoveAttribute("style"); }
                     else
                     {

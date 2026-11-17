@@ -31,6 +31,9 @@
     const r = await fetch(S + action + '?' + new URLSearchParams(Object.assign({ ownerType, ownerId }, q || {})), { credentials: 'same-origin' });
     return r.json();
   }
+  // Signaturen (avatar, namn, roll) i texten: se site-signature.js. Man skriver bara under som sig själv; servern prövar det vid sparning.
+  const SIG = window.HpskSignature ? window.HpskSignature.create({ get: ids => get('Signatures', { ids: ids.join(',') }) }) : null;
+  const sigUi = SIG ? SIG.controls(h) : null;
   const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString('sv-SE', { maximumFractionDigits: 1 }) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' kB';
 
   // En Bootstrap-dialog: svarar med värdet på den knapp som trycktes (null vid stängning). Samma uppbyggnad som Hemsidans dialoger.
@@ -321,7 +324,7 @@
       field('Rubrik', 'nwTitle', title, 'Det som står överst och i listan.'),
       h('div', { class: 'mb-3' }, h('label', { class: 'form-label fw-semibold' }, 'Text'),
         h('div', { class: 'mb-2 d-flex flex-wrap align-items-center gap-1' },
-          h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: insertImage }, h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), widthBar()),
+          h('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary', onclick: insertImage }, h('i', { class: 'bi bi-image me-1', 'aria-hidden': 'true' }), 'Infoga bild'), sigUi && sigUi.node, widthBar()),
         bodyHost),
       field('Kort sammanfattning (valfri)', 'nwExcerpt', excerpt, 'Visas i listan. Lämnar du den tom tas början av texten.'),
       h('div', { class: 'mb-3' }, h('div', { class: 'form-label fw-semibold' }, 'Omslagsbild (valfri)'), coverBox, h('div', { class: 'mt-2' }, h('label', { class: 'form-label small', for: 'nwCoverAlt' }, 'Beskrivning av omslagsbilden'), alt)),
@@ -343,10 +346,11 @@
       // Bilder: bara ur föreningens egna bilder (knappen Infoga bild). Placering och beskrivning väljs på bilden, storleken med knapparna ovanför textrutan.
       removePlugins: ['ImageCaption', 'ImageUpload', 'EasyImage', 'CKFinder', 'CKFinderUploadAdapter', 'CKBox', 'CKBoxUI', 'CKBoxEditing', 'CKBoxUtils', 'CKBoxImageEdit', 'MediaEmbed'],
       image: { toolbar: ['imageStyle:alignLeft', 'imageStyle:alignCenter', 'imageStyle:alignRight', '|', 'imageTextAlternative'], styles: { options: ['alignLeft', 'alignCenter', 'alignRight'] } },
-      extraPlugins: [SiteImageWidth],
+      extraPlugins: SIG ? [SiteImageWidth, SIG.plugin] : [SiteImageWidth],
     }).then(ed => {
       st.editor = ed;
       ed.setData(existing ? (existing.bodyHtml || '') : '');
+      if (sigUi) sigUi.bind(ed, existing ? (existing.bodyHtml || '') : '');
       ed.model.document.on('change:data', () => { st.dirty = true; });
     }).catch(e => { console.error('CKEditor kunde inte startas:', e && (e.message || e)); bodyHost.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte startas.')); });
     window.addEventListener('beforeunload', ev => { if (st.dirty) { ev.preventDefault(); ev.returnValue = ''; } });

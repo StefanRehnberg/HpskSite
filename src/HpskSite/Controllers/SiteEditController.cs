@@ -45,14 +45,16 @@ namespace HpskSite.Controllers
         private readonly ISiteSupportNotifier _notifier;
         private readonly SiteAppearanceService _appearance;
         private readonly DpaAcceptanceService _dpa;
+        private readonly SiteSignatureService _signatures;
 
         public SiteEditController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             AdminAuthorizationService auth, IScopeProvider scopes, SiteOwnerService owners, ISiteOwnerFacts facts, RateCounterService rate,
             IContentService content, IMemberManager members, IMemberService memberService, SiteViewerResolver viewers, ISiteSupportNotifier notifier,
-            SiteAppearanceService appearance, DpaAcceptanceService dpa)
+            SiteAppearanceService appearance, DpaAcceptanceService dpa, SiteSignatureService signatures)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _signatures = signatures;
             _auth = auth; _scopes = scopes; _owners = owners; _facts = facts; _rate = rate;
             _content = content; _members = members; _memberService = memberService; _viewers = viewers; _notifier = notifier;
             _appearance = appearance; _dpa = dpa;
@@ -82,6 +84,16 @@ namespace HpskSite.Controllers
             try { _owners.SetEditing(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); _owners.SetConversion(g.OwnerType, g.OwnerId, true, g.Actor!.MemberId); }
             catch (InvalidOperationException) { return Fail("Hemsidan kunde inte slås på just nu.", "unavailable"); }
             return Json(new { success = true, url = g.OwnerUrl + "hemsidan/" });
+        }
+
+        /// <summary>Skribentens egen signatur och förhandsvisningen av dem som redan står i texten (knappen Infoga signatur i ett textblock).</summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör (läsning), brytare 2 PÅ")]
+        public async Task<IActionResult> Signatures(string ownerType, int ownerId, string? ids)
+        {
+            var g = await Gate(ownerType, ownerId, write: false);
+            if (g.Error != null) return g.Error;
+            return Json(_signatures.ForEditor(g.Actor!.MemberId, g.OwnerType, g.OwnerId, SiteSignatures.ParseIds(ids)));
         }
 
         /// <summary>Utseendet och valen (vitlistan ur <see cref="SiteAppearance"/>). Samma sak ritas av sidorna, så editorn har inga egna listor.</summary>
