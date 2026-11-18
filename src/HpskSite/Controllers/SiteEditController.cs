@@ -838,6 +838,28 @@ namespace HpskSite.Controllers
             return Map(r);
         }
 
+        /// <summary>
+        /// Förhandsvisar adressen en ny sida får (steg 1 i Ny sida): samma regel som skapandet (<see cref="SitePageWriter.ResolveSlug"/>), men skriver ingenting.
+        /// Utan <c>slug</c> räknas adressen ut ur namnet (numrerad om upptagen); med <c>slug</c> prövas just den adressen. Svarar <c>ok</c> + <c>slug</c> + <c>url</c>, eller <c>ok</c> falskt med skälet.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen administratör, brytare 2 PÅ, villkoren accepterade (som CreatePage)")]
+        public async Task<IActionResult> CheckAddress(string ownerType, int ownerId, string? title, string? slug)
+        {
+            var g = await Gate(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (Throttled($"sitecheckaddr:{g.OwnerType}:{g.OwnerId}", 120, TimeSpan.FromMinutes(1)))
+                return Fail("För många kontroller på kort tid. Vänta en stund.", "rate");
+            title = (title ?? "").Trim();
+            if (title.Length > 120) return Json(new { success = true, ok = false, message = "Namnet får vara högst 120 tecken." });
+            if (SitePersonalNumberGuard.FindInAny(new[] { title }) != null)
+                return Json(new { success = true, ok = false, message = "Namnet ser ut att innehålla ett personnummer." });
+            SitePageWriter.SlugResolution r;
+            using (var scope = _scopes.CreateScope(autoComplete: true))
+                r = SitePageWriter.ResolveSlug(scope.Database, _facts, g.OwnerType, g.OwnerId, title, slug);
+            return Json(new { success = true, ok = r.Ok, slug = r.Slug, numbered = r.Numbered, message = r.Message, url = r.Ok ? g.OwnerUrl.TrimEnd('/') + "/" + r.Slug + "/" : null });
+        }
+
         /// <summary>Byter ikonen i menyn för en egen sida (<c>icon</c> = en nyckel ur <see cref="SitePageIcons"/>, tom = standardikonen). Gäller direkt.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

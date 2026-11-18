@@ -198,6 +198,34 @@ namespace HpskSite.Services.SitePages
             }
         }
 
+        /// <summary>Vad en ny sidas adress blir: <see cref="Slug"/> när <see cref="Ok"/>, annars <see cref="Message"/> som säger varför inte. <see cref="Numbered"/> = namnet var upptaget och fick ett nummer.</summary>
+        public sealed record SlugResolution(bool Ok, string? Slug, bool Numbered, string? Message);
+
+        /// <summary>
+        /// EN regel för en ny sidas adress, för skapandet OCH för förhandsvisningen i steg 1 (så att de aldrig kan ge olika svar).
+        /// Utelämnad adress = ur titeln, numrerad om upptagen. Angiven adress prövas som den är (aldrig numrerad). Skriver ingenting.
+        /// </summary>
+        public static SlugResolution ResolveSlug(IDatabase db, ISiteOwnerFacts facts, string ownerType, int ownerId, string? title, string? requestedSlug)
+        {
+            var taken = TakenAddressSlugs(db, ownerType, ownerId);
+            var children = facts.ChildNodeSegments(ownerType, ownerId);
+            var clubs = facts.RegionClubSegments(ownerType, ownerId);
+            if (string.IsNullOrWhiteSpace(requestedSlug))
+            {
+                var baseSlug = SitePageSlugRules.SlugFrom(title);
+                var suggested = SitePageSlugRules.Suggest(baseSlug, ownerType, taken, children, clubs);
+                if (suggested == null)
+                    return new SlugResolution(false, null, false, string.IsNullOrEmpty(baseSlug)
+                        ? "Namnet ger ingen adress. Använd några bokstäver eller siffror, eller skriv en egen adress."
+                        : SitePageSlugRules.Check(baseSlug, ownerType, Array.Empty<string>(), Array.Empty<string>(), null).Reason
+                          ?? "Adressen ur namnet kan inte användas. Välj ett annat namn eller skriv en egen adress.");
+                return new SlugResolution(true, suggested, suggested != baseSlug, null);
+            }
+            var slug = requestedSlug.Trim();
+            var check = SitePageSlugRules.Check(slug, ownerType, taken, children, clubs);
+            return check.Ok ? new SlugResolution(true, slug, false, null) : new SlugResolution(false, null, false, check.Reason);
+        }
+
         /// <summary>Skapa en fri sida med adress. Sluggen utelämnad = ur titeln (numrerad om upptagen).</summary>
         public static SiteWriteResult CreatePage(IDatabase db, ISiteOwnerFacts facts, string ownerType, int ownerId, string title,
             string? requestedSlug, SiteVisibility visibility, SiteActor actor, DateTime now, int? parentPageId = null, string? icon = null)
@@ -220,22 +248,9 @@ namespace HpskSite.Services.SitePages
                     return Invalid("visibility", $"Sidan får inte vara öppnare än sidan den ligger under ({SlotLevelLabel(parent.VisibilityLevel)} eller strängare).");
             }
 
-            var taken = TakenAddressSlugs(db, ownerType, ownerId);
-            var children = facts.ChildNodeSegments(ownerType, ownerId);
-            var clubs = facts.RegionClubSegments(ownerType, ownerId);
-            string slug;
-            if (string.IsNullOrWhiteSpace(requestedSlug))
-            {
-                var suggested = SitePageSlugRules.Suggest(SitePageSlugRules.SlugFrom(title), ownerType, taken, children, clubs);
-                if (suggested == null) return new SiteWriteResult(SiteWriteStatus.SlugTaken, Message: "Välj ett annat namn eller en annan adress: adressen ur titeln kan inte användas.");
-                slug = suggested;
-            }
-            else
-            {
-                slug = requestedSlug.Trim();
-                var check = SitePageSlugRules.Check(slug, ownerType, taken, children, clubs);
-                if (!check.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, Message: check.Reason);
-            }
+            var resolved = ResolveSlug(db, facts, ownerType, ownerId, title, requestedSlug);
+            if (!resolved.Ok) return new SiteWriteResult(SiteWriteStatus.SlugTaken, Message: resolved.Message);
+            var slug = resolved.Slug!;
 
             var created = SitePageStore.Create(db, ownerType, ownerId, title, visibility, null, null, actor.MemberId, actor.AsSupport, now, parentPageId, icon);
             if (created.Outcome != SiteStoreOutcome.Ok) return From(created);

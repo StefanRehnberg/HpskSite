@@ -1217,13 +1217,39 @@
     const step = (n, t) => h('li', { class: 'list-inline-item ' + (w.step === n ? 'fw-bold' : 'text-muted') }, n + '. ' + t);
     let content, next, back = null;
     if (w.step === 1) {
-      const inp = h('input', { class: 'form-control', maxlength: '120', value: w.title, placeholder: 'Till exempel: Regler för banan', 'aria-label': 'Sidans namn' });
-      inp.addEventListener('input', () => { w.title = inp.value; });
+      const inp = h('input', { class: 'form-control', maxlength: '120', value: w.title, placeholder: 'Till exempel: Regler för banan', 'aria-label': 'Sidans namn', id: 'hsNewTitle' });
+      // Adressen: räknas ut ur namnet tills man själv skriver i fältet. Servern prövar den (samma regel som när sidan skapas) och Nästa är avstängd tills den är ledig.
+      const addr = h('input', { class: 'form-control', maxlength: '60', value: w.slug || '', 'aria-label': 'Sidans adress', id: 'hsNewSlug', autocomplete: 'off', spellcheck: 'false' });
+      const addrMsg = h('div', { class: 'form-text', role: 'status', 'aria-live': 'polite', id: 'hsNewAddrMsg' });
+      const prefix = ((OWNER.url || '').replace(/\/$/, '') || '') + '/';
+      let seq = 0, timer = null;
+      const setNext = ok => { const b = document.getElementById('hsNewNext'); if (b) b.disabled = !ok; };
+      const paint = (kind, text) => { addrMsg.className = 'form-text ' + (kind === 'ok' ? 'text-success' : kind === 'bad' ? 'text-danger' : ''); addrMsg.textContent = text; };
+      const check = async () => {
+        const my = ++seq;
+        const title = w.title.trim();
+        if (!title && !w.slugEdited) { w.addrOk = false; setNext(false); paint('', 'Adressen visas här när du har skrivit ett namn.'); return; }
+        const r = await api('GET', 'CheckAddress', { title, slug: w.slugEdited ? addr.value.trim() : undefined });
+        if (my !== seq) return;   // ett nyare svar gäller
+        if (!r.success) { w.addrOk = false; setNext(false); paint('bad', r.message || 'Adressen gick inte att kontrollera. Försök igen.'); return; }
+        if (!r.ok) { w.addrOk = false; setNext(false); paint('bad', r.message || 'Adressen går inte att använda.'); return; }
+        w.slug = r.slug; w.addrOk = true; w.addrUrl = r.url;
+        if (!w.slugEdited) addr.value = r.slug;
+        setNext(true);
+        paint('ok', r.numbered ? 'Namnet var upptaget, så adressen blir ' + r.url + '. Du kan ändra den i fältet ovan.' : 'Adressen är ledig: ' + r.url);
+      };
+      const later = () => { w.addrOk = false; setNext(false); paint('', 'Kontrollerar adressen …'); clearTimeout(timer); timer = setTimeout(check, 350); };
+      inp.addEventListener('input', () => { w.title = inp.value; later(); });
+      addr.addEventListener('input', () => { w.slugEdited = addr.value.trim() !== ''; later(); });
       content = [parentRow ? h('p', { class: 'text-muted' }, 'Undersida till ', h('strong', {}, parentRow.title), '.') : null,
-        h('label', { class: 'form-label fw-semibold' }, parentRow ? 'Vad ska undersidan heta?' : 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text mb-3' }, 'Namnet blir sidans rubrik och en del av adressen.'),
+        h('label', { class: 'form-label fw-semibold', for: 'hsNewTitle' }, parentRow ? 'Vad ska undersidan heta?' : 'Vad ska sidan heta?'), inp, h('div', { class: 'form-text mb-3' }, 'Namnet blir sidans rubrik och ger förslaget på adress.'),
+        h('label', { class: 'form-label fw-semibold', for: 'hsNewSlug' }, 'Sidans adress'),
+        h('div', { class: 'input-group' }, h('span', { class: 'input-group-text text-break d-none d-sm-flex', style: 'max-width:60%;white-space:normal' }, prefix), addr), addrMsg,
+        h('div', { class: 'form-text mb-3' }, 'Små bokstäver a–z, siffror och bindestreck. Skriv en egen adress om du vill, eller töm fältet för att få förslaget ur namnet igen.'),
         iconRow(w.icon || '', pick => { w.icon = pick; return true; }), h('div', { class: 'form-text' }, 'Ikonen syns bredvid sidans namn i menyn. Du kan byta den när som helst.'), err];
-      next = () => { if (!w.title.trim()) { err.replaceChildren(alertBox('warning', 'Skriv ett namn på sidan.')); return; } w.step = 2; renderNew(w); };
+      next = () => { if (!w.title.trim()) { err.replaceChildren(alertBox('warning', 'Skriv ett namn på sidan.')); return; } if (!w.addrOk) return; w.step = 2; renderNew(w); };
       setTimeout(() => inp.focus(), 0);
+      if (w.addrOk) paint('ok', 'Adressen är ledig: ' + (w.addrUrl || prefix + w.slug + '/')); else if (w.title.trim() || w.slugEdited) later(); else paint('', 'Adressen visas här när du har skrivit ett namn.');
     } else if (w.step === 2) {
       // Färdiga sidor = sidor som redan är byggda av blocken (och hämtar sitt innehåll live); Egen sida = börja med text eller tomt.
       const ready = readyTemplates();
@@ -1244,8 +1270,12 @@
       back = () => { w.step = 2; renderNew(w); };
       next = async () => {
         if (w.visibility === 0 && !await confirmPublic()) return;
-        const create = await api('POST', 'CreatePage', { title: w.title.trim(), visibility: w.visibility, parentPageId: parentRow ? parentRow.id : undefined, icon: w.icon || undefined });
-        if (!create.success) { err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return; }
+        const create = await api('POST', 'CreatePage', { title: w.title.trim(), slug: w.slug || undefined, visibility: w.visibility, parentPageId: parentRow ? parentRow.id : undefined, icon: w.icon || undefined });
+        if (!create.success) {
+          // Någon hann ta adressen medan du valde nivå: tillbaka till steg 1 med ett nytt förslag.
+          if (create.status === 'SlugTaken') { w.step = 1; w.addrOk = false; w.slugEdited = false; w.slug = ''; renderNew(w); document.getElementById('hsNewAddrMsg')?.replaceChildren('Adressen hann bli upptagen: ' + (create.message || '') + ' Kontrollerar en ny adress …'); return; }
+          err.replaceChildren(alertBox('danger', create.message || 'Det gick inte att skapa sidan.')); return;
+        }
         // Mallens startinnehåll sparas som första utkast, därefter öppnas redigeraren.
         const blocks = templateBlocks(w.template, w.visibility);
         S.hint = w.template === 'docs' ? 'Välj vilka dokument som ska visas i blocket Dokument (Ändra på kortet).' : w.template === 'meetings' ? 'Mötena hämtas ur kalendern (händelser av typen Möte). Välj kallelser och protokoll i blocket Dokument (Ändra på kortet).' : null;
@@ -1257,7 +1287,8 @@
         openEditor(create.pageId);
       };
     }
-    const nextBtn = h('button', { class: 'btn btn-primary', onclick: () => next() }, w.step === 3 ? 'Skapa sidan' : 'Nästa');
+    const nextBtn = h('button', { class: 'btn btn-primary', id: 'hsNewNext', onclick: () => next() }, w.step === 3 ? 'Skapa sidan' : 'Nästa');
+    if (w.step === 1 && !w.addrOk) nextBtn.disabled = true;   // steg 1 går inte vidare förrän adressen är kontrollerad och ledig
     view(shell('sidor', pageHead(parentRow ? 'Ny undersida' : 'Ny sida', 'En egen sida i tre steg: namn, mall och vem som får läsa den.'), h('ol', { class: 'list-inline mb-3' }, step(1, 'Namn'), step(2, 'Mall'), step(3, 'Vem ser den')),
       h('div', { class: 'hs-card p-3 p-md-4', style: 'max-width:46rem' }, content,
         h('div', { class: 'd-flex gap-2 mt-3' }, back ? h('button', { class: 'btn btn-outline-secondary', onclick: back }, 'Tillbaka') : h('button', { class: 'btn btn-outline-secondary', onclick: renderList }, 'Avbryt'), nextBtn))));
