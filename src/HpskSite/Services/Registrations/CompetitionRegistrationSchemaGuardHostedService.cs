@@ -48,6 +48,10 @@ namespace HpskSite.Services.Registrations
             foreach (var c in new[] { "MaxPatrolSize", "ChampionshipWeaponGroups", "ChampionshipParticipants", "HideOutOfCompetitionInPlace", "FaltskyttePublishedGroups" })
                 if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Competition', @0) IS NULL THEN 0 ELSE 1 END", c) == 0)
                     missing.Add("Competition." + c + " (add-out-of-competition-and-patrol-max.sql)");
+            // Medaljer och priser enligt klubbens egna regler (add-competition-medal-rules.sql): Create/kopiering skriver ALLA fält och faller på en saknad kolumn.
+            foreach (var c in new[] { "MedalGroupingMode", "MedalPlaces", "MedalTieRule" })
+                if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Competition', @0) IS NULL THEN 0 ELSE 1 END", c) == 0)
+                    missing.Add("Competition." + c + " (add-competition-medal-rules.sql)");
             if (db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM sys.index_columns ic
                     JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
                     WHERE i.object_id = OBJECT_ID('dbo.CompetitionFeeChoice') AND i.is_primary_key = 1") != 2)
@@ -70,8 +74,9 @@ namespace HpskSite.Services.Registrations
                     return;
                 }
                 _logger.LogCritical(
-                    "ANMÄLNINGSTABELLERNA SAKNAS: {Missing}. Kör Migrations/create-competition-registration-tables.sql "
-                    + "(guardad, säker att köra om). Står Registrations:Store på 'table' faller varje anmälan.",
+                    "TÄVLINGS- OCH ANMÄLNINGSSCHEMAT SAKNAS: {Missing}. Kör skriptet som står efter varje namn i Migrations/ "
+                    + "(guardade, säkra att köra om; create-competition-registration-tables.sql för anmälningstabellerna). "
+                    + "Står Registrations:Store på 'table' faller varje anmälan, och en saknad tävlingskolumn fäller skapa/kopiera tävling.",
                     string.Join(", ", missing));
             }
             catch (Exception ex)

@@ -107,9 +107,10 @@ namespace HpskSite.Tests
                 var value = CompetitionFieldValues.Read(f.Shape, f.Shape switch
                 {
                     CompetitionFieldShape.Bool or CompetitionFieldShape.BoolDefaultTrue => 1,
-                    CompetitionFieldShape.Int => 7,
+                    CompetitionFieldShape.Int => 2,   // inom 0..3 (medalPlaces) och 0..50 (maxPatrolSize): sättarna klämmer och ska inte ändra ett giltigt värde
                     CompetitionFieldShape.Date => new DateTime(2026, 1, 2),
-                    _ => "x-" + f.Alias,
+                    // Medaljfälten har CHECK-villkor i databasen och normaliserar i sättaren: ett okänt värde blir null, så de får ett GILTIGT värde här.
+                    _ => f.Alias switch { "medalGroupingMode" => "class", "medalTieRule" => "shared", _ => "x-" + f.Alias },
                 });
                 f.Set(c, value);
                 Assert.Equal(value, f.Get(c));

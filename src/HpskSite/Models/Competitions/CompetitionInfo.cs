@@ -167,6 +167,18 @@ namespace HpskSite.Models.Competitions
         public bool MedalsPerWeaponGroup { get; set; }
 
         /// <summary>
+        /// Arrangörens medaljindelning (se <c>MedalGroupingModes</c>): "shb", "weapongroup" eller "class". Null = följ
+        /// <see cref="MedalsPerWeaponGroup"/> (dagens beteende). Effekten finns bara via <c>ChampionshipRule</c>.
+        /// </summary>
+        public string? MedalGroupingMode { get; set; }
+
+        /// <summary>Antal medaljplatser: 0 = SHB:s reducering efter deltagare (dagens beteende), 1–3 = fast antal bästa (färre om färre har skjutit).</summary>
+        public int MedalPlaces { get; set; }
+
+        /// <summary>Hur en oavgjord medaljplats avgörs (se <c>MedalTieRules</c>): null = särskjutning (dagens beteende), "shared", "series".</summary>
+        public string? MedalTieRule { get; set; }
+
+        /// <summary>
         /// Mästerskapets vapengrupper (kommalista, kanonisk, se <c>ChampionshipWeaponGroups.Canonicalize</c>); null = alla grupper
         /// (dagens beteende). Fält först. Effekten finns bara via <c>ChampionshipRule</c>.
         /// </summary>

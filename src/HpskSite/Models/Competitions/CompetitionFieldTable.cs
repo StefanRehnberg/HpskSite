@@ -128,6 +128,11 @@ namespace HpskSite.Models.Competitions
             F("maxPatrolSize", D, CompetitionFieldShape.Int, c => c.MaxPatrolSize, (c, v) => c.MaxPatrolSize = Math.Clamp((int)v!, 0, 50)),   // CHECK 0..50 i databasen; ett värde utanför ger annars 500
             F("championshipWeaponGroups", D, CompetitionFieldShape.Text, c => c.ChampionshipWeaponGroups, (c, v) => c.ChampionshipWeaponGroups = (string?)v),   // kanonisk kommalista; tom/okänd = null = alla grupper
             F("championshipParticipants", D, CompetitionFieldShape.Choice, c => c.ChampionshipParticipants, (c, v) => c.ChampionshipParticipants = (string?)v),   // NVARCHAR(20)
+            // Medaljer och priser enligt klubbens egna regler (backlog P1.2, add-competition-medal-rules.sql). Sättarna normaliserar:
+            // kolumnerna har CHECK-villkor, och ett okänt värde från en klient ska bli "som idag", inte ett 500.
+            F("medalGroupingMode", D, CompetitionFieldShape.Text, c => c.MedalGroupingMode, (c, v) => c.MedalGroupingMode = HpskSite.CompetitionTypes.Common.MedalGroupingModes.Normalize((string?)v)),   // NVARCHAR(20) NULL
+            F("medalPlaces", D, CompetitionFieldShape.Int, c => c.MedalPlaces, (c, v) => c.MedalPlaces = Math.Clamp((int)v!, 0, 3)),   // CHECK 0..3 i databasen
+            F("medalTieRule", D, CompetitionFieldShape.Text, c => c.MedalTieRule, (c, v) => c.MedalTieRule = HpskSite.CompetitionTypes.Common.MedalTieRules.Normalize((string?)v)),   // NVARCHAR(20) NULL
             F("hideOutOfCompetitionInPlace", D, CompetitionFieldShape.Bool, c => c.HideOutOfCompetitionInPlace, (c, v) => c.HideOutOfCompetitionInPlace = (bool)v!),
             F("showLiveResults", D, CompetitionFieldShape.Bool, c => c.ShowLiveResults, (c, v) => c.ShowLiveResults = (bool)v!),
             F("scoringMode", D, CompetitionFieldShape.Choice, c => c.ScoringMode, (c, v) => c.ScoringMode = (string?)v),
