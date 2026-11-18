@@ -51,8 +51,12 @@ namespace HpskSite.Models.Competitions
     /// och jämförelsen mot de gamla läsningarna går fält för fält genom den. Ett fält som saknas här
     /// finns inte för lagringen.
     ///
-    /// <para><b>⚠️ Nya tävlingsfält är frysta</b> från S1 tills noderna är borta (C3-planen). Läggs ett
-    /// fält ändå till: en rad här, en egenskap på <see cref="CompetitionInfo"/>, en kolumn i tabellen.</para>
+    /// <para><b>⚠️ Nya tävlingsfält var frysta</b> från S1 tills noderna var borta (C3-planen). Noderna är borta (alla lagringar står
+    /// på tabell sedan 2026-10-20; dev bekräftat 2026-11-18: <c>Competitions:Store = table</c>), så frysningen gäller inte längre;
+    /// dispens för medaljfälten 2026-11-18 (<c>medalGroupingMode</c>, <c>medalPlaces</c>, <c>medalTieRule</c>). Läggs ett
+    /// fält till: en rad här, en egenskap på <see cref="CompetitionInfo"/>, en kolumn i tabellen (<c>create-competition-tables.sql</c> OCH
+    /// en guardad <c>add-…</c>-fil som körs FÖRE koden — <c>Create</c> skriver alla fält), en rad i startvakten
+    /// (<c>CompetitionRegistrationSchemaGuardHostedService</c>) och ett giltigt värde i rundturstestet om kolumnen har ett CHECK-villkor.</para>
     ///
     /// <para>Fält som koden läser men som inte finns på doktypen (<c>teamResultSeriesCount</c>,
     /// <c>contactPerson</c>, <c>specialInstructions</c>, <c>patrolSize</c>, <c>patrolIntervalMinutes</c>,
