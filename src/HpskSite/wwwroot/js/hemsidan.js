@@ -1232,7 +1232,7 @@
         const r = await api('GET', 'CheckAddress', { title, slug: w.slugEdited ? addr.value.trim() : undefined });
         if (my !== seq) return;   // ett nyare svar gäller
         if (!r.success) { w.addrOk = false; setNext(false); paint('bad', r.message || 'Adressen gick inte att kontrollera. Försök igen.'); return; }
-        if (!r.ok) { w.addrOk = false; setNext(false); paint('bad', r.message || 'Adressen går inte att använda.'); return; }
+        if (!r.ok) { w.addrOk = false; setNext(false); if (!w.slugEdited) { addr.value = ''; w.slug = ''; } paint('bad', r.message || 'Adressen går inte att använda.'); return; }
         w.slug = r.slug; w.addrOk = true; w.addrUrl = r.url;
         if (!w.slugEdited) addr.value = r.slug;
         setNext(true);
