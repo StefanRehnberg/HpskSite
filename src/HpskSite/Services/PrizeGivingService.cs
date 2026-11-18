@@ -194,8 +194,15 @@ namespace HpskSite.Services
             }
             else if (!model.IsChampionship)
             {
-                model.Warnings.Add("Tävlingen är inte ett mästerskap, så inga placeringsmedaljer "
-                    + "delas ut. Hederspriser och lagpriser visas ändå om de utgår.");
+                // Läslista i stället för en tom ceremoni: de tre bästa i varje grupp som resultatlistan
+                // visar (sammanslagna klasser är EN grupp). Inga medaljer räknas och inget reduceras.
+                model.PlacementsOnly = true;
+                model.Individual = FilterByGroup(
+                    BuildPlacementLists(artifact.ClassGroups ?? new List<PrecisionClassGroup>()),
+                    a => a.WeaponGroup,
+                    model.SelectedWeaponGroup);
+                model.Warnings.Add("Tävlingen är inte ett mästerskap, så inga medaljer räknas ut. Listan visar de tre "
+                    + "bästa i varje klass så som resultatlistan visar klasserna. Hederspriser visas om de utgår.");
             }
 
             // ── Lagmedaljer ──────────────────────────────────────────────────────────
@@ -213,6 +220,80 @@ namespace HpskSite.Services
 
             return model;
         }
+
+        /// <summary>
+        /// Läslistan för en tävling som inte är mästerskap: de tre bästa i varje resultatlistegrupp (sammanslagna
+        /// klasser är EN grupp), i den ordning resultatlistan redan har.
+        ///
+        /// ⚠️ Räknar INGET om: ordningen är artefaktens. Skyttar som inte startat eller brutit (DNS/DNF) och
+        /// skyttar utanför mästerskapet tas inte med. En plats där flera står exakt lika (poäng och andrahandstal)
+        /// NAMNGER ingen — den står som oavgjord, precis som en oavgjord medaljplats gör — för att uppropet inte
+        /// ska läsa upp fel person. Tabellen delar inte ut medaljer och bär inget antal att reducera.
+        /// </summary>
+        public static List<PrecisionMedalCategoryAwards> BuildPlacementLists(IEnumerable<PrecisionClassGroup> groups)
+        {
+            var result = new List<PrecisionMedalCategoryAwards>();
+            foreach (var group in groups)
+            {
+                var competing = group.Shooters
+                    .Where(s => !s.OutOfCompetition && string.IsNullOrEmpty(s.ParticipationStatus))
+                    .ToList();
+                if (competing.Count == 0) continue;
+
+                var weaponGroup = ChampionshipCategory.WeaponGroupForClasses(competing.Select(s => s.ShootingClass));
+                if (weaponGroup.Length == 0) weaponGroup = ChampionshipCategory.WeaponGroupFor(competing[0].ShootingClass);
+
+                var category = new PrecisionMedalCategoryAwards
+                {
+                    CategoryName = string.IsNullOrWhiteSpace(group.DisplayClassName) ? group.ClassName : group.DisplayClassName!,
+                    WeaponGroup = weaponGroup,
+                    Participants = competing.Select(s => s.MemberId).Distinct().Count(),
+                    MedalCountText = "De tre bästa"
+                };
+
+                var idx = 0;
+                while (idx < competing.Count && idx < 3)
+                {
+                    var s = competing[idx];
+                    var end = idx + 1;
+                    while (end < competing.Count
+                           && competing[end].TotalScore == s.TotalScore
+                           && competing[end].TotalXCount == s.TotalXCount) end++;
+
+                    if (end - idx == 1)
+                    {
+                        category.Awards.Add(new PrecisionMedalAward
+                        {
+                            Place = idx + 1,
+                            Medal = PlaceLabel(idx + 1),
+                            MemberId = s.MemberId,
+                            Name = s.Name,
+                            Club = s.Club,
+                            ShootingClass = s.ShootingClass,
+                            TotalScore = s.TotalScore,
+                            XCount = s.TotalXCount
+                        });
+                    }
+                    else
+                    {
+                        var names = competing.Skip(idx).Take(end - idx).Select(x => x.Name).ToList();
+                        var between = names.Count == 2
+                            ? $"{names[0]} och {names[1]}"
+                            : string.Join(", ", names.Take(names.Count - 1)) + " och " + names.Last();
+                        var lastShown = Math.Min(end, 3);
+                        var range = lastShown > idx + 1 ? $"{PlaceLabel(idx + 1)}–{PlaceLabel(lastShown)}" : PlaceLabel(idx + 1);
+                        category.Unresolved.Add($"{range} — lika resultat mellan {between}");
+                    }
+                    idx = end;
+                }
+
+                category.MedalCount = category.Awards.Count;
+                result.Add(category);
+            }
+            return result;
+        }
+
+        private static string PlaceLabel(int place) => place <= 2 ? $"{place}:a" : $"{place}:e";
 
         /// <summary>
         /// Grenens egna ord för resultatet, och om den har lagtävling.

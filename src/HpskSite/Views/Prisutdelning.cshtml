@@ -60,6 +60,8 @@
         .pu-club { color: var(--bs-secondary-color); font-size: .92rem; }
         .pu-score { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
 
+        .pu-medal .pu-placenum { font-size: 1.5rem; font-weight: 700; }
+
         .pu-gold   { color: #b8860b; }
         .pu-silver { color: #6c757d; }
         .pu-bronze { color: #a0522d; }
@@ -147,13 +149,28 @@
             </span>
         }
         <span class="text-secondary">
-            <i class="bi bi-award"></i> @Model.TotalMedals medaljer att dela ut
+            <i class="bi bi-award"></i>
+            @if (Model.PlacementsOnly)
+            {
+                @: @Model.TotalMedals placeringar att läsa upp
+            }
+            else
+            {
+                @: @Model.TotalMedals medaljer att dela ut
+            }
         </span>
         @if (Model.TotalUnresolved > 0)
         {
             <span class="text-danger fw-semibold">
                 <i class="bi bi-exclamation-triangle-fill"></i>
-                @Model.TotalUnresolved oavgjord@(Model.TotalUnresolved == 1 ? "" : "a") medaljplats@(Model.TotalUnresolved == 1 ? "" : "er")
+                @if (Model.PlacementsOnly)
+                {
+                    @: @Model.TotalUnresolved oavgjord@(Model.TotalUnresolved == 1 ? "" : "a") placering@(Model.TotalUnresolved == 1 ? "" : "ar")
+                }
+                else
+                {
+                    @: @Model.TotalUnresolved oavgjord@(Model.TotalUnresolved == 1 ? "" : "a") medaljplats@(Model.TotalUnresolved == 1 ? "" : "er")
+                }
             </span>
         }
         @* Vilken INDELNING listan räknades i. Utan den meningen går det inte att se om ett
@@ -191,7 +208,11 @@
     }
 
     @* ───────────────────────── Individuella medaljer ───────────────────────── *@
-    @if (individualByGroup.Count == 0 && Model.MedalsComputed)
+    @if (individualByGroup.Count == 0 && Model.PlacementsOnly)
+    {
+        <div class="alert alert-secondary">Resultatlistan har inga skyttar att läsa upp placeringar för.</div>
+    }
+    else if (individualByGroup.Count == 0 && Model.MedalsComputed)
     {
         <div class="alert alert-secondary">Inga individuella mästerskapsmedaljer att dela ut.</div>
     }
@@ -234,10 +255,21 @@
                             var icon = a.Place == 1 ? "🥇" : a.Place == 2 ? "🥈" : "🥉";
                             var tone = a.Place == 1 ? "pu-gold" : a.Place == 2 ? "pu-silver" : "pu-bronze";
                             <div class="pu-award" data-place="@a.Place">
-                                <div class="pu-medal @tone">
-                                    <span>@icon</span>
-                                    <small>@a.Medal</small>
-                                </div>
+                                @if (Model.PlacementsOnly)
+                                {
+                                    @* Läslista utan medaljer: platsen leder, inte en medaljsymbol. *@
+                                    <div class="pu-medal @tone">
+                                        <span class="pu-placenum">@a.Medal</span>
+                                        <small>placering</small>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="pu-medal @tone">
+                                        <span>@icon</span>
+                                        <small>@a.Medal</small>
+                                    </div>
+                                }
                                 <div class="pu-who">
                                     <div class="pu-name">@a.Name</div>
                                     <div class="pu-club">

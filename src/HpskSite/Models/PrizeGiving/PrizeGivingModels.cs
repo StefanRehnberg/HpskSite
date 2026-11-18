@@ -17,6 +17,14 @@ namespace HpskSite.Models.PrizeGiving
         public string CompetitionType { get; set; } = "";
         public bool IsChampionship { get; set; }
 
+        /// <summary>
+        /// Sant när listan <see cref="Individual"/> är en LÄSLISTA med de tre bästa per resultatlistegrupp
+        /// och inte mästerskapsmedaljer. Gäller en tävling som inte är mästerskap: arrangören vill ändå ha
+        /// namnen att gratulera vid en ceremoni (Stefan 2026-11-14), men inga medaljer räknas och inget
+        /// medaljantal reduceras. Bygger på resultatlistans grupper, alltså följer sammanslagna klasser.
+        /// </summary>
+        public bool PlacementsOnly { get; set; }
+
         /// <summary>Vald vapengrupp, eller "" för alla. Kommer från ?grupp= i adressen.</summary>
         public string SelectedWeaponGroup { get; set; } = "";
 
