@@ -1,7 +1,4 @@
 using HpskSite.CompetitionTypes.Common.Utilities;
-using Umbraco.Cms.Core.Models;
-using Umbraco.Cms.Core.Models.PublishedContent;
-using Umbraco.Extensions;
 
 namespace HpskSite.CompetitionTypes.Common
 {
@@ -73,34 +70,8 @@ namespace HpskSite.CompetitionTypes.Common
         public static bool PerWeaponGroup(HpskSite.Models.Competitions.CompetitionInfo? competition) =>
             competition != null && PerWeaponGroup(competition.CompetitionScope, competition.MedalsPerWeaponGroup);
 
-        /// <summary>Läser valet ur en sparad (icke publicerad) nod.</summary>
-        public static bool PerWeaponGroup(IContent? competition)
-        {
-            if (competition == null) return false;
-            return PerWeaponGroup(
-                competition.GetValue<string>("competitionScope"),
-                competition.GetValue<bool>(PropertyAlias));
-        }
-
-        /// <summary>
-        /// Läser valet ur den publicerade cachen.
-        ///
-        /// ⚠️ Omfattningen läses OTYPAT. <c>competitionScope</c> kan vara en FlexibleDropdown,
-        /// vars värdekonverterare kastar på <c>Value&lt;string&gt;()</c> — samma försiktighet som
-        /// <c>CompetitionUrlProvider.ReadScopeValue</c>. <see cref="ChampionshipCategory"/> skalar
-        /// av en eventuell JSON-array.
-        /// </summary>
-        public static bool PerWeaponGroup(IPublishedContent? competition)
-        {
-            if (competition == null) return false;
-            // ⚠️ RÄTTAT 2026-09-20: den otypade läsningen här KASTADE på en tävling vars
-            // omfattning lagrats som ren sträng — FlexibleDropdownens konverterare kör även på
-            // Value(), inte bara på Value<string>(). CompetitionScopeHelper.ReadScope läser
-            // råvärdet förbi konverteraren och normaliserar en JSON-inpackad array.
-            return PerWeaponGroup(
-                CompetitionScopeHelper.ReadScope(competition),
-                competition.Value<bool>(PropertyAlias));
-        }
+        // (Överlagringarna för IContent och IPublishedContent är borttagna 2026-11-18: ingen anropade dem sedan tävlingarna
+        //  flyttade till tabellen, och de höll kvar Umbraco-typerna i regelklassen. Tävlingen läses som CompetitionInfo.)
 
         /// <summary>
         /// Klartext för ytan. Prisutdelningen och medaljpanelen skriver ut vilken indelning

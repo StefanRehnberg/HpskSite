@@ -1,0 +1,84 @@
+using FluentAssertions;
+using HpskSite.CompetitionTypes.Common;
+using HpskSite.Models.Competitions;
+using Xunit;
+
+namespace HpskSite.Tests.Services
+{
+    /// <summary>
+    /// Steg S0 (plan v2): regeln läser det nya fältet <c>medalGroupingMode</c> men ska svara EXAKT som förr för varje tävling som saknar det.
+    /// Paritetstestet jämför de gamla statiska formlerna (<see cref="MedalGrouping.PerWeaponGroup(string?, bool)"/>,
+    /// <see cref="ChampionshipCategory.SplitsGroupC"/>) mot den nya regeln över alla omfattningar och båda värden på boolen, innan något anrop byts.
+    /// </summary>
+    public class ChampionshipRuleGroupingParityTests
+    {
+        public static IEnumerable<object[]> Scopes() => new[]
+        {
+            new object[] { "Klubbmästerskap" }, new object[] { "Kretsmästerskap" }, new object[] { "Landsdelsmästerskap" },
+            new object[] { "Svenskt Mästerskap" }, new object[] { "" }, new object[] { "Ingen" }, new object[] { "[\"Klubbmästerskap\"]" },
+        };
+
+        [Theory]
+        [MemberData(nameof(Scopes))]
+        public void Without_the_new_field_the_rule_answers_as_before(string scope)
+        {
+            foreach (var stored in new[] { false, true })
+            {
+                var rule = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = stored });
+
+                rule.MedalsPerWeaponGroup.Should().Be(MedalGrouping.PerWeaponGroup(scope, stored), $"{scope} / bool={stored}");
+                rule.SplitsChampionshipClassC.Should().Be(ChampionshipCategory.SplitsGroupC(scope, stored), $"{scope} / bool={stored}");
+                // ForScope (prisutdelningen, ur artefaktens bool) svarar likadant.
+                ChampionshipRule.ForScope(scope, stored).MedalsPerWeaponGroup.Should().Be(rule.MedalsPerWeaponGroup);
+                ChampionshipRule.ForScope(scope, stored).SplitsChampionshipClassC.Should().Be(rule.SplitsChampionshipClassC);
+            }
+        }
+
+        [Theory]
+        [MemberData(nameof(Scopes))]
+        public void The_backfilled_mode_equals_the_old_bool(string scope)
+        {
+            // Migreringen sätter weapongroup där boolen var sann. Regeln ska då svara som boolen gjorde.
+            var viaBool = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = true });
+            var viaMode = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = true, MedalGroupingMode = "weapongroup" });
+
+            viaMode.MedalsPerWeaponGroup.Should().Be(viaBool.MedalsPerWeaponGroup);
+            viaMode.SplitsChampionshipClassC.Should().Be(viaBool.SplitsChampionshipClassC);
+        }
+
+        [Fact]
+        public void The_new_field_wins_over_the_old_bool_where_the_organiser_may_choose()
+        {
+            var rule = ChampionshipRule.For(new CompetitionInfo
+            {
+                CompetitionScope = "Klubbmästerskap", MedalsPerWeaponGroup = true, MedalGroupingMode = "shb"
+            });
+
+            rule.GroupingMode.Should().Be(MedalGroupingKind.Shb);
+            rule.MedalsPerWeaponGroup.Should().BeFalse();
+            rule.SplitsChampionshipClassC.Should().BeTrue();
+        }
+
+        [Theory]
+        [InlineData("Landsdelsmästerskap")]
+        [InlineData("Svenskt Mästerskap")]
+        [InlineData("")]
+        public void A_stored_mode_never_applies_outside_club_and_region_championships(string scope)
+        {
+            // Nivåspärren: ett värde som blivit kvar från när tävlingen var något annat slår aldrig igenom.
+            ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalGroupingMode = "weapongroup" })
+                .GroupingMode.Should().Be(MedalGroupingKind.Shb);
+        }
+
+        [Fact]
+        public void Class_is_read_as_shb_until_the_class_grouping_is_built()
+        {
+            // S0: fältet får finnas utan att ändra något. "class" tillämpas i S1, tillsammans med gruppavbildningen.
+            var rule = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = "Klubbmästerskap", MedalGroupingMode = "class" });
+
+            rule.StoredGroupingMode.Should().Be("class");
+            rule.GroupingMode.Should().Be(MedalGroupingKind.Shb);
+            rule.MedalsPerWeaponGroup.Should().BeFalse();
+        }
+    }
+}
