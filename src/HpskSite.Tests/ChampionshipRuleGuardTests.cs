@@ -31,6 +31,7 @@ namespace HpskSite.Tests
             Path.Combine("CompetitionTypes", "Common", "ChampionshipRule.cs"),
             Path.Combine("CompetitionTypes", "Common", "ChampionshipCategory.cs"),
             Path.Combine("CompetitionTypes", "Common", "MedalGrouping.cs"),
+            Path.Combine("CompetitionTypes", "Common", "MedalGroupMap.cs"),   // gruppavbildningen: den ENDA som anropar ChampionshipCategory.For/BuildLookup
             Path.Combine("CompetitionTypes", "Common", "Utilities", "CompetitionScopeHelper.cs"),
             Path.Combine("CompetitionTypes", "Precision", "Services", "StandardMedalCalculationService.cs"),   // ShouldSplitGroupC delegerar till regeln
         };
@@ -59,6 +60,8 @@ namespace HpskSite.Tests
             new(@"\.SplitsGroupC\(", RegexOptions.Compiled),
             new(@"\bShouldSplitGroupC\(", RegexOptions.Compiled),
             new(@"\bMedalGrouping\.(PerWeaponGroup|CanChoose)\(", RegexOptions.Compiled),
+            // Medaljgruppen byggs genom MedalGroupMap (plan v2, S0) — aldrig genom en egen bool till ChampionshipCategory.For/BuildLookup.
+            new(@"\bChampionshipCategory\.(For|BuildLookup)\(", RegexOptions.Compiled),
             // rå jämförelse mot konstanterna: == X, != X, is X, or X, Equals(.., X)
             new(@"(==|!=|\bis\b|\bor\b)\s*(HpskSite\.CompetitionTypes\.Common\.Utilities\.|CompetitionTypes\.Common\.Utilities\.)?CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap", RegexOptions.Compiled),
             new(@"CompetitionScopeHelper\.(SvensktM|Landsdelsm|Kretsm|Klubbm)asterskap\s*(==|!=)", RegexOptions.Compiled),
@@ -99,6 +102,8 @@ namespace HpskSite.Tests
         [InlineData("var s = new StandardMedalCalculationService().ShouldSplitGroupC(scope);")]
         [InlineData("var p = MedalGrouping.PerWeaponGroup(competition);")]
         [InlineData("if (!MedalGrouping.CanChoose(scope)) return;")]
+        [InlineData("var g = ChampionshipCategory.For(s.ShootingClass, splitC);")]
+        [InlineData("var l = ChampionshipCategory.BuildLookup(classes, true);")]
         [InlineData("var sm = scope == CompetitionScopeHelper.SvensktMasterskap;")]
         [InlineData("var sm = scope is CompetitionScopeHelper.Kretsmasterskap or CompetitionScopeHelper.Landsdelsmasterskap;")]
         [InlineData("if (string.Equals(scope, CompetitionScopeHelper.Klubbmasterskap, StringComparison.Ordinal))")]
@@ -114,6 +119,8 @@ namespace HpskSite.Tests
         [Theory]
         [InlineData("var r = ChampionshipRule.For(competition).IsChampionship;")]
         [InlineData("var r = ChampionshipRule.ForScope(scope, true).SplitsChampionshipClassC;")]
+        [InlineData("var g = MedalGroupMap.For(rule).GroupFor(s.ShootingClass);")]
+        [InlineData("var w = ChampionshipCategory.WeaponGroupFor(s.ShootingClass);")]   // skjutsessionen, en annan axel
         [InlineData("CompetitionScopeHelper.All.Contains(x)")]
         [InlineData("comp.SetValue(\"competitionScope\", CompetitionScopeHelper.Klubbmasterskap);")]
         public void Monstren_fangar_inte_regelns_egna_anrop(string line) =>

@@ -249,9 +249,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // kategori och en medalj per vapengrupp vore två olika svar på samma fråga.
             var rule = ChampionshipRule.For(competition);
             var lookup = rule.IsChampionship
-                ? ChampionshipCategory.BuildLookup(
-                    results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(),
-                    rule.SplitsChampionshipClassC)
+                ? MedalGroupMap.For(rule).BuildLookup(
+                    results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct())
                 : GetMergeLookup(competitionId);
 
             return _qualificationService.BuildFullClassRankings(results, shooterInfo, lookup);

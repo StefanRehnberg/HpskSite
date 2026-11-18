@@ -548,9 +548,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                                 .ToList()
                             : new List<PrecisionShooterResult>();
 
-                    var splitC = championshipRule.SplitsChampionshipClassC;
+                    var groupMap = MedalGroupMap.For(championshipRule);
                     foreach (var cat in contenders
-                                 .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
+                                 .GroupBy(s => groupMap.GroupFor(s.ShootingClass))
                                  .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
                     {
                         // Samma ordningsregel som resultatlistan — annars kan medaljlistan och
@@ -688,11 +688,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 //     aldrig få medalj).
                 if (useMedalCategories)
                 {
-                    var splitCForAwards = championshipRule.SplitsChampionshipClassC;
+                    var groupMapForAwards = MedalGroupMap.For(championshipRule);
                     // Antalet medaljer räknas över de TÄVLANDE (en skytt utanför ingår inte i mästerskapet, som i fält).
                     var participantsByCategory = PrecisionOutOfCompetition.Competing(
                             classGroups.SelectMany(cg => cg.Shooters), championshipRule.AppliesToClass)
-                        .GroupBy(sh => ChampionshipCategory.For(sh.ShootingClass, splitCForAwards))
+                        .GroupBy(sh => groupMapForAwards.GroupFor(sh.ShootingClass))
                         .Where(gr => !string.IsNullOrWhiteSpace(gr.Key))
                         .ToDictionary(
                             gr => gr.Key,

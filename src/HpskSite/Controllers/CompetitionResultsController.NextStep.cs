@@ -129,7 +129,7 @@ namespace HpskSite.Controllers
             }).ToList();
 
             // Mästerskapsklassernas indelning (C delas i Dam/Vet/Jun eller inte) — samma regel som medaljerna.
-            bool splitC = ChampionshipRule.For(comp).SplitsChampionshipClassC;
+            var groupMap = MedalGroupMap.For(ChampionshipRule.For(comp));
 
             // ── Per vapengrupp ─────────────────────────────────────────────────────────
             var groupNames = qualStarts.Select(s => s.Group).Distinct()
@@ -181,9 +181,9 @@ namespace HpskSite.Controllers
                 if (fl != null && finalSeries > 0)
                 {
                     var withResults = starts.Where(s => Enumerable.Range(1, qual).Any(n => Has(s, n)))
-                        .Select(s => ChampionshipCategory.For(s.RawClass, splitC)).Where(c => c.Length > 0);
+                        .Select(s => groupMap.GroupFor(s.RawClass)).Where(c => c.Length > 0);
                     var inFinal = new HashSet<string>(fl.Starts.Where(s => s.Group == g)
-                        .Select(s => ChampionshipCategory.For(s.RawClass, splitC)), StringComparer.OrdinalIgnoreCase);
+                        .Select(s => groupMap.GroupFor(s.RawClass)), StringComparer.OrdinalIgnoreCase);
                     missingCats = withResults.Distinct(StringComparer.OrdinalIgnoreCase)
                         .Where(c => !inFinal.Contains(c)).OrderBy(c => c).ToList();
                 }

@@ -481,14 +481,14 @@ namespace HpskSite.Services
             // bredvid medaljerna på samma sida, och medaljerna kommer ur artefakten — läste de
             // två olika indelningar skulle sidan visa fyra hedersprisklasser intill en enda
             // medaljgrupp. Samma skäl som att enheterna reser med talen.
-            var splitC = ChampionshipRule.ForScope(scope, artifact.MedalsPerWeaponGroup).SplitsChampionshipClassC;
+            var groupMap = MedalGroupMap.For(ChampionshipRule.ForScope(scope, artifact.MedalsPerWeaponGroup));
 
             // ⚠️ ORDNINGEN HÄR ÄR INTE MEDALJORDNINGEN. Hederspriser tillfaller deltagarna, inte
             // finalisterna, så mängden är en annan än medaljens — och därför får den här
             // ordningen aldrig användas för att peka ut en medaljör. Medaljörerna kommer
             // uteslutande ur artefaktens MedalAwards.
             foreach (var cat in allShooters
-                         .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
+                         .GroupBy(s => groupMap.GroupFor(s.ShootingClass))
                          .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                          .OrderBy(g => g.Key, StringComparer.CurrentCulture))
             {

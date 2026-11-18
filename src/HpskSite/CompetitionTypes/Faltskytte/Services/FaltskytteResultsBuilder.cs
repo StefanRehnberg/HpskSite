@@ -299,13 +299,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 // Arrangörens val (klubb/krets): en uppsättning medaljer per vapengrupp, eller
                 // delade mästerskapsklasser. Nivåspärren ligger i regeln.
-                var splitC = championshipRule.SplitsChampionshipClassC;
+                var groupMap = MedalGroupMap.For(championshipRule);
                 // Utanför mästerskapet (S4): en vapengrupp som mästerskapet inte gäller får ingen kategori alls — alltså ingen
                 // mästerskapsmedalj, ingen särskjutning och ingen prisutdelning som mästerskap. Placeringen i klassgrupperna
                 // ovan och standardmedaljerna är oförändrade. Utan lista är filtret alltid sant.
                 categoryStandings = shooterResults
                     .Where(s => championshipRule.AppliesToClass(s.ShootingClass) && !s.OutOfCompetition)
-                    .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
+                    .GroupBy(s => groupMap.GroupFor(s.ShootingClass))
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                     .Select(g => new FaltskytteCategoryStanding
                     {

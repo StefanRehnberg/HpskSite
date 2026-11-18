@@ -1668,7 +1668,7 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
         /// <summary>Hur många mästerskapsmedaljer planen ger, enligt samma regel som ytorna.</summary>
         private static int MedalPreview(MasterskapSeed plan) =>
             plan.Classes
-                .GroupBy(c => ChampionshipCategory.For(c.ShootingClass, splitGroupC: true))
+                .GroupBy(c => MedalGroupMap.Shb.GroupFor(c.ShootingClass))
                 .Sum(g => ChampionshipMedalCount.For(
                         g.Sum(c => c.Shooters),
                         g.Key.Contains("Jun", StringComparison.OrdinalIgnoreCase)).Medals);

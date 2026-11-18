@@ -2463,12 +2463,12 @@ namespace HpskSite.Controllers
             var groups = new List<object>();
             if (!rule.IsChampionship) return groups;
 
-            var splitC = rule.SplitsChampionshipClassC;
+            var groupMap = MedalGroupMap.For(rule);
 
             // Deltagare = distinkta skyttar i kategorin. En skytt kan inte starta i två klasser
             // inom samma vapengrupp i precision (F.2.2), så distinkta medlemmar är rätt mått.
             foreach (var g in results
-                         .GroupBy(r => ChampionshipCategory.For(r.ShootingClass, splitC))
+                         .GroupBy(r => groupMap.GroupFor(r.ShootingClass))
                          .Where(g => !string.IsNullOrWhiteSpace(g.Key))
                          .OrderBy(g => g.Key, StringComparer.CurrentCulture))
             {
