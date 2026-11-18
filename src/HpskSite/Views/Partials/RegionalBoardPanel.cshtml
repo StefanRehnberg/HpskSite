@@ -26,17 +26,17 @@
 <script>
 (function() {
     const regionId = @regionId;
+    const canManage = @((ViewBag.regionBoardCanManage as bool? ?? false) ? "true" : "false");
 
-    // Load when the tab becomes visible
+    // Fliken finns i det gamla skalet (ladda när den visas); på en egen sida (/styrelsen/) finns ingen flik — ladda direkt.
     const tabEl = document.getElementById('regionBoard-tab');
+    let loaded = false;
+    function loadOnce() { if (!loaded) { loaded = true; loadRegionalBoard(); } }
     if (tabEl) {
-        let loaded = false;
-        tabEl.addEventListener('shown.bs.tab', function() {
-            if (!loaded) {
-                loaded = true;
-                loadRegionalBoard();
-            }
-        });
+        tabEl.addEventListener('shown.bs.tab', loadOnce);
+        if (tabEl.classList.contains('active')) loadOnce();
+    } else {
+        loadOnce();
     }
 
     function loadRegionalBoard() {
@@ -45,7 +45,13 @@
             .then(r => r.json())
             .then(data => {
                 if (!data.success || !data.data || data.data.length === 0) {
-                    container.innerHTML = '<p class="text-muted text-center py-3">Ingen styrelse har registrerats ännu.</p>';
+                    container.innerHTML = canManage
+                        ? '<div class="alert alert-info mb-0"><div class="fw-semibold mb-1"><i class="bi bi-info-circle me-1"></i>Ingen styrelse har lagts till ännu</div>'
+                            + '<p class="mb-2">Så här lägger du till styrelsemedlemmar: öppna <a href="/styrelse?type=1&id=' + regionId + '&tab=styrelse" class="alert-link">Styrelsearbete</a> '
+                            + '(finns också i Admin-menyn på kretssidan), välj <strong>Styrelsen och mandat</strong> och klicka på <strong>Lägg till förtroendevald…</strong>. '
+                            + 'Välj person och roll och låt <em>Sitter i styrelsen</em> vara ibockat — då visas personen här.</p>'
+                            + '<p class="mb-0 small text-muted">Den här rutan syns bara för kretsens administratörer; besökare ser en kort notis.</p></div>'
+                        : '<p class="text-muted text-center py-3">Kretsens styrelse har inte registrerats ännu.</p>';
                     return;
                 }
 
