@@ -2348,7 +2348,8 @@ namespace HpskSite.Controllers
                 var hasFinalsForMedals = CompetitionFinals.Effective(
                     competition?.CompetitionType, competition?.NumberOfFinalSeries ?? 0) > 0;
                 var medalGroups = BuildMedalGroups(results, championshipRule,
-                    hasFinalsForMedals ? GetFinalistStarts(competitionId) : null);
+                    hasFinalsForMedals ? GetFinalistStarts(competitionId) : null,
+                    ClassMergingService.BuildMergeGroupLookup(appliedMerges));
                 var isChampionship = championshipRule.IsChampionship;
 
                 // Tillståndet ytan behöver för att kunna VISA och ÄNDRA indelningen.
@@ -2448,8 +2449,8 @@ namespace HpskSite.Controllers
         /// prisutdelningssidan, och en andra kopia av den är en andra chans att förväxla
         /// mästerskapskategori med skicklighetsklass.
         /// </summary>
-        private static (int Medals, string Text) ChampionshipMedals(int participants, bool isJuniorCategory)
-            => ChampionshipMedalCount.For(participants, isJuniorCategory);
+        private static (int Medals, string Text) ChampionshipMedals(int participants, bool isJuniorCategory, int places = 0)
+            => ChampionshipMedalCount.For(participants, isJuniorCategory, places: places);
 
         /// <summary>
         /// Deltagarantal och medaljutdelning per MÄSTERSKAPSKLASS. Tom lista när tävlingen inte
@@ -2458,12 +2459,14 @@ namespace HpskSite.Controllers
         /// </summary>
         private List<object> BuildMedalGroups(
             List<PrecisionResultEntry> results, ChampionshipRule rule,
-            HashSet<string>? finalistStarts = null)
+            HashSet<string>? finalistStarts = null,
+            IReadOnlyDictionary<string, string>? classMerges = null)
         {
             var groups = new List<object>();
             if (!rule.IsChampionship) return groups;
 
-            var groupMap = MedalGroupMap.For(rule);
+            // Per klass följer gruppen resultatlistans sammanslagningar (samma avbildning som byggarna) — annars säger panelen emot artefakten.
+            var groupMap = MedalGroupMap.For(rule, classMerges);
 
             // Deltagare = distinkta skyttar i kategorin. En skytt kan inte starta i två klasser
             // inom samma vapengrupp i precision (F.2.2), så distinkta medlemmar är rätt mått.
@@ -2474,7 +2477,7 @@ namespace HpskSite.Controllers
             {
                 var count = g.Select(r => r.MemberId).Distinct().Count();
                 var isJun = g.Key.Contains("Jun", StringComparison.OrdinalIgnoreCase);
-                var (medals, text) = ChampionshipMedals(count, isJun);
+                var (medals, text) = ChampionshipMedals(count, isJun, rule.MedalPlaces);
 
                 // ⚠️ Med en finalrunda tas medaljörerna BARA bland finalisterna (CalculateFinalResults).
                 // Har kategorin ingen finalist ger prisutdelningen inga medaljer — och tabellen här
@@ -3472,8 +3475,61 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // ── Klubbens egna regler (per klass, fast antal platser, oavgjort): bara när ett nytt fält skickas. Den gamla kryssrutan
+                // (bara PerWeaponGroup) går den gamla vägen, men skriver nu även det nya läget — annars skulle ett backfillat läge vinna över
+                // en avbockad ruta och valet se ut att inte sparas.
+                var current = _competitions.GetSaved(request.CompetitionId)!;
+                var legacyToggle = request.Mode == null && request.Places == null && request.TieRule == null;
+                if (!legacyToggle)
+                {
+                    var ruleSettings = HttpContext.RequestServices.GetService<HpskSite.Services.SiteSettings.SiteSettingService>();
+                    var enabled = string.Equals(ruleSettings?.Get(MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase);
+                    var refusal = MedalRuleEditSettings.Refusal(current.CompetitionScope, request.Mode, request.Places, request.TieRule, enabled);
+                    if (refusal != null)
+                        return Json(new { success = false, message = refusal });
+
+                    var newMode = request.Mode != null ? MedalGroupingModes.Normalize(request.Mode) : current.MedalGroupingMode;
+                    var newTie = request.TieRule != null ? MedalTieRules.Normalize(request.TieRule) : current.MedalTieRule;
+                    var newPlaces = request.Places ?? current.MedalPlaces;
+                    var changed = !string.Equals(newMode, current.MedalGroupingMode, StringComparison.Ordinal)
+                                  || !string.Equals(newTie, current.MedalTieRule, StringComparison.Ordinal)
+                                  || newPlaces != current.MedalPlaces;
+
+                    var resultPageNow = _results.Get(current.Id);
+                    if (changed && !request.Confirm)
+                    {
+                        var shootOffs = await CountShootOffEntriesAsync(current);
+                        var confirmText = MedalRuleEditSettings.ConfirmationNeeded(
+                            resultPageNow?.IsOfficial == true, shootOffs, !string.IsNullOrWhiteSpace(resultPageNow?.HonoraryAwardConfig));
+                        if (confirmText != null)
+                            return Json(new { success = false, needsConfirm = true, message = confirmText });
+                    }
+
+                    if (changed)
+                        _logger.LogWarning(
+                            "Medaljreglerna ändras för tävling {CompetitionId}: läge {OldMode}→{NewMode}, platser {OldPlaces}→{NewPlaces}, oavgjort {OldTie}→{NewTie}, publicerad={Official}",
+                            current.Id, current.MedalGroupingMode ?? "-", newMode ?? "-", current.MedalPlaces, newPlaces,
+                            current.MedalTieRule ?? "-", newTie ?? "-", resultPageNow?.IsOfficial == true);
+                }
+
                 // Genom tävlingslagringen (C3-planen S5), som bara publicerar en redan publicerad tävling.
-                var saved = _competitions.Update(request.CompetitionId, null, c => c.MedalsPerWeaponGroup = request.PerWeaponGroup);
+                var saved = _competitions.Update(request.CompetitionId, null, c =>
+                {
+                    if (legacyToggle)
+                    {
+                        c.MedalsPerWeaponGroup = request.PerWeaponGroup;
+                        c.MedalGroupingMode = request.PerWeaponGroup ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb;
+                        return;
+                    }
+                    if (request.Mode != null)
+                    {
+                        var m = MedalGroupingModes.Normalize(request.Mode);
+                        c.MedalGroupingMode = m;
+                        c.MedalsPerWeaponGroup = m == MedalGroupingModes.WeaponGroup;   // den gamla boolen följer med, för en äldre instans
+                    }
+                    if (request.Places != null) c.MedalPlaces = Math.Clamp(request.Places.Value, 0, 3);
+                    if (request.TieRule != null) c.MedalTieRule = MedalTieRules.Normalize(request.TieRule);
+                });
                 if (saved.PublishProblem != null)
                     return Json(new { success = false, message = saved.PublishProblem });
 
@@ -3497,6 +3553,22 @@ namespace HpskSite.Controllers
                     request?.CompetitionId);
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
+        }
+
+        /// <summary>Antal noterade särskjutningsrundor för tävlingen (precisionsfamiljens och fältets), för bekräftelsen vid ändrad indelning.</summary>
+        private async Task<int> CountShootOffEntriesAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
+        {
+            var count = 0;
+            try { count += (await _shootOffService.GetEntriesForCompetitionAsync(competition.Id)).Count; }
+            catch (Exception ex) { _logger.LogWarning(ex, "Särskjutningsrundorna kunde inte räknas för {Id}", competition.Id); }
+            try
+            {
+                var faltShootOffs = HttpContext.RequestServices
+                    .GetService<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();
+                if (faltShootOffs != null) count += (await faltShootOffs.GetEntriesForCompetitionAsync(competition.Id)).Count;
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Fältets särskjutningsrundor kunde inte räknas för {Id}", competition.Id); }
+            return count;
         }
 
         // Redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14). Kretsens admin bara för en kretsvärdad
@@ -3976,7 +4048,21 @@ namespace HpskSite.Controllers
     public class SetMedalGroupingRequest
     {
         public int CompetitionId { get; set; }
+
+        /// <summary>Den gamla kryssrutan. Används bara när <see cref="Mode"/>, <see cref="Places"/> och <see cref="TieRule"/> alla saknas.</summary>
         public bool PerWeaponGroup { get; set; }
+
+        /// <summary>Klubbens egen indelning ("shb", "weapongroup", "class"; tom = som förbundet). Null = rör inte.</summary>
+        public string? Mode { get; set; }
+
+        /// <summary>Antal medaljplatser 0–3 (0 = som förbundet). Null = rör inte.</summary>
+        public int? Places { get; set; }
+
+        /// <summary>Hur oavgjort avgörs ("shootoff", "shared", "series"; tom = särskjutning). Null = rör inte.</summary>
+        public string? TieRule { get; set; }
+
+        /// <summary>Arrangören har sett varningen (publicerad lista, särskjutningsrundor, hederspriser) och går vidare.</summary>
+        public bool Confirm { get; set; }
     }
 
     /// <summary>

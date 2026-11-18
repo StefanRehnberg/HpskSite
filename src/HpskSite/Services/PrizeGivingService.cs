@@ -125,16 +125,24 @@ namespace HpskSite.Services
             // öppen, Dam, Vet Y…", alltså något som inte finns på tävlingen (Sune 2026-10-03).
             var hasGroupC = artifact.MedalAwards == null || artifact.MedalAwards.Count == 0
                 || artifact.MedalAwards.Any(a => string.Equals(a.WeaponGroup, "C", StringComparison.OrdinalIgnoreCase));
-            if (model.IsChampionship && hasGroupC)
+            // Klubbens egna regler (per klass, fast antal platser, oavgjort): läses ur ARTEFAKTEN (null = SHB:s förval, och i gamla artefakter).
+            var artifactMode = MedalGroupingModes.Normalize(artifact.MedalGroupingMode)
+                ?? (artifact.MedalsPerWeaponGroup ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb);
+            var artifactPlaces = artifact.MedalPlaces ?? 0;
+            var artifactTie = MedalTieRules.Normalize(artifact.MedalTieRule) ?? MedalTieRules.ShootOff;
+            var customRules = artifactMode == MedalGroupingModes.Class || artifactPlaces > 0 || artifactTie != MedalTieRules.ShootOff;
+
+            // Texten om vapengrupp C gäller bara när C finns — men klubbens egna regler beskrivs alltid (per klass gäller alla vapengrupper).
+            if (model.IsChampionship && (hasGroupC || customRules))
             {
-                model.MedalGroupingText = MedalGrouping.Describe(artifact.MedalsPerWeaponGroup);
-                var current = ChampionshipRule.For(competition).MedalsPerWeaponGroup;
-                if (current != artifact.MedalsPerWeaponGroup)
+                model.MedalGroupingText = MedalGrouping.Describe(artifactMode, artifactPlaces, artifactTie);
+                var current = ChampionshipRule.For(competition);
+                if (current.GroupingModeName != artifactMode || current.MedalPlaces != artifactPlaces || current.TieRule != artifactTie)
                 {
                     model.MedalGroupingStale =
                         "Medaljindelningen har ändrats sedan listan räknades ut. Listan nedan är "
-                        + $"räknad så här: {MedalGrouping.Describe(artifact.MedalsPerWeaponGroup)} "
-                        + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current)} "
+                        + $"räknad så här: {MedalGrouping.Describe(artifactMode, artifactPlaces, artifactTie)} "
+                        + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current.GroupingModeName, current.MedalPlaces, current.TieRule)} "
                         + "Räkna om listan på fliken Resultat.";
                 }
             }
@@ -207,7 +215,7 @@ namespace HpskSite.Services
 
             // ── Lagmedaljer ──────────────────────────────────────────────────────────
             model.Teams = FilterByGroup(
-                await BuildTeamGroupsAsync(competition, model.IsChampionship),
+                await BuildTeamGroupsAsync(competition, model.IsChampionship, artifactPlaces),
                 t => t.WeaponGroup,
                 model.SelectedWeaponGroup);
 
@@ -346,7 +354,7 @@ namespace HpskSite.Services
                 .ToList();
         }
 
-        private async Task<List<PrizeTeamGroup>> BuildTeamGroupsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isChampionship)
+        private async Task<List<PrizeTeamGroup>> BuildTeamGroupsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isChampionship, int places = 0)
         {
             var groups = new List<PrizeTeamGroup>();
             if (!isChampionship) return groups;
@@ -362,7 +370,8 @@ namespace HpskSite.Services
                 // antalet medaljer. Ett lag utan en enda inmatad serie har inte startat.
                 var starting = tg.Teams.Count(t => t.MemberResults.Any(m => m.HasResult));
                 var isJun = tg.TeamClass.Contains("Jun", StringComparison.OrdinalIgnoreCase);
-                var (medalCount, medalText) = ChampionshipMedalCount.For(starting, isJun, "lag");
+                // Klubbens fasta antal platser gäller även lagen (Stefan 2026-11-18: lagmedaljer ja); utan det SHB:s reducering efter antal lag.
+                var (medalCount, medalText) = ChampionshipMedalCount.For(starting, isJun, "lag", places);
 
                 var group = new PrizeTeamGroup
                 {
@@ -481,7 +490,12 @@ namespace HpskSite.Services
             // bredvid medaljerna på samma sida, och medaljerna kommer ur artefakten — läste de
             // två olika indelningar skulle sidan visa fyra hedersprisklasser intill en enda
             // medaljgrupp. Samma skäl som att enheterna reser med talen.
-            var groupMap = MedalGroupMap.For(ChampionshipRule.ForScope(scope, artifact.MedalsPerWeaponGroup));
+            // Klubbens regel "per klass": hederspriserna räknas ändå per VAPENGRUPP (Stefan 2026-11-18). SHB:s kvot är "minst en fjärdedel
+            // av de i tävlingen deltagande" (C.3.4.2) och per skicklighetsklass blev den en handfull skyttar; arrangörens manuella antal
+            // är dessutom nycklade på gruppnamnet och ska inte försvinna när indelningen av medaljerna byts.
+            var groupMap = MedalGroupingModes.Normalize(artifact.MedalGroupingMode) == MedalGroupingModes.Class
+                ? MedalGroupMap.WeaponGroup
+                : MedalGroupMap.For(ChampionshipRule.ForScope(scope, artifact.MedalsPerWeaponGroup));
 
             // ⚠️ ORDNINGEN HÄR ÄR INTE MEDALJORDNINGEN. Hederspriser tillfaller deltagarna, inte
             // finalisterna, så mängden är en annan än medaljens — och därför får den här

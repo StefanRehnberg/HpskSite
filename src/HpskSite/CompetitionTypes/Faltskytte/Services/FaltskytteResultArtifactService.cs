@@ -242,10 +242,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 // Fältet utelämnade den, så en fälttävling med "en uppsättning medaljer per vapengrupp" fick alltid
                 // falskt här och prisutdelningen larmade om en "ändrad indelning" som aldrig ändrats (Expertgruppen
                 // 2026-11-18, medaljindelningen). Läget som GÄLLER, med nivåspärren tillämpad.
-                MedalsPerWeaponGroup = ChampionshipRule.For(competition).MedalsPerWeaponGroup
+                MedalsPerWeaponGroup = ChampionshipRule.For(competition).MedalsPerWeaponGroup,
+
+                // Klubbens egna regler skrivs in i artefakten, bara när de gäller (artefakten för varje annan tävling är oförändrad).
+                MedalGroupingMode = ChampionshipRule.For(competition).GroupingMode == MedalGroupingKind.Class ? MedalGroupingModes.Class : null,
+                MedalPlaces = ChampionshipRule.For(competition).MedalPlaces > 0 ? ChampionshipRule.For(competition).MedalPlaces : null,
+                MedalTieRule = ChampionshipRule.For(competition).TieRule != MedalTieRules.ShootOff ? ChampionshipRule.For(competition).TieRule : null
             };
 
-            if (!ChampionshipRule.For(competition).IsChampionship) return artifact;
+            var rule = ChampionshipRule.For(competition);
+            if (!rule.IsChampionship) return artifact;
 
             foreach (var standing in build.CategoryStandings)
             {
@@ -253,7 +259,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     .FirstOrDefault(t => string.Equals(t.CategoryName, standing.CategoryName, StringComparison.OrdinalIgnoreCase))
                     ?.Groups ?? new List<FaltskytteTiedMedalGroup>();
 
-                artifact.MedalAwards.Add(BuildCategoryAwards(standing, ties, scoring));
+                artifact.MedalAwards.Add(BuildCategoryAwards(standing, ties, scoring, rule));
             }
 
             artifact.MedalAwards = artifact.MedalAwards
@@ -301,10 +307,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private static PrecisionMedalCategoryAwards BuildCategoryAwards(
             FaltskytteCategoryStanding standing,
             List<FaltskytteTiedMedalGroup> ties,
-            FaltskytteScoreReader scoring)
+            FaltskytteScoreReader scoring,
+            ChampionshipRule rule)
         {
             var isJunior = standing.CategoryName.Contains("Jun", StringComparison.OrdinalIgnoreCase);
-            var (medalCount, medalCountText) = ChampionshipMedalCount.For(standing.Participants, isJunior);
+            var (medalCount, medalCountText) = ChampionshipMedalCount.For(standing.Participants, isJunior, places: rule.MedalPlaces);
 
             var awards = new PrecisionMedalCategoryAwards
             {
@@ -316,9 +323,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 Reduced = medalCount < 3
             };
 
-            for (int place = 1; place <= medalCount && place <= standing.Ordered.Count; place++)
+            // Klubbens regel "delad plats": skyttar som står exakt lika får samma plats (1, 2, 2, 4 …) och därmed samma medalj.
+            var sharedScores = rule.TieRule == MedalTieRules.Shared
+                ? standing.Ordered.Select(s => (scoring.Primary(s), scoring.Secondary(s))).ToList()
+                : null;
+            for (int position = 1; position <= standing.Ordered.Count; position++)
             {
-                var shooter = standing.Ordered[place - 1];
+                var place = sharedScores != null ? ChampionshipMedalCount.SharedPlace(sharedScores, position - 1) : position;
+                if (place > medalCount) break;
+                var shooter = standing.Ordered[position - 1];
                 var tie = ties.FirstOrDefault(g => place >= g.FirstRank && place <= g.LastRank);
 
                 // ⚠️ OAVGJORD MEDALJSTRID → INGEN MEDALJÖR UTSES. Att skriva ut den ordning

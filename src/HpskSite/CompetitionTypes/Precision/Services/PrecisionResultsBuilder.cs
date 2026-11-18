@@ -548,7 +548,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                                 .ToList()
                             : new List<PrecisionShooterResult>();
 
-                    var groupMap = MedalGroupMap.For(championshipRule);
+                    var groupMap = MedalGroupMap.For(championshipRule, mergeGroupLookup);
                     foreach (var cat in contenders
                                  .GroupBy(s => groupMap.GroupFor(s.ShootingClass))
                                  .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
@@ -561,6 +561,10 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
                 foreach (var (groupKey, groupShooters, perCategory) in detectionGroups)
                 {
+                    // Klubbens egen regel för oavgjort (delad plats / serieräkningen avgör): ingen särskjutning detekteras, så inget
+                    // särskjutningskort, inga "särskjutning krävs"-rader och ingen omsortering. Platserna avgörs nedan vid medaljutdelningen.
+                    if (championshipRule.TieRule != MedalTieRules.ShootOff) continue;
+
                     var tiedRaw = ShootOffService.DetectTiedMedalGroups(groupShooters, groupKey)
                         .Where(g => g.Shooters.All(HasShotEverythingDue))
                         .ToList();
@@ -688,7 +692,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 //     aldrig få medalj).
                 if (useMedalCategories)
                 {
-                    var groupMapForAwards = MedalGroupMap.For(championshipRule);
+                    var groupMapForAwards = MedalGroupMap.For(championshipRule, mergeGroupLookup);
                     // Antalet medaljer räknas över de TÄVLANDE (en skytt utanför ingår inte i mästerskapet, som i fält).
                     var participantsByCategory = PrecisionOutOfCompetition.Competing(
                             classGroups.SelectMany(cg => cg.Shooters), championshipRule.AppliesToClass)
@@ -707,7 +711,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                             ? pc
                             : orderedContenders.Count;
                         var isJunCategory = categoryKey.Contains("Jun", StringComparison.OrdinalIgnoreCase);
-                        var (medalCount, medalCountText) = ChampionshipMedals(participants, isJunCategory);
+                        var (medalCount, medalCountText) = ChampionshipMedalCount.For(participants, isJunCategory, places: championshipRule.MedalPlaces);
 
                         var categoryAwards = new PrecisionMedalCategoryAwards
                         {
@@ -725,9 +729,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                             .FirstOrDefault(t => string.Equals(t.CategoryName, categoryKey, StringComparison.OrdinalIgnoreCase))
                             ?.Groups ?? new List<PrecisionTiedMedalGroup>();
 
-                        for (int place = 1; place <= medalCount && place <= orderedContenders.Count; place++)
+                        // Klubbens regel "delad plats": skyttar som står exakt lika får samma plats (1, 2, 2, 4 …) och därmed samma medalj.
+                        // Annars är platsen positionen i den ordnade listan. Utan fast antal platser är medalCount SHB:s reducering.
+                        var sharedScores = championshipRule.TieRule == MedalTieRules.Shared
+                            ? orderedContenders.Select(c => (c.TotalScore, c.TotalXCount)).ToList()
+                            : null;
+                        for (int position = 1; position <= orderedContenders.Count; position++)
                         {
-                            var shooter = orderedContenders[place - 1];
+                            var place = sharedScores != null ? ChampionshipMedalCount.SharedPlace(sharedScores, position - 1) : position;
+                            if (place > medalCount) break;
+                            var shooter = orderedContenders[position - 1];
                             var tie = categoryTieGroups.FirstOrDefault(g => place >= g.FirstRank && place <= g.LastRank);
 
                             // Oavgjord medaljstrid → INGEN medaljör utses för platsen. Att
@@ -983,6 +994,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 MedalAwards = medalAwards,
                 MedalAwardsComputed = medalAwardsComputed,
                 MedalsPerWeaponGroup = medalsPerWeaponGroup,
+                // Klubbens egna regler skrivs in i artefakten (etiketten följer artefakten). Bara när de gäller, så att artefakten för varje
+                // annan tävling är oförändrad.
+                MedalGroupingMode = championshipRule.GroupingMode == MedalGroupingKind.Class ? MedalGroupingModes.Class : null,
+                MedalPlaces = championshipRule.MedalPlaces > 0 ? championshipRule.MedalPlaces : null,
+                MedalTieRule = championshipRule.TieRule != MedalTieRules.ShootOff ? championshipRule.TieRule : null,
                 PlacementsAssigned = placementsAssigned,
                 ParticipantCount = classGroups
                     .SelectMany(g => g.Shooters)

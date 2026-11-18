@@ -81,5 +81,37 @@ namespace HpskSite.CompetitionTypes.Common
         public static string Describe(bool perWeaponGroup) => perWeaponGroup
             ? "En uppsättning medaljer per vapengrupp — bäste skytt i vapengruppen får guld."
             : "Medaljer per mästerskapsklass — vapengrupp C delas i öppen, Dam, Vet Y, Vet Ä och Junior.";
+
+        /// <summary>
+        /// Klartext för arrangörens HELA val: indelning, antal platser och hur oavgjort avgörs. Med SHB:s förval (platser 0, särskjutning)
+        /// är texten exakt <see cref="Describe(bool)"/>, så en artefakt utan klubbens egna regler beskrivs som förut. Läser VÄRDEN ur artefakten,
+        /// inte ur tävlingen: etiketten ska följa listan den står över.
+        /// </summary>
+        public static string Describe(string? mode, int places, string? tieRule)
+        {
+            var m = MedalGroupingModes.Normalize(mode) ?? MedalGroupingModes.Shb;
+            var text = m switch
+            {
+                MedalGroupingModes.Class => "Medaljer per klass — de som skjutit i samma klass tävlar om medaljerna (klasser som slagits ihop räknas som en).",
+                MedalGroupingModes.WeaponGroup => Describe(true),
+                _ => Describe(false)
+            };
+
+            if (places > 0)
+                text += places switch
+                {
+                    1 => " Bara den bästa i varje grupp får medalj.",
+                    2 => " De två bästa i varje grupp får medalj.",
+                    _ => " De tre bästa i varje grupp får medalj."
+                };
+
+            text += MedalTieRules.Normalize(tieRule) switch
+            {
+                MedalTieRules.Shared => " Lika resultat ger delad plats.",
+                MedalTieRules.Series => " Lika resultat avgörs på serieräkningen.",
+                _ => ""
+            };
+            return text;
+        }
     }
 }

@@ -129,7 +129,10 @@ namespace HpskSite.Controllers
             }).ToList();
 
             // Mästerskapsklassernas indelning (C delas i Dam/Vet/Jun eller inte) — samma regel som medaljerna.
-            var groupMap = MedalGroupMap.For(ChampionshipRule.For(comp));
+            // Per klass (klubbens egen regel) följer gruppen resultatlistans sammanslagningar, som i byggarna.
+            var groupMap = MedalGroupMap.For(ChampionshipRule.For(comp),
+                HpskSite.Services.ClassMergingService.BuildMergeGroupLookup(
+                    ReadStoredMerges(_results.Get(competitionId), false) ?? new List<HpskSite.Services.ClassMergeAction>()));
 
             // ── Per vapengrupp ─────────────────────────────────────────────────────────
             var groupNames = qualStarts.Select(s => s.Group).Distinct()

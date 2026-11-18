@@ -1,3 +1,5 @@
+using HpskSite.Models;
+
 namespace HpskSite.CompetitionTypes.Common
 {
     /// <summary>
@@ -11,8 +13,9 @@ namespace HpskSite.CompetitionTypes.Common
     /// genom den här klassen, så att de aldrig kan säga olika saker om samma medalj (förväxlingen mellan mästerskapskategori och
     /// skicklighetsklass har uppstått fyra gånger i kodbasen, se <see cref="ChampionshipCategory"/>).</para>
     ///
-    /// <para>S0: avbildningen är neutral — den svarar exakt som <c>ChampionshipCategory.For</c> gjorde för varje tävling. Läget per klass
-    /// (och resultatlistans sammanslagningar) kopplas in här i S1, på ett enda ställe.</para>
+    /// <para><b>Per klass (S1):</b> gruppen är resultatlistans grupp, så avbildningen får sammanslagningarna (klass → sammanslagen grupp)
+    /// som argument; en klass utan sammanslagning är sin egen grupp. Ingen anropare bygger en sådan avbildning själv — de ger
+    /// <see cref="For(ChampionshipRule, IReadOnlyDictionary{string, string}?)"/> den sammanslagningstabell de redan har.</para>
     ///
     /// <para>⚠️ Anropa aldrig <c>ChampionshipCategory.For</c>/<c>BuildLookup</c> direkt utanför den här klassen
     /// (<c>ChampionshipRuleGuardTests</c> fäller bygget). <c>WeaponGroupFor</c> är en annan axel (skjutsessionen) och rörs inte.</para>
@@ -20,28 +23,73 @@ namespace HpskSite.CompetitionTypes.Common
     public sealed class MedalGroupMap
     {
         private readonly bool _splitGroupC;
+        private readonly IReadOnlyDictionary<string, string>? _classMerges;
 
-        private MedalGroupMap(bool splitGroupC) { _splitGroupC = splitGroupC; }
+        private MedalGroupMap(MedalGroupingKind kind, bool splitGroupC, IReadOnlyDictionary<string, string>? classMerges = null)
+        {
+            Kind = kind;
+            _splitGroupC = splitGroupC;
+            _classMerges = classMerges;
+        }
+
+        /// <summary>Vilken indelning avbildningen är.</summary>
+        public MedalGroupingKind Kind { get; }
 
         /// <summary>SHB:s mästerskapsklasser: A1–A3 är "A", B1–B3 är "B", och vapengrupp C delas i öppen, Dam, Vet Y, Vet Ä och Junior.</summary>
-        public static readonly MedalGroupMap Shb = new(splitGroupC: true);
+        public static readonly MedalGroupMap Shb = new(MedalGroupingKind.Shb, splitGroupC: true);
 
         /// <summary>En uppsättning medaljer per vapengrupp ("totalen"): A, B, C.</summary>
-        public static readonly MedalGroupMap WeaponGroup = new(splitGroupC: false);
+        public static readonly MedalGroupMap WeaponGroup = new(MedalGroupingKind.WeaponGroup, splitGroupC: false);
 
-        /// <summary>Avbildningen som tävlingens regel ger (indelningen som GÄLLER, med nivåspärren tillämpad).</summary>
-        public static MedalGroupMap For(ChampionshipRule rule) =>
-            rule.SplitsChampionshipClassC ? Shb : WeaponGroup;
+        /// <summary>Per klass utan några sammanslagningar: varje skicklighetsklass är sin egen grupp.</summary>
+        public static MedalGroupMap PerClass(IReadOnlyDictionary<string, string>? classMerges = null) =>
+            new(MedalGroupingKind.Class, splitGroupC: false, classMerges);
 
-        /// <summary>Gruppnamnet för en skytteklass (id- eller namnform). Tom sträng för en tom klass; en okänd klass returneras oförändrad.</summary>
-        public string GroupFor(string? shootingClassIdOrName) =>
-            ChampionshipCategory.For(shootingClassIdOrName, _splitGroupC);
+        /// <summary>
+        /// Avbildningen som tävlingens regel ger (indelningen som GÄLLER, med nivåspärren tillämpad). <paramref name="classMerges"/> är
+        /// resultatlistans sammanslagningar (klass → sammanslagen grupp, nycklar i klassens kanoniska namn) och används bara för per klass.
+        /// </summary>
+        public static MedalGroupMap For(ChampionshipRule rule, IReadOnlyDictionary<string, string>? classMerges = null) =>
+            rule.GroupingMode switch
+            {
+                MedalGroupingKind.Class => PerClass(classMerges),
+                MedalGroupingKind.WeaponGroup => WeaponGroup,
+                _ => rule.SplitsChampionshipClassC ? Shb : WeaponGroup
+            };
+
+        /// <summary>
+        /// Gruppnamnet för en skytteklass (id- eller namnform). Tom sträng för en tom klass. SHB och vapengrupp: en okänd klass returneras
+        /// oförändrad. Per klass: klassens kanoniska namn, eller den sammanslagna gruppens namn när klassen slagits ihop med andra.
+        /// </summary>
+        public string GroupFor(string? shootingClassIdOrName)
+        {
+            if (Kind != MedalGroupingKind.Class)
+                return ChampionshipCategory.For(shootingClassIdOrName, _splitGroupC);
+
+            if (string.IsNullOrWhiteSpace(shootingClassIdOrName)) return "";
+            var canonical = ShootingClasses.ToCanonicalName(shootingClassIdOrName);
+            if (canonical.Length == 0) canonical = shootingClassIdOrName.Trim();
+            return _classMerges != null && _classMerges.TryGetValue(canonical, out var merged) ? merged : canonical;
+        }
 
         /// <summary>
         /// Uppslagstabell klass → grupp i den form <c>PrecisionFinalsQualificationService.BuildFullClassRankings</c> väntar sig
         /// (nycklarna är klassernas visningsnamn).
         /// </summary>
-        public Dictionary<string, string> BuildLookup(IEnumerable<string> shootingClasses) =>
-            ChampionshipCategory.BuildLookup(shootingClasses, _splitGroupC);
+        public Dictionary<string, string> BuildLookup(IEnumerable<string> shootingClasses)
+        {
+            if (Kind != MedalGroupingKind.Class)
+                return ChampionshipCategory.BuildLookup(shootingClasses, _splitGroupC);
+
+            var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in shootingClasses ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var key = ShootingClasses.ToCanonicalName(raw);
+                if (key.Length == 0) continue;
+                lookup[key] = GroupFor(raw);
+            }
+            return lookup;
+        }
     }
 }

@@ -41,6 +41,9 @@ namespace HpskSite.Services.Competitions
         {
             if (string.IsNullOrWhiteSpace(key)) return null;
             var alias = CompetitionFieldCatalog.PropertyAliasFor(key);
+            // Arrangörens medaljregler skrivs bara genom SetMedalGrouping (behörighet, nivåspärr, bekräftelse och omräkning i samma handling),
+            // aldrig ur ett formulär: de hamnar i Ignored, så anroparen kan säga ifrån.
+            if (MedalRuleEditSettings.Aliases.Contains(alias)) return null;
             var f = CompetitionFieldTable.ForAlias(alias);
             return f is not null && f.Kind == CompetitionFieldKind.Definition ? f : null;
         }

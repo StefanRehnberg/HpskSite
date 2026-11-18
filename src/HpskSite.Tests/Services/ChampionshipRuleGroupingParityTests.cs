@@ -71,14 +71,49 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
-        public void Class_is_read_as_shb_until_the_class_grouping_is_built()
+        public void Class_applies_where_the_organiser_may_choose_and_is_neither_shb_nor_per_weapon_group()
         {
-            // S0: fältet får finnas utan att ändra något. "class" tillämpas i S1, tillsammans med gruppavbildningen.
+            // S1: per klass gäller (klubb/krets). Det är varken SHB:s indelning eller "per vapengrupp" — och C delas inte i mästerskapsklasser.
             var rule = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = "Klubbmästerskap", MedalGroupingMode = "class" });
 
             rule.StoredGroupingMode.Should().Be("class");
-            rule.GroupingMode.Should().Be(MedalGroupingKind.Shb);
+            rule.GroupingMode.Should().Be(MedalGroupingKind.Class);
+            rule.GroupingModeName.Should().Be("class");
             rule.MedalsPerWeaponGroup.Should().BeFalse();
+            rule.SplitsChampionshipClassC.Should().BeFalse();
+        }
+
+        [Theory]
+        [InlineData("Landsdelsmästerskap")]
+        [InlineData("Svenskt Mästerskap")]
+        public void Class_places_and_tie_rule_never_apply_at_sm_or_landsdel(string scope)
+        {
+            var rule = ChampionshipRule.For(new CompetitionInfo
+            {
+                CompetitionScope = scope, MedalGroupingMode = "class", MedalPlaces = 3, MedalTieRule = "shared"
+            });
+
+            rule.GroupingMode.Should().Be(MedalGroupingKind.Shb);
+            rule.MedalPlaces.Should().Be(0);
+            rule.TieRule.Should().Be(MedalTieRules.ShootOff);
+        }
+
+        [Fact]
+        public void Places_and_tie_rule_apply_at_club_and_region_level_and_default_to_the_old_behaviour()
+        {
+            var none = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = "Kretsmästerskap" });
+            none.MedalPlaces.Should().Be(0);
+            none.TieRule.Should().Be(MedalTieRules.ShootOff);
+
+            var set = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = "Kretsmästerskap", MedalPlaces = 2, MedalTieRule = "series" });
+            set.MedalPlaces.Should().Be(2);
+            set.TieRule.Should().Be(MedalTieRules.Series);
+
+            // En artefakts egna värden (prisutdelningen läser dem därifrån):
+            var fromArtifact = ChampionshipRule.ForScope("Klubbmästerskap", false, "class", 3, "shared");
+            fromArtifact.GroupingMode.Should().Be(MedalGroupingKind.Class);
+            fromArtifact.MedalPlaces.Should().Be(3);
+            fromArtifact.TieRule.Should().Be(MedalTieRules.Shared);
         }
     }
 }

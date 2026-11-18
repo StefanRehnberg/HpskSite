@@ -347,6 +347,25 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// </summary>
         public bool MedalsPerWeaponGroup { get; set; }
 
+        /// <summary>
+        /// Indelningen medaljerna räknades i (<c>MedalGroupingModes</c>: "shb", "weapongroup", "class"). Null i artefakter skrivna före
+        /// klubbens egna regler — läsaren faller då tillbaka på <see cref="MedalsPerWeaponGroup"/>. Sätts bara när arrangören valt
+        /// per klass, så artefakter för alla andra tävlingar är byte-identiska med förut (golden master).
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public string? MedalGroupingMode { get; set; }
+
+        /// <summary>Antal medaljplatser listan räknades med (1–3 = fast antal). Null = SHB:s reducering (dagens beteende) och i gamla artefakter.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public int? MedalPlaces { get; set; }
+
+        /// <summary>Hur oavgjorda platser avgjordes ("shared", "series"). Null = särskjutning (dagens beteende) och i gamla artefakter.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public string? MedalTieRule { get; set; }
+
         /// <summary>Antal distinkta skyttar med minst en serie i tävlingen. Underlaget för
         /// hederspristaket i SHB C.3.4.2 ("minst en fjärdedel av de i tävlingen deltagande").</summary>
         public int ParticipantCount { get; set; }

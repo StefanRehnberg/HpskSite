@@ -47,11 +47,18 @@
         /// LAG. Antalet är rätt i båda fallen; det var bara ordet som var fel, och ett
         /// felaktigt ord på en funktionärsskärm läses som ett felaktigt antal.
         /// </param>
+        /// <param name="places">
+        /// Arrangörens FASTA antal platser (1–3; 0 = SHB:s reducering). Klubbens egna regler (backlog P1.2): "de tre bästa" oavsett antal
+        /// deltagare, färre om färre har skjutit. Egen gren, inte juniorregeln: den är SHB:s och ska inte läsas som klubbens regel.
+        /// </param>
         public static (int Medals, string Text) For(
             int participants,
             bool isJuniorCategory,
-            string unitPlural = "deltagande")
+            string unitPlural = "deltagande",
+            int places = 0)
         {
+            if (places > 0) return Fixed(participants, places);
+
             if (isJuniorCategory)
             {
                 var n = System.Math.Min(3, System.Math.Max(0, participants));
@@ -73,6 +80,33 @@
                 3 => (1, "Enbart Guld"),
                 _ => (0, "Inga medaljer")
             };
+        }
+
+        /// <summary>
+        /// Fast antal platser (klubbens egen regel): de <paramref name="places"/> bästa, dock aldrig fler än de som har skjutit.
+        /// Ingen reducering efter deltagarantal — det är SHB:s regel (C.3.4.1), inte klubbens.
+        /// </summary>
+        public static (int Medals, string Text) Fixed(int participants, int places)
+        {
+            var n = System.Math.Min(System.Math.Clamp(places, 1, 3), System.Math.Max(0, participants));
+            return (n, n switch
+            {
+                >= 3 => "Guld, Silver, Brons",
+                2 => "Guld + Silver",
+                1 => "Guld",
+                _ => "Inga medaljer"
+            });
+        }
+
+        /// <summary>
+        /// Platsen med DELAD plats (klubbens regel "delad plats"): skyttar som står exakt lika (samma huvudtal och andrahandstal) får samma
+        /// plats, och platsen är den bästa i följden (1, 2, 2, 4 …). <paramref name="index"/> är nollbaserad position i den ordnade listan.
+        /// </summary>
+        public static int SharedPlace(IReadOnlyList<(int Primary, int Secondary)> ordered, int index)
+        {
+            var first = index;
+            while (first > 0 && ordered[first - 1] == ordered[index]) first--;
+            return first + 1;
         }
 
         /// <summary>Valören för en placering. "Guld" / "Silver" / "Brons".</summary>

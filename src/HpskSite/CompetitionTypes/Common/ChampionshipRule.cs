@@ -39,26 +39,41 @@ namespace HpskSite.CompetitionTypes.Common
         /// <summary>Arrangörens lagrade indelning (<see cref="MedalGroupingModes"/>), normaliserad; null = följ den gamla boolen.</summary>
         public string? StoredGroupingMode { get; }
 
+        /// <summary>Arrangörens lagrade antal medaljplatser (0–3, 0 = SHB:s reducering) före nivåspärren.</summary>
+        public int StoredMedalPlaces { get; }
+
+        /// <summary>Arrangörens lagrade avgörande av oavgjorda platser (<see cref="MedalTieRules"/>), normaliserad; null = särskjutning.</summary>
+        public string? StoredTieRule { get; }
+
         private readonly string _discipline;
         private readonly IReadOnlyList<string> _weaponGroups;
 
         private ChampionshipRule(string? scope, bool storedMedalsPerWeaponGroup,
-            string? discipline = null, string? weaponGroups = null, string? storedGroupingMode = null)
+            string? discipline = null, string? weaponGroups = null, string? storedGroupingMode = null,
+            int storedMedalPlaces = 0, string? storedTieRule = null)
         {
             Scope = scope ?? "";
             StoredMedalsPerWeaponGroup = storedMedalsPerWeaponGroup;
             StoredGroupingMode = MedalGroupingModes.Normalize(storedGroupingMode);
+            StoredMedalPlaces = Math.Clamp(storedMedalPlaces, 0, 3);
+            StoredTieRule = MedalTieRules.Normalize(storedTieRule);
             _discipline = CanonicalDiscipline(discipline);
             _weaponGroups = ChampionshipWeaponGroups.Parse(weaponGroups);
         }
 
         public static ChampionshipRule For(CompetitionInfo? competition) =>
             new(competition?.CompetitionScope, competition?.MedalsPerWeaponGroup ?? false,
-                competition?.CompetitionType, competition?.ChampionshipWeaponGroups, competition?.MedalGroupingMode);
+                competition?.CompetitionType, competition?.ChampionshipWeaponGroups, competition?.MedalGroupingMode,
+                competition?.MedalPlaces ?? 0, competition?.MedalTieRule);
 
-        /// <summary>För de ställen som bara har omfattningen och arrangörens lagrade val (t.ex. en sparad artefakt).</summary>
-        public static ChampionshipRule ForScope(string? scope, bool storedMedalsPerWeaponGroup = false) =>
-            new(scope, storedMedalsPerWeaponGroup);
+        /// <summary>
+        /// För de ställen som bara har omfattningen och arrangörens lagrade val (t.ex. en sparad artefakt, som bär sin egen indelning,
+        /// sina platser och sin oavgjort-regel: etiketten följer artefakten, inte tävlingens nuvarande inställning).
+        /// </summary>
+        public static ChampionshipRule ForScope(string? scope, bool storedMedalsPerWeaponGroup = false,
+            string? storedGroupingMode = null, int storedMedalPlaces = 0, string? storedTieRule = null) =>
+            new(scope, storedMedalsPerWeaponGroup, storedGroupingMode: storedGroupingMode,
+                storedMedalPlaces: storedMedalPlaces, storedTieRule: storedTieRule);
 
         // ── Är det ett mästerskap? ───────────────────────────────────────────────
 
@@ -85,9 +100,9 @@ namespace HpskSite.CompetitionTypes.Common
         /// SHB:s indelning). Det nya fältet <c>medalGroupingMode</c> vinner över den gamla boolen; är det tomt gäller boolen, så en tävling utan
         /// det nya fältet beter sig exakt som förr.
         ///
-        /// <para>⚠️ <c>class</c> (per klass) tillämpas först i S1 (plan v2): tills dess läses ett lagrat <c>class</c> som SHB:s indelning, så
-        /// ingenting ändras av att fältet finns. Den som lägger in <c>class</c> ska ersätta <c>ChampionshipCategory.For(klass, bool)</c> med
-        /// gruppavbildningen — inte bara göra den här egenskapen sann.</para>
+        /// <para><c>class</c> (per klass) gäller medaljgruppen = resultatlistans grupp, alltså följer den sammanslagna klasser; den
+        /// kopplas in i <see cref="MedalGroupMap.For(ChampionshipRule, IReadOnlyDictionary{string, string}?)"/>, som kräver sammanslagningarna
+        /// som argument — därför får ingen läsa <c>GroupingMode == Class</c> och bygga en egen grupp.</para>
         /// </summary>
         public MedalGroupingKind GroupingMode
         {
@@ -96,9 +111,28 @@ namespace HpskSite.CompetitionTypes.Common
                 if (!MedalGrouping.CanChoose(Scope)) return MedalGroupingKind.Shb;
                 var stored = StoredGroupingMode
                     ?? (StoredMedalsPerWeaponGroup ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb);
-                return stored == MedalGroupingModes.WeaponGroup ? MedalGroupingKind.WeaponGroup : MedalGroupingKind.Shb;
+                return stored switch
+                {
+                    MedalGroupingModes.WeaponGroup => MedalGroupingKind.WeaponGroup,
+                    MedalGroupingModes.Class => MedalGroupingKind.Class,
+                    _ => MedalGroupingKind.Shb
+                };
             }
         }
+
+        /// <summary>Indelningen som GÄLLER som lagrat värde (<see cref="MedalGroupingModes"/>) — det som skrivs i artefakten och jämförs mot den.</summary>
+        public string GroupingModeName => GroupingMode switch
+        {
+            MedalGroupingKind.WeaponGroup => MedalGroupingModes.WeaponGroup,
+            MedalGroupingKind.Class => MedalGroupingModes.Class,
+            _ => MedalGroupingModes.Shb
+        };
+
+        /// <summary>Antal medaljplatser som GÄLLER: 0 = SHB:s reducering efter deltagare, 1–3 = fast antal bästa. Nivåspärren tillämpad.</summary>
+        public int MedalPlaces => MedalGrouping.CanChoose(Scope) ? StoredMedalPlaces : 0;
+
+        /// <summary>Hur en oavgjord medaljplats avgörs (<see cref="MedalTieRules"/>) som GÄLLER: särskjutning (dagens beteende) om inget annat är valt eller spärren slår till.</summary>
+        public string TieRule => MedalGrouping.CanChoose(Scope) ? (StoredTieRule ?? MedalTieRules.ShootOff) : MedalTieRules.ShootOff;
 
         /// <summary>Arrangörens val som det GÄLLER (med nivåspärren): en uppsättning medaljer per vapengrupp.</summary>
         public bool MedalsPerWeaponGroup => GroupingMode == MedalGroupingKind.WeaponGroup;
@@ -109,7 +143,7 @@ namespace HpskSite.CompetitionTypes.Common
         /// Delas vapengrupp C i sina fem MÄSTERSKAPSKLASSER (öppen, Dam, Vet Y, Vet Ä, Junior)? Vid alla mästerskap, om inte
         /// arrangören valt bort delningen. (SHB C.3.6.4, C.3.4.1.) Tidigare <c>ChampionshipCategory.SplitsGroupC</c>.
         /// </summary>
-        public bool SplitsChampionshipClassC => IsChampionship && GroupingMode != MedalGroupingKind.WeaponGroup;
+        public bool SplitsChampionshipClassC => IsChampionship && GroupingMode == MedalGroupingKind.Shb;
 
         /// <summary>
         /// Delas vapengrupp C för STANDARDMEDALJBERÄKNINGEN? Bara vid SM och landsdelsmästerskap (SHB C.5.1.1.4). Rå jämförelse, exakt
