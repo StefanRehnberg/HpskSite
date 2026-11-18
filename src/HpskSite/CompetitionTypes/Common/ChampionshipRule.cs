@@ -108,9 +108,12 @@ namespace HpskSite.CompetitionTypes.Common
         {
             get
             {
-                if (!MedalGrouping.CanChoose(Scope)) return MedalGroupingKind.Shb;
+                if (!MayChooseMedalRules) return MedalGroupingKind.Shb;
+                // ⚠️ Den gamla boolen är bara ett val vid klubb- och kretsmästerskap (där den alltid gällt). Utanför mästerskap hade den aldrig
+                // någon effekt, så en bool som blivit kvar där betyder inte att klubben valt något — bara ett uttryckligt läge gör det.
+                var legacyBool = StoredMedalsPerWeaponGroup && MedalGrouping.CanChoose(Scope);
                 var stored = StoredGroupingMode
-                    ?? (StoredMedalsPerWeaponGroup ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb);
+                    ?? (legacyBool ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb);
                 return stored switch
                 {
                     MedalGroupingModes.WeaponGroup => MedalGroupingKind.WeaponGroup,
@@ -129,10 +132,27 @@ namespace HpskSite.CompetitionTypes.Common
         };
 
         /// <summary>Antal medaljplatser som GÄLLER: 0 = SHB:s reducering efter deltagare, 1–3 = fast antal bästa. Nivåspärren tillämpad.</summary>
-        public int MedalPlaces => MedalGrouping.CanChoose(Scope) ? StoredMedalPlaces : 0;
+        public int MedalPlaces => MayChooseMedalRules ? StoredMedalPlaces : 0;
 
         /// <summary>Hur en oavgjord medaljplats avgörs (<see cref="MedalTieRules"/>) som GÄLLER: särskjutning (dagens beteende) om inget annat är valt eller spärren slår till.</summary>
-        public string TieRule => MedalGrouping.CanChoose(Scope) ? (StoredTieRule ?? MedalTieRules.ShootOff) : MedalTieRules.ShootOff;
+        public string TieRule => MayChooseMedalRules ? (StoredTieRule ?? MedalTieRules.ShootOff) : MedalTieRules.ShootOff;
+
+        /// <summary>
+        /// Får arrangören välja medaljregler (indelning, platser, oavgjort) för den här tävlingen? Nivåspärren: <b>inte vid SM och landsdelsmästerskap</b>
+        /// (där är de fem C-mästerskapen vad förbundet delar ut och rekord noteras i dem, C.3.7.1.1), men vid klubb- och kretsmästerskap OCH för en
+        /// tävling utan mästerskapsomfattning — klubbens egna regler (backlog P1.2). Ett lagrat värde på ett SM ignoreras.
+        /// </summary>
+        public bool MayChooseMedalRules => MedalGrouping.CanChoose(Scope) || !IsChampionship;
+
+        /// <summary>
+        /// Delar tävlingen ut placeringsmedaljer — och har därför särskjutning, mästerskapsmedaljer, prisutdelning och lagmedaljer? Ja för varje
+        /// mästerskap, och för en tävling utan mästerskapsomfattning där arrangören valt en indelning (<see cref="StoredGroupingMode"/> är satt).
+        /// Inget lagrat val = ingen medaljutdelning, som förr.
+        ///
+        /// <para>⚠️ Det här är GRINDEN för medaljerna. <see cref="IsChampionship"/> gäller fortfarande allt som är mästerskapets egna regler
+        /// (Utanför mästerskapet, vilka som deltar, vapengrupperna, SHB-noten på finalkortet): läs inte det här värdet för dem.</para>
+        /// </summary>
+        public bool AwardsPlacementMedals => IsChampionship || (StoredGroupingMode != null && MayChooseMedalRules);
 
         /// <summary>Arrangörens val som det GÄLLER (med nivåspärren): en uppsättning medaljer per vapengrupp.</summary>
         public bool MedalsPerWeaponGroup => GroupingMode == MedalGroupingKind.WeaponGroup;

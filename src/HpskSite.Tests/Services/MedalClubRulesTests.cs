@@ -62,6 +62,64 @@ namespace HpskSite.Tests.Services
             lookup["A1"].Should().Be("A1");
         }
 
+        // ── Grinden: vem delar ut placeringsmedaljer ─────────────────────────────
+
+        [Theory]
+        [InlineData("Svenskt Mästerskap")]
+        [InlineData("Landsdelsmästerskap")]
+        [InlineData("Kretsmästerskap")]
+        [InlineData("Klubbmästerskap")]
+        public void Every_championship_awards_placement_medals_with_or_without_a_stored_choice(string scope)
+        {
+            ChampionshipRule.ForScope(scope).AwardsPlacementMedals.Should().BeTrue();
+            ChampionshipRule.ForScope(scope, false, "class", 3, "shared").AwardsPlacementMedals.Should().BeTrue();
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("Ingen")]
+        public void A_competition_without_championship_awards_nothing_until_the_organiser_has_chosen(string scope)
+        {
+            // Ingen markering, inget lagrat läge: som förr. En gammal bool utan läge betyder inte "klubben har valt".
+            ChampionshipRule.ForScope(scope).AwardsPlacementMedals.Should().BeFalse();
+            ChampionshipRule.ForScope(scope, storedMedalsPerWeaponGroup: true).AwardsPlacementMedals.Should().BeFalse();
+        }
+
+        [Theory]
+        [InlineData("shb")]
+        [InlineData("weapongroup")]
+        [InlineData("class")]
+        public void A_competition_without_championship_awards_medals_once_a_mode_is_chosen(string mode)
+        {
+            ChampionshipRule.ForScope("", false, mode).AwardsPlacementMedals.Should().BeTrue();
+        }
+
+        [Fact]
+        public void The_clubs_rules_take_effect_without_a_championship_scope()
+        {
+            var rule = ChampionshipRule.For(new HpskSite.Models.Competitions.CompetitionInfo
+            {
+                CompetitionScope = null, MedalGroupingMode = "class", MedalPlaces = 3, MedalTieRule = "shared"
+            });
+
+            rule.IsChampionship.Should().BeFalse();            // mästerskapets egna regler (Utanför mästerskapet m.m.) gäller inte
+            rule.OutOfCompetitionApplies.Should().BeFalse();
+            rule.AwardsPlacementMedals.Should().BeTrue();
+            rule.GroupingMode.Should().Be(MedalGroupingKind.Class);
+            rule.MedalPlaces.Should().Be(3);
+            rule.TieRule.Should().Be(MedalTieRules.Shared);
+        }
+
+        [Theory]
+        [InlineData("Landsdelsmästerskap")]
+        [InlineData("Svenskt Mästerskap")]
+        public void The_level_check_still_holds_at_sm_and_landsdel(string scope)
+        {
+            ChampionshipRule.ForScope(scope).MayChooseMedalRules.Should().BeFalse();
+            ChampionshipRule.ForScope("Klubbmästerskap").MayChooseMedalRules.Should().BeTrue();
+            ChampionshipRule.ForScope("").MayChooseMedalRules.Should().BeTrue();
+        }
+
         // ── Fast antal platser ───────────────────────────────────────────────────
 
         [Theory]

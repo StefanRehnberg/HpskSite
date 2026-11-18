@@ -2350,7 +2350,8 @@ namespace HpskSite.Controllers
                 var medalGroups = BuildMedalGroups(results, championshipRule,
                     hasFinalsForMedals ? GetFinalistStarts(competitionId) : null,
                     ClassMergingService.BuildMergeGroupLookup(appliedMerges));
-                var isChampionship = championshipRule.IsChampionship;
+                // Fältnamnet isChampionship är ytans: "delar tävlingen ut placeringsmedaljer?" (ett mästerskap, eller klubbens egna regler).
+                var isChampionship = championshipRule.AwardsPlacementMedals;
 
                 // Tillståndet ytan behöver för att kunna VISA och ÄNDRA indelningen.
                 // `propertyExists` skiljer "arrangören har valt delad" från "egenskapen finns
@@ -2463,7 +2464,7 @@ namespace HpskSite.Controllers
             IReadOnlyDictionary<string, string>? classMerges = null)
         {
             var groups = new List<object>();
-            if (!rule.IsChampionship) return groups;
+            if (!rule.AwardsPlacementMedals) return groups;
 
             // Per klass följer gruppen resultatlistans sammanslagningar (samma avbildning som byggarna) — annars säger panelen emot artefakten.
             var groupMap = MedalGroupMap.For(rule, classMerges);

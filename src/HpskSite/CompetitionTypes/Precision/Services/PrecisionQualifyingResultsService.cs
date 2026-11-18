@@ -251,7 +251,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // Per klass (klubbens egen regel) följer finalklasserna resultatlistans grupper, alltså sammanslagningarna, precis som
             // medaljgruppen gör — samma avbildning, så finalklassen och medaljgruppen inte kan skilja sig.
             var mergeLookup = GetMergeLookup(competitionId);
-            var lookup = rule.IsChampionship
+            var lookup = rule.AwardsPlacementMedals
                 ? MedalGroupMap.For(rule, mergeLookup).BuildLookup(
                     results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct())
                 : mergeLookup;

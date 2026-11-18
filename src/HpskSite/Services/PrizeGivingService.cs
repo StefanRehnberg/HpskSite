@@ -82,7 +82,9 @@ namespace HpskSite.Services
                 CompetitionId = competitionId,
                 CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                 CompetitionType = competitionType,
-                IsChampionship = ChampionshipRule.ForScope(scope).IsChampionship,
+                // "Delar tävlingen ut placeringsmedaljer?" — ett mästerskap, eller en tävling där arrangören valt egna medaljregler.
+                // (Namnet IsChampionship är modellens gamla; utan medaljer visas en läslista, PlacementsOnly.)
+                IsChampionship = ChampionshipRule.For(competition).AwardsPlacementMedals,
                 SelectedWeaponGroup = (weaponGroup ?? "").Trim(),
                 CanEdit = canEdit
             };

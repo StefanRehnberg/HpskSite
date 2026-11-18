@@ -69,18 +69,19 @@ namespace HpskSite.Tests.Services
         [Theory]
         [InlineData("Svenskt Mästerskap")]
         [InlineData("Landsdelsmästerskap")]
-        [InlineData("")]
-        public void The_level_check_refuses_every_value_outside_club_and_region_championships(string scope)
+        public void The_level_check_refuses_every_value_at_sm_and_landsdel(string scope)
         {
-            MedalRuleEditSettings.Refusal(scope, "class", null, null, enabled: true).Should().Contain("klubb- och kretsmästerskap");
-            MedalRuleEditSettings.Refusal(scope, "weapongroup", null, null, enabled: true).Should().Contain("klubb- och kretsmästerskap");
-            MedalRuleEditSettings.Refusal(scope, null, 3, null, enabled: true).Should().Contain("klubb- och kretsmästerskap");
+            MedalRuleEditSettings.Refusal(scope, "class", null, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
+            MedalRuleEditSettings.Refusal(scope, "weapongroup", null, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
+            MedalRuleEditSettings.Refusal(scope, null, 3, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
         }
 
         [Theory]
         [InlineData("Klubbmästerskap")]
         [InlineData("Kretsmästerskap")]
-        public void Club_and_region_championships_may_choose(string scope)
+        [InlineData("")]            // klubbens egna regler (backlog P1.2): en tävling utan mästerskapsomfattning får välja
+        [InlineData("Ingen")]
+        public void Club_and_region_championships_and_non_championships_may_choose(string scope)
         {
             MedalRuleEditSettings.Refusal(scope, "class", 3, "shared", enabled: true).Should().BeNull();
         }

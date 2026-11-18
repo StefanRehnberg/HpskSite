@@ -111,6 +111,24 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
+        public void A_competition_without_championship_awards_medals_only_when_the_organiser_has_chosen()
+        {
+            var notChosen = new CompetitionInfo { CompetitionType = "Faltskytte", CompetitionScope = null };
+            var none = Build(notChosen, 4, Four);
+            none.MedalAwards.Should().BeEmpty();            // som förr: ingen medaljutdelning
+            none.MedalAwardsComputed.Should().BeFalse();
+
+            var chosen = new CompetitionInfo
+            {
+                CompetitionType = "Faltskytte", CompetitionScope = null, MedalGroupingMode = "class", MedalPlaces = 3
+            };
+            var awards = Build(chosen, 4, Four);
+            awards.MedalAwardsComputed.Should().BeTrue();
+            awards.MedalAwards.Single().Awards.Select(a => a.Name).Should().Equal("Anna", "Bo", "Cia");
+            awards.MedalGroupingMode.Should().Be("class");
+        }
+
+        [Fact]
         public void At_sm_the_clubs_rules_do_not_apply_and_are_not_written()
         {
             var sm = new CompetitionInfo

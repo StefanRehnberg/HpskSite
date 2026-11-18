@@ -467,7 +467,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
             var medalAwards = new List<PrecisionMedalCategoryAwards>();
             var medalAwardsComputed = false;
-            if (championshipRule.IsChampionshipRaw)
+            // GRINDEN för särskjutning och medaljer: ett mästerskap, eller en tävling där arrangören valt egna medaljregler (AwardsPlacementMedals).
+            if (championshipRule.AwardsPlacementMedals)
             {
                 // Who was taken to the final. Only looked up when there is a final to be taken
                 // to; an empty set means no finals start list exists yet, which is "unknown"

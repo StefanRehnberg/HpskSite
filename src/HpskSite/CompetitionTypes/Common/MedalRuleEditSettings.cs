@@ -44,9 +44,8 @@ namespace HpskSite.CompetitionTypes.Common
             if (custom && !enabled)
                 return "Klubbens egna medaljregler är inte påslagna än.";
 
-            if (!ChampionshipRule.ForScope(scope).CanChooseMedalGrouping)
-                return "Indelningen går bara att välja vid klubb- och kretsmästerskap. "
-                     + "Vid landsdels- och svenskt mästerskap är de fem C-mästerskapen "
+            if (!ChampionshipRule.ForScope(scope).MayChooseMedalRules)
+                return "Medaljreglerna går inte att välja vid landsdels- och svenskt mästerskap: där är de fem C-mästerskapen "
                      + "(öppen, Dam, Vet Y, Vet Ä, Junior) vad förbundet delar ut.";
 
             return null;

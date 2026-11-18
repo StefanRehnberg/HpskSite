@@ -295,7 +295,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var medalCategoryTies = new List<FaltskytteMedalCategoryTies>();
             var categoryStandings = new List<FaltskytteCategoryStanding>();
 
-            if (championshipRule.IsChampionshipRaw)
+            // GRINDEN för särskjutning och medaljer: ett mästerskap, eller en tävling där arrangören valt egna medaljregler (AwardsPlacementMedals).
+            if (championshipRule.AwardsPlacementMedals)
             {
                 // Arrangörens val (klubb/krets): en uppsättning medaljer per vapengrupp, eller
                 // delade mästerskapsklasser. Nivåspärren ligger i regeln.

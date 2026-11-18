@@ -251,7 +251,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             };
 
             var rule = ChampionshipRule.For(competition);
-            if (!rule.IsChampionship) return artifact;
+            if (!rule.AwardsPlacementMedals) return artifact;
 
             foreach (var standing in build.CategoryStandings)
             {

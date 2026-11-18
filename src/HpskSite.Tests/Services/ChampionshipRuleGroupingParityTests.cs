@@ -35,10 +35,15 @@ namespace HpskSite.Tests.Services
         }
 
         [Theory]
-        [MemberData(nameof(Scopes))]
+        [InlineData("Klubbmästerskap")]
+        [InlineData("Kretsmästerskap")]
+        [InlineData("Landsdelsmästerskap")]
+        [InlineData("Svenskt Mästerskap")]
+        [InlineData("[\"Klubbmästerskap\"]")]
         public void The_backfilled_mode_equals_the_old_bool(string scope)
         {
-            // Migreringen sätter weapongroup där boolen var sann. Regeln ska då svara som boolen gjorde.
+            // Migreringen sätter weapongroup där boolen var sann OCH tävlingen är ett klubb- eller kretsmästerskap (där boolen gällde; utanför
+            // mästerskap lämnas läget tomt, eftersom ett lagrat läge där betyder "klubben har valt"). Regeln ska då svara som boolen gjorde.
             var viaBool = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = true });
             var viaMode = ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = true, MedalGroupingMode = "weapongroup" });
 
@@ -62,12 +67,24 @@ namespace HpskSite.Tests.Services
         [Theory]
         [InlineData("Landsdelsmästerskap")]
         [InlineData("Svenskt Mästerskap")]
-        [InlineData("")]
-        public void A_stored_mode_never_applies_outside_club_and_region_championships(string scope)
+        public void A_stored_mode_never_applies_at_sm_and_landsdel(string scope)
         {
-            // Nivåspärren: ett värde som blivit kvar från när tävlingen var något annat slår aldrig igenom.
+            // Nivåspärren: ett värde som blivit kvar från när tävlingen var något annat slår aldrig igenom på SM och landsdel.
             ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalGroupingMode = "weapongroup" })
                 .GroupingMode.Should().Be(MedalGroupingKind.Shb);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("Ingen")]
+        public void The_old_bool_means_nothing_without_a_championship_but_a_stored_mode_does(string scope)
+        {
+            // Boolen hade aldrig effekt utanför klubb- och kretsmästerskap och får inte få det nu (8 tävlingar i rehearsal har den kvar).
+            ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalsPerWeaponGroup = true })
+                .GroupingMode.Should().Be(MedalGroupingKind.Shb);
+            // Ett uttryckligt läge är däremot klubbens val.
+            ChampionshipRule.For(new CompetitionInfo { CompetitionScope = scope, MedalGroupingMode = "weapongroup" })
+                .GroupingMode.Should().Be(MedalGroupingKind.WeaponGroup);
         }
 
         [Fact]
