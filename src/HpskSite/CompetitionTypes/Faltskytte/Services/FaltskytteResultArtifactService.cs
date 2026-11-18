@@ -236,7 +236,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 // listan räknats. Se PrecisionFinalResults.ScoreUnit.
                 ScoreUnit = scoring.PrimaryUnit,
                 SecondaryUnit = scoring.SecondaryUnit,
-                ScoringVariant = scoring.Variant
+                ScoringVariant = scoring.Variant,
+
+                // ⚠️ INDELNINGEN SKRIVS IN I ARTEFAKTEN, som precisionens byggare gör (PrecisionResultsBuilder).
+                // Fältet utelämnade den, så en fälttävling med "en uppsättning medaljer per vapengrupp" fick alltid
+                // falskt här och prisutdelningen larmade om en "ändrad indelning" som aldrig ändrats (Expertgruppen
+                // 2026-11-18, medaljindelningen). Läget som GÄLLER, med nivåspärren tillämpad.
+                MedalsPerWeaponGroup = ChampionshipRule.For(competition).MedalsPerWeaponGroup
             };
 
             if (!ChampionshipRule.For(competition).IsChampionship) return artifact;
