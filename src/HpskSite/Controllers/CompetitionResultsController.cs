@@ -3463,15 +3463,15 @@ namespace HpskSite.Controllers
                 if (comp == null) return Json(new { success = false, enabled = false });
 
                 var rule = ChampionshipRule.For(comp);
-                var enabled = MedalRulesSurfaceEnabled(comp) && rule.MayChooseMedalRules;
+                // Kortet visas för varje tävling som ytan gäller. Vid SM och landsdel är det LÅST (förbundets regler, inget val):
+                // locked = arrangören får inte välja.
+                var enabled = MedalRulesSurfaceEnabled(comp);
                 var effective = rule.GroupingModeName;
                 return Json(new
                 {
                     success = true,
                     enabled,
-                    // surface = ytan finns för grenen och är påslagen; enabled = dessutom får arrangören välja (inte SM/landsdel).
-                    // Redigera tävling skiljer på dem för att kunna förklara varför valet saknas.
-                    surface = MedalRulesSurfaceEnabled(comp),
+                    locked = !rule.MayChooseMedalRules,
                     isChampionshipScope = rule.IsChampionship,
                     awards = rule.AwardsPlacementMedals,
                     mode = rule.StoredGroupingMode,
