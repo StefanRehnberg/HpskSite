@@ -80,7 +80,7 @@ WHERE ct.alias = 'competitionSeries' AND n.trashed = 0");
                 var seriesRegion = (series.Value<string>("regionalFederation") ?? "").Trim();
                 if (seriesClub <= 0 && seriesRegion.Length == 0) continue;
                 // Seriens publicerade omgångar ur tävlingslagringen (C3-planen S3).
-                foreach (var comp in _competitions.ListBySeries(series.Id))
+                foreach (var comp in _competitions.ListBySeries(series.Id, includeDrafts: true))   // underhåll: också dolda tävlingar
                 {
                     if (comp.ClubId > 0) continue;
                     if (!string.IsNullOrWhiteSpace(comp.RegionalFederation)) continue;

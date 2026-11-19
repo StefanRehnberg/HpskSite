@@ -123,21 +123,32 @@ namespace HpskSite.Routing
             return true;
         }
 
-        public Task<bool> TryFindContent(IPublishedRequestBuilder request)
+        /// <summary>
+        /// Sant när tävlingen är ett utkast och den som frågar inte tillhör arrangörens personal (kretsutlysningen F1):
+        /// då svarar finnern som om adressen inte fanns (404), så ingen får en <c>IPublishedContent</c> för den.
+        /// Prövas per förfrågan — indexet är gemensamt och cachas aldrig per tittare.
+        /// </summary>
+        private async Task<bool> MustHideAsync(IPublishedContent competition)
+        {
+            var access = _http.HttpContext?.RequestServices.GetService<HpskSite.Services.Competitions.DraftCompetitionAccess>();
+            return access != null && await access.MustHideFromViewerAsync(competition.Id);
+        }
+
+        public async Task<bool> TryFindContent(IPublishedRequestBuilder request)
         {
             try
             {
                 var path = request.Uri.GetAbsolutePathDecoded();
                 if (!path.StartsWith("/competitions/", StringComparison.OrdinalIgnoreCase))
-                    return Task.FromResult(false);
+                    return false;
 
                 var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
                 // Need at minimum: "competitions" + year + 2 more (e.g. xSM/comp or region/comp)
-                if (segments.Length < 4) return Task.FromResult(false);
+                if (segments.Length < 4) return false;
                 if (!segments[0].Equals("competitions", StringComparison.OrdinalIgnoreCase))
-                    return Task.FromResult(false);
+                    return false;
                 if (!int.TryParse(segments[1], out var year))
-                    return Task.FromResult(false);
+                    return false;
 
                 // Peel off optional trailing child segment.
                 string? childSegment = null;
@@ -148,7 +159,7 @@ namespace HpskSite.Routing
                 }
 
                 if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                    return Task.FromResult(false);
+                    return false;
 
                 // After year, what remains determines which shape this is.
                 var competition = FindCompetition(year, segments.AsSpan(2).ToArray());
@@ -165,14 +176,18 @@ namespace HpskSite.Routing
                     // Bara en PUBLICERAD lista ur lagringen visas — aldrig en godtycklig barnnod.
                     // ⚠️ Bara en lista som FINNS — ett omdöpt segment har en rad i Umbracos omdirigeringar.
                     if (listCompetition != null && HasPublishedList(listCompetition.Id, segments[^1]))
-                        return Task.FromResult(RedirectToNewAddress(request, listCompetition, segments[^1])
-                            || TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings));
+                    {
+                        if (await MustHideAsync(listCompetition)) return false;
+                        return RedirectToNewAddress(request, listCompetition, segments[^1])
+                            || TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings);
+                    }
                 }
 
-                if (competition == null) return Task.FromResult(false);
+                if (competition == null) return false;
+                if (await MustHideAsync(competition)) return false;   // dold tävling: 404 för alla utom arrangörens personal
 
                 // C3-planen S6: den gamla adressformen ger 301 till tävlingens adress i PageAddress.
-                if (RedirectToNewAddress(request, competition, childSegment)) return Task.FromResult(true);
+                if (RedirectToNewAddress(request, competition, childSegment)) return true;
 
                 IPublishedContent target = competition;
                 if (childSegment != null)
@@ -182,19 +197,19 @@ namespace HpskSite.Routing
                     if (child == null)
                     {
                         if (string.Equals(childSegment, "resultat", StringComparison.OrdinalIgnoreCase))
-                            return Task.FromResult(TryServeResultPage(request, competition, _http, _shortStrings));
-                        return Task.FromResult(TryServeStartListPage(request, competition, childSegment, _http, _shortStrings));
+                            return TryServeResultPage(request, competition, _http, _shortStrings);
+                        return TryServeStartListPage(request, competition, childSegment, _http, _shortStrings);
                     }
                     target = child;
                 }
 
                 request.SetPublishedContent(target);
-                return Task.FromResult(true);
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "CompetitionUrlContentFinder failed for {Path}", request.Uri.AbsolutePath);
-                return Task.FromResult(false);
+                return false;
             }
         }
 
@@ -408,7 +423,9 @@ namespace HpskSite.Routing
             var competitions = services?.GetService(typeof(HpskSite.Services.Competitions.ICompetitionStore)) as HpskSite.Services.Competitions.ICompetitionStore;
             var series = services?.GetService(typeof(HpskSite.Services.Competitions.ICompetitionSeriesStore)) as HpskSite.Services.Competitions.ICompetitionSeriesStore;
             if (competitions == null) yield break;
-            foreach (var c in competitions.List())
+            // includeDrafts: arrangörens egen sida måste gå att nå. Indexet är gemensamt för alla tittare, så spärren mot
+            // andra ligger i TryFindContent (MustHideAsync), aldrig här. Publicera bumpar CompetitionCacheVersion.
+            foreach (var c in competitions.List(includeDrafts: true))
             {
                 var year = c.CompetitionDate?.Year ?? 0;
                 if (year == 0 && c.SeriesId is > 0 && series?.Get(c.SeriesId.Value) is { } s)

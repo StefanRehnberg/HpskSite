@@ -17,7 +17,11 @@ namespace HpskSite.Services.Competitions
     /// </summary>
     public interface ICompetitionStore
     {
-        /// <summary>Den publicerade tävlingen, eller null när den inte finns eller inte är publicerad.</summary>
+        /// <summary>
+        /// Den publicerade tävlingen, eller null när den inte finns eller inte är publicerad. <b>Uppslag av ett känt id
+        /// inkluderar dolda tävlingar</b> (planen 4.2, omgjord 2026-11-19): ett känt id är en arbetsyta som nåtts genom
+        /// en behörighetsprövad väg. Publika endpoints skyddas av <c>DraftCompetitionGuardFilter</c> och <c>PageNode</c>.
+        /// </summary>
         CompetitionInfo? Get(int id);
 
         /// <summary>Den senast sparade tävlingen, även opublicerad. Null när id:t inte är en tävling.</summary>
@@ -26,17 +30,23 @@ namespace HpskSite.Services.Competitions
         /// <summary>Flera publicerade på en gång (en uppslagning för en lista). Saknade id:n saknas i svaret.</summary>
         IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids);
 
-        /// <summary>Alla publicerade tävlingar, sorterade på id.</summary>
-        IReadOnlyList<CompetitionInfo> List();
+        /// <summary>
+        /// Alla publicerade tävlingar, sorterade på id. <b>Dolda tävlingar (utkast) ingår inte</b> — det som visar
+        /// tävlingar för allmänheten ska aldrig se dem. Arrangörens egna vyer anger <paramref name="includeDrafts"/>: true.
+        /// </summary>
+        IReadOnlyList<CompetitionInfo> List(bool includeDrafts = false);
 
-        /// <summary>Seriens publicerade omgångar, i seriens ordning.</summary>
-        IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId);
+        /// <summary>Seriens publicerade omgångar, i seriens ordning. Utkast ingår inte utan <paramref name="includeDrafts"/>.</summary>
+        IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId, bool includeDrafts = false);
 
         /// <summary>
         /// Seriens alla omgångar i det sparade läget, även opublicerade — för seriens admin och spärren mot att
         /// ta bort en serie som har tävlingar. (I tabellen samma rader som <see cref="ListBySeries"/>.)
         /// </summary>
         IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId);
+
+        /// <summary>Är tävlingen dold (utkast)? En billig fråga för grindarna; falskt för ett id som inte finns.</summary>
+        bool IsDraft(int id);
 
         /// <summary>
         /// Går fältet (nodens alias) att spara? Nodlagringen: doktypen har egenskapen — <c>SetValue</c> på en saknad

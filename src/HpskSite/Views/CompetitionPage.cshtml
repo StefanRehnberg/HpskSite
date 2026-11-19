@@ -752,6 +752,45 @@
         </div>
     }
 
+    @* Dold tävling (kretsutlysningen F1): bara arrangörens personal når sidan, och den ska aldrig tro att alla ser den. *@
+    @if (compPost.IsDraft)
+    {
+        var publishBlocked = HpskSite.Services.Competitions.CompetitionPublishRules.BlockedReason(compPost);
+        <div class="alert alert-warning d-flex flex-wrap align-items-center gap-3 mb-4" id="competitionDraftBanner" role="status">
+            <div class="flex-grow-1">
+                <strong><i class="bi bi-eye-slash me-1"></i>Dold – syns bara för er</strong>
+                <div class="small">Skyttar och andra klubbar ser inte tävlingen och kan inte anmäla sig förrän den är publicerad.@(publishBlocked != null ? " " + publishBlocked : "")</div>
+            </div>
+            @if (canManageCompetition)
+            {
+                <button type="button" class="btn btn-success" id="competitionPublishButton" disabled="@(publishBlocked != null)" data-competition-id="@Model.Id">
+                    <i class="bi bi-megaphone me-1"></i>Publicera tävlingen
+                </button>
+            }
+        </div>
+        @if (canManageCompetition)
+        {
+            @Html.AntiForgeryToken()
+            <script>
+                document.getElementById('competitionPublishButton')?.addEventListener('click', function () {
+                    var btn = this; btn.disabled = true;
+                    var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                    fetch('/umbraco/surface/CompetitionAdmin/PublishCompetition', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                        credentials: 'include',
+                        body: JSON.stringify({ competitionId: parseInt(btn.dataset.competitionId, 10) })
+                    }).then(function (r) { return r.json(); }).then(function (d) {
+                        if (d.success) { location.reload(); return; }
+                        btn.disabled = false;
+                        var box = document.querySelector('#competitionDraftBanner .small');
+                        if (box) box.textContent = d.message || 'Tävlingen kunde inte publiceras.';
+                    }).catch(function () { btn.disabled = false; });
+                });
+            </script>
+        }
+    }
+
     <div class="row">
         <div class="col-lg-8">
 			<div class="card mb-4">
@@ -1243,7 +1282,17 @@
 							</div>
 						}
 
-						@if (regClosed)
+						@if (compPost.IsDraft)
+						{
+							@* Dold tävling (kretsutlysningen F1): ingen anmälan förrän den är publicerad — servern vägrar också (RegisterForCompetition). *@
+							<p class="text-muted small mb-2">
+								<i class="bi bi-eye-slash me-1"></i>Anmälan går att göra när tävlingen har publicerats.
+							</p>
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+						}
+						else if (regClosed)
 						{
 							<p class="text-muted small mb-2">
 								<i class="bi bi-calendar-x me-1"></i>Anmälan stängde @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))

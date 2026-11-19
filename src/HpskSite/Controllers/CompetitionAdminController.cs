@@ -518,7 +518,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Alla publicerade tävlingar ur tävlingslagringen (C3-planen S3) — de ligger under navet.
-                var allCompetitions = _competitions.List();
+                var allCompetitions = _competitions.List(includeDrafts: true);   // arrangörens egen lista: dolda tävlingar ingår (behörighetsfiltret nedan avgör vem som ser dem)
 
                 // Build club -> region lookup from published cache (only if needed for region filtering)
                 // Resolved once, not per competition — the filter runs over every node in the hub.
@@ -730,6 +730,9 @@ namespace HpskSite.Controllers
                             registrationOpenDate = comp.RegistrationOpenDate,
                             registrationCloseDate = comp.RegistrationCloseDate,
                             isActive = isActive,
+                            // Dold tävling (F1): märket "Dold – syns bara för er" och Publicera i radens meny.
+                            isDraft = comp.IsDraft,
+                            publishBlocked = comp.IsDraft ? HpskSite.Services.Competitions.CompetitionPublishRules.BlockedReason(comp) : null,
                             isClubOnly = comp.IsClubOnly,
                             // Bekräftad nivå eller tomt; listan faller då tillbaka på värdbrickan.
                             competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(comp.CompetitionLevel),
@@ -773,7 +776,7 @@ namespace HpskSite.Controllers
         /// Get a single competition by ID for editing
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetCompetition(int id)
+        public async Task<IActionResult> GetCompetition([HpskSite.Services.Competitions.CompetitionIdArg] int id)
         {
             // Personalregeln (C3-planen S2, Stefans beslut 2026-10-14). Förut saknades kretsens väg: en
             // kretsadmin nådde inte en kretsvärdad tävling i redigeringsdialogen.
@@ -1035,15 +1038,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = _finalsRefusal });
                 }
 
-                // Extract competition date to determine year folder
-                DateTime competitionDate = DateTime.Now;
-                if (request.Fields.TryGetValue("competitionDate", out var dateObj) && dateObj != null)
-                {
-                    if (DateTime.TryParse(dateObj.ToString(), out DateTime parsedDate))
-                    {
-                        competitionDate = parsedDate;
-                    }
-                }
+                // (N7, kretsutlysningen F1: här låg en lokal "competitionDate = DateTime.Now" som standard för årsmappen i nodlagringen.
+                // Ingen läste den längre — tabellen har ingen årsmapp — och ett saknat datum ska aldrig bli "i dag". Borttagen.)
 
                 // Check if seriesId is provided
                 int? seriesId = null;
@@ -1070,6 +1066,7 @@ namespace HpskSite.Controllers
                 var created = _competitions.Create(seriesId, competitionName, c =>
                 {
                     c.IsVisible = true;
+                    c.IsDraft = true;   // dold tills arrangören trycker Publicera (kretsutlysningen F1); ett tillståndsfält som aldrig kommer ur formuläret
                     HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, request.Fields, CreateHandledElsewhere);
                     c.CompetitionType = competitionTypeId;
                     c.CompetitionName = competitionName;
@@ -1222,15 +1219,7 @@ namespace HpskSite.Controllers
                     competitionTypeId = typeObj.ToString()!;
                 }
 
-                // Extract competition date to determine year folder
-                DateTime competitionDate = DateTime.Now;
-                if (fields.TryGetValue("competitionDate", out var dateObj) && dateObj != null)
-                {
-                    if (DateTime.TryParse(dateObj.ToString(), out DateTime parsedDate))
-                    {
-                        competitionDate = parsedDate;
-                    }
-                }
+                // (N7: den döda "competitionDate = DateTime.Now" för årsmappen är borttagen, som i CreateCompetition.)
 
                 // Check if seriesId is provided
                 int? seriesId = null;
@@ -1259,6 +1248,7 @@ namespace HpskSite.Controllers
                     c.CompetitionName = competitionName;
                     c.IsExternal = true;
                     c.IsVisible = true;
+                    c.IsDraft = true;   // dold tills arrangören publicerar (F1)
                     c.IsClubOnly = false;
                     c.NumberOfSeriesOrStations = AdvertisementSeriesCount(fields);
                     c.NumberOfFinalSeries = AdvertisementFinalSeriesCount(fields);
@@ -1457,6 +1447,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Competitions.DraftGuardOk("kopian prövar redigeringsregeln på käll-id:t, och källan kan vara en dold tävling för den som får redigera den")]
         public async Task<IActionResult> CopyCompetition([FromBody] CopyCompetitionRequest request)
         {
             if (!ModelState.IsValid)
@@ -1498,6 +1489,7 @@ namespace HpskSite.Controllers
                 {
                     HpskSite.Models.Competitions.CompetitionFieldTable.CopyDefinitionInto(sourceCompetition, c, shiftYears: 1);
                     c.IsVisible = true;
+                    c.IsDraft = true;   // en kopia är dold tills den publiceras (F1): datumen är flyttade ett år och resten ska ses över först
                     c.AddToMenu = isSiteAdmin && sourceCompetition.AddToMenu;
                 });
                 var newCompetition = created.Record!;
@@ -1602,6 +1594,86 @@ namespace HpskSite.Controllers
             {
                 return Ok(new { success = false, message = "Tävlingen kunde inte tas bort: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// <b>Publicera</b> en dold tävling (kretsutlysningen F1): tävlingen blir synlig för alla. Redigeringsregeln
+        /// (<c>CanEditCompetitionAsync</c>: sajtadmin, tävlingsansvarig, värdklubbens admin, värdkretsens admin).
+        /// Avstängd med förklaring när obligatoriska fält saknas. Idempotent: en redan publicerad tävling ger ett vänligt svar.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("CanEditCompetitionAsync: redigeringsregeln på tävlingen")]
+        public async Task<IActionResult> PublishCompetition([FromBody] DeleteCompetitionRequest request)
+        {
+            try
+            {
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null) return Ok(new { success = false, message = "Tävlingen finns inte." });
+                if (!await _authorizationService.CanEditCompetitionAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
+                    return Ok(new { success = false, message = "Du har inte behörighet att publicera tävlingen." });
+                if (!competition.IsDraft)
+                    return Ok(new { success = true, alreadyPublished = true, message = "Tävlingen är redan publicerad." });
+
+                var blocked = HpskSite.Services.Competitions.CompetitionPublishRules.BlockedReason(competition);
+                if (blocked != null) return Ok(new { success = false, message = blocked });
+
+                var updated = _competitions.Update(request.CompetitionId, null, c => c.IsDraft = false);
+                if (!updated.Ok) return Ok(new { success = false, message = "Tävlingen finns inte." });
+
+                AfterVisibilityChanged();
+                return Ok(new { success = true, message = "Tävlingen är publicerad och syns nu för alla." });
+            }
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
+            {
+                return Ok(new { success = false, message = "Tävlingen kunde inte publiceras: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// <b>Ångra publicering</b>: tävlingen blir dold igen. Bara när den saknar anmälningar (skyttarna känner redan
+        /// till en tävling med anmälningar). Samma behörighet som Publicera.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("CanEditCompetitionAsync: redigeringsregeln på tävlingen")]
+        public async Task<IActionResult> UnpublishCompetition([FromBody] DeleteCompetitionRequest request)
+        {
+            try
+            {
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null) return Ok(new { success = false, message = "Tävlingen finns inte." });
+                if (!await _authorizationService.CanEditCompetitionAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
+                    return Ok(new { success = false, message = "Du har inte behörighet att ändra tävlingen." });
+                if (competition.IsDraft)
+                    return Ok(new { success = true, alreadyDraft = true, message = "Tävlingen är redan dold." });
+
+                var blocked = HpskSite.Services.Competitions.CompetitionPublishRules.UnpublishBlockedReason(
+                    CountRegistrationsForCompetition(competition.Id));
+                if (blocked != null) return Ok(new { success = false, message = blocked });
+
+                var updated = _competitions.Update(request.CompetitionId, null, c => c.IsDraft = true);
+                if (!updated.Ok) return Ok(new { success = false, message = "Tävlingen finns inte." });
+
+                AfterVisibilityChanged();
+                return Ok(new { success = true, message = "Tävlingen är dold igen och syns bara för er." });
+            }
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
+            {
+                return Ok(new { success = false, message = "Publiceringen kunde inte ångras: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Efter att en tävling blivit synlig eller dold: listorna och kalendern ska följa direkt. Skrivningen genom lagringen
+        /// har redan räknat upp <c>CompetitionCacheVersion</c> (adressindexet byggs om på alla instanser); här töms
+        /// adminlistorna, menyn och kretskalendern (som signalerar övriga instanser).
+        /// </summary>
+        private void AfterVisibilityChanged()
+        {
+            InvalidateCompetitionCaches();
+            (HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.KretsCalendarService))
+                as HpskSite.Services.Kretsgranskning.KretsCalendarService)?.Invalidate();
         }
 
         /// <summary>

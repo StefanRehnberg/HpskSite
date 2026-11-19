@@ -258,7 +258,7 @@ namespace HpskSite.Controllers
             var capacityRows = CompCounts("Patrullernas platser",
                 "SELECT CompetitionId, COUNT(*) AS N FROM FaltskyttePatrol WHERE Capacity IS NOT NULL GROUP BY CompetitionId");
             var publishedGroupRows = CompCounts("Publicering per vapengrupp",
-                "SELECT Id AS CompetitionId, 1 AS N FROM Competition WHERE FaltskyttePublishedGroups IS NOT NULL");
+                "SELECT Id AS CompetitionId, 1 AS N FROM Competition WHERE FaltskyttePublishedGroups IS NOT NULL AND DeletedUtc IS NULL AND IsDraft = 0");   // dolda tävlingar (F1) ingår aldrig i statistiken
 
             // ── Sidvisningar: planeringen, generatorn (tävlingens) och övningsläget — 30 dagar och de 30 dessförinnan ──
             var visits = Safe("Sidvisningarna", () => db.Fetch<PlVisitRow>(

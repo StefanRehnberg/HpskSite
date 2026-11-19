@@ -190,6 +190,14 @@ namespace HpskSite.Models.Competitions
         /// <summary>Arrangörens val: false = utanför-skyttar visas "på rätt plats", true = samlade sist i klassen.</summary>
         public bool HideOutOfCompetitionInPlace { get; set; }
 
+        /// <summary>
+        /// <b>Dold tävling</b> (kretsutlysningen F1): arrangören bygger klart den innan den publiceras. En NY kolumn —
+        /// aldrig <see cref="IsVisible"/> (= Inaktiv, ett annat begrepp). Listor och den offentliga ingången utesluter
+        /// utkast; uppslag av ett känt id (<c>Get</c>/<c>GetSaved</c>/<c>GetMany</c>) inkluderar dem. Tillstånd:
+        /// följer aldrig med en kopia.
+        /// </summary>
+        public bool IsDraft { get; set; }
+
         // (Växeln ChampionshipMode är borttagen 2026-11-06: utanför-mästerskapet gäller alltid fält-/MagnumFältmästerskap. Kolumnen
         //  Competition.ChampionshipMode finns kvar i databasen, nullbar och oläst, tills en städmigrering tar bort den.)
 

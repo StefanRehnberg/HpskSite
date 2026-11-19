@@ -40,7 +40,7 @@ namespace HpskSite.Controllers
         {
             using var db = _databaseFactory.CreateDatabase();
             return db.Fetch<int>(
-                "SELECT Id FROM dbo.Competition WHERE FaltskytteResultsOfficial = 1 ORDER BY Id");
+                "SELECT Id FROM dbo.Competition WHERE FaltskytteResultsOfficial = 1 AND DeletedUtc IS NULL AND IsDraft = 0 ORDER BY Id");   // dolda tävlingar (F1) har aldrig publicerade listor
         }
 
         /// <summary>Visar läget utan att skriva: per officiell fälttävling om bilden finns eller skulle skapas.</summary>

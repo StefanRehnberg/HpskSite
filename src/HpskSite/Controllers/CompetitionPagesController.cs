@@ -200,6 +200,11 @@ namespace HpskSite.Controllers
                 // Tabelläget (C3-planen §5c): sidan har en virtuell nod byggd ur raden — ingen nod behövs, och en
                 // gammal nod som ligger kvar till rensningen visar aldrig ett inaktuellt läge.
                 var info = HttpContext.RequestServices.GetRequiredService<ICompetitionStore>().Get(id);
+                // Dold tävling (kretsutlysningen F1): ENDA offentliga ingången till tävlingssidorna. Alla utom arrangörens personal
+                // får 404 — ingen virtuell nod byggs ens (Get inkluderar utkast, så spärren måste ligga här).
+                if (info is { IsDraft: true }
+                    && HttpContext.RequestServices.GetRequiredService<DraftCompetitionAccess>().MustHideFromViewerAsync(id).GetAwaiter().GetResult())
+                    return NotFoundPage();
                 competition = info == null ? null : HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Competition(info, HubNode());
                 if (competition == null) return NotFoundPage();
                 if (child == null) return View(HpskSite.Routing.PageViews.Competition, competition);

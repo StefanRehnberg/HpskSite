@@ -123,6 +123,27 @@
             return '<span class="badge bg-dark ms-2"><i class="bi bi-globe me-1"></i>Nationell</span>';
         };
 
+        // Publicera en dold tävling (kretsutlysningen F1). Raden uppdateras på plats: märket och menyvalet försvinner.
+        // Servern prövar behörigheten och att obligatoriska fält finns — knappen är bara en genväg.
+        window.hpskPublishCompetition = function (competitionId) {
+            const token = (typeof window.getAntiForgeryToken === 'function' ? window.getAntiForgeryToken() : '')
+                || document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+            fetch('/umbraco/surface/CompetitionAdmin/PublishCompetition', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                credentials: 'include',
+                body: JSON.stringify({ competitionId: competitionId })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) { alert(data.message || 'Tävlingen kunde inte publiceras.'); return; }
+                    document.querySelectorAll(`tr[data-competition-id="${competitionId}"]`).forEach(row => {
+                        row.querySelectorAll('.hpsk-draft-badge, .hpsk-publish-item').forEach(el => el.remove());
+                    });
+                })
+                .catch(() => alert('Kontakten med servern bröts. Försök igen.'));
+        };
+
         window.hpskRenderCompetitionRow = function (comp, scope) {
             scope = scope || {};
             const name = window.hpskCompEscape(comp.name);
@@ -154,11 +175,20 @@
             const manage = scope.manageUrl === false ? '' :
                 `<li><a class="dropdown-item" href="/competitionmanagement?competitionId=${comp.id}"><i class="bi bi-gear me-2 text-info"></i>Hantera tävlingen</a></li>`;
 
+            // Dold tävling (kretsutlysningen F1): Publicera överst i menyn. Avstängd med förklaring när något saknas.
+            let publish = '';
+            if (comp.isDraft) {
+                const why = window.hpskCompEscape(comp.publishBlocked || '');
+                publish = comp.publishBlocked
+                    ? `<li class="hpsk-publish-item"><button class="dropdown-item" type="button" disabled title="${why}"><i class="bi bi-megaphone me-2"></i>Publicera tävlingen</button><div class="px-3 pb-1 small text-muted" style="max-width:260px;white-space:normal">${why}</div></li><li class="hpsk-publish-item"><hr class="dropdown-divider"></li>`
+                    : `<li class="hpsk-publish-item"><button class="dropdown-item fw-semibold" type="button" onclick="hpskPublishCompetition(${comp.id})"><i class="bi bi-megaphone me-2 text-success"></i>Publicera tävlingen</button></li><li class="hpsk-publish-item"><hr class="dropdown-divider"></li>`;
+            }
+
             return `<tr data-competition-id="${comp.id}">
                 <td><strong>${name}</strong>${window.hpskCompetitionExternalBadge(comp)}${window.hpskCompetitionScopeBadge(comp, scope)}</td>
                 <td><span class="badge bg-secondary">${typeLabel}</span></td>
                 <td>${window.hpskFormatCompetitionDate(comp.startDate)}</td>
-                <td>${window.hpskCompetitionStatusBadge(comp)}${window.hpskCompetitionRegistrationBadge(comp)}</td>
+                <td>${window.hpskCompetitionStatusBadge(comp)}${comp.isDraft ? ' <span class="badge bg-warning text-dark hpsk-draft-badge" title="Syns bara för er tills ni publicerar den"><i class="bi bi-eye-slash me-1"></i>Dold – syns bara för er</span>' : ''}${window.hpskCompetitionRegistrationBadge(comp)}</td>
                 <td class="text-center"><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
                 <td class="text-end">
                     <div class="dropdown">
@@ -168,6 +198,7 @@
                             <i class="bi bi-sliders me-2"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            ${publish}
                             ${manage}
                             <li><a class="dropdown-item" href="${window.hpskCompEscape(comp.url || `/competitions/${comp.id}/`)}" target="_blank"><i class="bi bi-eye me-2 text-secondary"></i>Visa tävlingssidan</a></li>
                             <li><hr class="dropdown-divider"></li>

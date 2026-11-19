@@ -37,16 +37,19 @@ namespace HpskSite.Services.Competitions
         {
             _services = services;
             _core = new SqlStoreCore<CompetitionInfo>(Table, CompetitionFieldTable.NodeAlias, CompetitionFieldTable.Fields,
-                scopeProvider, recorder, shortStrings, logger, new[] { "SeriesId" }, Fill, Meta, SyncAddress);
+                scopeProvider, recorder, shortStrings, logger, new[] { "SeriesId" }, Fill, Meta, SyncAddress, hasDraftColumn: true);
         }
 
         public CompetitionInfo? Get(int id) => _core.Get(id);
         public CompetitionInfo? GetSaved(int id) => _core.Get(id);
         public IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids) => _core.GetMany(ids);
-        public IReadOnlyList<CompetitionInfo> List() => _core.List(null);
-        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) =>
-            seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(("SeriesId", seriesId));
-        public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => ListBySeries(seriesId);
+        // Listor utesluter dolda tävlingar (IsDraft) om inte anroparen uttryckligen ber om dem; uppslag av ett känt id
+        // (Get, GetSaved, GetMany, ListAllInSeries) inkluderar dem. Planen 4.2, omgjord 2026-11-19.
+        public IReadOnlyList<CompetitionInfo> List(bool includeDrafts = false) => _core.List(null, includeDrafts);
+        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId, bool includeDrafts = false) =>
+            seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(("SeriesId", seriesId), includeDrafts);
+        public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => ListBySeries(seriesId, includeDrafts: true);
+        public bool IsDraft(int id) => _core.IsDraft(id);
         public bool CanStore(string alias) => CompetitionFieldTable.Fields.Any(f => string.Equals(f.Alias, alias, StringComparison.OrdinalIgnoreCase));
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change) =>
@@ -117,7 +120,7 @@ namespace HpskSite.Services.Competitions
         public CompetitionSeriesInfo? Get(int id) => _core.Get(id);
         public CompetitionSeriesInfo? GetSaved(int id) => _core.Get(id);
         public IReadOnlyDictionary<int, CompetitionSeriesInfo> GetMany(IReadOnlyCollection<int> ids) => _core.GetMany(ids);
-        public IReadOnlyList<CompetitionSeriesInfo> List() => _core.List(null);
+        public IReadOnlyList<CompetitionSeriesInfo> List() => _core.List(null, includeDrafts: true);   // serier har inga utkast
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change) =>
             _core.Update(id, expectedVersion, change, (_, _) => new Dictionary<string, object?>());
@@ -151,6 +154,13 @@ namespace HpskSite.Services.Competitions
         /// <summary>Varje läsning och skrivning går förbi de raderade raderna.</summary>
         public const string NotDeleted = "DeletedUtc IS NULL";
 
+        /// <summary>
+        /// Det listor och den offentliga ingången läser: inte raderad OCH inte dold (IsDraft, F1). ⚠️ Ligger INTE i
+        /// <see cref="NotDeleted"/>: Update (UPDLOCK-läsningen), Trash, Exists och NextSortOrder måste nå ett utkast —
+        /// annars går det varken att redigera eller radera (planen N1).
+        /// </summary>
+        public const string PublishedOnly = NotDeleted + " AND IsDraft = 0";
+
         private readonly string _table;
         private readonly string _kind;
         private readonly IReadOnlyList<CompetitionFieldDef<T>> _fields;
@@ -162,11 +172,14 @@ namespace HpskSite.Services.Competitions
         private readonly Action<T, IDictionary<string, object?>, SqlMeta> _fill;
         private readonly Func<T, SqlMeta> _meta;
         private readonly Action<int> _syncAddress;
+        private readonly bool _hasDraftColumn;
 
         public SqlStoreCore(string table, string kind, IReadOnlyList<CompetitionFieldDef<T>> fields, IScopeProvider scopeProvider,
             CompetitionChangeRecorder recorder, IShortStringHelper shortStrings, ILogger logger, string[] extraColumns,
-            Action<T, IDictionary<string, object?>, SqlMeta> fill, Func<T, SqlMeta> meta, Action<int> syncAddress)
+            Action<T, IDictionary<string, object?>, SqlMeta> fill, Func<T, SqlMeta> meta, Action<int> syncAddress,
+            bool hasDraftColumn = false)
         {
+            _hasDraftColumn = hasDraftColumn;
             _table = table;
             _kind = kind;
             _fields = fields;
@@ -206,13 +219,26 @@ namespace HpskSite.Services.Competitions
             return result;
         }
 
-        public IReadOnlyList<T> List((string Column, int Value)? filter)
+        /// <summary>
+        /// En lista. Utan <paramref name="includeDrafts"/> utesluts dolda tävlingar (<see cref="PublishedOnly"/>) —
+        /// standardvärdet är "syns inte", inte "läcker". Tabeller utan kolumnen (serier) filtrerar inte.
+        /// </summary>
+        public IReadOnlyList<T> List((string Column, int Value)? filter, bool includeDrafts)
         {
+            var where = _hasDraftColumn && !includeDrafts ? PublishedOnly : NotDeleted;
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var rows = filter.HasValue
-                ? scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE [{filter.Value.Column}] = @0 AND {NotDeleted} ORDER BY SortOrder, Id", filter.Value.Value)
-                : scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE {NotDeleted} ORDER BY Id");
+                ? scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE [{filter.Value.Column}] = @0 AND {where} ORDER BY SortOrder, Id", filter.Value.Value)
+                : scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE {where} ORDER BY Id");
             return rows.Select(ToRecord).ToList();
+        }
+
+        /// <summary>Är raden en dold tävling? En billig primärnyckelfråga — grindarna ställer den vid varje förfrågan med ett tävlings-id.</summary>
+        public bool IsDraft(int id)
+        {
+            if (!_hasDraftColumn || id <= 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>($"SELECT COUNT(*) FROM {_table} WHERE Id = @0 AND {NotDeleted} AND IsDraft = 1", id) > 0;
         }
 
         /// <summary>Finns en icke raderad rad med id:t i <paramref name="table"/> (en av de två tävlingstabellerna)?</summary>

@@ -301,6 +301,12 @@ namespace HpskSite.Composers
             // Frysningen under underhållsfönstret ska svara med sitt meddelande, inte med ett 500-svar.
             builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o =>
                 o.Filters.Add<HpskSite.Services.Hosting.WriteFrozenExceptionFilter>());
+            // Dolda tävlingar (kretsutlysningen F1): ETT filter svarar "finns inte" på varje åtgärd med ett tävlings-id
+            // när tävlingen är ett utkast och den som frågar inte är arrangörens personal. Spärrtest: DraftCompetitionGuardTests.
+            builder.Services.AddScoped<HpskSite.Services.Competitions.DraftCompetitionAccess>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.DraftCompetitionGuardFilter>();
+            builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o =>
+                o.Filters.AddService<HpskSite.Services.Competitions.DraftCompetitionGuardFilter>());
             builder.Services.AddHostedService<HpskSite.Services.Results.CompetitionResultSchemaGuardHostedService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Results.CompetitionResultNodeGuard>();

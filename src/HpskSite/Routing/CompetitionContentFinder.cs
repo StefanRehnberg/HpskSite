@@ -15,15 +15,30 @@ namespace HpskSite.Routing
         private readonly HpskSite.Services.SiteSettings.SiteSettingService _settings;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
+        private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _http;
+
         public CompetitionContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
-            HpskSite.Services.SiteSettings.SiteSettingService settings, HpskSite.Services.Competitions.CompetitionLinks links)
+            HpskSite.Services.SiteSettings.SiteSettingService settings, HpskSite.Services.Competitions.CompetitionLinks links,
+            Microsoft.AspNetCore.Http.IHttpContextAccessor http)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _settings = settings;
             _links = links;
+            _http = http;
         }
 
-        public Task<bool> TryFindContent(IPublishedRequestBuilder request)
+        /// <summary>
+        /// Dold tävling (kretsutlysningen F1): id-adressen omdirigerar till tävlingens riktiga adress, och den innehåller
+        /// namnet. För alla utom arrangörens personal ska ett utkast därför vara "inte vår adress" (404), inte en 301.
+        /// </summary>
+        private async Task<bool> MustHideAsync(int competitionId)
+        {
+            var access = _http.HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Competitions.DraftCompetitionAccess))
+                as HpskSite.Services.Competitions.DraftCompetitionAccess;
+            return access != null && await access.MustHideFromViewerAsync(competitionId);
+        }
+
+        public async Task<bool> TryFindContent(IPublishedRequestBuilder request)
         {
             var path = request.Uri.GetAbsolutePathDecoded();
 
@@ -41,17 +56,18 @@ namespace HpskSite.Routing
                         // Tabelläget (C3-planen §5d): ingen nod att visa — adressen ur PageAddress, annars ingen sida.
                         if (HpskSite.Services.Competitions.CompetitionStoreSettings.UsesTable(_settings))
                         {
+                            if (await MustHideAsync(competitionId)) return false;
                             var url = _links.Url(competitionId);
                             if (string.IsNullOrEmpty(url) || url.TrimEnd('/').Equals(path.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
-                                return Task.FromResult(false);
+                                return false;
                             request.SetRedirectPermanent(url + request.Uri.Query);
-                            return Task.FromResult(true);
+                            return true;
                         }
 
                         // Get Umbraco context
                         if (!_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
                         {
-                            return Task.FromResult(false);
+                            return false;
                         }
 
                         // Find the content by ID
@@ -69,16 +85,16 @@ namespace HpskSite.Routing
                                 && !pretty.TrimEnd('/').Equals(path.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
                             {
                                 request.SetRedirectPermanent(pretty + request.Uri.Query);
-                                return Task.FromResult(true);
+                                return true;
                             }
                             request.SetPublishedContent(content);
-                            return Task.FromResult(true);
+                            return true;
                         }
                     }
                 }
             }
 
-            return Task.FromResult(false);
+            return false;
         }
     }
 }

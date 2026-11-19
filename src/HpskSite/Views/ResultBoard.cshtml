@@ -2,6 +2,7 @@
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
+@inject HpskSite.Services.Competitions.DraftCompetitionAccess DraftAccess
 @{
     // Standalone live results board at /live?c=<competitionId>. Chromeless (no Master)
     // so it fills a wall-TV/kiosk screen. Public, but only renders when the competition
@@ -12,6 +13,8 @@
     var cStr = Context.Request.Query["c"].FirstOrDefault();
     int competitionId = 0;
     int.TryParse(cStr, out competitionId);
+    // Dold tävling (kretsutlysningen F1): för alla utom arrangörens personal finns den inte.
+    if (competitionId > 0 && await DraftAccess.MustHideFromViewerAsync(competitionId)) competitionId = 0;
 
     // Tävlingen genom ICompetitionStore (C3-planen S3); noden bara för adressen nedan.
     var info = competitionId > 0 ? Competitions.Get(competitionId) : null;

@@ -280,6 +280,19 @@ namespace HpskSite.Controllers
                     return RedirectToCurrentUmbracoPage();
                 }
 
+                // VALIDATION: en dold tävling (kretsutlysningen F1) tar inte emot anmälan förrän den är publicerad. Personalen når
+                // tävlingen, men en anmälan på en tävling ingen annan kan se vore en anmälan utan tävling — spärren ligger på servern.
+                if (competition.IsDraft)
+                {
+                    var errorMsg = "Tävlingen är inte publicerad än. Anmälan går att göra när den har publicerats.";
+                    if (IsAjaxRequest())
+                    {
+                        return Json(new { success = false, message = errorMsg });
+                    }
+                    TempData["Error"] = errorMsg;
+                    return RedirectToCurrentUmbracoPage();
+                }
+
                 // VALIDATION: Check if competition is external
                 var isExternal = competition.IsExternal;
                 if (isExternal)

@@ -8,6 +8,7 @@
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.ClubService ClubService
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.DraftCompetitionAccess DraftAccess
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
@@ -25,6 +26,8 @@
     int stationNumber = 0;
     int.TryParse(cStr, out competitionId);
     int.TryParse(sStr, out stationNumber);
+    // Dold tävling (kretsutlysningen F1): för alla utom arrangörens personal finns den inte.
+    if (competitionId > 0 && await DraftAccess.MustHideFromViewerAsync(competitionId)) competitionId = 0;
 
     // ── QR-1: read-only Förutsättningar via opaque token (?t=) ──────────
     // Public, no login, NON-enumerable. Decodes "<compId>:<station>" (minted by

@@ -44,8 +44,10 @@ namespace HpskSite.Services.Competitions
         public CompetitionInfo? Get(int id) => _core.Get(id);
         public CompetitionInfo? GetSaved(int id) => _core.GetSaved(id);
         public IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids) => _core.GetMany(ids);
-        public IReadOnlyList<CompetitionInfo> List() => _core.List(null);
-        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(seriesId);
+        public bool IsDraft(int id) => false;
+        // Nodlagringen har inga utkast (IsDraft finns bara i tabellen), så includeDrafts betyder inget här.
+        public IReadOnlyList<CompetitionInfo> List(bool includeDrafts = false) => _core.List(null);
+        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId, bool includeDrafts = false) => seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(seriesId);
 
         /// <summary>Doktypen har egenskapen (även genom en komposition).</summary>
         public bool CanStore(string alias) =>

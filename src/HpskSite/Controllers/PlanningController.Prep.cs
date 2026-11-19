@@ -214,7 +214,7 @@ namespace HpskSite.Controllers
             // Närmast planeringens datum först (en planering för 2028 ska inte få höstens tävlingar överst).
             var anchor = x.Planning.TargetStart ?? DateTime.Today;
             var candidates = new List<(CompetitionInfo C, string Host)>();
-            foreach (var c in _competitions.List())
+            foreach (var c in _competitions.List(includeDrafts: true))   // en dold tävling kan kopplas av den som får redigera den (CanLinkIntoPlanningAsync prövar)
             {
                 var last = c.CompetitionEndDate ?? c.CompetitionDate;
                 if (c.CompetitionDate == null || last < from || linked.Contains(c.Id)) continue;

@@ -51,9 +51,10 @@ namespace HpskSite.Services.Competitions
         public CompetitionInfo? Get(int id) => Current.Get(id);
         public CompetitionInfo? GetSaved(int id) => Current.GetSaved(id);
         public IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids) => Current.GetMany(ids);
-        public IReadOnlyList<CompetitionInfo> List() => Current.List();
-        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => Current.ListBySeries(seriesId);
+        public IReadOnlyList<CompetitionInfo> List(bool includeDrafts = false) => Current.List(includeDrafts);
+        public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId, bool includeDrafts = false) => Current.ListBySeries(seriesId, includeDrafts);
         public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => Current.ListAllInSeries(seriesId);
+        public bool IsDraft(int id) => Current.IsDraft(id);
         public bool CanStore(string alias) => Current.CanStore(alias);
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change)

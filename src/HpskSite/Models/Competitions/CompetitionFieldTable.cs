@@ -145,6 +145,8 @@ namespace HpskSite.Models.Competitions
             F("rollingStart", D, CompetitionFieldShape.Text, c => c.RollingStart, (c, v) => c.RollingStart = (string?)v),
             F("faltskytteSelfServiceResults", D, CompetitionFieldShape.Bool, c => c.FaltskytteSelfServiceResults, (c, v) => c.FaltskytteSelfServiceResults = (bool)v!),
 
+            F("isDraft", S, CompetitionFieldShape.Bool, c => c.IsDraft, (c, v) => c.IsDraft = (bool)v!),   // dold tävling (F1); ALDRIG isActive/IsVisible
+
             F("faltskyttePatrolsPublished", S, CompetitionFieldShape.Bool, c => c.FaltskyttePatrolsPublished, (c, v) => c.FaltskyttePatrolsPublished = (bool)v!),
             F("faltskyttePublishedGroups", S, CompetitionFieldShape.Text, c => c.FaltskyttePublishedGroups, (c, v) => c.FaltskyttePublishedGroups = (string?)v),
             F("faltskytteResultsOfficial", S, CompetitionFieldShape.Bool, c => c.FaltskytteResultsOfficial, (c, v) => c.FaltskytteResultsOfficial = (bool)v!),

@@ -36,7 +36,7 @@ namespace HpskSite.Services.Competitions
             if (!_bulkLoaded && ++_misses >= BulkAfterMisses)
             {
                 _bulkLoaded = true;
-                foreach (var c in _store.List())
+                foreach (var c in _store.List(includeDrafts: true))   // Of(node) är ett uppslag av ett känt id: utkast ingår
                     _cache.TryAdd(c.Id, c);
                 if (_cache.TryGetValue(node.Id, out post)) return post;
             }

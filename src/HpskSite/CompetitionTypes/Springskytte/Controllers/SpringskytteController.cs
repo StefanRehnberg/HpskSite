@@ -581,7 +581,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             return db.Fetch<int>(
                 "SELECT c.Id FROM dbo.Competition c JOIN dbo.CompetitionResultList l ON l.CompetitionId = c.Id "
-                + "WHERE c.CompetitionType = 'Springskytte' AND l.IsOfficial = 1 ORDER BY c.Id");
+                + "WHERE c.CompetitionType = 'Springskytte' AND l.IsOfficial = 1 AND c.DeletedUtc IS NULL AND c.IsDraft = 0 ORDER BY c.Id");   // dolda tävlingar (F1) har aldrig publicerade listor
         }
 
         /// <summary>"frozen" | "already" | "not-official" | "no-results" | "failed".</summary>

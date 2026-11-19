@@ -4,6 +4,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.DraftCompetitionAccess DraftAccess
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -15,6 +16,8 @@
     int lagNumber = 0;
     int.TryParse(cStr, out competitionId);
     int.TryParse(lStr, out lagNumber);
+    // Dold tävling (kretsutlysningen F1): för alla utom arrangörens personal finns den inte.
+    if (competitionId > 0 && await DraftAccess.MustHideFromViewerAsync(competitionId)) competitionId = 0;
 
     HpskSite.Models.Competitions.CompetitionInfo? competition = null;
     string competitionName = "";

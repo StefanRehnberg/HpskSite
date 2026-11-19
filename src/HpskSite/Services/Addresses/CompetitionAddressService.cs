@@ -100,7 +100,7 @@ namespace HpskSite.Services.Addresses
         {
             var results = new List<SyncResult>();
             foreach (var s in _series.List().OrderBy(s => s.Id)) results.Add(Safe(() => SyncSeries(s.Id), PageAddressKinds.Series, s.Id));
-            foreach (var c in _competitions.List().OrderBy(c => c.Id)) results.Add(Safe(() => SyncCompetition(c.Id), PageAddressKinds.Competition, c.Id));
+            foreach (var c in _competitions.List(includeDrafts: true).OrderBy(c => c.Id)) results.Add(Safe(() => SyncCompetition(c.Id), PageAddressKinds.Competition, c.Id));
             return results;
         }
 
