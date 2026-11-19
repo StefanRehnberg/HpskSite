@@ -38,6 +38,17 @@
         <div class="card-body pt-2" id="faltMergeState"></div>
     </div>
 
+    @* Klubbens egna medaljregler. Eget kort som ändras på stället (inte i resultatlistans yta) och som räknar om listan vid sparning.
+       Dolt tills servern säger att det gäller tävlingen (sajtinställningen Medals:ClubRules, inte SM/landsdel). *@
+    @await Html.PartialAsync("_MedalRulesCard", competitionId)
+    <script>
+    document.addEventListener('hpsk:medal-rules-saved', function () {
+        if (typeof faltRestoreIframe === 'function') faltRestoreIframe();
+        if (typeof faltCheckFreshness === 'function') faltCheckFreshness();
+        if (typeof faltLoadShootOffStatus === 'function') faltLoadShootOffStatus(false);
+    });
+    </script>
+
     <!-- Result List Card -->
     <div class="card mb-3">
         <div class="card-header" role="button" onclick="toggleFaltSection('faltResultBody', 'faltResultChevron')">

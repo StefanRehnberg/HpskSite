@@ -3448,6 +3448,45 @@ namespace HpskSite.Controllers
         /// medaljlistan, inte när tävlingen skapas — vid skapandet vet ingen hur många som
         /// dyker upp i varje klass, vilket är precis det beslutet hänger på.
         /// </summary>
+        /// <summary>
+        /// Tillståndet kortet "Medaljer och priser" på Resultat-fliken behöver (precision- och fältfliken delar det): är ytan påslagen för
+        /// tävlingen, vad som gäller nu i klartext och de lagrade värdena. <c>enabled</c> falskt = kortet visas inte.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMedalRules(int competitionId)
+        {
+            try
+            {
+                if (competitionId <= 0 || !await CanManageCompetitionResults(competitionId))
+                    return Json(new { success = false, enabled = false });
+                var comp = _competitions.GetSaved(competitionId);
+                if (comp == null) return Json(new { success = false, enabled = false });
+
+                var rule = ChampionshipRule.For(comp);
+                var enabled = MedalRulesSurfaceEnabled(comp) && rule.MayChooseMedalRules;
+                var effective = rule.GroupingModeName;
+                return Json(new
+                {
+                    success = true,
+                    enabled,
+                    isChampionshipScope = rule.IsChampionship,
+                    awards = rule.AwardsPlacementMedals,
+                    mode = rule.StoredGroupingMode,
+                    effectiveMode = effective,
+                    places = rule.StoredMedalPlaces,
+                    tieRule = rule.StoredTieRule,
+                    summary = rule.AwardsPlacementMedals
+                        ? MedalGrouping.Describe(effective, rule.MedalPlaces, rule.TieRule)
+                        : "Inga medaljer delas ut i den här tävlingen."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetMedalRules for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, enabled = false });
+            }
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetMedalGrouping([FromBody] SetMedalGroupingRequest request)
@@ -3507,11 +3546,13 @@ namespace HpskSite.Controllers
                                   || newPlaces != current.MedalPlaces;
 
                     var resultPageNow = _results.Get(current.Id);
+                    // Fältets publiceringsflagga ligger på tävlingen, precisionsfamiljens på resultatposten.
+                    var listIsOfficial = IsFaltFamily(current) ? current.FaltskytteResultsOfficial : resultPageNow?.IsOfficial == true;
                     if (changed && !request.Confirm)
                     {
                         var shootOffs = await CountShootOffEntriesAsync(current);
                         var confirmText = MedalRuleEditSettings.ConfirmationNeeded(
-                            resultPageNow?.IsOfficial == true, shootOffs, !string.IsNullOrWhiteSpace(resultPageNow?.HonoraryAwardConfig));
+                            listIsOfficial, shootOffs, !string.IsNullOrWhiteSpace(resultPageNow?.HonoraryAwardConfig));
                         if (confirmText != null)
                             return Json(new { success = false, needsConfirm = true, message = confirmText });
                     }
@@ -3544,8 +3585,21 @@ namespace HpskSite.Controllers
                 if (saved.PublishProblem != null)
                     return Json(new { success = false, message = saved.PublishProblem });
 
-                var refreshed = await RefreshResultArtifactAsync(
-                    request.CompetitionId, "medaljindelningen ändrad");
+                // ⚠️ Fältet räknar om genom sin egen tjänst: precisionsfamiljens omräkning läser precisionens resultatrader och hade
+                // skrivit en tom artefakt över en fälttävlings lista.
+                bool refreshed;
+                var savedNow = _competitions.GetSaved(request.CompetitionId);
+                if (IsFaltFamily(savedNow))
+                {
+                    var faltArtifacts = HttpContext.RequestServices
+                        .GetService<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteResultArtifactService>();
+                    refreshed = faltArtifacts != null
+                        && await faltArtifacts.RefreshAsync(request.CompetitionId, "medaljindelningen ändrad");
+                }
+                else
+                {
+                    refreshed = await RefreshResultArtifactAsync(request.CompetitionId, "medaljindelningen ändrad");
+                }
 
                 return Json(new
                 {
@@ -3570,6 +3624,12 @@ namespace HpskSite.Controllers
         /// Visas klubbens medaljregler på tävlingens resultatflik? Sajtinställningen <c>Medals:ClubRules</c> är nödbromsen; springskytte och
         /// skidskytte har egna regler och får ingen yta (precisionsfamiljen och fältet har den).
         /// </summary>
+        private static bool IsFaltFamily(HpskSite.Models.Competitions.CompetitionInfo? competition)
+        {
+            var type = competition?.CompetitionType ?? "";
+            return type.Equals("Faltskytte", StringComparison.OrdinalIgnoreCase) || type.Equals("MagnumFalt", StringComparison.OrdinalIgnoreCase);
+        }
+
         private bool MedalRulesSurfaceEnabled(HpskSite.Models.Competitions.CompetitionInfo? competition)
         {
             var type = competition?.CompetitionType ?? "";

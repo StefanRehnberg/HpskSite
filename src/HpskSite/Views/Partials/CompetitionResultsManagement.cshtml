@@ -356,6 +356,16 @@
             </div>
         </div>
 
+        @* Klubbens egna medaljregler. Eget kort FÖRE listan: det ändras på stället och räknar om listan när det sparas. Dolt tills servern
+           säger att det gäller tävlingen (sajtinställningen Medals:ClubRules, inte SM/landsdel). *@
+        @await Html.PartialAsync("_MedalRulesCard", competitionId)
+        <script>
+        document.addEventListener('hpsk:medal-rules-saved', function () {
+            if (typeof hpskReloadResultsFrame === 'function') hpskReloadResultsFrame();
+            if (typeof loadShootOffStatus === 'function') loadShootOffStatus(false);
+        });
+        </script>
+
         <!-- ===== Resultatlistan ===== -->
         @*
             OMGJORD 2026-10-04 (Stefan, efter Sune-genomgången). Skiss:
@@ -1037,9 +1047,8 @@ async function applyMergesAndCreateResults() {
         : 'Sparat: ingen sammanslagning.';
     if (groupingChoice !== null) {
         const err = await saveMedalGrouping(competitionId, groupingChoice);
-        if (err === 'CANCEL') return;   // arrangören avbröt vid bekräftelsen — inget är ändrat
         if (err) { alert(err); return; }
-        msg += describeMedalChoice(groupingChoice);
+        msg += groupingChoice ? ' Medaljerna: en uppsättning per vapengrupp.' : ' Medaljerna: dam, veteran och junior får egna medaljer.';
     }
     msg += ' Listan är omräknad.';
     submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false, msg);
@@ -1758,8 +1767,10 @@ async function loadMergeState() {
     // Kontrollen står HÄR, intill medaljtabellen den styr, och sparningen räknar om listan i
     // samma handling — se SetMedalGrouping för varför.
     const grouping = data.medalGrouping || {};
+    // När kortet "Medaljer och priser" gäller tävlingen (klubbens egna regler) ändras indelningen DÄR; den gamla väljaren här döljs så att
+    // de två inte säger emot varandra.
     const clubRulesActive = !!(grouping.clubRules && grouping.clubRules.enabled && grouping.clubRules.mayChoose);
-    let groupingBlock = clubRulesActive ? renderClubRulesBlock(grouping) : '';
+    let groupingBlock = '';
     // Valet gäller bara vapengrupp C (Dam/Vet/Jun) — på ett KM i bara B talade det om C-klasser
     // som inte finns (Sune-genomgång 3). Vapengruppen läses ur klassnamnen via registret.
     const hasGroupC = classes.some(c => {
@@ -1809,7 +1820,7 @@ async function loadMergeState() {
     if (!isChampionship) {
         medalBlock = `<div class="text-muted small">
             ${clubRulesActive
-                ? 'Inga medaljer delas ut i den här tävlingen. Välj ovan om klubben delar ut medaljer.'
+                ? 'Inga medaljer delas ut i den här tävlingen. Det väljer du i kortet Medaljer och priser.'
                 : 'Tävlingen är inte ett mästerskap, så inga mästerskapsmedaljer delas ut.'}
         </div>`;
     } else if (!medalGroups.length) {
@@ -1885,145 +1896,11 @@ async function loadMergeState() {
     }
 }
 
-// ── Klubbens egna medaljregler (S3) ──
-// Visas bara när sajtinställningen Medals:ClubRules är på och nivån tillåter val (inte SM/landsdel). Tre paket + antal platser + oavgjort.
-// Sparas med samma knapp som klasserna (Spara och räkna om listan); servern kräver bekräftelse när något redan är utdelat.
-function renderClubRulesBlock(grouping) {
-    const cr = grouping.clubRules || {};
-    const champ = !!cr.isChampionshipScope;
-    const initMode = cr.mode || (grouping.perWeaponGroup ? 'weapongroup' : (champ ? 'shb' : ''));
-    const initPlaces = Number(cr.places || 0);
-    const initTie = cr.tieRule || 'shootoff';
-    const radio = (value, title, sub) => `
-        <div class="form-check">
-            <input class="form-check-input" type="radio" name="medalRuleMode" id="medalRuleMode_${value || 'none'}"
-                   value="${value}" ${initMode === value ? 'checked' : ''} onchange="medalRuleModeChanged()">
-            <label class="form-check-label small" for="medalRuleMode_${value || 'none'}">
-                ${title}<span class="text-muted d-block">${sub}</span>
-            </label>
-        </div>`;
-    const opt = (value, label, current) => `<option value="${value}" ${String(current) === String(value) ? 'selected' : ''}>${label}</option>`;
-    return `
-        <div class="border rounded p-2 mb-2" id="medalRulesBox"
-             data-init-mode="${initMode}" data-init-places="${initPlaces}" data-init-tie="${initTie}">
-            <div class="fw-semibold small mb-1">Medaljer och priser</div>
-            ${champ ? '' : radio('', 'Inga medaljer', 'Tävlingen delar inte ut medaljer')}
-            ${radio('shb', 'Som förbundets mästerskap', 'A, B och C, och i C även Dam, Vet Y, Vet Ä och Junior var för sig')}
-            ${radio('class', 'Tre bästa i varje klass', 'A1, A2 och A3 var för sig (sammanslagna klasser räknas som en klass, så som listan visar dem)')}
-            ${radio('weapongroup', 'Bäste skytt per vapengrupp', 'En uppsättning medaljer för hela A, hela B och hela C')}
-            <div id="medalRuleDetails" class="mt-2 ${initMode === '' ? 'd-none' : ''}">
-                <label class="form-label small mb-1" for="medalRulePlaces">Antal som får medalj</label>
-                <select class="form-select form-select-sm mb-2" id="medalRulePlaces">
-                    ${opt(0, 'Som förbundet (färre medaljer när det är få deltagare)', initPlaces)}
-                    ${opt(1, 'Bara guld', initPlaces)}
-                    ${opt(2, 'Guld och silver', initPlaces)}
-                    ${opt(3, 'Guld, silver och brons', initPlaces)}
-                </select>
-                <label class="form-label small mb-1" for="medalRuleTie">Vid lika resultat på en medaljplats</label>
-                <select class="form-select form-select-sm" id="medalRuleTie">
-                    ${opt('shootoff', 'Särskjutning', initTie)}
-                    ${opt('shared', 'Delad plats (samma medalj till båda)', initTie)}
-                    ${opt('series', 'Serieräkningen avgör (ingen särskjutning)', initTie)}
-                </select>
-            </div>
-            <div class="form-text mb-0 mt-1">Sparas med knappen Spara och räkna om listan. Gäller bara den här tävlingen.</div>
-        </div>`;
-}
-
-function medalRuleModeChanged() {
-    const picked = document.querySelector('#medalRulesBox input[name="medalRuleMode"]:checked');
-    const details = document.getElementById('medalRuleDetails');
-    const places = document.getElementById('medalRulePlaces');
-    if (!picked || !details || !places) return;
-    details.classList.toggle('d-none', picked.value === '');
-    // Förslag: per klass och per vapengrupp delar klubbar oftast ut till de tre bästa.
-    if ((picked.value === 'class' || picked.value === 'weapongroup') && places.value === '0') places.value = '3';
-}
-
-// Valet i dialogen, eller null när det inte ändrats.
-function pendingMedalGrouping() {
-    const box = document.getElementById('medalRulesBox');
-    if (!box) return pendingLegacyMedalGrouping();
-    const picked = box.querySelector('input[name="medalRuleMode"]:checked');
-    if (!picked) return null;
-    const mode = picked.value;
-    const places = mode === '' ? 0 : Number(document.getElementById('medalRulePlaces').value);
-    const tie = mode === '' ? 'shootoff' : document.getElementById('medalRuleTie').value;
-    const same = mode === box.dataset.initMode && places === Number(box.dataset.initPlaces) && tie === box.dataset.initTie;
-    return same ? null : { club: true, mode: mode, places: places, tieRule: tie };
-}
-
-function describeMedalChoice(choice) {
-    if (choice && choice.club) {
-        const names = { '': 'inga medaljer', shb: 'som förbundets mästerskap', 'class': 'tre bästa i varje klass', weapongroup: 'bäste skytt per vapengrupp' };
-        const plc = choice.places > 0 ? ', ' + choice.places + (choice.places === 1 ? ' plats' : ' platser') : '';
-        return ' Medaljerna: ' + (names[choice.mode] || choice.mode) + plc + '.';
-    }
-    return choice ? ' Medaljerna: en uppsättning per vapengrupp.' : ' Medaljerna: dam, veteran och junior får egna medaljer.';
-}
-
-// Bekräftelse när indelningen ändras på en publicerad lista, med särskjutningsrundor eller egen hedersprisfördelning.
-function confirmMedalRuleChange(text) {
-    return new Promise(resolve => {
-        const modal = document.createElement('div');
-        modal.className = 'modal fade';
-        modal.innerHTML = `
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Ändra medaljreglerna?</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p class="mb-0">${escapeHtml(text || '')}</p>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                        <button type="button" class="btn btn-warning" id="confirmMedalRuleBtn">Ja, ändra och räkna om</button>
-                    </div>
-                </div>
-            </div>`;
-        document.body.appendChild(modal);
-        const m = new bootstrap.Modal(modal);
-        let answered = false;
-        modal.querySelector('#confirmMedalRuleBtn').addEventListener('click', () => { answered = true; resolve(true); m.hide(); });
-        modal.addEventListener('hidden.bs.modal', () => { if (!answered) resolve(false); modal.remove(); });
-        m.show();
-    });
-}
-
-async function saveMedalGrouping(competitionId, choice) {
-    if (!choice || !choice.club) return saveLegacyMedalGrouping(competitionId, choice);
-    const post = async confirm => {
-        const res = await fetch('/umbraco/surface/CompetitionResults/SetMedalGrouping', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
-            },
-            body: JSON.stringify({ competitionId: competitionId, mode: choice.mode, places: choice.places, tieRule: choice.tieRule, confirm: confirm })
-        });
-        if (!res.ok) return { success: false, message: 'Medaljreglerna kunde inte sparas (' + res.status + '). Inget är ändrat.' };
-        return res.json();
-    };
-    try {
-        let data = await post(false);
-        if (data.needsConfirm) {
-            if (!await confirmMedalRuleChange(data.message)) return 'CANCEL';
-            data = await post(true);
-        }
-        return data.success ? null : (data.message || 'Medaljreglerna kunde inte sparas. Inget är ändrat.');
-    } catch (e) {
-        console.error('saveMedalGrouping', e);
-        return 'Ingen kontakt med servern — inget är sparat.';
-    }
-}
-
 // Spara arrangörens medaljindelning. Servern skriver egenskapen OCH räknar om
 // resultatartefakten i samma handling — medaljörerna ligger i den, och prisutdelningen läser
 // den, så en sparning utan omräkning hade lämnat de två oense.
 // Valet i dialogen, eller null när det inte ändrats (data-initial = det sparade läget).
-function pendingLegacyMedalGrouping() {
+function pendingMedalGrouping() {
     const picked = document.querySelector('#mergeStateContent input[name="medalGroupingMode"]:checked');
     if (!picked || picked.disabled) return null;
     const per = picked.id === 'medalGroupingWeapon';
@@ -2032,7 +1909,7 @@ function pendingLegacyMedalGrouping() {
 
 // Sparar indelningen. Returnerar ett felmeddelande, eller null. Omräkningen som följer
 // (submitCreateResultsList) räknar listan i den nya indelningen.
-async function saveLegacyMedalGrouping(competitionId, perWeaponGroup) {
+async function saveMedalGrouping(competitionId, perWeaponGroup) {
     try {
         const res = await fetch('/umbraco/surface/CompetitionResults/SetMedalGrouping', {
             method: 'POST',
