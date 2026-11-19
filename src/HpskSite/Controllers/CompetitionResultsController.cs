@@ -3453,6 +3453,7 @@ namespace HpskSite.Controllers
         /// tävlingen, vad som gäller nu i klartext och de lagrade värdena. <c>enabled</c> falskt = kortet visas inte.
         /// </summary>
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("CanManageCompetitionResults(competitionId) i första raden; ingen behörighet = enabled false")]
         public async Task<IActionResult> GetMedalRules(int competitionId)
         {
             try
