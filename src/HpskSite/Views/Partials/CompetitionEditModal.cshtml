@@ -661,9 +661,19 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                             <div class="fw-semibold">Medaljer och priser</div>
                             <div class="small mt-1" id="edit_medalRulesText"></div>
                             <div class="form-text">Ändras på fliken Resultat, så att listan räknas om.</div>
-                            <button type="button" class="btn btn-outline-secondary mt-2" style="min-height:44px" onclick="hpskEditGoToMedalRules()">
+                            <button type="button" class="btn btn-outline-secondary mt-2" id="edit_medalRulesGo" style="min-height:44px" onclick="hpskEditGoToMedalRules()">
                                 Gå till Medaljer och priser <i class="bi bi-arrow-right ms-1"></i>
                             </button>
+                            @* Visas i stället för att gå vidare när formuläret har ändringar som inte sparats. *@
+                            <div class="alert alert-warning small mt-2 mb-0 d-none" id="edit_medalRulesWarn" role="alert">
+                                <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Du har ändringar som inte är sparade</div>
+                                <div>Om du går vidare stängs rutan och ändringarna försvinner. Spara dem först med Spara längst ned om du vill behålla dem.</div>
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    <button type="button" class="btn btn-warning btn-sm" style="min-height:44px" onclick="hpskEditGoToMedalRules(true)">Gå vidare utan att spara</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" style="min-height:44px" onclick="hpskEditMedalRulesStay()">Stanna kvar</button>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
 
@@ -1407,9 +1417,45 @@ async function hpskEditLoadMedalRules(competitionId) {
 }
 
 // Länken: på tävlingens hanteringssida stängs modalen och fliken Resultat öppnas; från en lista går vi till hanteringssidan.
-function hpskEditGoToMedalRules() {
+// Osparade ändringar: en ögonblicksbild av formuläret tas en stund efter att modalen visats (då är den ifylld), och jämförs när man
+// klickar på länken. Modalen har ingen annan spårning, och programmatiska ändringar (datumväljare, ledarlistan) ger inga användarhändelser.
+window._hpskEditSnapshot = null;
+function hpskEditFormState() {
+    var form = document.getElementById('competitionEditForm');
+    if (!form) return '';
+    return JSON.stringify(Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
+        return [e.id || e.name, (e.type === 'checkbox' || e.type === 'radio') ? e.checked : e.value];
+    }));
+}
+(function () {
+    var modalEl = document.getElementById('competitionEditModal');
+    if (!modalEl) return;
+    modalEl.addEventListener('shown.bs.modal', function () {
+        window._hpskEditSnapshot = null;
+        setTimeout(function () { window._hpskEditSnapshot = hpskEditFormState(); }, 1200);
+    });
+    modalEl.addEventListener('hidden.bs.modal', function () {
+        window._hpskEditSnapshot = null;
+        var w = document.getElementById('edit_medalRulesWarn'), b = document.getElementById('edit_medalRulesGo');
+        if (w) w.classList.add('d-none');
+        if (b) b.classList.remove('d-none');
+    });
+})();
+
+function hpskEditMedalRulesStay() {
+    document.getElementById('edit_medalRulesWarn').classList.add('d-none');
+    document.getElementById('edit_medalRulesGo').classList.remove('d-none');
+}
+
+function hpskEditGoToMedalRules(force) {
     var id = parseInt(document.getElementById('edit_competitionId').value, 10) || 0;
     if (!id) return;
+    // Ändringar som inte är sparade: fråga först (på stället i raden), gå inte vidare tyst.
+    if (force !== true && window._hpskEditSnapshot && hpskEditFormState() !== window._hpskEditSnapshot) {
+        document.getElementById('edit_medalRulesWarn').classList.remove('d-none');
+        document.getElementById('edit_medalRulesGo').classList.add('d-none');
+        return;
+    }
     if (typeof window.hpskGoToMedalRules === 'function' && document.getElementById('results-tab')) {
         var modalEl = document.getElementById('competitionEditModal');
         var inst = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
