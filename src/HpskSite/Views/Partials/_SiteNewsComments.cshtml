@@ -40,7 +40,8 @@
             @foreach (var c in Model.Comments)
             {
                 <li class="sn-c @(c.IsDeleted ? "sn-c-deleted" : "") @(c.IsPending ? "sn-c-pending" : "")" id="kommentar-@c.Id" data-sn-comment="@c.Id" data-sn-mine="@(c.IsMine ? "1" : "0")">
-                    <div class="sn-c-avatar" aria-hidden="true">@c.Initials</div>
+                    @if (c.PictureUrl != null) { <img class="sn-c-avatar" src="@c.PictureUrl" alt="" loading="lazy" decoding="async" width="36" height="36"> }
+                    else { <div class="sn-c-avatar" aria-hidden="true">@c.Initials</div> }
                     <div class="sn-c-main">
                         <div class="small">
                             @if (c.IsDeleted && !Model.IsModerator)
@@ -87,7 +88,8 @@
         @if (Model.CanComment)
         {
             <form class="sn-c sn-c-compose" data-sn-c-form novalidate>
-                <div class="sn-c-avatar" aria-hidden="true">@Model.ViewerInitials</div>
+                @if (Model.ViewerPictureUrl != null) { <img class="sn-c-avatar" src="@Model.ViewerPictureUrl" alt="" decoding="async" width="36" height="36"> }
+                else { <div class="sn-c-avatar" aria-hidden="true">@Model.ViewerInitials</div> }
                 <div class="sn-c-main">
                     <div class="d-flex gap-2 align-items-start">
                         <textarea id="snCommentBody" class="form-control" rows="1" maxlength="2000" placeholder="Skriv en kommentar ..." aria-label="Skriv en kommentar" data-sn-c-body aria-describedby="snCommentHelp"></textarea>

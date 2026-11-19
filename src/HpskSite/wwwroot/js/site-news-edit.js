@@ -471,7 +471,11 @@
       renderGallery();
       if (existing.publishedDate) setDate(String(existing.publishedDate).slice(0, 10));
       apply(existing);
-    } else renderActions();
+    } else {
+      // En NY nyhet får kommentarer På som förval när klubben slagit på dem (skribenten kan ändra till Av eller Stängd). Äldre nyheter lämnas som de är.
+      if (commentsEnabled) cmode.value = '1';
+      renderActions();
+    }
     if (!window.ClassicEditor) { bodyHost.append(h('p', { class: 'text-danger' }, 'Textredigeraren kunde inte laddas. Ladda om sidan.')); return; }
     ClassicEditor.create(bodyHost, {
       toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList', 'blockQuote', 'insertTable', '|', 'undo', 'redo'],

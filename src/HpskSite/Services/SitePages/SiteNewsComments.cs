@@ -11,6 +11,8 @@ namespace HpskSite.Services.SitePages
         public int Id { get; init; }
         public string DisplayName { get; init; } = "";
         public string Initials { get; init; } = "";
+        /// <summary>Profilbildens adress (bara en säker adress, <see cref="SiteSignatures.IsOwnPicture"/>), annars null: då ritas initialerna.</summary>
+        public string? PictureUrl { get; init; }
         public string Body { get; init; } = "";
         public DateTime CreatedDate { get; init; }
         public DateTime? EditedDate { get; init; }
@@ -40,6 +42,7 @@ namespace HpskSite.Services.SitePages
         public bool IsModerator { get; init; }
         /// <summary>Tittarens egna initialer (avataren bredvid skrivrutan).</summary>
         public string ViewerInitials { get; init; } = "?";
+        public string? ViewerPictureUrl { get; init; }
         /// <summary>Förgranskas tittarens kommentarer (visas som en upplysning under skrivrutan)?</summary>
         public bool WillBePreModerated { get; init; }
         public int VisibleCount { get; init; }
@@ -62,10 +65,11 @@ namespace HpskSite.Services.SitePages
         private readonly IScopeProvider _scopes;
         private readonly DpaAcceptanceService _dpa;
         private readonly ClubRosterService _roster;
+        private readonly MemberPropertyReader _props;
 
-        public SiteNewsCommentsFactory(IMemberManager members, IMemberService memberService, IScopeProvider scopes, DpaAcceptanceService dpa, ClubRosterService roster)
+        public SiteNewsCommentsFactory(IMemberManager members, IMemberService memberService, IScopeProvider scopes, DpaAcceptanceService dpa, ClubRosterService roster, MemberPropertyReader props)
         {
-            _members = members; _memberService = memberService; _scopes = scopes; _dpa = dpa; _roster = roster;
+            _members = members; _memberService = memberService; _scopes = scopes; _dpa = dpa; _roster = roster; _props = props;
         }
 
         public async Task<SiteNewsCommentsModel?> BuildAsync(SitePostRow post, SiteViewer viewer, string postUrl, int page)
@@ -94,6 +98,7 @@ namespace HpskSite.Services.SitePages
 
             var views = new List<SiteCommentView>();
             var total = 0; var pageCount = 1; page = Math.Max(1, page);
+            string? viewerPicture = null;
             if (canRead)
             {
                 total = SitePostComments.List(db, post.Id, post.OwnerType, post.OwnerId, moderator, memberId, 0, 1).Total;   // totalen först, så att sidan kan klämmas till den sista
@@ -102,6 +107,11 @@ namespace HpskSite.Services.SitePages
                 var (rows, _) = SitePostComments.List(db, post.Id, post.OwnerType, post.OwnerId, moderator, memberId, (page - 1) * SiteCommentRules.PageSize, SiteCommentRules.PageSize);
                 var left = _roster.LeftMemberIds(post.OwnerId, rows.Where(r => r.AuthorMemberId != null).Select(r => r.AuthorMemberId!.Value).ToList());
                 var now = DateTime.Now;
+                // Profilbilderna i EN fråga (aldrig en uppslagning per kommentar); bara en säker adress används, annars ritas initialerna. En som lämnat klubben visas utan bild.
+                var picIds = rows.Where(r => r.AuthorMemberId != null && !left.Contains(r.AuthorMemberId.Value)).Select(r => r.AuthorMemberId!.Value).Append(memberId).Distinct().ToList();
+                var pics = _props.Read(new[] { "profilePictureUrl" }, picIds).ToDictionary(p => p.Id, p => p.Get("profilePictureUrl"));
+                string? PictureOf(int? id) => id is int i && pics.TryGetValue(i, out var u) && SiteSignatures.IsOwnPicture(u) ? u : null;
+                viewerPicture = PictureOf(memberId);
                 foreach (var r in rows)
                 {
                     var own = memberId > 0 && r.AuthorMemberId == memberId;
@@ -109,7 +119,7 @@ namespace HpskSite.Services.SitePages
                     var name = r.IsDeleted && !moderator ? "" : (r.AuthorMemberId is not int aid || left.Contains(aid) || string.IsNullOrWhiteSpace(r.AuthorName) ? "Tidigare medlem" : r.AuthorName);
                     views.Add(new SiteCommentView
                     {
-                        Id = r.Id, DisplayName = name, Initials = InitialsOf(name), Body = r.Body, CreatedDate = r.CreatedDate, EditedDate = r.EditedDate,
+                        Id = r.Id, DisplayName = name, Initials = InitialsOf(name), PictureUrl = r.IsDeleted && !moderator || name == "Tidigare medlem" ? null : PictureOf(r.AuthorMemberId), Body = r.Body, CreatedDate = r.CreatedDate, EditedDate = r.EditedDate,
                         IsPending = r.IsPending, IsDeleted = r.IsDeleted, IsMine = own,
                         CanEdit = !r.IsDeleted && SiteCommentRules.CanEdit(own, r.CreatedDate, now),
                         CanDelete = !r.IsDeleted && (own || moderator),
@@ -123,7 +133,7 @@ namespace HpskSite.Services.SitePages
             return new SiteNewsCommentsModel
             {
                 PostId = post.Id, OwnerType = post.OwnerType, OwnerId = post.OwnerId, PostUrl = postUrl, Mode = post.CommentsMode,
-                LoggedIn = viewer.LoggedIn, ViewerInitials = InitialsOf(viewerName), CanComment = canComment, CanReadText = canRead, IsModerator = moderator,
+                LoggedIn = viewer.LoggedIn, ViewerInitials = InitialsOf(viewerName), ViewerPictureUrl = viewerPicture, CanComment = canComment, CanReadText = canRead, IsModerator = moderator,
                 WillBePreModerated = canComment && SiteCommentRules.NeedsApproval(settings.Moderation, birthYear, DateTime.Now.Year, moderator),
                 VisibleCount = visible, Total = total, Page = page, PageCount = pageCount, Comments = views,
             };
