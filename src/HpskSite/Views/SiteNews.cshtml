@@ -276,7 +276,7 @@
             @if (social != null && post.IsPublished) { @await Html.PartialAsync("_SiteNewsReactions", social) }
             @if (commentsModel != null) { @await Html.PartialAsync("_SiteNewsComments", commentsModel) }
             @if (social != null && canWrite) { @await Html.PartialAsync("_SiteNewsImageRequests", social) }
-            <link rel="stylesheet" href="/css/site-news.css?v=6" />
+            <link rel="stylesheet" href="/css/site-news.css?v=7" />
             <script src="/js/site-news-view.js?v=4" defer></script>
             @if (canWrite)
             {
