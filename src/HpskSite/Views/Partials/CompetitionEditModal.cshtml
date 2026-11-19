@@ -1462,31 +1462,60 @@ document.getElementById('edit_competitionScope')?.addEventListener('change', hps
 // Osparade ändringar: en ögonblicksbild av formuläret tas en stund efter att modalen visats (då är den ifylld), och jämförs när man
 // klickar på länken. Modalen har ingen annan spårning, och programmatiska ändringar (datumväljare, ledarlistan) ger inga användarhändelser.
 window._hpskEditSnapshot = null;
+window._hpskEditTouched = false;
+// Ändrat = användaren har rört något (betrodd händelse) OCH formuläret skiljer sig från utgångsläget. Utan en användarhändelse är
+// det aldrig en ändring: det som fylls i av sidan själv efter att rutan visats ska aldrig ge en varning.
+function hpskEditIsDirty() {
+    return !!window._hpskEditTouched && !!window._hpskEditSnapshot && hpskEditFormState() !== window._hpskEditSnapshot;
+}
 function hpskEditFormState() {
     var form = document.getElementById('competitionEditForm');
     if (!form) return '';
-    return JSON.stringify(Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
+    var fields = Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
         return [e.id || e.name, (e.type === 'checkbox' || e.type === 'radio') ? e.checked : e.value];
-    }));
+    });
+    // Beskrivningen ligger i redigeraren och skrivs till fältet först vid Spara — ta med den, annars märks inte ändringar där.
+    try { if (typeof compDescriptionEditor !== 'undefined' && compDescriptionEditor) fields.push(['description-editor', compDescriptionEditor.getData()]); } catch (e) { }
+    return JSON.stringify(fields);
 }
 (function () {
     var modalEl = document.getElementById('competitionEditModal');
     if (!modalEl) return;
+    // Utgångsläget (snapshot) uppdateras var 0,4 s tills ANVÄNDAREN rör något: rutan fylls i, listor läses in och datumväljaren sätts
+    // efter att den visats, och en fast ögonblicksbild efter 1,2 s gav falsk varning när något av det kom senare. Det räknas som en
+    // ändring först när en betrodd händelse (tangent som skriver, ändring, klick i datumväljaren) har skett — Esc, Tab och klick på
+    // stäng räknas inte.
+    var baselineTimer = null;
+    function stopBaseline() { if (baselineTimer) { clearInterval(baselineTimer); baselineTimer = null; } }
+    function userTouched(e) {
+        if (!e.isTrusted) return;
+        if (e.type === 'keydown' && !(e.key && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete'))) return;
+        if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !/^[vVxX]$/.test(e.key)) return;
+        window._hpskEditTouched = true;
+        stopBaseline();
+    }
+    ['input', 'change', 'keydown'].forEach(function (t) { modalEl.addEventListener(t, userTouched, true); });
+    document.addEventListener('mousedown', function (e) {
+        if (e.isTrusted && modalEl.classList.contains('show') && e.target.closest && e.target.closest('.flatpickr-calendar')) { window._hpskEditTouched = true; stopBaseline(); }
+    }, true);
     modalEl.addEventListener('shown.bs.modal', function () {
         window._hpskEditSnapshot = null;
-        setTimeout(function () { window._hpskEditSnapshot = hpskEditFormState(); }, 1200);
+        window._hpskEditTouched = false;
+        stopBaseline();
+        baselineTimer = setInterval(function () { window._hpskEditSnapshot = hpskEditFormState(); }, 400);
     });
     // Stängning med ändringar som inte sparats (klick utanför, Esc, kryss, Avbryt): stoppa och fråga. Egna stängningar
     // (efter sparning, vidare till Medaljer och priser) sätter _hpskEditAllowClose och går igenom.
     modalEl.addEventListener('hide.bs.modal', function (ev) {
         if (window._hpskEditAllowClose) return;
-        if (window._hpskEditSnapshot && hpskEditFormState() !== window._hpskEditSnapshot) {
+        if (hpskEditIsDirty()) {
             ev.preventDefault();
             var cw = document.getElementById('edit_closeWarn');
             if (cw) { cw.classList.remove('d-none'); cw.scrollIntoView({ block: 'nearest' }); }
         }
     });
     modalEl.addEventListener('hidden.bs.modal', function () {
+        stopBaseline();
         window._hpskEditSnapshot = null;
         window._hpskEditAllowClose = false;
         var cw = document.getElementById('edit_closeWarn');
@@ -1516,7 +1545,7 @@ function hpskEditGoToMedalRules(force) {
     var id = parseInt(document.getElementById('edit_competitionId').value, 10) || 0;
     if (!id) return;
     // Ändringar som inte är sparade: fråga först (på stället i raden), gå inte vidare tyst.
-    if (force !== true && window._hpskEditSnapshot && hpskEditFormState() !== window._hpskEditSnapshot) {
+    if (force !== true && hpskEditIsDirty()) {
         document.getElementById('edit_medalRulesWarn').classList.remove('d-none');
         document.getElementById('edit_medalRulesGo').classList.add('d-none');
         return;

@@ -584,17 +584,37 @@ window._hpskSpringAllowClose = false;
 function hpskSpringFormState() {
     var form = document.getElementById('springEditForm');
     if (!form) return '';
-    return JSON.stringify(Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
+    var fields = Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
         return [e.id || e.name, (e.type === 'checkbox' || e.type === 'radio') ? e.checked : e.value];
-    }));
+    });
+    try { if (typeof springEditDescEditor !== 'undefined' && springEditDescEditor) fields.push(['description-editor', springEditDescEditor.getData()]); } catch (e) { }
+    return JSON.stringify(fields);
 }
+// Utgångsläget uppdateras var 0,4 s tills ANVÄNDAREN rör något (listor och datumväljare fylls i efter att rutan visats, och en fast
+// ögonblicksbild gav falsk varning). Esc, Tab och klick på stäng räknas inte som en ändring.
+var _springBaselineTimer = null;
+function _springStopBaseline() { if (_springBaselineTimer) { clearInterval(_springBaselineTimer); _springBaselineTimer = null; } }
+function _springUserTouched(e) {
+    if (!e.isTrusted) return;
+    if (e.type === 'keydown' && !(e.key && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete'))) return;
+    if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !/^[vVxX]$/.test(e.key)) return;
+    window._hpskSpringTouched = true;
+    _springStopBaseline();
+}
+['input', 'change', 'keydown'].forEach(function (t) { springEditModalEl.addEventListener(t, _springUserTouched, true); });
+document.addEventListener('mousedown', function (e) {
+    if (e.isTrusted && springEditModalEl.classList.contains('show') && e.target.closest && e.target.closest('.flatpickr-calendar')) { window._hpskSpringTouched = true; _springStopBaseline(); }
+}, true);
 springEditModalEl.addEventListener('shown.bs.modal', function () {
     window._hpskSpringSnapshot = null;
-    setTimeout(function () { window._hpskSpringSnapshot = hpskSpringFormState(); }, 1500);
+    window._hpskSpringTouched = false;
+    _springStopBaseline();
+    _springBaselineTimer = setInterval(function () { window._hpskSpringSnapshot = hpskSpringFormState(); }, 400);
 });
+springEditModalEl.addEventListener('hidden.bs.modal', _springStopBaseline);
 springEditModalEl.addEventListener('hide.bs.modal', function (ev) {
     if (window._hpskSpringAllowClose) return;
-    if (window._hpskSpringSnapshot && hpskSpringFormState() !== window._hpskSpringSnapshot) {
+    if (window._hpskSpringTouched && window._hpskSpringSnapshot && hpskSpringFormState() !== window._hpskSpringSnapshot) {
         ev.preventDefault();
         var cw = document.getElementById('springEdit_closeWarn');
         if (cw) { cw.classList.remove('d-none'); cw.scrollIntoView({ block: 'nearest' }); }
