@@ -15,6 +15,16 @@ namespace HpskSite.CompetitionTypes.Common
         /// </summary>
         public const string SettingKey = "Medals:ClubRules";
 
+        /// <summary>
+        /// Har grenen ytan för klubbens medaljregler? Springskytte och skidskytte har egna regler och får den inte; precisionsfamiljen och
+        /// fältet har den. Sajtinställningen (<see cref="SettingKey"/>) är en annan fråga och prövas av den som frågar.
+        /// </summary>
+        public static bool SurfaceAppliesTo(string? competitionType)
+        {
+            var type = competitionType ?? "";
+            return !type.Contains("spring", StringComparison.OrdinalIgnoreCase) && !type.Contains("skid", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Fältens alias. Fältpåsen (guiden, redigeringen, annonsdialogerna) skriver dem aldrig.</summary>
         public static readonly IReadOnlySet<string> Aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

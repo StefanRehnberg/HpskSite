@@ -97,6 +97,10 @@
     var isActive = compPost.IsVisible;
     var showLiveResults = compPost.ShowLiveResults;
     var competitionTypeStr = compPost.CompetitionType ?? "Precision";
+    // Hur medaljerna delas ut, när klubbens egna regler avviker från förbundets (annars null = ingen rad). Bakom sajtinställningen.
+    var medalRuleSettings = Context.RequestServices.GetService(typeof(HpskSite.Services.SiteSettings.SiteSettingService)) as HpskSite.Services.SiteSettings.SiteSettingService;
+    var medalRuleLine = HpskSite.CompetitionTypes.Common.MedalRulePublicLine.For(
+        compPost, string.Equals(medalRuleSettings?.Get(HpskSite.CompetitionTypes.Common.MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase));
     // competitionType lagras som STRÄNG — oftast id:t ("Milsnabb"), på äldre tävlingar ibland
     // visningsnamnet ("Magnum Fält"). Den lästes tidigare som en innehållsnod, alltså alltid null,
     // och typen syntes aldrig på sidan. Exakt matchning, inte GetFuzzy (prefixmatchning).
@@ -966,6 +970,10 @@
 								@if (!isExternal)
 								{
 									<li><i class="bi bi-broadcast@(showLiveResults ? "" : "-off")"></i> Live-resultat: <strong>@(showLiveResults ? "Ja" : "Nej")</strong></li>
+								}
+								@if (medalRuleLine != null)
+								{
+									<li id="competitionMedalRules"><i class="bi bi-award"></i> <strong>Medaljer och priser:</strong> @medalRuleLine</li>
 								}
 							</ul>
 						</div>

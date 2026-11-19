@@ -3638,8 +3638,7 @@ namespace HpskSite.Controllers
 
         private bool MedalRulesSurfaceEnabled(HpskSite.Models.Competitions.CompetitionInfo? competition)
         {
-            var type = competition?.CompetitionType ?? "";
-            if (type.Contains("spring", StringComparison.OrdinalIgnoreCase) || type.Contains("skid", StringComparison.OrdinalIgnoreCase))
+            if (!MedalRuleEditSettings.SurfaceAppliesTo(competition?.CompetitionType))
                 return false;
             var settings = HttpContext.RequestServices.GetService<HpskSite.Services.SiteSettings.SiteSettingService>();
             return string.Equals(settings?.Get(MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase);
