@@ -1082,6 +1082,10 @@ window.hpskGoToMedalRules = function () {
 document.addEventListener('DOMContentLoaded', function () {
     if (window.location.hash === '#medaljer') window.hpskGoToMedalRules();
 });
+// En länk till #medaljer som klistras in i en flik som redan visar sidan laddar inte om den — bara adressen ändras.
+window.addEventListener('hashchange', function () {
+    if (window.location.hash === '#medaljer') window.hpskGoToMedalRules();
+});
 </script>
 
 @* Competition Edit Modals — loaded only for users who can edit this competition *@

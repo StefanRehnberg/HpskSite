@@ -56,13 +56,14 @@
     <!-- Result List Card -->
     <div class="card mb-3">
         <div class="card-header" role="button" onclick="toggleFaltSection('faltResultBody', 'faltResultChevron')">
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
                     <h5 class="mb-0 d-inline"><i class="bi bi-trophy me-2"></i>Resultatlista</h5>
                     <span class="badge ms-2" id="faltResultStatusBadge">Preliminär</span>
                     <div class="text-muted small mt-1" id="faltResultMeta" style="display:none"></div>
                 </div>
-                <div class="d-flex gap-2">
+                @* flex-wrap: sju knappar i rad gav 210–417 px sidscroll i sidled på en telefon (uppmätt 2026-11-19). *@
+                <div class="d-flex gap-2 flex-wrap justify-content-end">
                     <button class="btn btn-outline-primary btn-sm" onclick="faltRefreshResults(event)">
                         <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
                     </button>
