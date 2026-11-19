@@ -10,14 +10,9 @@ namespace HpskSite.CompetitionTypes.Common
     public static class MedalRuleEditSettings
     {
         /// <summary>
-        /// Sajtinställningen som slår på klubbens egna medaljregler (per klass, fast antal platser, oavgjort). <c>on</c> = tillåtet.
-        /// Av som standard tills ytorna är byggda och granskade (plan v2: mörk lansering, nödbroms utan deploy).
-        /// </summary>
-        public const string SettingKey = "Medals:ClubRules";
-
-        /// <summary>
         /// Har grenen ytan för klubbens medaljregler? Springskytte och skidskytte har egna regler och får den inte; precisionsfamiljen och
-        /// fältet har den. Sajtinställningen (<see cref="SettingKey"/>) är en annan fråga och prövas av den som frågar.
+        /// fältet har den. (Sajtinställningen Medals:ClubRules, mörk lansering, togs bort 2026-11-19: funktionen släpps direkt vid deploy,
+        /// som allt annat.)
         /// </summary>
         public static bool SurfaceAppliesTo(string? competitionType)
         {
@@ -36,8 +31,7 @@ namespace HpskSite.CompetitionTypes.Common
         /// <paramref name="tieRule"/> är null när de inte skickas (rörs inte); en tom sträng för läget/oavgjort-regeln betyder "som förbundet".
         /// </summary>
         /// <param name="scope">Tävlingens omfattning — nivåspärren: bara klubb- och kretsmästerskap får välja.</param>
-        /// <param name="enabled">Är klubbens egna regler påslagna (<see cref="SettingKey"/>)?</param>
-        public static string? Refusal(string? scope, string? mode, int? places, string? tieRule, bool enabled)
+        public static string? Refusal(string? scope, string? mode, int? places, string? tieRule)
         {
             if (mode == null && places == null && tieRule == null) return null;
 
@@ -47,12 +41,6 @@ namespace HpskSite.CompetitionTypes.Common
                 return "Antal medaljplatser måste vara 0–3 (0 = som förbundet).";
             if (!string.IsNullOrWhiteSpace(tieRule) && MedalTieRules.Normalize(tieRule) == null)
                 return $"Okänd regel för lika resultat: \"{tieRule}\".";
-
-            var m = MedalGroupingModes.Normalize(mode);
-            var t = MedalTieRules.Normalize(tieRule);
-            var custom = m == MedalGroupingModes.Class || places > 0 || (t != null && t != MedalTieRules.ShootOff);
-            if (custom && !enabled)
-                return "Klubbens egna medaljregler är inte påslagna än.";
 
             if (!ChampionshipRule.ForScope(scope).MayChooseMedalRules)
                 return "Medaljreglerna går inte att välja vid landsdels- och svenskt mästerskap: där är de fem C-mästerskapen "

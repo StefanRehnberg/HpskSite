@@ -17,7 +17,7 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void Nothing_sent_is_nothing_to_refuse()
         {
-            MedalRuleEditSettings.Refusal("Svenskt Mästerskap", null, null, null, enabled: false).Should().BeNull();
+            MedalRuleEditSettings.Refusal("Svenskt Mästerskap", null, null, null).Should().BeNull();
         }
 
         [Theory]
@@ -25,7 +25,7 @@ namespace HpskSite.Tests.Services
         [InlineData("SHB-klasser")]
         public void An_unknown_mode_is_refused_and_named(string mode)
         {
-            MedalRuleEditSettings.Refusal(Club, mode, null, null, enabled: true)
+            MedalRuleEditSettings.Refusal(Club, mode, null, null)
                 .Should().Contain("Okänd medaljindelning").And.Contain(mode);
         }
 
@@ -35,13 +35,13 @@ namespace HpskSite.Tests.Services
         [InlineData(99)]
         public void Places_outside_zero_to_three_are_refused(int places)
         {
-            MedalRuleEditSettings.Refusal(Club, null, places, null, enabled: true).Should().Contain("0–3");
+            MedalRuleEditSettings.Refusal(Club, null, places, null).Should().Contain("0–3");
         }
 
         [Fact]
         public void An_unknown_tie_rule_is_refused()
         {
-            MedalRuleEditSettings.Refusal(Club, null, null, "lottning", enabled: true).Should().Contain("Okänd regel för lika resultat");
+            MedalRuleEditSettings.Refusal(Club, null, null, "lottning").Should().Contain("Okänd regel för lika resultat");
         }
 
         [Theory]
@@ -49,21 +49,13 @@ namespace HpskSite.Tests.Services
         [InlineData(null, 3, null)]
         [InlineData(null, null, "shared")]
         [InlineData(null, null, "series")]
-        public void The_clubs_own_rules_are_refused_while_the_setting_is_off(string? mode, int? places, string? tie)
+        [InlineData("shb", null, null)]
+        [InlineData("weapongroup", null, null)]
+        [InlineData("", null, null)]
+        [InlineData(null, 0, "shootoff")]
+        public void Every_valid_choice_is_accepted_at_club_level(string? mode, int? places, string? tie)
         {
-            MedalRuleEditSettings.Refusal(Club, mode, places, tie, enabled: false).Should().Contain("inte påslagna");
-            MedalRuleEditSettings.Refusal(Club, mode, places, tie, enabled: true).Should().BeNull();
-        }
-
-        [Theory]
-        [InlineData("shb")]
-        [InlineData("weapongroup")]
-        [InlineData("")]
-        public void The_old_choices_need_no_setting(string mode)
-        {
-            // SHB och "per vapengrupp" är redan idag valbara för klubb och krets — de kräver inte den nya inställningen.
-            MedalRuleEditSettings.Refusal(Club, mode, null, null, enabled: false).Should().BeNull();
-            MedalRuleEditSettings.Refusal(Club, null, 0, "shootoff", enabled: false).Should().BeNull();
+            MedalRuleEditSettings.Refusal(Club, mode, places, tie).Should().BeNull();
         }
 
         [Theory]
@@ -71,9 +63,9 @@ namespace HpskSite.Tests.Services
         [InlineData("Landsdelsmästerskap")]
         public void The_level_check_refuses_every_value_at_sm_and_landsdel(string scope)
         {
-            MedalRuleEditSettings.Refusal(scope, "class", null, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
-            MedalRuleEditSettings.Refusal(scope, "weapongroup", null, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
-            MedalRuleEditSettings.Refusal(scope, null, 3, null, enabled: true).Should().Contain("landsdels- och svenskt mästerskap");
+            MedalRuleEditSettings.Refusal(scope, "class", null, null).Should().Contain("landsdels- och svenskt mästerskap");
+            MedalRuleEditSettings.Refusal(scope, "weapongroup", null, null).Should().Contain("landsdels- och svenskt mästerskap");
+            MedalRuleEditSettings.Refusal(scope, null, 3, null).Should().Contain("landsdels- och svenskt mästerskap");
         }
 
         [Theory]
@@ -83,7 +75,7 @@ namespace HpskSite.Tests.Services
         [InlineData("Ingen")]
         public void Club_and_region_championships_and_non_championships_may_choose(string scope)
         {
-            MedalRuleEditSettings.Refusal(scope, "class", 3, "shared", enabled: true).Should().BeNull();
+            MedalRuleEditSettings.Refusal(scope, "class", 3, "shared").Should().BeNull();
         }
 
         // ── Bekräftelsen ────────────────────────────────────────────────────────

@@ -3540,8 +3540,10 @@ namespace HpskSite.Controllers
                 var legacyToggle = request.Mode == null && request.Places == null && request.TieRule == null;
                 if (!legacyToggle)
                 {
-                    var enabled = MedalRulesSurfaceEnabled(current);
-                    var refusal = MedalRuleEditSettings.Refusal(current.CompetitionScope, request.Mode, request.Places, request.TieRule, enabled);
+                    // Springskytte och skidskytte har egna regler och får inte klubbens medaljregler.
+                    var refusal = !MedalRulesSurfaceEnabled(current)
+                        ? "Den här grenen har egna medaljregler, så klubbens regler går inte att välja."
+                        : MedalRuleEditSettings.Refusal(current.CompetitionScope, request.Mode, request.Places, request.TieRule);
                     if (refusal != null)
                         return Json(new { success = false, message = refusal });
 
@@ -3628,8 +3630,7 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Visas klubbens medaljregler på tävlingens resultatflik? Sajtinställningen <c>Medals:ClubRules</c> är nödbromsen; springskytte och
-        /// skidskytte har egna regler och får ingen yta (precisionsfamiljen och fältet har den).
+        /// Är grenen en där fältet kräver fältets egen omräkning (fält och magnumfält)?
         /// </summary>
         private static bool IsFaltFamily(HpskSite.Models.Competitions.CompetitionInfo? competition)
         {
@@ -3637,12 +3638,13 @@ namespace HpskSite.Controllers
             return type.Equals("Faltskytte", StringComparison.OrdinalIgnoreCase) || type.Equals("MagnumFalt", StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool MedalRulesSurfaceEnabled(HpskSite.Models.Competitions.CompetitionInfo? competition)
+        /// <summary>
+        /// Visas klubbens medaljregler på tävlingens resultatflik? Springskytte och skidskytte har egna regler och får ingen yta
+        /// (precisionsfamiljen och fältet har den). Ingen sajtinställning: funktionen släpps direkt vid deploy.
+        /// </summary>
+        private static bool MedalRulesSurfaceEnabled(HpskSite.Models.Competitions.CompetitionInfo? competition)
         {
-            if (!MedalRuleEditSettings.SurfaceAppliesTo(competition?.CompetitionType))
-                return false;
-            var settings = HttpContext.RequestServices.GetService<HpskSite.Services.SiteSettings.SiteSettingService>();
-            return string.Equals(settings?.Get(MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase);
+            return MedalRuleEditSettings.SurfaceAppliesTo(competition?.CompetitionType);
         }
 
         /// <summary>Antal noterade särskjutningsrundor för tävlingen (precisionsfamiljens och fältets), för bekräftelsen vid ändrad indelning.</summary>

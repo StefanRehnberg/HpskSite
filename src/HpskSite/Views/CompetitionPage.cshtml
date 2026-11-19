@@ -97,10 +97,8 @@
     var isActive = compPost.IsVisible;
     var showLiveResults = compPost.ShowLiveResults;
     var competitionTypeStr = compPost.CompetitionType ?? "Precision";
-    // Hur medaljerna delas ut, när klubbens egna regler avviker från förbundets (annars null = ingen rad). Bakom sajtinställningen.
-    var medalRuleSettings = Context.RequestServices.GetService(typeof(HpskSite.Services.SiteSettings.SiteSettingService)) as HpskSite.Services.SiteSettings.SiteSettingService;
-    var medalRuleLine = HpskSite.CompetitionTypes.Common.MedalRulePublicLine.For(
-        compPost, string.Equals(medalRuleSettings?.Get(HpskSite.CompetitionTypes.Common.MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase));
+    // Hur medaljerna delas ut, när klubbens egna regler avviker från förbundets (annars null = ingen rad).
+    var medalRuleLine = HpskSite.CompetitionTypes.Common.MedalRulePublicLine.For(compPost);
     // competitionType lagras som STRÄNG — oftast id:t ("Milsnabb"), på äldre tävlingar ibland
     // visningsnamnet ("Magnum Fält"). Den lästes tidigare som en innehållsnod, alltså alltid null,
     // och typen syntes aldrig på sidan. Exakt matchning, inte GetFuzzy (prefixmatchning).

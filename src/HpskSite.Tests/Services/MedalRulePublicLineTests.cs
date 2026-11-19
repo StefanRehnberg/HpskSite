@@ -16,15 +16,9 @@ namespace HpskSite.Tests.Services
             new() { CompetitionType = type, CompetitionScope = scope, MedalGroupingMode = mode, MedalPlaces = places, MedalTieRule = tie };
 
         [Fact]
-        public void The_dark_launch_switch_hides_the_line()
-        {
-            MedalRulePublicLine.For(Comp(null, "class", 3), clubRulesOn: false).Should().BeNull();
-        }
-
-        [Fact]
         public void A_competition_outside_the_championships_with_a_choice_explains_it()
         {
-            var line = MedalRulePublicLine.For(Comp(null, "class", 3, "shared"), true);
+            var line = MedalRulePublicLine.For(Comp(null, "class", 3, "shared"));
 
             line.Should().NotBeNull();
             line.Should().Contain("per klass").And.Contain("tre bästa").And.Contain("delad plats");
@@ -33,21 +27,21 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void A_competition_without_a_choice_has_no_line()
         {
-            MedalRulePublicLine.For(Comp(null), true).Should().BeNull();
+            MedalRulePublicLine.For(Comp(null)).Should().BeNull();
         }
 
         [Fact]
         public void A_club_championship_with_the_federations_rules_has_no_line()
         {
-            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Klubbmasterskap), true).Should().BeNull();
+            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Klubbmasterskap)).Should().BeNull();
         }
 
         [Fact]
         public void A_club_championship_that_deviates_gets_a_line()
         {
-            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Klubbmasterskap, "weapongroup", 1), true)
+            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Klubbmasterskap, "weapongroup", 1))
                 .Should().NotBeNull().And.Contain("vapengrupp");
-            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Kretsmasterskap, null, 0, "series"), true)
+            MedalRulePublicLine.For(Comp(CompetitionScopeHelper.Kretsmasterskap, null, 0, "series"))
                 .Should().NotBeNull().And.Contain("serieräkningen");
         }
 
@@ -59,7 +53,7 @@ namespace HpskSite.Tests.Services
             // En lagrad klubbregel på ett SM ignoreras (nivåspärren) — sidan får inte påstå något förbundet inte gör.
             var scopeValue = scope.StartsWith("Svenskt") ? CompetitionScopeHelper.SvensktMasterskap : CompetitionScopeHelper.Landsdelsmasterskap;
 
-            MedalRulePublicLine.For(Comp(scopeValue, "class", 3), true).Should().BeNull();
+            MedalRulePublicLine.For(Comp(scopeValue, "class", 3)).Should().BeNull();
         }
 
         [Theory]
@@ -67,13 +61,13 @@ namespace HpskSite.Tests.Services
         [InlineData("Skidskytte")]
         public void Disciplines_without_the_surface_have_no_line(string type)
         {
-            MedalRulePublicLine.For(Comp(null, "class", 3, type: type), true).Should().BeNull();
+            MedalRulePublicLine.For(Comp(null, "class", 3, type: type)).Should().BeNull();
         }
 
         [Fact]
         public void A_missing_competition_gives_no_line()
         {
-            MedalRulePublicLine.For(null, true).Should().BeNull();
+            MedalRulePublicLine.For(null).Should().BeNull();
         }
 
         [Fact]
@@ -81,7 +75,7 @@ namespace HpskSite.Tests.Services
         {
             var c = Comp(null, "class", 2, "shared");
 
-            MedalRulePublicLine.For(c, true).Should().Be(MedalGrouping.Describe("class", 2, "shared"));
+            MedalRulePublicLine.For(c).Should().Be(MedalGrouping.Describe("class", 2, "shared"));
         }
     }
 }
