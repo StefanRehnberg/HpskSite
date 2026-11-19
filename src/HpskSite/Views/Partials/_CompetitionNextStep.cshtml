@@ -114,6 +114,16 @@
             + esc((GROUP_PHASE[g.phase] || (() => ''))(g)) + '</span></li>').join('') + '</ul>';
     }
 
+    // Påminnelse när anmälan stängt: klubben kan välja hur medaljerna delas ut (antalet per klass är först känt nu). Bara när ytan gäller
+    // tävlingen och inget val är gjort; försvinner när valet är gjort. Länken öppnar fliken Resultat vid kortet Medaljer och priser.
+    function medalNote(p) {
+        const m = state && state.medalRules;
+        if (!m || !m.available || m.chosen || state.registrationOpen) return '';
+        if (p === 'Done' || p === 'PublishResults' || p === 'ShootOff') return '';
+        return '<div class="ns-note"><i class="bi bi-award me-1"></i>Anmälan är stängd. Kontrollera hur medaljerna delas ut. '
+            + '<a href="#medaljer" onclick="if (window.hpskGoToMedalRules) { hpskGoToMedalRules(); return false; }">Medaljer och priser</a></div>';
+    }
+
     function render() {
         const s = state, p = s.phase;
         card.className = 'ns-card' + (p === 'ShootOff' ? ' ns-warn' : p === 'Done' ? ' ns-done' : '');
@@ -259,7 +269,7 @@
                 : PHASE_TITLE[p] || '') + '</div>'
             + '<p class="ns-fact">' + fact + '</p>'
             + groupList()
-            + '<div class="ns-actions">' + actions + '</div>' + extra;
+            + '<div class="ns-actions">' + actions + '</div>' + extra + medalNote(p);
     }
 
     function renderError(msg) {

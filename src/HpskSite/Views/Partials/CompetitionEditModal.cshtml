@@ -653,9 +653,23 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    @* Medaljer och priser (klubbens egna regler): bara en LÄSRAD. Valet ändras på fliken Resultat (där listan räknas om och
+                       en bekräftelse kan krävas) — den här raden har ingen egen kopia av värdet och inget name-attribut, så den aldrig sparas
+                       av Spara. Visas bara för en befintlig tävling när ytan gäller (GetMedalRules.enabled). *@
+                    <div class="mb-3 d-none" id="edit_medalRulesRow">
+                        <div class="border rounded p-3">
+                            <div class="fw-semibold">Medaljer och priser</div>
+                            <div class="small mt-1" id="edit_medalRulesText"></div>
+                            <div class="form-text">Ändras på fliken Resultat, så att listan räknas om.</div>
+                            <button type="button" class="btn btn-outline-secondary mt-2" style="min-height:44px" onclick="hpskEditGoToMedalRules()">
+                                Gå till Medaljer och priser <i class="bi bi-arrow-right ms-1"></i>
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
+                            <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals"@(isAwardingStandardMedals == true ? "checked" : "")>
                             <label class="form-check-label" for="edit_isAwardingStandardMedals">
                                 Standardmedaljsgrundande
                             </label>
@@ -1189,6 +1203,7 @@ window.populateEditModal = function(competition) {
 
     setFieldValue('edit_shootingClassIds', competition.shootingClassIds || '');
     setFieldValue('edit_competitionId', competition.id || '');
+    hpskEditLoadMedalRules(parseInt(competition.id, 10) || 0);
 
     // Checkboxes
     onEditAllowTeamsChange();
@@ -1371,6 +1386,42 @@ function updateShootingClassIds() {
         .map(cb => cb.value)
         .join(',');
     document.getElementById('edit_shootingClassIds').value = selected;
+}
+
+// Medaljer och priser: läsraden under Mästerskap. Läser tillståndet från servern varje gång modalen fylls (ingen kopia av värdet),
+// och döljs för en ny tävling/kopia (id 0) och när ytan inte gäller tävlingen.
+async function hpskEditLoadMedalRules(competitionId) {
+    var row = document.getElementById('edit_medalRulesRow');
+    if (!row) return;
+    row.classList.add('d-none');
+    if (!competitionId) return;
+    try {
+        var res = await fetch('/umbraco/surface/CompetitionResults/GetMedalRules?competitionId=' + competitionId);
+        var d = await res.json();
+        // Modalen kan ha fyllts om med en annan tävling medan svaret var på väg.
+        if ((parseInt(document.getElementById('edit_competitionId').value, 10) || 0) !== competitionId) return;
+        if (!d || !d.success || !d.enabled) return;
+        document.getElementById('edit_medalRulesText').textContent = d.summary || '';
+        row.classList.remove('d-none');
+    } catch (e) { /* raden är en hjälp — utan den är modalen som förut */ }
+}
+
+// Länken: på tävlingens hanteringssida stängs modalen och fliken Resultat öppnas; från en lista går vi till hanteringssidan.
+function hpskEditGoToMedalRules() {
+    var id = parseInt(document.getElementById('edit_competitionId').value, 10) || 0;
+    if (!id) return;
+    if (typeof window.hpskGoToMedalRules === 'function' && document.getElementById('results-tab')) {
+        var modalEl = document.getElementById('competitionEditModal');
+        var inst = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
+        if (inst) {
+            modalEl.addEventListener('hidden.bs.modal', function () { window.hpskGoToMedalRules(); }, { once: true });
+            inst.hide();
+        } else {
+            window.hpskGoToMedalRules();
+        }
+        return;
+    }
+    window.location.href = '/competitionmanagement?competitionId=' + id + '#medaljer';
 }
 
 function onEditIsClubOnlyChange() {

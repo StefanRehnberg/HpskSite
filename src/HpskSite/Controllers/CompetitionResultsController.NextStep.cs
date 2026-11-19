@@ -282,7 +282,13 @@ namespace HpskSite.Controllers
                 ties,
                 resultsOfficial,
                 // Prisutdelningssidan gäller mästerskapsmedaljer — utan mästerskap säger den bara "0 medaljer".
-                isChampionship = ChampionshipRule.For(comp).AwardsPlacementMedals
+                isChampionship = ChampionshipRule.For(comp).AwardsPlacementMedals,
+                // Påminnelsen om klubbens medaljregler: ytan gäller tävlingen och inget val är gjort ännu.
+                medalRules = new
+                {
+                    available = MedalRulesSurfaceEnabled(comp) && ChampionshipRule.For(comp).MayChooseMedalRules,
+                    chosen = ChampionshipRule.For(comp).StoredGroupingMode != null
+                }
             };
         }
     }

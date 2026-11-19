@@ -1066,6 +1066,24 @@ window.CompetitionConfig = {
     @await Html.PartialAsync("CompetitionReplaceConfirmModal")
 }
 
+<script>
+// Länken "Medaljer och priser" (Redigera tävling, Nästa steg, adressen #medaljer): öppnar fliken Resultat och rullar till kortet. Kortet
+// laddar sig självt och är dolt tills servern svarat, så vi väntar på det en kort stund.
+window.hpskGoToMedalRules = function () {
+    var tab = document.getElementById('results-tab');
+    if (tab && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tab).show();
+    var tries = 0;
+    (function scroll() {
+        var card = document.getElementById('medalRulesCard');
+        if (card && !card.classList.contains('d-none')) { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+        if (++tries < 25) setTimeout(scroll, 200);
+    })();
+};
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.location.hash === '#medaljer') window.hpskGoToMedalRules();
+});
+</script>
+
 @* Competition Edit Modals — loaded only for users who can edit this competition *@
 @if (canManageCompetition)
 {
