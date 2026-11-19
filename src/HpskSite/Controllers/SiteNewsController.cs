@@ -24,7 +24,10 @@ namespace HpskSite.Controllers
     public class SiteNewsController : SurfaceController
     {
         public const int WritesPerMinute = 30;
-        public const int UploadsPerHour = 60;
+        /// <summary>Per förening och timme (övre skydd). Räknaren är nyheternas egen — Hemsidans uppladdningar räknas inte hit och tvärtom.</summary>
+        public const int UploadsPerHour = 300;
+        /// <summary>Per medlem och timme: rymmer ett galleri på tolv foton flera gånger om, men stoppar en som laddar upp i en slinga.</summary>
+        public const int UploadsPerHourPerMember = 100;
 
         private readonly IScopeProvider _scopes;
         private readonly SiteOwnerService _owners;
@@ -82,12 +85,32 @@ namespace HpskSite.Controllers
 
         private static string PostUrl(Gate g, string slug) => g.OwnerUrl.TrimEnd('/') + "/nyheter/" + slug + "/";
 
-        private object Dto(Gate g, SitePostRow p) => new
+        private object Dto(Gate g, SitePostRow p, List<SitePostImageRow> gallery) => new
         {
             id = p.Id, title = p.Title, slug = p.Slug, excerpt = p.Excerpt, bodyHtml = SiteHtmlSanitizerSafe(p.BodyHtml), coverFileId = p.CoverFileId, coverAlt = p.CoverAlt,
             status = (int)p.Status, visibility = (int)p.ReadVisibility, revision = p.Revision, publishedDate = p.PublishedDate, authorName = p.AuthorName,
             url = PostUrl(g, p.Slug), canDelete = g.CanDelete, mailedDate = p.MailedDate, mailedCount = p.MailedCount,
+            // Galleriet i visningsordning (första = den stora). En nyhet från före galleriet har bara ett omslag, som visas som en enda bild (SitePosts.GalleryFor).
+            gallery = gallery.Select(i => new { fileId = i.FileId, alt = i.AltText, caption = i.Caption, showsPeople = i.ShowsPeople, consented = i.ConsentDate != null, url = SiteImages.UrlFor(i.FileId), thumb = SiteImages.ThumbUrlFor(i.FileId, 320) }),
+            maxGallery = SitePostRules.MaxGallery,
         };
+
+        /// <summary>Galleriet ur klientens JSON (<c>[{fileId, alt, caption, showsPeople}]</c>). Null = inget galleri skickades (galleriet rörs inte). Felet på svenska om texten inte går att läsa.</summary>
+        private static (IReadOnlyList<SitePostGalleryItem>? Items, string? Error) ParseGallery(string? json)
+        {
+            if (json == null) return (null, null);
+            if (json.Length > 30_000) return (null, "Galleriet är för stort.");
+            try
+            {
+                var raw = System.Text.Json.JsonSerializer.Deserialize<List<GalleryItemDto>>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (raw == null) return (null, "Galleriet går inte att läsa.");
+                if (raw.Count > SitePostRules.MaxGallery * 4) return (null, $"Ett galleri får ha högst {SitePostRules.MaxGallery} bilder.");
+                return (raw.Select(r => new SitePostGalleryItem(r.FileId, r.Alt, r.Caption, r.ShowsPeople)).ToList(), null);
+            }
+            catch (System.Text.Json.JsonException) { return (null, "Galleriet går inte att läsa."); }
+        }
+
+        private sealed class GalleryItemDto { public int FileId { get; set; } public string? Alt { get; set; } public string? Caption { get; set; } public bool ShowsPeople { get; set; } }
 
         private static string SiteHtmlSanitizerSafe(string html) => HpskSite.Extensions.SiteHtmlSanitizer.Sanitize(html);   // saneras vid rendering också: en lagrad rad är inte betrodd
 
@@ -99,7 +122,7 @@ namespace HpskSite.Controllers
             if (g.Error != null) return g.Error;
             using var scope = _scopes.CreateScope(autoComplete: true);
             var p = SitePosts.Get(scope.Database, id, g.OwnerType, g.OwnerId);
-            return p == null ? Fail("Nyheten finns inte.", "notfound") : Json(new { success = true, post = Dto(g, p) });
+            return p == null ? Fail("Nyheten finns inte.", "notfound") : Json(new { success = true, post = Dto(g, p, SitePosts.GalleryFor(scope.Database, p)) });
         }
 
         /// <summary>Skribentens egen signatur och förhandsvisningen av dem som redan står i texten (knappen Infoga signatur).</summary>
@@ -116,7 +139,8 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin, sajtadmin eller styrelsen (SiteNewsRules), brytare 2 PÅ, villkoren accepterade")]
-        public async Task<IActionResult> Save(string ownerType, int ownerId, int id, int revision, string? title, string? bodyHtml, string? excerpt, int? coverFileId, string? coverAlt, int visibility, string? publishedDate = null)
+        public async Task<IActionResult> Save(string ownerType, int ownerId, int id, int revision, string? title, string? bodyHtml, string? excerpt, int? coverFileId, string? coverAlt, int visibility, string? publishedDate = null,
+            string? gallery = null, bool consent = false)
         {
             var g = await GateAsync(ownerType, ownerId, write: true);
             if (g.Error != null) return g.Error;
@@ -128,7 +152,9 @@ namespace HpskSite.Controllers
                 if (!DateTime.TryParseExact(publishedDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var pd)) return Fail("Datumet går inte att läsa.", "invalid");
                 shownDate = pd.Date == DateTime.Today ? DateTime.Now : pd.Date.AddHours(12);
             }
-            var input = new SitePostInput(title, bodyHtml, excerpt, coverFileId is > 0 ? coverFileId : null, coverAlt, (SiteVisibility)visibility, shownDate);
+            var (galleryItems, galleryError) = ParseGallery(gallery);
+            if (galleryError != null) return Fail(galleryError, "invalid");
+            var input = new SitePostInput(title, bodyHtml, excerpt, coverFileId is > 0 ? coverFileId : null, coverAlt, (SiteVisibility)visibility, shownDate, galleryItems, consent);
             SitePostWrite r;
             using (var scope = _scopes.CreateScope())
             {
@@ -262,13 +288,16 @@ namespace HpskSite.Controllers
             var docType = g.OwnerType == SiteTemplates.Region ? HpskSite.Models.DocumentOwnerType.Region : HpskSite.Models.DocumentOwnerType.Club;
             var limitBytes = docs.GetStorageLimitBytes(docType, g.OwnerId);
             var quotaBytes = SiteImages.QuotaFor(limitBytes, docs.GetDocumentBytes(docType, g.OwnerId));
-            if (Throttled($"sitefile-up:{g.OwnerType}:{g.OwnerId}", UploadsPerHour, TimeSpan.FromHours(1))) return Fail("För många uppladdningar på kort tid. Försök igen om en stund.", "rate");
+            // Egna räknare för nyheterna (inte Hemsidans delade `sitefile-up:`): ett galleri på tjugo foton ska inte låsa ut klubbens övriga skribenter från att ladda upp en bild i Hemsidan.
+            // Per medlem (ett galleri i taget) och, som övre skydd, per förening.
+            if (Throttled($"sitenews-up-m:{g.Actor!.MemberId}", UploadsPerHourPerMember, TimeSpan.FromHours(1))) return Fail($"Du har laddat upp {UploadsPerHourPerMember} bilder den här timmen. Försök igen om en stund.", "rate");
+            if (Throttled($"sitenews-up:{g.OwnerType}:{g.OwnerId}", UploadsPerHour, TimeSpan.FromHours(1))) return Fail("Föreningen har laddat upp många bilder den här timmen. Försök igen om en stund.", "rate");
             if (upload == null || upload.Length == 0) return Fail("Ingen fil vald.");
 
             SiteImageResult? img; SiteImageFailure failure;
             await using (var input = upload.OpenReadStream())
                 (img, failure) = await SiteImages.ProcessAsync(input, upload.FileName, upload.Length);
-            if (img == null) return Fail(SiteImages.Message(failure));
+            if (img == null) return Fail(SiteImages.Message(failure), failure == SiteImageFailure.Busy ? "busy" : null);   // "busy": klienten väntar en stund och försöker igen
 
             var stored = Guid.NewGuid().ToString("N");
             var fileName = stored + SiteImages.ExtensionFor(img.ContentType);
@@ -305,6 +334,7 @@ namespace HpskSite.Controllers
         private IActionResult Map(Gate g, SitePostWrite r)
         {
             if (r.Result == SitePostResult.Ok) return Json(new { success = true, id = r.Id, revision = r.Revision, url = null as string, message = (string?)null, post = LoadDto(g, r.Id) });
+            // (SitePostResult.Invalid bär felet på svenska, t.ex. saknat samtycke eller för många bilder.)
             var message = r.Result switch
             {
                 SitePostResult.Conflict => "Någon annan har ändrat nyheten. Din text finns kvar; ladda om sidan för att se deras ändring.",
@@ -318,7 +348,24 @@ namespace HpskSite.Controllers
         {
             using var scope = _scopes.CreateScope(autoComplete: true);
             var p = SitePosts.Get(scope.Database, id, g.OwnerType, g.OwnerId);
-            return p == null ? null : Dto(g, p);
+            return p == null ? null : Dto(g, p, SitePosts.GalleryFor(scope.Database, p));
+        }
+
+        /// <summary>Skribenten markerar en "ta bort min bild"-förfrågan som hanterad (bilden är borttagen ur galleriet, eller förfrågan avvisad). Prövas mot ägaren.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin, sajtadmin eller styrelsen (SiteNewsRules), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> HandleImageRequest(string ownerType, int ownerId, int requestId)
+        {
+            var g = await GateAsync(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            bool ok;
+            using (var scope = _scopes.CreateScope())
+            {
+                ok = SitePosts.HandleImageRequest(scope.Database, requestId, g.OwnerType, g.OwnerId, g.Actor!.MemberId, DateTime.Now);
+                if (ok) scope.Complete();
+            }
+            return ok ? Json(new { success = true }) : Fail("Förfrågan finns inte eller är redan hanterad.", "notfound");
         }
     }
 }

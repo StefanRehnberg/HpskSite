@@ -3,6 +3,7 @@
 @using HpskSite.Extensions
 @inject SiteViewerResolver Viewers
 @inject SiteSignatureService Signatures
+@inject SiteNewsSocialFactory NewsSocial
 @inject SitePageViewFactory SitePages
 @inject Umbraco.Cms.Infrastructure.Scoping.IScopeProvider Scopes
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -25,6 +26,9 @@
     var canWrite = false; var canDelete = false;
     List<SitePostRow> rows = new(); var total = 0; var pageNo = 1; const int PageSize = 10;
     SitePostRow? post = null;
+    SiteNewsPostSocial? social = null;                                              // galleri, reaktioner och förfrågningar för EN nyhet (partialvyerna tar bara den)
+    Dictionary<int, SitePostReactionSummary> listReactions = new();                 // antal reaktioner per nyhet i arkivet (en gruppfråga)
+    Dictionary<int, int> listImageRequests = new();                                 // obehandlade "ta bort min bild" per nyhet (bara skribenter ser dem)
     string? regionCode = null;
     var title = "Nyheter";
 
@@ -38,7 +42,12 @@
         {
             int.TryParse(Context.Request.Query["sida"].ToString(), out pageNo);
             pageNo = Math.Clamp(pageNo, 1, 1000);
-            try { (rows, total) = SitePosts.List(scope.Database, req.OwnerType, req.OwnerId, viewer, includeDrafts: canWrite, (pageNo - 1) * PageSize, PageSize); }
+            try
+            {
+                (rows, total) = SitePosts.List(scope.Database, req.OwnerType, req.OwnerId, viewer, includeDrafts: canWrite, (pageNo - 1) * PageSize, PageSize);
+                listReactions = SitePostReactions.Summaries(scope.Database, req.OwnerType, req.OwnerId, rows.Where(r => r.IsPublished).Select(r => r.Id).ToList());
+                if (canWrite) listImageRequests = SitePosts.OpenImageRequestCounts(scope.Database, req.OwnerType, req.OwnerId);
+            }
             catch (Microsoft.Data.SqlClient.SqlException) { ok = false; }
         }
         else if (req.PageKey == SitePageRequest.NewsPostKey)
@@ -48,6 +57,8 @@
         }
         else title = "Skriv en nyhet";
     }
+    // Galleri, reaktioner och förfrågningar: byggs EFTER att vyns scope stängts (medlemsuppslaget är async och får inte ligga inne i ett scope). Nyheten är redan läsprövad ovan.
+    if (ok && post != null) social = await NewsSocial.BuildAsync(post, viewer, canWrite);
     if (ok)
     {
         ViewBag.sitePageView = SitePages.For(req!.OwnerType, req.OwnerId, Model!.Url(), viewer);
@@ -124,6 +135,14 @@
                             @DateOf(p)
                             @if (!p.IsPublished) { <span class="badge text-bg-warning ms-1">Utkast</span> }
                             @if (canWrite && p.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(p.Visibility)</span> }
+                            @if (listReactions.TryGetValue(p.Id, out var rowReactions) && rowReactions.Total > 0 && rowReactions.Top is { } rowTop)
+                            {
+                                <span class="ms-2" title="@rowReactions.Total @(rowReactions.Total == 1 ? "reaktion" : "reaktioner")"><span aria-hidden="true">@SitePostReactionKinds.Emoji(rowTop)</span> @rowReactions.Total<span class="visually-hidden"> @(rowReactions.Total == 1 ? "reaktion" : "reaktioner")</span></span>
+                            }
+                            @if (listImageRequests.TryGetValue(p.Id, out var rowRequests) && rowRequests > 0)
+                            {
+                                <span class="badge text-bg-warning ms-1" title="Någon vill att en bild tas bort">@(rowRequests == 1 ? "1 bildförfrågan" : rowRequests + " bildförfrågningar")</span>
+                            }
                         </div>
                         <h2 class="h5 mb-1"><a href="@(archiveUrl)@(p.Slug)/" class="text-decoration-none">@p.Title</a></h2>
                         @if (!string.IsNullOrWhiteSpace(p.Excerpt)) { <p class="mb-1">@p.Excerpt</p> }
@@ -149,11 +168,13 @@
             <h2 class="h2 mb-1">@post.Title</h2>
             <p class="text-muted mb-3">@DateOf(post)@(string.IsNullOrWhiteSpace(post.AuthorName) ? "" : " · " + post.AuthorName)
                 @if (canWrite && post.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(post.Visibility)</span> }</p>
-            @if (post.CoverFileId != null)
-            {
-                <figure class="mb-3"><img class="img-fluid rounded" src="@SiteImages.UrlFor(post.CoverFileId.Value)" alt="@(post.CoverAlt ?? "")" decoding="async" style="height:auto"></figure>
-            }
+            @* Bilderna: galleriet (en stor och två små, "+N"), eller omslaget som en enda bild för en nyhet från före galleriet (SitePosts.GalleryFor). *@
+            @if (social != null) { @await Html.PartialAsync("_SiteNewsGallery", social) }
             <div class="site-post-body">@Html.Raw(Signatures.Resolve(SiteHtmlSanitizer.Sanitize(post.BodyHtml), post.OwnerType, post.OwnerId))</div>
+            @if (social != null && post.IsPublished) { @await Html.PartialAsync("_SiteNewsReactions", social) }
+            @if (social != null && canWrite) { @await Html.PartialAsync("_SiteNewsImageRequests", social) }
+            <link rel="stylesheet" href="/css/site-news.css?v=2" />
+            <script src="/js/site-news-view.js?v=1" defer></script>
             @if (canWrite)
             {
                 <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">
@@ -208,7 +229,7 @@
         <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
         <script src="/js/planering-dates.js?v=1"></script>
         <script src="/js/site-signature.js?v=2"></script>
-        <script src="/js/site-news-edit.js?v=6"></script>
+        <script src="/js/site-news-edit.js?v=7"></script>
     }
 
     @if (ok)

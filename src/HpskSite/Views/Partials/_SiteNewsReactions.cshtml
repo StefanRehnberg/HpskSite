@@ -1,0 +1,44 @@
+@using HpskSite.Services.SitePages
+@model SiteNewsPostSocial
+@*
+    Reaktionerna på en nyhet: samma fem som Träningsmatcherna (SitePostReactionKinds.All). Hjärtat är "gilla" — ett tryck. De andra fyra ligger bakom "Fler". Tryck på sin egen igen tar bort den.
+    Bara antal visas, aldrig namn (det vore personuppgifter på en sida som kan läsas av fler än klubben). En utloggad besökare ser antalen som text och en rad om att logga in; en inloggad som inte är med i
+    föreningen ser bara antalen. Allt som skrivs ut är kodat. Antiforgery-token behövs här (inte bara för skribenter) eftersom läsare skickar POST.
+*@
+@{
+    var mine = Model.Mine;
+    var heartMine = mine == SitePostReactionKinds.Heart;
+}
+<div class="sn-react" data-sn-react data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId" data-post-id="@Model.PostId" data-mine="@(mine ?? "")" data-can-react="@(Model.CanReact ? "1" : "0")">
+    @if (Model.LoggedIn) { @Html.AntiForgeryToken() }
+    <div class="sn-react-row d-flex flex-wrap align-items-center gap-2">
+        @if (Model.CanReact)
+        {
+            <button type="button" class="btn btn-sm @(heartMine ? "btn-primary" : "btn-outline-secondary") sn-heart" data-sn-kind="@SitePostReactionKinds.Heart" aria-pressed="@(heartMine ? "true" : "false")">
+                <span aria-hidden="true">@SitePostReactionKinds.Emoji(SitePostReactionKinds.Heart)</span> <span data-sn-heart-label>@(heartMine ? "Du gillar" : "Gilla")</span>
+            </button>
+            <span class="position-relative">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-sn-more aria-expanded="false" aria-haspopup="true" aria-label="Fler reaktioner">
+                    <span aria-hidden="true">😊</span> Fler
+                </button>
+                <span class="sn-picker" data-sn-picker hidden role="group" aria-label="Välj en reaktion">
+                    @foreach (var k in SitePostReactionKinds.All.Where(x => x.Key != SitePostReactionKinds.Heart))
+                    {
+                        <button type="button" class="btn btn-light sn-emoji" data-sn-kind="@k.Key" aria-pressed="@(mine == k.Key ? "true" : "false")" aria-label="@k.Label" title="@k.Label">@k.Emoji</button>
+                    }
+                </span>
+            </span>
+        }
+        <span class="sn-counts d-inline-flex flex-wrap gap-2 align-items-center" data-sn-counts aria-live="polite">
+            @foreach (var k in SitePostReactionKinds.All.Where(x => Model.Reactions.Of(x.Key) > 0))
+            {
+                <span class="badge rounded-pill text-bg-light border" data-sn-count="@k.Key" title="@k.Label"><span aria-hidden="true">@k.Emoji</span> @Model.Reactions.Of(k.Key)<span class="visually-hidden"> @k.Label</span></span>
+            }
+        </span>
+    </div>
+    @if (!Model.LoggedIn)
+    {
+        <p class="small text-muted mt-2 mb-0">@(Model.Reactions.Total > 0 ? "" : "Inga reaktioner ännu. ")<a href="/login-register">Logga in som medlem</a> för att reagera.</p>
+    }
+    <div class="small text-danger mt-1 d-none" data-sn-error role="alert"></div>
+</div>

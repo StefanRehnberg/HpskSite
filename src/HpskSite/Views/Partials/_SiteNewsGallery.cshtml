@@ -1,0 +1,31 @@
+@using HpskSite.Services.SitePages
+@model SiteNewsPostSocial
+@*
+    Nyhetens bilder: en stor bild och högst två små, "+N" på den tredje när fler finns (som Svenska Lag). Layouten räknas av SitePostRules.GalleryLayout.
+    1 bild = bara den stora, 2 = två lika stora bredvid varandra, 3 eller fler = stor överst och två små under (en stapel på telefon).
+    Varje ruta är en KNAPP (tangentbord och skärmläsare), inte en bild med klickhändelse. Rutnätet laddar bara miniatyrer (640/1280); lightboxen (site-news-view.js) tar 1280.
+    Alla bilder (inte bara de tre som syns) ligger som JSON i sidan så att lightboxen kan bläddra bland dem; den bär bara det som redan syns för tittaren.
+*@
+@{
+    var imgs = Model.Gallery;
+    var shown = Math.Min(imgs.Count, 3);
+    var (_, _, more) = SitePostRules.GalleryLayout(imgs.Count);
+    var lightbox = imgs.Select(i => new { url = SiteImages.ThumbUrlFor(i.FileId, 1280), alt = i.AltText ?? "", caption = i.Caption ?? "", fileId = i.FileId, people = i.ShowsPeople }).ToList();
+}
+@if (imgs.Count > 0)
+{
+    <div class="sn-gallery sn-n@(shown)" data-sn-gallery data-post-id="@Model.PostId" data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId" data-can-request="@(Model.LoggedIn ? "1" : "0")" role="group" aria-label="Bilder till nyheten">
+        @for (var i = 0; i < shown; i++)
+        {
+            var im = imgs[i];
+            var label = string.IsNullOrWhiteSpace(im.AltText) ? $"Bild {i + 1} av {imgs.Count}" : im.AltText;
+            var isBig = i == 0 && shown != 2;
+            <button type="button" class="sn-tile @(isBig ? "sn-big" : "sn-small")" data-sn-index="@i" aria-label="@(label + (i == 2 && more > 0 ? $". Visa alla {imgs.Count} bilder" : ". Öppna bilden större"))">
+                <img src="@SiteImages.ThumbUrlFor(im.FileId, isBig || shown == 1 ? 1280 : 640)" srcset="@SiteImages.ThumbUrlFor(im.FileId, 640) 640w, @SiteImages.ThumbUrlFor(im.FileId, 1280) 1280w"
+                     sizes="@(isBig ? "(min-width: 768px) 650px, 100vw" : "(min-width: 768px) 325px, 50vw")" alt="@(im.AltText ?? "")" loading="@(i == 0 ? "eager" : "lazy")" decoding="async" width="640" height="480">
+                @if (i == 2 && more > 0) { <span class="sn-more" aria-hidden="true">+@more</span> }
+            </button>
+        }
+        <script type="application/json" data-sn-images>@Html.Raw(System.Text.Json.JsonSerializer.Serialize(lightbox))</script>
+    </div>
+}

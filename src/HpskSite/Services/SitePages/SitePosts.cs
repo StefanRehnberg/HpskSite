@@ -38,8 +38,29 @@ namespace HpskSite.Services.SitePages
         public SiteVisibility Visibility => (SiteVisibility)ReadVisibility;
     }
 
-    /// <summary>Det skribenten fyller i. <see cref="BodyHtml"/> är rå HTML (saneras av lagret); <see cref="Excerpt"/> tom = klipps ur texten.</summary>
-    public sealed record SitePostInput(string? Title, string? BodyHtml, string? Excerpt, int? CoverFileId, string? CoverAlt, SiteVisibility ReadVisibility, DateTime? PublishedDate = null);
+    /// <summary>
+    /// Det skribenten fyller i. <see cref="BodyHtml"/> är rå HTML (saneras av lagret); <see cref="Excerpt"/> tom = klipps ur texten.
+    /// <para><see cref="Gallery"/>: null = rör inte galleriet (och omslaget gäller som förut); en lista (även tom) ERSÄTTER galleriet, och omslaget blir då galleriets första bild
+    /// (<see cref="SitePosts.EffectiveCover"/>) — EN skrivväg för omslaget. <see cref="ConsentConfirmed"/> = uppladdaren bekräftar att de som syns på bilder märkta "visar personer" har samtyckt.</para>
+    /// </summary>
+    public sealed record SitePostInput(string? Title, string? BodyHtml, string? Excerpt, int? CoverFileId, string? CoverAlt, SiteVisibility ReadVisibility, DateTime? PublishedDate = null,
+        IReadOnlyList<SitePostGalleryItem>? Gallery = null, bool ConsentConfirmed = false);
+
+    /// <summary>En bild i galleriet, i den ordning skribenten valt (första = den stora). Alt-texten läses upp för den som inte ser bilden; bildtexten visas.</summary>
+    public sealed record SitePostGalleryItem(int FileId, string? Alt, string? Caption, bool ShowsPeople);
+
+    /// <summary>En rad i <c>SitePostImage</c>.</summary>
+    public sealed class SitePostImageRow
+    {
+        public int PostId { get; set; }
+        public int FileId { get; set; }
+        public int SortOrder { get; set; }
+        public string? Caption { get; set; }
+        public string? AltText { get; set; }
+        public bool ShowsPeople { get; set; }
+        public int? ConsentByMemberId { get; set; }
+        public DateTime? ConsentDate { get; set; }
+    }
 
     /// <summary>Vem som skriver: id (null för en flytt/systemet) och namnet som lagras vid första skrivningen.</summary>
     public sealed record SitePostAuthor(int? MemberId, string Name);
@@ -68,6 +89,9 @@ namespace HpskSite.Services.SitePages
         public const int AutoExcerptChars = 200;
         public const string FallbackSlug = "nyhet";
         public const int MaxPostRefs = 60;
+        /// <summary>Högst så många bilder i ett galleri (Stefan 2026-11-19). Räknas in i <see cref="MaxPostRefs"/> tillsammans med bilderna i texten.</summary>
+        public const int MaxGallery = 12;
+        public const int MaxImageText = 200;
 
         /// <summary>Adressdelen ur en rubrik: gemener, å/ä→a, ö→o, resten som inte är a–z/0–9 blir ett bindestreck. Aldrig tom.</summary>
         public static string Slugify(string? title)
@@ -126,8 +150,33 @@ namespace HpskSite.Services.SitePages
             if (i.CoverAlt != null && i.CoverAlt.Length > 200) return "Bildtexten får vara högst 200 tecken.";
             if (!SiteAccess.IsSelectable(i.ReadVisibility)) return "Välj vem som får läsa nyheten.";
             if ((i.BodyHtml ?? "").Length > MaxBodyChars) return "Texten är för lång.";
+            return ValidateGallery(i.Gallery);
+        }
+
+        /// <summary>Galleriet: högst <see cref="MaxGallery"/> bilder, ingen bild två gånger, texterna inom gränsen. Null = galleriet rörs inte. Ren funktion.</summary>
+        public static string? ValidateGallery(IReadOnlyList<SitePostGalleryItem>? gallery)
+        {
+            if (gallery == null) return null;
+            if (gallery.Count > MaxGallery) return $"Ett galleri får ha högst {MaxGallery} bilder.";
+            if (gallery.Any(g => g.FileId <= 0)) return "En bild i galleriet är ogiltig.";
+            if (gallery.Select(g => g.FileId).Distinct().Count() != gallery.Count) return "Samma bild ligger två gånger i galleriet.";
+            if (gallery.Any(g => (g.Alt ?? "").Length > MaxImageText || (g.Caption ?? "").Length > MaxImageText)) return $"Bildtexter och beskrivningar får vara högst {MaxImageText} tecken.";
             return null;
         }
+
+        /// <summary>
+        /// Omslaget och dess beskrivning: galleriets första bild när galleriet skrivs (EN skrivväg — <c>CoverFileId</c> finns kvar bara för listkortet, blocket Nyheter och indexet),
+        /// annars det som anropet bär. Ren funktion.
+        /// </summary>
+        public static (int? FileId, string? Alt) EffectiveCover(SitePostInput i) =>
+            i.Gallery == null ? (i.CoverFileId, i.CoverAlt) : i.Gallery.Count == 0 ? (null, null) : (i.Gallery[0].FileId, i.Gallery[0].Alt);
+
+        /// <summary>
+        /// Visning av galleriet: den stora bilden, de (högst) två små och hur många som ligger bakom "+N" på den tredje. 1 bild = bara den stora, 2 = stor + en liten.
+        /// Ren funktion så att layouten går att pröva utan vy.
+        /// </summary>
+        public static (int Big, int Small, int More) GalleryLayout(int count) =>
+            count <= 0 ? (0, 0, 0) : (1, Math.Min(2, count - 1), Math.Max(0, count - 3));
 
         /// <summary>Nivåerna (0–4) som <paramref name="viewer"/> får läsa: EN källa, samma <see cref="SiteAccess.CanSee"/> som sidor och block.</summary>
         public static int[] ReadableLevels(SiteViewer viewer) =>
@@ -157,17 +206,21 @@ namespace HpskSite.Services.SitePages
 
             // En ny nyhet kan bara bära skribentens egen signatur (SiteSignatures): ingenting stod där förut.
             var body = SiteSignatures.Restrict(SiteHtmlSanitizer.Sanitize(input.BodyHtml), actor.MemberId, new HashSet<int>());
-            var refError = CheckFiles(db, ownerType, ownerId, input.CoverFileId, body, out var fileIds);
+            var (coverId, coverAlt) = SitePostRules.EffectiveCover(input);
+            var refError = CheckFiles(db, ownerType, ownerId, coverId, body, input.Gallery, out var fileIds);
             if (refError != null) return new SitePostWrite(SitePostResult.Invalid, Error: refError);
+            var consentError = ConsentError(input.Gallery, new Dictionary<int, SitePostImageRow>(), input.ConsentConfirmed);
+            if (consentError != null) return new SitePostWrite(SitePostResult.Invalid, Error: consentError);
 
             var slug = UniqueSlug(db, ownerType, ownerId, SitePostRules.Slugify(input.Title), exceptId: 0);
             var excerpt = string.IsNullOrWhiteSpace(input.Excerpt) ? SitePostRules.AutoExcerpt(body) : input.Excerpt!.Trim();
             var id = db.ExecuteScalar<int>(
                 @"INSERT INTO dbo.SitePost (OwnerType, OwnerId, Title, Slug, Excerpt, BodyHtml, CoverFileId, CoverAlt, AuthorMemberId, AuthorName, Status, ReadVisibility, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate)
                   OUTPUT INSERTED.Id VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, 0, @10, 1, @8, @11, @11)",
-                ownerType, ownerId, input.Title!.Trim(), slug, string.IsNullOrEmpty(excerpt) ? null : excerpt, body, input.CoverFileId, Blank(input.CoverAlt),
+                ownerType, ownerId, input.Title!.Trim(), slug, string.IsNullOrEmpty(excerpt) ? null : excerpt, body, coverId, Blank(coverAlt),
                 author.MemberId, Clip(author.Name, 120), (int)input.ReadVisibility, now);
             SetRefs(db, id, ownerType, ownerId, fileIds);
+            if (input.Gallery != null) WriteGallery(db, id, ownerType, ownerId, input.Gallery, new Dictionary<int, SitePostImageRow>(), actor.MemberId, now);
             Audit(db, ownerType, ownerId, actor, id, "post-create", now);
             return new SitePostWrite(SitePostResult.Ok, id, 1);
         }
@@ -185,8 +238,14 @@ namespace HpskSite.Services.SitePages
 
             // Skribentens egen signatur, och de som redan stod i nyheten (en annan skribents bevaras när någon redigerar).
             var body = SiteSignatures.Restrict(SiteHtmlSanitizer.Sanitize(input.BodyHtml), actor.MemberId, SiteSignatures.Ids(SiteHtmlSanitizer.Sanitize(cur.BodyHtml)).ToHashSet());
-            var refError = CheckFiles(db, ownerType, ownerId, input.CoverFileId, body, out var fileIds);
+            var (coverId, coverAlt) = SitePostRules.EffectiveCover(input);
+            var refError = CheckFiles(db, ownerType, ownerId, coverId, body, input.Gallery, out var fileIds);
             if (refError != null) return new SitePostWrite(SitePostResult.Invalid, Error: refError);
+            var existingGallery = input.Gallery == null ? new Dictionary<int, SitePostImageRow>() : GalleryRows(db, id, ownerType, ownerId).ToDictionary(r => r.FileId);
+            var consentError = ConsentError(input.Gallery, existingGallery, input.ConsentConfirmed);
+            if (consentError != null) return new SitePostWrite(SitePostResult.Invalid, Error: consentError);
+            // Utan galleri i anropet rörs galleriets bilder inte, men de är fortfarande refererade (annars 404 i bildmotorn och ingen raderingsspärr).
+            if (input.Gallery == null) fileIds = fileIds.Union(GalleryRows(db, id, ownerType, ownerId).Select(r => r.FileId)).ToList();
 
             var slug = cur.FirstPublishedDate == null ? UniqueSlug(db, ownerType, ownerId, SitePostRules.Slugify(input.Title), exceptId: id) : cur.Slug;
             var excerpt = string.IsNullOrWhiteSpace(input.Excerpt) ? SitePostRules.AutoExcerpt(body) : input.Excerpt!.Trim();
@@ -195,10 +254,11 @@ namespace HpskSite.Services.SitePages
                          PublishedDate = CASE WHEN Status = 1 AND @12 IS NOT NULL THEN CAST(@12 AS DATETIME2(0)) ELSE PublishedDate END,
                          Revision = Revision + 1, UpdatedByMemberId = @10, UpdatedDate = @11
                   WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND Revision = @13 AND DeletedDate IS NULL",
-                id, ownerType, ownerId, input.Title!.Trim(), slug, string.IsNullOrEmpty(excerpt) ? null : excerpt, body, input.CoverFileId, Blank(input.CoverAlt),
+                id, ownerType, ownerId, input.Title!.Trim(), slug, string.IsNullOrEmpty(excerpt) ? null : excerpt, body, coverId, Blank(coverAlt),
                 (int)input.ReadVisibility, actor.MemberId, now, input.PublishedDate, expectedRevision);
             if (rows != 1) return new SitePostWrite(SitePostResult.Conflict);
             SetRefs(db, id, ownerType, ownerId, fileIds);
+            if (input.Gallery != null) WriteGallery(db, id, ownerType, ownerId, input.Gallery, existingGallery, actor.MemberId, now);
             Audit(db, ownerType, ownerId, actor, id, "post-update", now);
             return new SitePostWrite(SitePostResult.Ok, id, expectedRevision + 1);
         }
@@ -287,14 +347,134 @@ namespace HpskSite.Services.SitePages
         }
 
         /// <summary>Bilderna nyheten använder: omslaget och de i texten (ur den sanerade HTML:en), alla prövade mot ägaren. Felet på svenska, annars null.</summary>
-        private static string? CheckFiles(IDatabase db, string ownerType, int ownerId, int? cover, string sanitizedBody, out List<int> fileIds)
+        private static string? CheckFiles(IDatabase db, string ownerType, int ownerId, int? cover, string sanitizedBody, IReadOnlyList<SitePostGalleryItem>? gallery, out List<int> fileIds)
         {
             fileIds = SiteHtmlSanitizer.InlineFileIds(sanitizedBody).ToList();
             if (cover is int c && !fileIds.Contains(c)) fileIds.Add(c);
+            // Galleribilderna är refererade av nyheten precis som omslaget: bildmotorn släpper bara ut en bild som någon nyhet pekar på (annars 404 för besökaren).
+            if (gallery != null) foreach (var g in gallery) if (!fileIds.Contains(g.FileId)) fileIds.Add(g.FileId);
             if (fileIds.Count > SitePostRules.MaxPostRefs) return "Nyheten har för många bilder.";
             foreach (var f in fileIds)
                 if (!SiteFiles.BelongsTo(db, f, ownerType, ownerId)) return "En bild i nyheten finns inte i föreningens bildbibliotek.";
             return null;
+        }
+
+        // ───── "Ta bort min bild" ─────
+
+        /// <summary>En medlems förfrågan om att en galleribild tas bort ("Jag syns på den här bilden").</summary>
+        public sealed class ImageRequestRow
+        {
+            public int Id { get; set; }
+            public int PostId { get; set; }
+            public int FileId { get; set; }
+            public int? RequesterMemberId { get; set; }
+            public string? Message { get; set; }
+            public DateTime CreatedDate { get; set; }
+        }
+
+        /// <summary>
+        /// Lägger in en förfrågan om att <paramref name="fileId"/> tas bort. Bilden måste ligga i nyhetens galleri (annars kan ingen be om något som inte finns). Samma medlem kan inte ha två
+        /// obehandlade förfrågningar på samma bild. False = bilden finns inte i galleriet, eller förfrågan finns redan.
+        /// </summary>
+        public static bool AddImageRequest(IDatabase db, int postId, string ownerType, int ownerId, int fileId, int memberId, string? message, DateTime now)
+        {
+            if (!SocialTablesExist(db) || memberId <= 0) return false;
+            var inGallery = db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM dbo.SitePostImage i JOIN dbo.SitePost p ON p.Id = i.PostId AND p.OwnerType = i.OwnerType AND p.OwnerId = i.OwnerId
+                  WHERE i.PostId = @0 AND i.OwnerType = @1 AND i.OwnerId = @2 AND i.FileId = @3 AND p.DeletedDate IS NULL", postId, ownerType, ownerId, fileId) == 1;
+            if (!inGallery) return false;
+            return db.Execute(
+                @"IF NOT EXISTS (SELECT 1 FROM dbo.SitePostImageRequest WHERE PostId = @0 AND FileId = @3 AND RequesterMemberId = @4 AND HandledDate IS NULL)
+                      INSERT INTO dbo.SitePostImageRequest (PostId, FileId, OwnerType, OwnerId, RequesterMemberId, Message, CreatedDate) VALUES (@0, @3, @1, @2, @4, @5, @6)",
+                postId, ownerType, ownerId, fileId, memberId, Blank(message) is { } m ? Clip(m, 300) : null, now) == 1;
+        }
+
+        /// <summary>De obehandlade förfrågningarna på en nyhet (för skribenterna), äldst först, högst 50.</summary>
+        public static List<ImageRequestRow> OpenImageRequests(IDatabase db, int postId, string ownerType, int ownerId) =>
+            !SocialTablesExist(db) ? new List<ImageRequestRow>() : db.Fetch<ImageRequestRow>(
+                @"SELECT TOP (50) Id, PostId, FileId, RequesterMemberId, Message, CreatedDate FROM dbo.SitePostImageRequest
+                  WHERE PostId = @0 AND OwnerType = @1 AND OwnerId = @2 AND HandledDate IS NULL ORDER BY Id", postId, ownerType, ownerId);
+
+        /// <summary>Antalet obehandlade förfrågningar per nyhet, för arkivets märkning (en fråga för listans rader).</summary>
+        public static Dictionary<int, int> OpenImageRequestCounts(IDatabase db, string ownerType, int ownerId) =>
+            !SocialTablesExist(db) ? new Dictionary<int, int>() : db.Fetch<PostCountRow>(
+                @"SELECT PostId, COUNT(*) AS N FROM dbo.SitePostImageRequest WHERE OwnerType = @0 AND OwnerId = @1 AND HandledDate IS NULL GROUP BY PostId", ownerType, ownerId)
+                .ToDictionary(x => x.PostId, x => x.N);
+
+        private sealed class PostCountRow { public int PostId { get; set; } public int N { get; set; } }
+
+        /// <summary>Markerar förfrågan som hanterad (bilden är borttagen eller förfrågan avvisad). Prövas mot nyhetens ägare. False = finns inte eller redan hanterad.</summary>
+        public static bool HandleImageRequest(IDatabase db, int requestId, string ownerType, int ownerId, int? handledByMemberId, DateTime now) =>
+            SocialTablesExist(db) && db.Execute(
+                "UPDATE dbo.SitePostImageRequest SET HandledDate = @3, HandledByMemberId = @4 WHERE Id = @0 AND OwnerType = @1 AND OwnerId = @2 AND HandledDate IS NULL",
+                requestId, ownerType, ownerId, now, handledByMemberId) == 1;
+
+        // ───── Galleriet ─────
+
+        private static volatile bool _socialTablesSeen;
+
+        /// <summary>
+        /// Finns galleri-, reaktions- och kommentarstabellerna? Schemat försvinner aldrig, så ett ja kommer ihåg (ingen rundtur per anrop). Saknas de (migreringen ej körd)
+        /// visas nyheterna som förut utan galleri och reaktioner — aldrig ett 500.
+        /// </summary>
+        public static bool SocialTablesExist(IDatabase db)
+        {
+            if (_socialTablesSeen) return true;
+            var ok = db.ExecuteScalar<int>(
+                @"SELECT CASE WHEN OBJECT_ID(N'dbo.SitePostImage', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.SitePostReaction', N'U') IS NOT NULL
+                               AND OBJECT_ID(N'dbo.SitePostComment', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.SitePostImageRequest', N'U') IS NOT NULL THEN 1 ELSE 0 END") == 1;
+            if (ok) _socialTablesSeen = true;
+            return ok;
+        }
+
+        /// <summary>Galleriets rader i visningsordning (första = den stora). Tom när tabellen saknas.</summary>
+        public static List<SitePostImageRow> GalleryRows(IDatabase db, int postId, string ownerType, int ownerId) =>
+            !SocialTablesExist(db) ? new List<SitePostImageRow>() : db.Fetch<SitePostImageRow>(
+                @"SELECT PostId, FileId, SortOrder, Caption, AltText, ShowsPeople, ConsentByMemberId, ConsentDate FROM dbo.SitePostImage
+                  WHERE PostId = @0 AND OwnerType = @1 AND OwnerId = @2 ORDER BY SortOrder, FileId", postId, ownerType, ownerId);
+
+        /// <summary>
+        /// Bilderna att visa: galleriets rader, eller — för en nyhet som skrevs före galleriet och bara har ett omslag — omslaget som en enda bild. Då behöver en gammal nyhet
+        /// ingen datamigrering: första sparningen i den nya skrivytan lägger omslaget i galleriet.
+        /// </summary>
+        public static List<SitePostImageRow> GalleryFor(IDatabase db, SitePostRow post)
+        {
+            var rows = GalleryRows(db, post.Id, post.OwnerType, post.OwnerId);
+            if (rows.Count == 0 && post.CoverFileId is int cover)
+                rows.Add(new SitePostImageRow { PostId = post.Id, FileId = cover, SortOrder = 0, AltText = post.CoverAlt });
+            return rows;
+        }
+
+        /// <summary>Felet (på svenska) när en bild märkt "visar personer" saknar samtycke att stå på: nya markeringar kräver bekräftelsen, redan bekräftade behåller sin.</summary>
+        private static string? ConsentError(IReadOnlyList<SitePostGalleryItem>? gallery, IReadOnlyDictionary<int, SitePostImageRow> existing, bool confirmed)
+        {
+            if (gallery == null || confirmed) return null;
+            var missing = gallery.Any(g => g.ShowsPeople && !(existing.TryGetValue(g.FileId, out var e) && e.ShowsPeople && e.ConsentDate != null));
+            return missing ? "Bekräfta att de som syns på bilderna har gett sitt samtycke (för barn under 18: vårdnadshavare)." : null;
+        }
+
+        /// <summary>
+        /// Ersätter galleriet (i anroparens transaktion, under nyhetens revisionskontroll). Ordningen skrivs tätt 0..N-1 — aldrig ett unikt index på <c>SortOrder</c>, så att två bilder
+        /// kan byta plats utan mellansteg. Samtycket behåller sin tid och person när bilden redan var bekräftad; annars är det nu och den som sparar.
+        /// </summary>
+        private static void WriteGallery(IDatabase db, int postId, string ownerType, int ownerId, IReadOnlyList<SitePostGalleryItem> gallery,
+            IReadOnlyDictionary<int, SitePostImageRow> existing, int? actorMemberId, DateTime now)
+        {
+            db.Execute("DELETE FROM dbo.SitePostImage WHERE PostId = @0 AND OwnerType = @1 AND OwnerId = @2", postId, ownerType, ownerId);
+            for (var i = 0; i < gallery.Count; i++)
+            {
+                var g = gallery[i];
+                int? by = null; DateTime? at = null;
+                if (g.ShowsPeople)
+                {
+                    if (existing.TryGetValue(g.FileId, out var e) && e.ShowsPeople && e.ConsentDate != null) { by = e.ConsentByMemberId; at = e.ConsentDate; }
+                    else { by = actorMemberId; at = now; }
+                }
+                db.Execute(
+                    @"INSERT INTO dbo.SitePostImage (PostId, FileId, OwnerType, OwnerId, SortOrder, Caption, AltText, ShowsPeople, ConsentByMemberId, ConsentDate)
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9)",
+                    postId, g.FileId, ownerType, ownerId, i, Blank(g.Caption), Blank(g.Alt), g.ShowsPeople, by, at);
+            }
         }
 
         private static string UniqueSlug(IDatabase db, string ownerType, int ownerId, string baseSlug, int exceptId)

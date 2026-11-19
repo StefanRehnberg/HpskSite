@@ -1,0 +1,24 @@
+@using HpskSite.Services.SitePages
+@model SiteNewsPostSocial
+@*
+    Skribenternas lista: medlemmar som syns på en galleribild och ber om att den tas bort. Visas bara för dem som får skriva nyheten. Bilden tas bort genom att ändra nyheten (Ändra → ta bort bilden ur
+    galleriet) och förfrågan markeras som hanterad här. Inget mejl skickas (ännu): skribenten ser raden här och en märkning i arkivet.
+*@
+@if (Model.Requests.Count > 0)
+{
+    <div class="alert alert-warning mt-4" role="region" aria-label="Förfrågningar om att ta bort bilder" data-sn-requests data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId">
+        <h3 class="h6 mb-2"><i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>@(Model.Requests.Count == 1 ? "En medlem vill att en bild tas bort" : Model.Requests.Count + " medlemmar vill att bilder tas bort")</h3>
+        <p class="small mb-3">Den som syns på en bild har rätt att be om att den tas bort. Ta bort bilden ur galleriet (Ändra) och markera sedan förfrågan som hanterad.</p>
+        @foreach (var r in Model.Requests)
+        {
+            <div class="d-flex flex-wrap align-items-center gap-3 border-top pt-2 mt-2" data-sn-request="@r.Id">
+                <img src="@SiteImages.ThumbUrlFor(r.FileId, 320)" width="80" class="rounded" alt="" loading="lazy">
+                <div class="flex-grow-1">
+                    <strong>@r.RequesterName</strong> <span class="text-muted small">· @r.CreatedDate.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE"))</span>
+                    @if (!string.IsNullOrWhiteSpace(r.Message)) { <div class="small">@r.Message</div> }
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-sn-handled="@r.Id">Markera som hanterad</button>
+            </div>
+        }
+    </div>
+}

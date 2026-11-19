@@ -69,6 +69,10 @@ namespace HpskSite.Services
             ("CertificationRequests",        "CandidateMemberId"),   // subject = the member the cert is FOR
 
             // ── Märken (marksmanship proficiency badges) ──
+            // Reaktioner på nyheter (2026-11-19): vem som reagerade är en personuppgift och raden har inget värde utan personen → hård radering. Tabellen har ett surrogat-Id
+            // (MemberMergeService.MoveRowByRow kräver det när båda kontona reagerat på samma nyhet och det unika indexet krockar vid sammanslagningen).
+            ("SitePostReaction",             "MemberId"),
+
             ("MemberBadge",                  "MemberId"),
             ("MemberBadgeQualification",     "MemberId"),
             ("MarkenSeries",                 "MemberId"),
@@ -202,6 +206,13 @@ namespace HpskSite.Services
             // Nyheterna (2026-11-13): nyheten hör till föreningen och står kvar; författaren släpps och namnet på raden blir neutralt ("Tidigare medlem").
             ("SitePost",                             "AuthorMemberId",    "AuthorName = N'Tidigare medlem'"),
             ("SitePost",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
+            // Nyheternas galleri, kommentarer och bildförfrågningar (2026-11-19). Kommentaren står kvar med ett neutralt namn (som nyhetens byline); texten rörs inte (kommentarer har
+            // aldrig HTML och författaren släpps). Samtycket står kvar men personen som bekräftade släpps. Förfrågans fria text rensas: den kan nämna namn.
+            ("SitePostComment",                      "AuthorMemberId",    "AuthorName = N'Tidigare medlem'"),
+            ("SitePostComment",                      "DeletedByMemberId", "CreatedDate = CreatedDate"),
+            ("SitePostImage",                        "ConsentByMemberId", "ConsentDate = ConsentDate"),
+            ("SitePostImageRequest",                 "RequesterMemberId", "Message = NULL"),
+            ("SitePostImageRequest",                 "HandledByMemberId", "CreatedDate = CreatedDate"),
         };
 
         /// <summary>

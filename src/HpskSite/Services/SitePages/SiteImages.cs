@@ -36,7 +36,7 @@ namespace HpskSite.Services.SitePages
     /// <summary>En omkodad bild redo att lagras.</summary>
     public sealed record SiteImageResult(byte[] Bytes, string ContentType, int Width, int Height, byte[] Hash);
 
-    public enum SiteImageFailure { None, NotAnImage, TooManyPixels, TooLarge, BadExtension }
+    public enum SiteImageFailure { None, NotAnImage, TooManyPixels, TooLarge, BadExtension, Busy }
 
     /// <summary>
     /// Bilder på klubbens och kretsens sidor (klubbsidorna 2c). <b>Allt som laddas upp avkodas och skrivs om</b> av oss: metadata (EXIF/GPS),
@@ -118,6 +118,22 @@ namespace HpskSite.Services.SitePages
             if (length > MaxUploadBytes) return (null, SiteImageFailure.TooLarge);
             if (!AllowedExtensions.Contains(Path.GetExtension(originalName ?? "")))
                 return (null, SiteImageFailure.BadExtension);
+            // Minnesskydd, inte korrekthet: en avkodad bild på 40 Mpx tar ca 160 MB, och ett galleri laddas upp många åt gången. Högst MaxConcurrent samtidigt per instans;
+            // resten väntar en stund och får annars "upptagen" (klienten försöker igen). Ett lås i processen är rätt här just därför att det bara skyddar den egna processens minne.
+            if (!await ProcessGate.WaitAsync(TimeSpan.FromSeconds(30))) return (null, SiteImageFailure.Busy);
+            try
+            {
+                return await ProcessCoreAsync(input, length);
+            }
+            finally { ProcessGate.Release(); }
+        }
+
+        /// <summary>Högst så många bilder avkodas samtidigt i en instans (se <see cref="ProcessAsync"/>).</summary>
+        public const int MaxConcurrent = 2;
+        private static readonly SemaphoreSlim ProcessGate = new(MaxConcurrent, MaxConcurrent);   // processlås med flit: skyddar minnet, aldrig data
+
+        private static async Task<(SiteImageResult? Image, SiteImageFailure Failure)> ProcessCoreAsync(Stream input, long length)
+        {
             try
             {
                 var options = new DecoderOptions { Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance, MaxFrames = 200 };
@@ -137,6 +153,9 @@ namespace HpskSite.Services.SitePages
                     case "WebP": encoder = new WebpEncoder { Quality = 85 }; type = "image/webp"; break;
                     default: return (null, SiteImageFailure.NotAnImage);   // BMP och allt annat sajten kan läsa men inte lagrar här
                 }
+                // Orienteringen ska tas ur EXIF och bakas in i pixlarna INNAN metadatan nollas — annars försvinner taggen och en stående mobilbild ligger på sidan.
+                // (ImageSharp roterar inte vid inläsning.) AutoOrient nollar också Orientation-taggen, så bilden inte roteras två gånger.
+                image.Mutate(c => c.AutoOrient());
                 image.Metadata.ExifProfile = null;
                 image.Metadata.IccProfile = null;
                 image.Metadata.IptcProfile = null;
@@ -162,6 +181,7 @@ namespace HpskSite.Services.SitePages
             SiteImageFailure.TooLarge => $"Bilden är för stor (högst {MaxUploadBytes / 1024 / 1024} MB).",
             SiteImageFailure.TooManyPixels => "Bilden har för många pixlar. Förminska den och försök igen.",
             SiteImageFailure.BadExtension => "Bara bildfiler (JPG, PNG, GIF, WebP) går att ladda upp.",
+            SiteImageFailure.Busy => "Servern bearbetar många bilder just nu. Försök igen om en liten stund.",
             _ => "Filen är ingen bild som sajten kan läsa.",
         };
     }

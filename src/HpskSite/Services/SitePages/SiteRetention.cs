@@ -7,9 +7,9 @@ namespace HpskSite.Services.SitePages
 {
     /// <summary>Vad en gallringskörning tog bort.</summary>
     public sealed record SiteRetentionResult(int PagesPurged, int VersionsDeleted, int DraftsDiscarded, int GrantsDeleted, int AuditDeleted, int IpHashesCleared,
-        int PersonalNumbersCleared = 0, int FormEntriesDeleted = 0)
+        int PersonalNumbersCleared = 0, int FormEntriesDeleted = 0, int PostsPurged = 0)
     {
-        public int Total => PagesPurged + VersionsDeleted + DraftsDiscarded + GrantsDeleted + AuditDeleted + IpHashesCleared + PersonalNumbersCleared + FormEntriesDeleted;
+        public int Total => PagesPurged + VersionsDeleted + DraftsDiscarded + GrantsDeleted + AuditDeleted + IpHashesCleared + PersonalNumbersCleared + FormEntriesDeleted + PostsPurged;
     }
 
     /// <summary>
@@ -49,7 +49,22 @@ namespace HpskSite.Services.SitePages
             var audit = Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SiteAudit WHERE CreatedDate < @0", now.AddMonths(-AuditMonths)));
             var ip = db.Execute("UPDATE dbo.SiteAudit SET IpHash = NULL WHERE IpHash IS NOT NULL AND CreatedDate < @0", now.AddDays(-IpHashDays));
             var (pnr, entries) = PurgeFormEntries(db, now);
-            return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip, pnr, entries);
+            var posts = PurgeDeletedPosts(db, now);
+            return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip, pnr, entries, posts);
+        }
+
+        public const int DeletedPostDays = 30;
+
+        /// <summary>
+        /// Raderade nyheter (Nyheter, <c>SitePost</c>) är slutligt borta 30 dagar efter <c>DeletedDate</c>, som sidor. Utan den här gallringen ligger en raderad nyhet kvar för alltid — med
+        /// sin text, sina kommentarer (andras personuppgifter) och sina reaktioner. Raderingen av nyheten tar med allt under den: bildreferenserna, galleriet, reaktionerna, kommentarerna
+        /// och bildförfrågningarna följer med (ON DELETE CASCADE på de sammansatta nycklarna). Körs bara när tabellen finns (en migrering som inte körts får inte stoppa övrig gallring).
+        /// </summary>
+        public static int PurgeDeletedPosts(IDatabase db, DateTime now)
+        {
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.SitePost', N'U') IS NULL THEN 0 ELSE 1 END") == 0) return 0;
+            var cut = now.AddDays(-DeletedPostDays);
+            return Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SitePost WHERE DeletedDate IS NOT NULL AND DeletedDate < @0", cut));
         }
 
         public const int PersonalNumberDays = 30;
