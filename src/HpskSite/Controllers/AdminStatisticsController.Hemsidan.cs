@@ -134,7 +134,8 @@ namespace HpskSite.Controllers
                 };
             }
 
-            var list = owners.Where(o => o.IsEnabled).Select(o =>
+            // Tabellen "Vilka som använder den" listar bara dem som byggt egna sidor (sidtalen i kortens summering är oförändrade).
+            var list = owners.Where(o => o.IsEnabled && pageBy.TryGetValue((o.OwnerType, o.OwnerId), out var own) && own.Own > 0).Select(o =>
             {
                 pageBy.TryGetValue((o.OwnerType, o.OwnerId), out var p);
                 postBy.TryGetValue((o.OwnerType, o.OwnerId), out var po);

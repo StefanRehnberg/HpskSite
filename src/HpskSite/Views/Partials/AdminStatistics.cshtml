@@ -1126,7 +1126,7 @@
             </div></div></div>
         </div>
         <div class="card mb-3"><div class="card-body">
-            <h6 class="card-title">Vilka som använder den</h6>
+            <h6 class="card-title">Vilka som använder den <span class="text-muted small fw-normal">(bara de som byggt egna sidor)</span></h6>
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
                     <thead><tr><th>Förening</th><th>Typ</th><th class="text-end">Egna sidor</th><th class="text-end">Publicerade</th><th class="text-end">Inlägg</th><th class="text-end">Anmälningar</th><th>På sedan</th><th>Senast ändrad</th></tr></thead>
@@ -2275,7 +2275,7 @@
             + '<td class="text-end">' + nf(r.ownPages) + '</td><td class="text-end">' + nf(r.published) + '</td>'
             + '<td class="text-end">' + nf(r.posts) + '</td><td class="text-end">' + nf(r.forms) + '</td>'
             + '<td class="small text-nowrap">' + e(r.enabled || '—') + '</td><td class="small text-nowrap">' + e(r.lastUpdate || '—') + '</td></tr>').join('')
-            || '<tr><td colspan="8" class="text-muted">Ingen har slagit på Hemsidan ännu.</td></tr>';
+            || '<tr><td colspan="8" class="text-muted">Ingen har byggt egna sidor ännu.</td></tr>';
     }
 
     // ── Section O: tävlingsplanering och patrullgenerator ─────────────────────────────────────────
