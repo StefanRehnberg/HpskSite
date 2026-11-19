@@ -1,9 +1,10 @@
 @using HpskSite.Services.SitePages
 @model SiteNewsCommentsModel
 @*
-    Kommentarerna på en nyhet. Klubbens styrelse ansvarar för dem (BBS-lagen) och det står här. Texten visas bara för klubbens medlemmar (samma krets som får reagera); andra ser antalet.
-    Allt som skrivs ut är kodat (@-uttryck, aldrig Html.Raw) och kommentarens text visas som text med radbrytningar — en länk blir aldrig klickbar. Vyn avgör inget om behörighet: varje
-    knapp styrs av ett färdigt svar i modellen och servern prövar om allt vid varje anrop (SiteNewsCommentsController). Inga prompt/confirm/alert: "Ta bort" tar två klick.
+    Kommentarerna på en nyhet (utseendet följer Svenska Lag: grå rutor med avatar, skrivrutan sist på en rad). Klubbens styrelse ansvarar för dem (BBS-lagen) och det står här. Texten visas bara för
+    klubbens medlemmar (samma krets som får reagera); andra ser antalet. Allt som skrivs ut är kodat (@-uttryck, aldrig Html.Raw) och kommentarens text visas som text med radbrytningar — en länk
+    blir aldrig klickbar. Vyn avgör inget om behörighet: varje knapp styrs av ett färdigt svar i modellen och servern prövar om allt vid varje anrop (SiteNewsCommentsController).
+    Inga prompt/confirm/alert: "Ta bort" tar två klick.
 *@
 @{
     var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
@@ -12,11 +13,12 @@
 }
 <section class="sn-comments mt-4 pt-3 border-top" id="kommentarer" data-sn-comments data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId" data-post-id="@Model.PostId" aria-labelledby="snCommentsHeading">
     @if (Model.LoggedIn) { @Html.AntiForgeryToken() }
-    <h3 class="h5 mb-2" id="snCommentsHeading">Kommentarer <span class="text-muted fw-normal">(@Model.VisibleCount)</span></h3>
+    <h3 class="h5 mb-2" id="snCommentsHeading">Kommentarer</h3>
 
     @if (!Model.CanReadText)
     {
         <p class="small text-muted mb-0">
+            @Model.VisibleCount @(Model.VisibleCount == 1 ? "kommentar" : "kommentarer").
             @if (!Model.LoggedIn) { <span>Kommentarerna kan läsas av klubbens medlemmar. <a href="/login-register">Logga in som medlem</a> för att läsa och skriva.</span> }
             else { <span>Kommentarerna kan bara läsas av klubbens medlemmar.</span> }
         </p>
@@ -30,28 +32,11 @@
             <div class="alert alert-warning py-2 small" role="status">@Model.Comments.Count(c => c.IsPending) @(Model.Comments.Count(c => c.IsPending) == 1 ? "kommentar väntar" : "kommentarer väntar") på ditt godkännande. Den syns bara för dig och skribenten tills du godkänt den.</div>
         }
 
-        @if (Model.CanComment)
-        {
-            <form class="sn-c-form mb-3" data-sn-c-form novalidate>
-                <label class="form-label small fw-semibold" for="snCommentBody">Skriv en kommentar</label>
-                <textarea id="snCommentBody" class="form-control" rows="3" maxlength="2000" data-sn-c-body aria-describedby="snCommentHelp"></textarea>
-                <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-                    <button type="submit" class="btn btn-primary btn-sm" data-sn-c-send>Skicka</button>
-                    <span class="small text-muted" id="snCommentHelp"><span data-sn-c-count>0</span> av 2000 tecken@(Model.WillBePreModerated ? ". Din kommentar granskas av en moderator innan den syns för andra." : ".")</span>
-                </div>
-                <div class="small text-danger mt-1 d-none" data-sn-c-error role="alert"></div>
-            </form>
-        }
-        else if (Model.Mode == 2)
-        {
-            <p class="small text-muted">Kommentarerna på den här nyheten är stängda. Du kan fortfarande läsa dem.</p>
-        }
-
         @if (Model.Comments.Count == 0)
         {
-            <p class="text-muted small mb-0">Inga kommentarer ännu.</p>
+            <p class="text-muted small mb-2">Inga kommentarer ännu.</p>
         }
-        <ul class="list-unstyled mb-3 sn-c-list">
+        <ul class="list-unstyled mb-2 sn-c-list">
             @foreach (var c in Model.Comments)
             {
                 <li class="sn-c @(c.IsDeleted ? "sn-c-deleted" : "") @(c.IsPending ? "sn-c-pending" : "")" id="kommentar-@c.Id" data-sn-comment="@c.Id" data-sn-mine="@(c.IsMine ? "1" : "0")">
@@ -64,7 +49,7 @@
                             }
                             else
                             {
-                                <strong>@c.DisplayName</strong>
+                                <strong class="sn-c-name">@c.DisplayName</strong>
                                 <span class="text-muted ms-1">@When(c.CreatedDate)@(c.EditedDate != null ? " · ändrad" : "")</span>
                                 @if (c.IsPending) { <span class="badge text-bg-warning ms-1">Väntar på granskning</span> }
                                 @if (c.IsDeleted) { <span class="badge text-bg-secondary ms-1">Borttagen</span> }
@@ -90,12 +75,33 @@
         </ul>
         @if (Model.PageCount > 1)
         {
-            <nav aria-label="Bläddra bland kommentarerna" class="d-flex gap-2 align-items-center">
+            <nav aria-label="Bläddra bland kommentarerna" class="d-flex gap-2 align-items-center mb-2">
                 @if (Model.Page > 1) { <a class="btn btn-outline-secondary btn-sm" href="@PageUrl(Model.Page - 1)">Tidigare</a> }
                 <span class="small text-muted">Sida @Model.Page av @Model.PageCount</span>
                 @if (Model.Page < Model.PageCount) { <a class="btn btn-outline-secondary btn-sm" href="@PageUrl(Model.Page + 1)">Senare</a> }
             </nav>
         }
-        <div class="small text-danger mt-1 d-none" data-sn-c-listerror role="alert"></div>
+        <div class="small text-danger mb-2 d-none" data-sn-c-listerror role="alert"></div>
+
+        @* Skrivrutan sist, på en rad som växer när man skriver (som Svenska Lag). *@
+        @if (Model.CanComment)
+        {
+            <form class="sn-c sn-c-compose" data-sn-c-form novalidate>
+                <div class="sn-c-avatar" aria-hidden="true">@Model.ViewerInitials</div>
+                <div class="sn-c-main">
+                    <div class="d-flex gap-2 align-items-start">
+                        <textarea id="snCommentBody" class="form-control" rows="1" maxlength="2000" placeholder="Skriv en kommentar ..." aria-label="Skriv en kommentar" data-sn-c-body aria-describedby="snCommentHelp"></textarea>
+                        <button type="submit" class="btn btn-primary" data-sn-c-send>Skicka</button>
+                    </div>
+                    <div class="small text-muted mt-1 d-none" id="snCommentHelp" data-sn-c-help><span data-sn-c-count>0</span> av 2000 tecken.</div>
+                    @if (Model.WillBePreModerated) { <div class="small text-muted mt-1" data-sn-c-premod>Din kommentar granskas av en moderator innan den syns för andra.</div> }
+                    <div class="small text-danger mt-1 d-none" data-sn-c-error role="alert"></div>
+                </div>
+            </form>
+        }
+        else if (Model.Mode == 2)
+        {
+            <p class="small text-muted">Kommentarerna på den här nyheten är stängda. Du kan fortfarande läsa dem.</p>
+        }
     }
 </section>

@@ -155,7 +155,11 @@
     const form = root.querySelector('[data-sn-c-form]');
     if (form) {
       const ta = form.querySelector('[data-sn-c-body]'), count = form.querySelector('[data-sn-c-count]'), err = form.querySelector('[data-sn-c-error]'), send = form.querySelector('[data-sn-c-send]');
-      ta.addEventListener('input', () => { count.textContent = ta.value.length; });
+      const help = form.querySelector('[data-sn-c-help]');
+      ta.addEventListener('input', () => {
+        count.textContent = ta.value.length; if (help) help.classList.remove('d-none');
+        ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px';   // växer med texten, högst ~240 px
+      });
       form.addEventListener('submit', async e => {
         e.preventDefault(); err.classList.add('d-none');
         send.disabled = true;

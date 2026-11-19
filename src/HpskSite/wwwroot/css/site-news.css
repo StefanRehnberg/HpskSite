@@ -1,15 +1,12 @@
 /* Nyheternas galleri, reaktioner och bildvisning (lightbox). Färger ur Bootstrap-variablerna så att mörkt läge följer med. */
 
 /* ── Galleriet: en stor bild och högst två små (som Svenska Lag). 1 bild = en stor, 2 = bredvid varandra, 3+ = stor överst och två under. ── */
-.sn-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 1rem; max-width: 560px; }   /* begränsad bredd: bilderna ska inte fylla hela sidan; klick öppnar bilden stor */
-.sn-gallery.sn-n1 { max-width: 420px; }
-.sn-gallery.sn-n2 { max-width: 480px; }
+.sn-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 1rem; max-width: 540px; }   /* som Svenska Lag: stor bild 4:3 och två kvadratiska under; bredden begransad, klick oppnar bilden stor */
 .sn-tile { position: relative; display: block; padding: 0; border: 0; background: var(--bs-secondary-bg); border-radius: .375rem; overflow: hidden; cursor: zoom-in; line-height: 0; }
 .sn-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sn-tile:focus-visible { outline: 3px solid var(--bs-primary); outline-offset: 2px; }
-.sn-big { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
-.sn-small { aspect-ratio: 4 / 3; }
-.sn-n1 .sn-big { aspect-ratio: 4 / 3; }
+.sn-big { grid-column: 1 / -1; aspect-ratio: 4 / 3; }
+.sn-small { aspect-ratio: 1 / 1; }
 .sn-more { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .5); color: #fff; font-size: 1.75rem; font-weight: 600; line-height: 1; }
 
 /* ── Reaktionerna ── */
@@ -43,11 +40,14 @@
 body.sn-lb-open { overflow: hidden; }
 
 /* Kommentarerna: platt lista, initialer som avatar. Farger ur Bootstrap-variablerna sa att morkt lage foljer med. */
-.sn-c { display: flex; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid var(--bs-border-color); }
-.sn-c:last-child { border-bottom: 0; }
+.sn-c { display: flex; gap: .75rem; padding: .6rem .75rem; margin-bottom: .5rem; background: var(--bs-tertiary-bg); border-radius: .375rem; }
 .sn-c-avatar { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 600; }
 .sn-c-main { min-width: 0; flex: 1 1 auto; }
 .sn-c-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .sn-c-deleted .sn-c-body { opacity: .6; text-decoration: line-through; }
-.sn-c-pending { background: var(--bs-warning-bg-subtle); border-radius: .375rem; padding-left: .5rem; padding-right: .5rem; }
+.sn-c-pending { background: var(--bs-warning-bg-subtle); }
+.sn-c-name { color: var(--bs-link-color); }
+.sn-c-compose textarea { resize: none; overflow-y: auto; min-height: 38px; }
+.sn-c-compose .btn { flex: 0 0 auto; }
+.sn-meta i { margin-right: .15rem; }
 .sn-c-actions .btn-link { text-decoration: none; min-height: 32px; }

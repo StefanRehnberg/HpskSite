@@ -254,7 +254,13 @@
             @if (!post.IsPublished) { <div class="alert alert-warning py-2">Det här är ett utkast. Bara skribenterna ser det.</div> }
             <h2 class="h2 mb-1">@post.Title</h2>
             <p class="text-muted mb-3">@DateOf(post)@(string.IsNullOrWhiteSpace(post.AuthorName) ? "" : " · " + post.AuthorName)
-                @if (canWrite && post.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(post.Visibility)</span> }</p>
+                @if (canWrite && post.Visibility != SiteVisibility.Alla) { <span class="badge text-bg-secondary ms-1">@Level(post.Visibility)</span> }
+                @* Som Svenska Lag: antalen direkt under rubriken (kommentarer, reaktioner). Bara antal, aldrig namn. *@
+                @if (post.IsPublished)
+                {
+                    @if (commentsModel != null) { <a href="#kommentarer" class="sn-meta ms-2 text-muted text-decoration-none" title="@commentsModel.VisibleCount @(commentsModel.VisibleCount == 1 ? "kommentar" : "kommentarer")"><i class="bi bi-chat" aria-hidden="true"></i>@commentsModel.VisibleCount<span class="visually-hidden"> @(commentsModel.VisibleCount == 1 ? "kommentar" : "kommentarer")</span></a> }
+                    @if (social != null && social.Reactions.Total > 0) { <span class="sn-meta ms-2" title="@social.Reactions.Total @(social.Reactions.Total == 1 ? "reaktion" : "reaktioner")"><i class="bi bi-heart-fill text-danger" aria-hidden="true"></i>@social.Reactions.Total<span class="visually-hidden"> @(social.Reactions.Total == 1 ? "reaktion" : "reaktioner")</span></span> }
+                }</p>
             @* Bilderna: galleriet (en stor och två små, "+N"), eller omslaget som en enda bild för en nyhet från före galleriet (SitePosts.GalleryFor). *@
             @if (social != null) { @await Html.PartialAsync("_SiteNewsGallery", social) }
             <div class="site-post-body">@Html.Raw(Signatures.Resolve(SiteHtmlSanitizer.Sanitize(post.BodyHtml), post.OwnerType, post.OwnerId))</div>
@@ -270,8 +276,8 @@
             @if (social != null && post.IsPublished) { @await Html.PartialAsync("_SiteNewsReactions", social) }
             @if (commentsModel != null) { @await Html.PartialAsync("_SiteNewsComments", commentsModel) }
             @if (social != null && canWrite) { @await Html.PartialAsync("_SiteNewsImageRequests", social) }
-            <link rel="stylesheet" href="/css/site-news.css?v=4" />
-            <script src="/js/site-news-view.js?v=3" defer></script>
+            <link rel="stylesheet" href="/css/site-news.css?v=5" />
+            <script src="/js/site-news-view.js?v=4" defer></script>
             @if (canWrite)
             {
                 <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">

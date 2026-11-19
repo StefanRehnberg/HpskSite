@@ -38,6 +38,8 @@ namespace HpskSite.Services.SitePages
         public bool CanComment { get; init; }
         public bool CanReadText { get; init; }
         public bool IsModerator { get; init; }
+        /// <summary>Tittarens egna initialer (avataren bredvid skrivrutan).</summary>
+        public string ViewerInitials { get; init; } = "?";
         /// <summary>Förgranskas tittarens kommentarer (visas som en upplysning under skrivrutan)?</summary>
         public bool WillBePreModerated { get; init; }
         public int VisibleCount { get; init; }
@@ -70,12 +72,12 @@ namespace HpskSite.Services.SitePages
         {
             if (post.OwnerType != SiteTemplates.Club || !post.IsPublished || post.CommentsMode == 0) return null;
             // Allt async FÖRE databasscopet.
-            var memberId = 0; var birthYear = 0;
+            var memberId = 0; var birthYear = 0; var viewerName = "";
             if (viewer.LoggedIn)
             {
                 var cur = await _members.GetCurrentMemberAsync();
                 var m = cur?.Email == null ? null : _memberService.GetByEmail(cur.Email);
-                memberId = m?.Id ?? 0;
+                memberId = m?.Id ?? 0; viewerName = m?.Name ?? "";
                 birthYear = Marken.BirthYearFromPersonNumber(m?.GetValue("personNumber")?.ToString(), DateTime.Now.Year);
             }
             var dpaOk = (await _dpa.GetStatusForClubAsync(post.OwnerId)).Accepted;
@@ -121,7 +123,7 @@ namespace HpskSite.Services.SitePages
             return new SiteNewsCommentsModel
             {
                 PostId = post.Id, OwnerType = post.OwnerType, OwnerId = post.OwnerId, PostUrl = postUrl, Mode = post.CommentsMode,
-                LoggedIn = viewer.LoggedIn, CanComment = canComment, CanReadText = canRead, IsModerator = moderator,
+                LoggedIn = viewer.LoggedIn, ViewerInitials = InitialsOf(viewerName), CanComment = canComment, CanReadText = canRead, IsModerator = moderator,
                 WillBePreModerated = canComment && SiteCommentRules.NeedsApproval(settings.Moderation, birthYear, DateTime.Now.Year, moderator),
                 VisibleCount = visible, Total = total, Page = page, PageCount = pageCount, Comments = views,
             };
