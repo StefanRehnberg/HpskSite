@@ -673,6 +673,15 @@
 
             <!-- Modal Footer with Navigation -->
             <div class="modal-footer">
+                @* Visas när någon trycker på krysset med något ifyllt (ersätter webbläsarens confirm-ruta). *@
+                <div class="alert alert-warning small w-100 mb-0 d-none" id="wizard_closeWarn" role="alert">
+                    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Du har fyllt i uppgifter som inte är sparade</div>
+                    <div>Stänger du guiden nu skapas ingen tävling och det du fyllt i försvinner.</div>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <button type="button" class="btn btn-warning btn-sm" style="min-height:44px" onclick="wizardCloseAnyway()">Stäng utan att spara</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" style="min-height:44px" onclick="wizardCloseStay()">Stanna kvar</button>
+                    </div>
+                </div>
                 <button type="button" class="btn btn-secondary" id="wizard_btnBack" onclick="wizardPrevStep()" style="display: none;">
                     <i class="bi bi-arrow-left me-1"></i>Tillbaka
                 </button>
@@ -1041,8 +1050,19 @@ document.getElementById('competitionWizardModal').addEventListener('change', fun
 });
 
 window.wizardRequestClose = function () {
-    if (window._wizardDirty && !confirm('Vill du stänga guiden? Det du har fyllt i sparas inte.')) return;
+    if (window._wizardDirty) {
+        var cw = document.getElementById('wizard_closeWarn');
+        if (cw) { cw.classList.remove('d-none'); cw.scrollIntoView({ block: 'nearest' }); return; }
+    }
+    window.wizardCloseAnyway();
+};
+window.wizardCloseStay = function () {
+    document.getElementById('wizard_closeWarn').classList.add('d-none');
+};
+window.wizardCloseAnyway = function () {
     window._wizardDirty = false;
+    var cw = document.getElementById('wizard_closeWarn');
+    if (cw) cw.classList.add('d-none');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionWizardModal')).hide();
 };
 
@@ -1054,6 +1074,8 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
         return;
     }
     window._wizardDirty = false;
+    var _wcw = document.getElementById('wizard_closeWarn');
+    if (_wcw) _wcw.classList.add('d-none');
     wizardCurrentStep = 0;
     resetWizard();
     if (window.hpskClubPays) hpskClubPays.reset('wizard_');

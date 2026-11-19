@@ -506,6 +506,15 @@
                 </div>
             </div>
             <div class="modal-footer">
+                @* Visas när någon försöker stänga rutan (klick utanför, Esc, kryss, Avbryt) med ändringar som inte sparats. *@
+                <div class="alert alert-warning small w-100 mb-0 d-none" id="springEdit_closeWarn" role="alert">
+                    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Du har ändringar som inte är sparade</div>
+                    <div>Stänger du rutan nu försvinner de.</div>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <button type="button" class="btn btn-warning btn-sm" style="min-height:44px" onclick="hpskSpringCloseAnyway()">Stäng utan att spara</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" style="min-height:44px" onclick="hpskSpringCloseStay()">Stanna kvar</button>
+                    </div>
+                </div>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle me-1"></i>Avbryt
                 </button>
@@ -568,8 +577,44 @@ springEditModalEl.addEventListener('show.bs.modal', function() {
     }, 100);
 });
 
+// Osparade ändringar: en ögonblicksbild av formuläret tas en stund efter att rutan visats (då är den ifylld, klubb- och serielistorna
+// inlästa) och jämförs när någon försöker stänga. Samma upplägg som Redigera tävling (CompetitionEditModal).
+window._hpskSpringSnapshot = null;
+window._hpskSpringAllowClose = false;
+function hpskSpringFormState() {
+    var form = document.getElementById('springEditForm');
+    if (!form) return '';
+    return JSON.stringify(Array.prototype.filter.call(form.elements, function (e) { return e.id || e.name; }).map(function (e) {
+        return [e.id || e.name, (e.type === 'checkbox' || e.type === 'radio') ? e.checked : e.value];
+    }));
+}
+springEditModalEl.addEventListener('shown.bs.modal', function () {
+    window._hpskSpringSnapshot = null;
+    setTimeout(function () { window._hpskSpringSnapshot = hpskSpringFormState(); }, 1500);
+});
+springEditModalEl.addEventListener('hide.bs.modal', function (ev) {
+    if (window._hpskSpringAllowClose) return;
+    if (window._hpskSpringSnapshot && hpskSpringFormState() !== window._hpskSpringSnapshot) {
+        ev.preventDefault();
+        var cw = document.getElementById('springEdit_closeWarn');
+        if (cw) { cw.classList.remove('d-none'); cw.scrollIntoView({ block: 'nearest' }); }
+    }
+});
+function hpskSpringCloseStay() {
+    document.getElementById('springEdit_closeWarn').classList.add('d-none');
+}
+function hpskSpringCloseAnyway() {
+    var inst = bootstrap.Modal.getInstance(springEditModalEl);
+    window._hpskSpringAllowClose = true;
+    if (inst) inst.hide();
+}
+
 // Reset on close
 springEditModalEl.addEventListener('hidden.bs.modal', function() {
+    window._hpskSpringSnapshot = null;
+    window._hpskSpringAllowClose = false;
+    var _cw = document.getElementById('springEdit_closeWarn');
+    if (_cw) _cw.classList.add('d-none');
     document.getElementById('springEditForm').reset();
     document.querySelectorAll('#springEditModal .springEdit-age-cb, #springEdit_weaponA, #springEdit_weaponC').forEach(cb => cb.checked = false);
     document.getElementById('springEdit_classSummary').style.display = 'none';
@@ -1027,6 +1072,7 @@ function springEditSave() {
                 })
                 .then(r => r.json())
                 .then(() => {
+                    window._hpskSpringAllowClose = true;
                     bootstrap.Modal.getInstance(springEditModalEl).hide();
                     setTimeout(() => {
                         if (typeof loadCompetitionsList === 'function') loadCompetitionsList();
@@ -1034,6 +1080,7 @@ function springEditSave() {
                     }, 300);
                 })
                 .catch(() => {
+                    window._hpskSpringAllowClose = true;
                     bootstrap.Modal.getInstance(springEditModalEl).hide();
                     setTimeout(() => { if (typeof loadCompetitionsList === 'function') loadCompetitionsList(); }, 300);
                 });
@@ -1043,6 +1090,7 @@ function springEditSave() {
             if (typeof showNotification === 'function') {
                 showNotification('Tavlingen uppdaterades framgangsrikt!', 'success');
             }
+            window._hpskSpringAllowClose = true;
             bootstrap.Modal.getInstance(springEditModalEl).hide();
             setTimeout(() => { if (typeof loadCompetitionsList === 'function') loadCompetitionsList(); }, 500);
         } else {

@@ -35,7 +35,11 @@
                 </button>
             </div>
         </div>
-        <div class="card-body pt-2" id="faltMergeState"></div>
+        <div class="card-body pt-2">
+            <div id="faltMergeState"></div>
+            @* Ändra öppnar sammanslagningen HÄR, i sitt eget kort — inte i Resultatlistan, som förut. *@
+            <div id="faltMergeEdit" class="mt-3 d-none"></div>
+        </div>
     </div>
 
     @* Klubbens egna medaljregler. Eget kort som ändras på stället (inte i resultatlistans yta) och som räknar om listan vid sparning.
@@ -515,10 +519,14 @@ async function faltRefreshResults(event) {
 async function faltShowMergeConfig(event) {
     if (event) event.stopPropagation();
     const compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
-    const container = document.getElementById('faltResultContent');
+    // Panelen bor i kortet Klasser och sammanslagning (aldrig i resultatlistans yta). Knappen "Sammanslagning..." i
+    // resultatlistans rubrik leder hit och rullar upp till kortet.
+    const container = document.getElementById('faltMergeEdit');
+    if (!container) return;
 
+    container.classList.remove('d-none');
     container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Analyserar klasser...</div>';
-    document.getElementById('faltResultBody').style.display = '';
+    container.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
     try {
         var mergeResp = await fetch('/umbraco/surface/Faltskytte/AnalyzeFaltskytteMerges?competitionId=' + compId);
@@ -661,11 +669,17 @@ function faltRenderMergePanel(containerId, analysis, savedConfig, opts) {
 }
 
 function faltShowMergeModal(analysis, savedConfig) {
-    faltRenderMergePanel('faltResultContent', analysis, savedConfig, {
+    faltRenderMergePanel('faltMergeEdit', analysis, savedConfig, {
         isSub: false, title: 'Sammanslagning av klasser',
-        applyFn: 'faltApplyMerges', skipFn: 'faltSkipMerges', closeFn: 'faltRestoreIframe'
+        applyFn: 'faltApplyMerges', skipFn: 'faltSkipMerges', closeFn: 'faltCloseMergePanel'
     });
 }
+
+// Stänger panelen i kortet. Resultatlistan rörs inte.
+window.faltCloseMergePanel = function() {
+    var host = document.getElementById('faltMergeEdit');
+    if (host) { host.classList.add('d-none'); host.innerHTML = ''; }
+};
 
 window.faltApplyMerges = async function() {
     var actions = [];
@@ -684,6 +698,7 @@ window.faltApplyMerges = async function() {
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
     if (!await faltSaveMergeConfig(compId, _faltMergeConfig || '', false)) return;
 
+    faltCloseMergePanel();
     faltRestoreIframe();
     await faltRefreshResults();
 };
@@ -717,6 +732,7 @@ window.faltSkipMerges = async function() {
     _faltMergeConfig = null;
     var compId = document.querySelector('.faltskytte-results-management')?.dataset.competitionId;
     if (!await faltSaveMergeConfig(compId, '', false)) return;
+    faltCloseMergePanel();
     faltRestoreIframe();
     await faltRefreshResults();
 };
