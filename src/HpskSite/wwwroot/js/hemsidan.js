@@ -2437,8 +2437,8 @@
           (() => { const c = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsNwEx' + b.id, checked: d.showExcerpt !== false }); c.addEventListener('change', () => { d.showExcerpt = c.checked; markDirty(); }); return c; })(),
           h('label', { class: 'form-check-label', for: 'hsNwEx' + b.id }, 'Visa en kort sammanfattning under rubriken')),
         h('div', { class: 'form-check' },
-          (() => { const c = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsNwIm' + b.id, checked: d.showImage === true }); c.addEventListener('change', () => { d.showImage = c.checked; markDirty(); }); return c; })(),
-          h('label', { class: 'form-check-label', for: 'hsNwIm' + b.id }, 'Visa omslagsbilden'))];
+          (() => { const c = h('input', { type: 'checkbox', class: 'form-check-input', id: 'hsNwIm' + b.id, checked: d.showImage !== false }); c.addEventListener('change', () => { d.showImage = c.checked; markDirty(); }); return c; })(),
+          h('label', { class: 'form-check-label', for: 'hsNwIm' + b.id }, 'Visa en miniatyr av nyhetens bild'))];
       case 'events': return [field('Rubrik (valfri)', bind(h('input', { class: 'form-control', maxlength: '120', value: d.title || '' }), d, 'title')),
         field('Så många händelser', bind(h('select', { class: 'form-select w-auto' }, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { value: n, selected: n === (d.count || 5) ? true : null }, n))), d, 'count', v => parseInt(v, 10)),
           'Visar de närmaste kommande händelserna i kalendern.'),

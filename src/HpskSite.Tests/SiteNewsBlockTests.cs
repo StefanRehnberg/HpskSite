@@ -95,12 +95,33 @@ namespace HpskSite.Tests
             Assert.DoesNotContain("Kort", Render(new JsonObject { ["count"] = 3, ["showExcerpt"] = false }, Member, d));
         }
 
-        [Fact]
-        public void Omslagsbilden_visas_bara_när_blocket_ber_om_den_och_bilden_hör_till_ägaren()
+        private sealed class NewsWithImages : ISiteBlockData
         {
-            var d = new NewsData(); d.Items.Add(new SiteNewsInfo("Hej", new DateTime(2027, 3, 1), "/x/", null, 7));
-            Assert.DoesNotContain("<img", Render(new JsonObject { ["count"] = 3 }, Member, d));                        // förvalet: ingen bild
-            Assert.DoesNotContain("<img", Render(new JsonObject { ["count"] = 3, ["showImage"] = true }, Member, d));  // bilden finns inte hos ägaren (Images() ger inga)
+            public List<SiteNewsInfo> Items = new();
+            public HashSet<int> OwnerImages = new();
+            public IReadOnlyList<SiteDocumentInfo> Documents(IReadOnlyList<int> ids) => Array.Empty<SiteDocumentInfo>();
+            public IReadOnlyList<SiteEventInfo> UpcomingEvents(int count) => Array.Empty<SiteEventInfo>();
+            public SiteContactInfo? Contact() => null;
+            public IReadOnlyList<SiteNewsInfo> News(int count) => Items;
+            public IReadOnlyList<SiteImageInfo> Images(IReadOnlyList<int> ids) => ids.Where(OwnerImages.Contains).Select(i => new SiteImageInfo(i, 800, 600)).ToList();
+        }
+
+        private static string RenderWith(JsonObject data, NewsWithImages d) =>
+            SiteBlockRenderer.Render(new SiteBlock("abcd1", "news", SiteVisibility.Klubbmedlemmar, data), SiteVisibility.Klubbmedlemmar,
+                new SiteRenderContext(Member, "/halland/ankeborg/", SiteTemplates.ClubTemplate, d));
+
+        [Fact]
+        public void Miniatyren_av_nyhetens_bild_visas_som_förval_kan_väljas_bort_och_bara_när_bilden_hör_till_ägaren()
+        {
+            var d = new NewsWithImages(); d.Items.Add(new SiteNewsInfo("Hej", new DateTime(2027, 3, 1), "/x/", null, 7)); d.OwnerImages.Add(7);
+            var thumb = "src=\"/umbraco/surface/SiteFile/Image?id=7&amp;w=320\"";
+            Assert.Contains(thumb, RenderWith(new JsonObject { ["count"] = 3 }, d));                                     // förvalet (Stefan 2026-11-19): miniatyr
+            Assert.Contains(thumb, RenderWith(new JsonObject { ["count"] = 3, ["showImage"] = true }, d));
+            Assert.DoesNotContain("<img", RenderWith(new JsonObject { ["count"] = 3, ["showImage"] = false }, d));       // ett uttryckligt val bort respekteras
+            d.OwnerImages.Clear();
+            Assert.DoesNotContain("<img", RenderWith(new JsonObject { ["count"] = 3 }, d));                              // en bild som inte hör till ägaren visas aldrig
+            var none = new NewsWithImages(); none.Items.Add(new SiteNewsInfo("Utan bild", new DateTime(2027, 3, 1), "/y/"));
+            Assert.DoesNotContain("<img", RenderWith(new JsonObject { ["count"] = 3 }, none));                           // en nyhet utan bild ger ingen ruta
         }
 
         [Theory]

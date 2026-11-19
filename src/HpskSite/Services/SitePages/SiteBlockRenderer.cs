@@ -287,7 +287,7 @@ namespace HpskSite.Services.SitePages
             if (items.Count == 0) return "";
             var title = b.Data["title"]?.GetValue<string>();
             var showExcerpt = b.Data["showExcerpt"]?.GetValue<bool>() ?? true;
-            var showImage = b.Data["showImage"]?.GetValue<bool>() ?? false;
+            var showImage = b.Data["showImage"]?.GetValue<bool>() ?? true;   // miniatyr av nyhetens bild som förval (Stefan 2026-11-19); ett block där någon valt bort den (false) behåller det valet
             var covers = showImage
                 ? ctx.Data.Images(items.Where(i => i.CoverFileId != null).Select(i => i.CoverFileId!.Value).Distinct().ToList()).ToDictionary(i => i.Id)
                 : new Dictionary<int, SiteImageInfo>();
