@@ -2361,7 +2361,18 @@ namespace HpskSite.Controllers
                     perWeaponGroup,
                     canChoose = championshipRule.CanChooseMedalGrouping,
                     propertyExists = _competitions.CanStore(MedalGrouping.PropertyAlias),
-                    description = MedalGrouping.Describe(perWeaponGroup)
+                    description = MedalGrouping.Describe(perWeaponGroup),
+                    // Klubbens egna regler (S3): läget/platserna/oavgjort som lagrade, och om ytan är påslagen för just den här tävlingen.
+                    // Springskytte och skidskytte har egna regler och får inte ytan (de delar inte ut per klass på det här sättet).
+                    clubRules = new
+                    {
+                        enabled = MedalRulesSurfaceEnabled(competition),
+                        mode = championshipRule.StoredGroupingMode,
+                        places = championshipRule.StoredMedalPlaces,
+                        tieRule = championshipRule.StoredTieRule,
+                        mayChoose = championshipRule.MayChooseMedalRules,
+                        isChampionshipScope = championshipRule.IsChampionship
+                    }
                 };
 
                 // Fallback to cached result data if DB is empty
@@ -3483,8 +3494,7 @@ namespace HpskSite.Controllers
                 var legacyToggle = request.Mode == null && request.Places == null && request.TieRule == null;
                 if (!legacyToggle)
                 {
-                    var ruleSettings = HttpContext.RequestServices.GetService<HpskSite.Services.SiteSettings.SiteSettingService>();
-                    var enabled = string.Equals(ruleSettings?.Get(MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase);
+                    var enabled = MedalRulesSurfaceEnabled(current);
                     var refusal = MedalRuleEditSettings.Refusal(current.CompetitionScope, request.Mode, request.Places, request.TieRule, enabled);
                     if (refusal != null)
                         return Json(new { success = false, message = refusal });
@@ -3554,6 +3564,19 @@ namespace HpskSite.Controllers
                     request?.CompetitionId);
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Visas klubbens medaljregler på tävlingens resultatflik? Sajtinställningen <c>Medals:ClubRules</c> är nödbromsen; springskytte och
+        /// skidskytte har egna regler och får ingen yta (precisionsfamiljen och fältet har den).
+        /// </summary>
+        private bool MedalRulesSurfaceEnabled(HpskSite.Models.Competitions.CompetitionInfo? competition)
+        {
+            var type = competition?.CompetitionType ?? "";
+            if (type.Contains("spring", StringComparison.OrdinalIgnoreCase) || type.Contains("skid", StringComparison.OrdinalIgnoreCase))
+                return false;
+            var settings = HttpContext.RequestServices.GetService<HpskSite.Services.SiteSettings.SiteSettingService>();
+            return string.Equals(settings?.Get(MedalRuleEditSettings.SettingKey, "off"), "on", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Antal noterade särskjutningsrundor för tävlingen (precisionsfamiljens och fältets), för bekräftelsen vid ändrad indelning.</summary>
