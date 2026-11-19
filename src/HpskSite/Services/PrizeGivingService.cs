@@ -132,22 +132,10 @@ namespace HpskSite.Services
                 ?? (artifact.MedalsPerWeaponGroup ? MedalGroupingModes.WeaponGroup : MedalGroupingModes.Shb);
             var artifactPlaces = artifact.MedalPlaces ?? 0;
             var artifactTie = MedalTieRules.Normalize(artifact.MedalTieRule) ?? MedalTieRules.ShootOff;
-            var customRules = artifactMode == MedalGroupingModes.Class || artifactPlaces > 0 || artifactTie != MedalTieRules.ShootOff;
-
-            // Texten om vapengrupp C gäller bara när C finns — men klubbens egna regler beskrivs alltid (per klass gäller alla vapengrupper).
-            if (model.IsChampionship && (hasGroupC || customRules))
-            {
-                model.MedalGroupingText = MedalGrouping.Describe(artifactMode, artifactPlaces, artifactTie);
-                var current = ChampionshipRule.For(competition);
-                if (current.GroupingModeName != artifactMode || current.MedalPlaces != artifactPlaces || current.TieRule != artifactTie)
-                {
-                    model.MedalGroupingStale =
-                        "Medaljindelningen har ändrats sedan listan räknades ut. Listan nedan är "
-                        + $"räknad så här: {MedalGrouping.Describe(artifactMode, artifactPlaces, artifactTie)} "
-                        + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current.GroupingModeName, current.MedalPlaces, current.TieRule)} "
-                        + "Räkna om listan på fliken Resultat.";
-                }
-            }
+            var (groupingText, groupingStale) = BuildGroupingLabels(
+                model.IsChampionship, hasGroupC, artifactMode, artifactPlaces, artifactTie, ChampionshipRule.For(competition));
+            model.MedalGroupingText = groupingText;
+            model.MedalGroupingStale = groupingStale;
 
             // ⚠️ TALEN OCH ENHETEN KOMMER UR SAMMA KÄLLA. Artefakten bär sedan 2026-09-13 de
             // enheter den räknades i, och de vinner över tävlingens nuvarande konfiguration:
@@ -229,6 +217,31 @@ namespace HpskSite.Services
             await AddIntegrityWarningsAsync(model, competition, resultNode, artifact);
 
             return model;
+        }
+
+        /// <summary>
+        /// Texten som säger hur medaljerna delades ut, och varningen när tävlingens val ändrats efter att listan räknades ut. Ren funktion
+        /// (ingen tjänst, ingen databas) så att klubbens egna regler kan låsas med tester. <paramref name="awardsMedals"/> =
+        /// <see cref="ChampionshipRule.AwardsPlacementMedals"/>. Texten om vapengrupp C kräver att C finns; klubbens egna regler beskrivs alltid
+        /// (per klass gäller alla vapengrupper). Utan medaljer: ingen text.
+        /// </summary>
+        internal static (string Text, string? Stale) BuildGroupingLabels(
+            bool awardsMedals, bool hasGroupC, string artifactMode, int artifactPlaces, string artifactTie, ChampionshipRule current)
+        {
+            var customRules = artifactMode == MedalGroupingModes.Class || artifactPlaces > 0 || artifactTie != MedalTieRules.ShootOff;
+            if (!awardsMedals || !(hasGroupC || customRules)) return ("", null);
+
+            var text = MedalGrouping.Describe(artifactMode, artifactPlaces, artifactTie);
+            string? stale = null;
+            if (current.GroupingModeName != artifactMode || current.MedalPlaces != artifactPlaces || current.TieRule != artifactTie)
+            {
+                stale =
+                    "Medaljindelningen har ändrats sedan listan räknades ut. Listan nedan är "
+                    + $"räknad så här: {text} "
+                    + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current.GroupingModeName, current.MedalPlaces, current.TieRule)} "
+                    + "Räkna om listan på fliken Resultat.";
+            }
+            return (text, stale);
         }
 
         /// <summary>
