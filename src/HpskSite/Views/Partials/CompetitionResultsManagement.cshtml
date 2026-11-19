@@ -357,7 +357,7 @@
         </div>
 
         @* Klubbens egna medaljregler. Eget kort FÖRE listan: det ändras på stället och räknar om listan när det sparas. Dolt tills servern
-           säger att det gäller tävlingen (sajtinställningen Medals:ClubRules, inte SM/landsdel). *@
+           säger att det gäller tävlingen (grenen har ytan, inte SM/landsdel). *@
         @await Html.PartialAsync("_MedalRulesCard", competitionId)
         <script>
         document.addEventListener('hpsk:medal-rules-saved', function () {
