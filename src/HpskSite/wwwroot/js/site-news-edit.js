@@ -225,6 +225,16 @@
   const vis = h('select', { class: 'form-select w-auto', id: 'nwVis' },
     [[0, 'Alla, även utan inloggning'], [1, 'Alla inloggade'], [2, isRegion ? 'Medlemmar i kretsens klubbar' : 'Medlemmar i klubben'], [3, 'Styrelsen'], [4, 'Bara administratören']]
       .map(([v, t]) => h('option', { value: v, selected: v === 2 ? true : null }, t)));
+  // Fäst överst och kommentarsläge (sparas med ett eget anrop, SetPostOptions, som aldrig rör Revision). Kommentarsvalet visas bara när föreningen slagit på kommentarer.
+  const commentsEnabled = root.dataset.commentsEnabled === '1';
+  const pinned = h('input', { type: 'checkbox', class: 'form-check-input', id: 'nwPinned' });
+  const cmode = h('select', { class: 'form-select w-auto', id: 'nwComments' },
+    [[0, 'Av'], [1, 'På'], [2, 'Stängd (går att läsa, inga nya)']].map(([v, t]) => h('option', { value: v }, t)));
+  async function saveOptions() {
+    const j = await post('SetPostOptions', { id: st.id, commentsMode: commentsEnabled ? cmode.value : (st.commentsMode || 0), pinned: pinned.checked ? 'true' : 'false' });
+    if (j.success) st.commentsMode = parseInt(commentsEnabled ? cmode.value : (st.commentsMode || 0), 10);
+    return j;
+  }
   // Datumfält: sajtens vanliga svenska datumväljare (flatpickr + planering-dates.js: skriv "16 maj 2027" eller välj i kalendern). Värdet är alltid åååå-mm-dd eller fältet är rött.
   const date = h('input', { type: 'text', class: 'form-control', style: 'max-width:14rem', id: 'nwDate', autocomplete: 'off' });
   if (window.hpskPlDatePicker) window.hpskPlDatePicker(date);
@@ -358,6 +368,8 @@
       const j = await post('Save', Object.assign({ id: st.id, revision: st.revision }, d));
       if (!j.success) { say(j.message || 'Det gick inte att spara.', 'danger'); return; }
       apply(j.post);
+      const o = await saveOptions();
+      if (!o.success) { say(o.message || 'Nyheten sparades men fästningen och kommentarsläget gick inte att spara.', 'danger'); return; }
       if (publish !== undefined) {
         const p = await post('SetPublished', { id: st.id, revision: st.revision, publish: publish ? 'true' : 'false', publishedDate: dateValue() || '' });
         if (!p.success) { say(p.message || 'Det gick inte att publicera.', 'danger'); return; }
@@ -448,11 +460,14 @@
       galleryCard(),
       field('Vem får läsa nyheten?', 'nwVis', vis, 'Nyheten syns bara för dem på den nivån och över. Välj "Alla" bara för sådant som är offentligt.'),
       field('Datum som visas (valfritt)', 'nwDate', date, 'Tomt = dagen du publicerar.'),
+      h('div', { class: 'mb-3 form-check' }, pinned, h('label', { class: 'form-check-label', for: 'nwPinned' }, 'Fäst överst i listan'), h('div', { class: 'form-text' }, 'En fäst nyhet står först i arkivet tills du tar bort fästningen.')),
+      commentsEnabled ? field('Kommentarer', 'nwComments', cmode, 'På: klubbens medlemmar kan kommentera. Stängd: kommentarerna går att läsa men inga nya kan skrivas. Klubbens styrelse ansvarar för kommentarerna.') : null,
       msg, actions, mailBox);
     renderGallery();
     vis.addEventListener('change', refreshConsent);
     if (existing) {
       title.value = existing.title || ''; excerpt.value = existing.excerpt || ''; vis.value = String(existing.visibility);
+      pinned.checked = !!existing.isPinned; st.commentsMode = existing.commentsMode || 0; cmode.value = String(st.commentsMode);
       st.gallery = (existing.gallery || []).map(g => ({ fileId: g.fileId, alt: g.alt || '', caption: g.caption || '', showsPeople: !!g.showsPeople, consented: !!g.consented, thumb: g.thumb }));
       renderGallery();
       if (existing.publishedDate) setDate(String(existing.publishedDate).slice(0, 10));

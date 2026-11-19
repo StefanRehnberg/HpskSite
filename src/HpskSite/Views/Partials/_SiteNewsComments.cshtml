@@ -1,0 +1,101 @@
+@using HpskSite.Services.SitePages
+@model SiteNewsCommentsModel
+@*
+    Kommentarerna på en nyhet. Klubbens styrelse ansvarar för dem (BBS-lagen) och det står här. Texten visas bara för klubbens medlemmar (samma krets som får reagera); andra ser antalet.
+    Allt som skrivs ut är kodat (@-uttryck, aldrig Html.Raw) och kommentarens text visas som text med radbrytningar — en länk blir aldrig klickbar. Vyn avgör inget om behörighet: varje
+    knapp styrs av ett färdigt svar i modellen och servern prövar om allt vid varje anrop (SiteNewsCommentsController). Inga prompt/confirm/alert: "Ta bort" tar två klick.
+*@
+@{
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    string When(DateTime d) => d.ToString("d MMM yyyy HH:mm", sv);
+    string PageUrl(int p) => Model.PostUrl + (p > 1 ? "?kp=" + p : "") + "#kommentarer";
+}
+<section class="sn-comments mt-4 pt-3 border-top" id="kommentarer" data-sn-comments data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId" data-post-id="@Model.PostId" aria-labelledby="snCommentsHeading">
+    @if (Model.LoggedIn) { @Html.AntiForgeryToken() }
+    <h3 class="h5 mb-2" id="snCommentsHeading">Kommentarer <span class="text-muted fw-normal">(@Model.VisibleCount)</span></h3>
+
+    @if (!Model.CanReadText)
+    {
+        <p class="small text-muted mb-0">
+            @if (!Model.LoggedIn) { <span>Kommentarerna kan läsas av klubbens medlemmar. <a href="/login-register">Logga in som medlem</a> för att läsa och skriva.</span> }
+            else { <span>Kommentarerna kan bara läsas av klubbens medlemmar.</span> }
+        </p>
+    }
+    else
+    {
+        <p class="small text-muted mb-3">Klubbens styrelse ansvarar för kommentarerna. Skriv så som du skulle prata i klubbhuset. Hör en kommentar inte hemma kan du anmäla den, så tittar klubbens administratörer på den.</p>
+
+        @if (Model.IsModerator && Model.Comments.Any(c => c.IsPending))
+        {
+            <div class="alert alert-warning py-2 small" role="status">@Model.Comments.Count(c => c.IsPending) @(Model.Comments.Count(c => c.IsPending) == 1 ? "kommentar väntar" : "kommentarer väntar") på ditt godkännande. Den syns bara för dig och skribenten tills du godkänt den.</div>
+        }
+
+        @if (Model.CanComment)
+        {
+            <form class="sn-c-form mb-3" data-sn-c-form novalidate>
+                <label class="form-label small fw-semibold" for="snCommentBody">Skriv en kommentar</label>
+                <textarea id="snCommentBody" class="form-control" rows="3" maxlength="2000" data-sn-c-body aria-describedby="snCommentHelp"></textarea>
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                    <button type="submit" class="btn btn-primary btn-sm" data-sn-c-send>Skicka</button>
+                    <span class="small text-muted" id="snCommentHelp"><span data-sn-c-count>0</span> av 2000 tecken@(Model.WillBePreModerated ? ". Din kommentar granskas av en moderator innan den syns för andra." : ".")</span>
+                </div>
+                <div class="small text-danger mt-1 d-none" data-sn-c-error role="alert"></div>
+            </form>
+        }
+        else if (Model.Mode == 2)
+        {
+            <p class="small text-muted">Kommentarerna på den här nyheten är stängda. Du kan fortfarande läsa dem.</p>
+        }
+
+        @if (Model.Comments.Count == 0)
+        {
+            <p class="text-muted small mb-0">Inga kommentarer ännu.</p>
+        }
+        <ul class="list-unstyled mb-3 sn-c-list">
+            @foreach (var c in Model.Comments)
+            {
+                <li class="sn-c @(c.IsDeleted ? "sn-c-deleted" : "") @(c.IsPending ? "sn-c-pending" : "")" id="kommentar-@c.Id" data-sn-comment="@c.Id" data-sn-mine="@(c.IsMine ? "1" : "0")">
+                    <div class="sn-c-avatar" aria-hidden="true">@c.Initials</div>
+                    <div class="sn-c-main">
+                        <div class="small">
+                            @if (c.IsDeleted && !Model.IsModerator)
+                            {
+                                <span class="text-muted fst-italic">Kommentaren är borttagen</span>
+                            }
+                            else
+                            {
+                                <strong>@c.DisplayName</strong>
+                                <span class="text-muted ms-1">@When(c.CreatedDate)@(c.EditedDate != null ? " · ändrad" : "")</span>
+                                @if (c.IsPending) { <span class="badge text-bg-warning ms-1">Väntar på granskning</span> }
+                                @if (c.IsDeleted) { <span class="badge text-bg-secondary ms-1">Borttagen</span> }
+                                @if (c.OpenReports > 0) { <span class="badge text-bg-danger ms-1" title="Anmäld av en medlem">@(c.OpenReports == 1 ? "1 anmälan" : c.OpenReports + " anmälningar")</span> }
+                            }
+                        </div>
+                        @if (!(c.IsDeleted && !Model.IsModerator))
+                        {
+                            <div class="sn-c-body" data-sn-c-text>@c.Body</div>
+                        }
+                        <div class="sn-c-actions small mt-1 d-flex flex-wrap gap-2">
+                            @if (c.CanEdit) { <button type="button" class="btn btn-link btn-sm p-0" data-sn-c-edit>Ändra</button> }
+                            @if (c.CanDelete) { <button type="button" class="btn btn-link btn-sm p-0 text-danger" data-sn-c-delete>Ta bort</button> }
+                            @if (c.CanApprove) { <button type="button" class="btn btn-link btn-sm p-0" data-sn-c-approve>Godkänn</button> }
+                            @if (c.CanRestore) { <button type="button" class="btn btn-link btn-sm p-0" data-sn-c-restore>Återställ</button> }
+                            @if (c.CanReport) { <button type="button" class="btn btn-link btn-sm p-0 text-muted" data-sn-c-report>Anmäl</button> }
+                            @if (c.OpenReports > 0 && Model.IsModerator && !c.IsDeleted) { <button type="button" class="btn btn-link btn-sm p-0" data-sn-c-handle>Markera anmälan som hanterad</button> }
+                        </div>
+                        <div class="small mt-1" data-sn-c-slot></div>
+                    </div>
+                </li>
+            }
+        </ul>
+        @if (Model.PageCount > 1)
+        {
+            <nav aria-label="Bläddra bland kommentarerna" class="d-flex gap-2 align-items-center">
+                @if (Model.Page > 1) { <a class="btn btn-outline-secondary btn-sm" href="@PageUrl(Model.Page - 1)">Tidigare</a> }
+                <span class="small text-muted">Sida @Model.Page av @Model.PageCount</span>
+                @if (Model.Page < Model.PageCount) { <a class="btn btn-outline-secondary btn-sm" href="@PageUrl(Model.Page + 1)">Senare</a> }
+            </nav>
+        }
+        <div class="small text-danger mt-1 d-none" data-sn-c-listerror role="alert"></div>
+    }
+</section>

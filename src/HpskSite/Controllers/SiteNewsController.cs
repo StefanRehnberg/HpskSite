@@ -89,7 +89,7 @@ namespace HpskSite.Controllers
         {
             id = p.Id, title = p.Title, slug = p.Slug, excerpt = p.Excerpt, bodyHtml = SiteHtmlSanitizerSafe(p.BodyHtml), coverFileId = p.CoverFileId, coverAlt = p.CoverAlt,
             status = (int)p.Status, visibility = (int)p.ReadVisibility, revision = p.Revision, publishedDate = p.PublishedDate, authorName = p.AuthorName,
-            url = PostUrl(g, p.Slug), canDelete = g.CanDelete, mailedDate = p.MailedDate, mailedCount = p.MailedCount,
+            url = PostUrl(g, p.Slug), canDelete = g.CanDelete, commentsMode = (int)p.CommentsMode, isPinned = p.IsPinned, mailedDate = p.MailedDate, mailedCount = p.MailedCount,
             // Galleriet i visningsordning (första = den stora). En nyhet från före galleriet har bara ett omslag, som visas som en enda bild (SitePosts.GalleryFor).
             gallery = gallery.Select(i => new { fileId = i.FileId, alt = i.AltText, caption = i.Caption, showsPeople = i.ShowsPeople, consented = i.ConsentDate != null, url = SiteImages.UrlFor(i.FileId), thumb = SiteImages.ThumbUrlFor(i.FileId, 320) }),
             maxGallery = SitePostRules.MaxGallery,
@@ -349,6 +349,51 @@ namespace HpskSite.Controllers
             using var scope = _scopes.CreateScope(autoComplete: true);
             var p = SitePosts.Get(scope.Database, id, g.OwnerType, g.OwnerId);
             return p == null ? null : Dto(g, p, SitePosts.GalleryFor(scope.Database, p));
+        }
+
+        /// <summary>
+        /// Föreningens brytare för kommentarer och förgranskningsläget. Bara klubbens egen administratör eller sajtadmin (samma rätt som att ta bort en nyhet). Kommentarer kan bara slås
+        /// PÅ för en klubb med GODKÄNT PUB-avtal (aktuell version): styrelsen ansvarar för kommentarerna (BBS-lagen). Av är alltid tillåtet.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin eller sajtadmin (SiteNewsRules.CanDelete), brytare 2 PÅ, villkoren accepterade; PÅ kräver godkänt PUB-avtal")]
+        public async Task<IActionResult> SetCommentsEnabled(string ownerType, int ownerId, bool enabled, int moderation, [FromServices] DpaAcceptanceService dpa)
+        {
+            if (ownerType != SiteTemplates.Club) return Fail("Kommentarer finns bara på en klubbs nyheter.");
+            var g = await GateAsync(ownerType, ownerId, write: true, needsDelete: true);
+            if (g.Error != null) return g.Error;
+            if (moderation is < 0 or > 2) return Fail("Okänt förgranskningsläge.");
+            if (enabled && !(await dpa.GetStatusForClubAsync(ownerId)).Accepted)
+                return Fail("Klubben måste först godkänna personuppgiftsbiträdesavtalet (PUB-avtalet) innan kommentarer kan slås på.", "dpa");
+            bool ok;
+            using (var scope = _scopes.CreateScope())
+            {
+                ok = SitePostComments.SetSettings(scope.Database, g.OwnerType, g.OwnerId, enabled, (byte)moderation, g.Actor!.MemberId ?? 0, DateTime.Now);
+                if (ok) scope.Complete();
+            }
+            return ok ? Json(new { success = true, enabled, moderation }) : Fail("Föreningen finns inte.");
+        }
+
+        /// <summary>
+        /// Nyhetens kommentarsläge (0 av, 1 på, 2 stängd) och "Fäst överst". Sparas utan att röra <c>Revision</c> — skribentens konfliktkontroll gäller texten, inte de här två valen.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Gate: ägarens egen admin, sajtadmin eller styrelsen (SiteNewsRules), brytare 2 PÅ, villkoren accepterade")]
+        public async Task<IActionResult> SetPostOptions(string ownerType, int ownerId, int id, int commentsMode, bool pinned)
+        {
+            var g = await GateAsync(ownerType, ownerId, write: true);
+            if (g.Error != null) return g.Error;
+            if (commentsMode is < 0 or > 2) return Fail("Okänt kommentarsläge.");
+            if (ownerType != SiteTemplates.Club && commentsMode != 0) return Fail("Kommentarer finns bara på en klubbs nyheter.");
+            bool ok;
+            using (var scope = _scopes.CreateScope())
+            {
+                ok = SitePostComments.SetPostOptions(scope.Database, id, g.OwnerType, g.OwnerId, (byte)commentsMode, pinned);
+                if (ok) scope.Complete();
+            }
+            return ok ? Json(new { success = true }) : Fail("Nyheten finns inte.", "notfound");
         }
 
         /// <summary>Skribenten markerar en "ta bort min bild"-förfrågan som hanterad (bilden är borttagen ur galleriet, eller förfrågan avvisad). Prövas mot ägaren.</summary>

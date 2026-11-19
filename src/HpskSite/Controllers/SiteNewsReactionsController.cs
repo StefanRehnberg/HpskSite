@@ -38,7 +38,7 @@ namespace HpskSite.Controllers
             _scopes = scopes; _rate = rate; _content = content; _members = members; _memberService = memberService; _viewers = viewers;
         }
 
-        private sealed record Gate(IActionResult? Error, string OwnerType = "", int OwnerId = 0, int MemberId = 0, SitePostRow? Post = null);
+        private sealed record Gate(IActionResult? Error, string OwnerType = "", int OwnerId = 0, int MemberId = 0, SitePostRow? Post = null, string OwnerName = "", string OwnerUrl = "/");
 
         private IActionResult Fail(string message, string? code = null) => Json(new { success = false, message, code });
 
@@ -64,7 +64,9 @@ namespace HpskSite.Controllers
             using var scope = _scopes.CreateScope(autoComplete: true);
             var post = SitePosts.GetReadable(scope.Database, postId, ownerType, ownerId, viewer, includeDrafts: false);
             if (post == null || !post.IsPublished) return new Gate(Fail("Nyheten finns inte.", "notfound"));
-            return new Gate(null, ownerType, ownerId, member.Id, post);
+            var ownerName = node.GetValue<string>("clubName") ?? node.GetValue<string>("regionName") ?? node.Name ?? "";
+            var ownerUrl = UmbracoContext.Content?.GetById(ownerId)?.Url() ?? "/";
+            return new Gate(null, ownerType, ownerId, member.Id, post, ownerName, ownerUrl);
         }
 
         private static object State(NPoco.IDatabase db, Gate g)
@@ -121,7 +123,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("Gate: inloggad + läsrätt till nyheten (SitePosts.GetReadable), räknare per medlem; bilden måste ligga i nyhetens galleri")]
-        public async Task<IActionResult> RequestImageRemoval(string ownerType, int ownerId, int postId, int fileId, string? message)
+        public async Task<IActionResult> RequestImageRemoval(string ownerType, int ownerId, int postId, int fileId, string? message, [FromServices] SiteNewsAlerts alerts)
         {
             var g = await GateAsync(ownerType, ownerId, postId, mustBeMember: false);
             if (g.Error != null) return g.Error;
@@ -132,7 +134,11 @@ namespace HpskSite.Controllers
                 added = SitePosts.AddImageRequest(scope.Database, g.Post!.Id, g.OwnerType, g.OwnerId, fileId, g.MemberId, message, DateTime.Now);
                 if (added) scope.Complete();
             }
-            return added ? Json(new { success = true }) : Fail("Förfrågan finns redan, eller bilden ligger inte längre i galleriet.", "exists");
+            if (!added) return Fail("Förfrågan finns redan, eller bilden ligger inte längre i galleriet.", "exists");
+            // Mejl till klubbens administratörer, EFTER att scopet stängts. Ett misslyckat mejl ändrar inte svaret: förfrågan syns på nyhetens sida ändå.
+            try { await alerts.ImageRemovalRequestedAsync(g.OwnerType, g.OwnerId, g.OwnerName, g.Post!, fileId, message, g.MemberId, Request.PublicBase() + g.OwnerUrl.TrimEnd('/') + "/nyheter/" + g.Post!.Slug + "/"); }
+            catch { /* loggas i tjänsten */ }
+            return Json(new { success = true });
         }
     }
 }

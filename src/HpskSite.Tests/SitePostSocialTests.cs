@@ -465,7 +465,7 @@ namespace HpskSite.Tests
 
             Assert.Equal(0, f.Db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SitePostReaction WHERE PostId = @0", id));              // reaktionen är borta
             var comment = f.Db.Single<(int? Author, string Name, string Body)>("SELECT AuthorMemberId, AuthorName, Body FROM dbo.SitePostComment WHERE PostId = @0", id);
-            Assert.Null(comment.Author); Assert.Equal("Tidigare medlem", comment.Name); Assert.Equal("Fint!", comment.Body);          // kommentaren står kvar, anonymiserad
+            Assert.Null(comment.Author); Assert.Equal("Tidigare medlem", comment.Name); Assert.Equal("(Kommentaren är raderad på begäran)", comment.Body);   // raden står kvar, men raderingsvägen tömmer texten (steg 2, Stefans beslut 8)
             Assert.Null(f.Db.ExecuteScalar<int?>("SELECT DeletedByMemberId FROM dbo.SitePostComment WHERE PostId = @0", id));
             var img = Assert.Single(SitePosts.GalleryRows(f.Db, id, "Club", A));
             Assert.Null(img.ConsentByMemberId); Assert.NotNull(img.ConsentDate);                                                       // samtycket står kvar utan personen

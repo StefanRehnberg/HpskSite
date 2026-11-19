@@ -18,7 +18,7 @@ namespace HpskSite.Services.SitePages
         /// </summary>
         public static readonly IReadOnlyList<string> RequiredTables = new[]
         {
-            "dbo.SiteOwner", "dbo.SitePage", "dbo.SitePageVersion", "dbo.SiteMenuItem", "dbo.SitePageRef", "dbo.SiteAudit", "dbo.SiteSupportGrant", "dbo.SiteFile", "dbo.SiteFormEntry", "dbo.SiteImageAlbum", "dbo.SiteImageAlbumItem", "dbo.SitePost", "dbo.SitePostRef", "dbo.SitePostImage", "dbo.SitePostReaction", "dbo.SitePostComment", "dbo.SitePostImageRequest"
+            "dbo.SiteOwner", "dbo.SitePage", "dbo.SitePageVersion", "dbo.SiteMenuItem", "dbo.SitePageRef", "dbo.SiteAudit", "dbo.SiteSupportGrant", "dbo.SiteFile", "dbo.SiteFormEntry", "dbo.SiteImageAlbum", "dbo.SiteImageAlbumItem", "dbo.SitePost", "dbo.SitePostRef", "dbo.SitePostImage", "dbo.SitePostReaction", "dbo.SitePostComment", "dbo.SitePostCommentReport", "dbo.SitePostImageRequest"
         };
 
         /// <summary>De tabeller i <see cref="RequiredTables"/> som <paramref name="exists"/> inte känner igen. Ren funktion.</summary>

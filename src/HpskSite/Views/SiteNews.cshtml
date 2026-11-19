@@ -4,6 +4,9 @@
 @inject SiteViewerResolver Viewers
 @inject SiteSignatureService Signatures
 @inject SiteNewsSocialFactory NewsSocial
+@inject SiteNewsCommentsFactory NewsComments
+@inject HpskSite.Services.DpaAcceptanceService Dpa
+@inject Umbraco.Cms.Core.Services.IMemberService MemberSvc
 @inject SitePageViewFactory SitePages
 @inject Umbraco.Cms.Infrastructure.Scoping.IScopeProvider Scopes
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -28,7 +31,12 @@
     SitePostRow? post = null;
     SiteNewsPostSocial? social = null;                                              // galleri, reaktioner och förfrågningar för EN nyhet (partialvyerna tar bara den)
     Dictionary<int, SitePostReactionSummary> listReactions = new();                 // antal reaktioner per nyhet i arkivet (en gruppfråga)
-    Dictionary<int, int> listImageRequests = new();                                 // obehandlade "ta bort min bild" per nyhet (bara skribenter ser dem)
+    Dictionary<int, SiteCommentCounts> listComments = new();                        // kommentarer per nyhet i arkivet (en gruppfråga; väntande/anmälda bara för moderatorer)
+    SiteCommentSettings? commentSettings = null;                                    // föreningens brytare (bara i arkivet)
+    var dpaAccepted = false;
+    SiteNewsCommentsModel? commentsModel = null;
+    var isModerator = false;
+    Dictionary<int, int> listImageRequests = new();                               // obehandlade "ta bort min bild" per nyhet (bara skribenter ser dem)
     string? regionCode = null;
     var title = "Nyheter";
 
@@ -37,6 +45,8 @@
         regionCode = req!.OwnerType == SiteTemplates.Region ? Model!.Value<string>("regionCode") : null;
         viewer = await Viewers.ResolveAsync(req.OwnerType, req.OwnerId, regionCode);
         (canWrite, canDelete) = await Viewers.NewsRightsAsync(req.OwnerType, req.OwnerId, regionCode, viewer);
+        isModerator = viewer.LoggedIn && req.OwnerType == SiteTemplates.Club && SitePostReactionRules.CanReact(viewer) && (viewer.IsOwnerAdmin || viewer.IsOwnerBoard);
+        if (req.OwnerType == SiteTemplates.Club && canDelete && req.PageKey == SitePageRequest.NewsKey) dpaAccepted = (await Dpa.GetStatusForClubAsync(req.OwnerId)).Accepted;   // async FÖRE scopet
         using var scope = Scopes.CreateScope(autoComplete: true);
         if (req.PageKey == SitePageRequest.NewsKey)
         {
@@ -47,6 +57,11 @@
                 (rows, total) = SitePosts.List(scope.Database, req.OwnerType, req.OwnerId, viewer, includeDrafts: canWrite, (pageNo - 1) * PageSize, PageSize);
                 listReactions = SitePostReactions.Summaries(scope.Database, req.OwnerType, req.OwnerId, rows.Where(r => r.IsPublished).Select(r => r.Id).ToList());
                 if (canWrite) listImageRequests = SitePosts.OpenImageRequestCounts(scope.Database, req.OwnerType, req.OwnerId);
+                if (req.OwnerType == SiteTemplates.Club)
+                {
+                    commentSettings = SitePostComments.Settings(scope.Database, req.OwnerType, req.OwnerId);
+                    if (commentSettings.Enabled) listComments = SitePostComments.Counts(scope.Database, req.OwnerType, req.OwnerId, isModerator);
+                }
             }
             catch (Microsoft.Data.SqlClient.SqlException) { ok = false; }
         }
@@ -55,10 +70,21 @@
             post = SitePosts.GetReadableBySlug(scope.Database, req.OwnerType, req.OwnerId, req.PostSlug ?? "", viewer, includeDrafts: canWrite);
             if (post == null) ok = false; else title = post.Title;
         }
-        else title = "Skriv en nyhet";
+        else
+        {
+            title = "Skriv en nyhet";
+            if (req.OwnerType == SiteTemplates.Club) commentSettings = SitePostComments.Settings(scope.Database, req.OwnerType, req.OwnerId);   // skrivytan visar kommentarsvalet bara när föreningen slagit på kommentarer
+        }
     }
     // Galleri, reaktioner och förfrågningar: byggs EFTER att vyns scope stängts (medlemsuppslaget är async och får inte ligga inne i ett scope). Nyheten är redan läsprövad ovan.
     if (ok && post != null) social = await NewsSocial.BuildAsync(post, viewer, canWrite);
+    var updatedByName = "";
+    if (ok && post != null && canWrite && post.UpdatedByMemberId is int updaterId) updatedByName = MemberSvc.GetById(updaterId)?.Name ?? "";
+    if (ok && post != null)
+    {
+        int.TryParse(Context.Request.Query["kp"].ToString(), out var commentPage);
+        commentsModel = await NewsComments.BuildAsync(post, viewer, archiveUrl + post.Slug + "/", commentPage);
+    }
     if (ok)
     {
         ViewBag.sitePageView = SitePages.For(req!.OwnerType, req.OwnerId, Model!.Url(), viewer);
@@ -79,6 +105,12 @@
 
     ViewBag.Title = title + " – " + ownerName;
     ViewBag.OgTitle = ownerName;
+    // Delningsförhandsvisning (titel, bild) bara för en publicerad nyhet som är öppen för alla — aldrig för en som inte får läsas av alla.
+    if (post != null && post.IsPublished && post.Visibility == SiteVisibility.Alla)
+    {
+        ViewBag.OgTitle = post.Title + " – " + ownerName;
+        if (post.CoverFileId != null) ViewBag.OgImage = SiteImages.UrlFor(post.CoverFileId.Value);
+    }
     // En nyhet som inte är öppen för alla beskrivs inte i delningsförhandsvisningen (titel och utdrag får inte läcka via en delad länk).
     ViewBag.OgDescription = post != null && post.IsPublished && post.Visibility == SiteVisibility.Alla && !string.IsNullOrWhiteSpace(post.Excerpt) ? post.Excerpt : $"Nyheter från {ownerName}";
 
@@ -118,6 +150,54 @@
                 <a class="btn btn-primary" href="@(archiveUrl)skriv/"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Skriv en nyhet</a>
             }
         </div>
+        @if (canDelete && req.OwnerType == SiteTemplates.Club && commentSettings != null)
+        {
+            @* Inställningskortet för kommentarer: bara klubbens administratör. På kräver godkänt PUB-avtal (servern prövar det igen). Styrelsen ansvarar för kommentarerna och det står här. *@
+            <details class="card card-body mb-3 py-2" id="snCommentSettings" data-owner-type="@req.OwnerType" data-owner-id="@req.OwnerId">
+                <summary class="fw-semibold">Kommentarer på nyheterna <span class="badge @(commentSettings.Enabled ? "text-bg-success" : "text-bg-secondary") ms-1">@(commentSettings.Enabled ? "På" : "Av")</span></summary>
+                <div class="mt-3">
+                    <p class="small text-muted">Klubbens styrelse ansvarar för kommentarerna som skrivs på klubbens sida (lagen om elektroniska anslagstavlor). Bara klubbens medlemmar kan läsa och skriva dem. Ni väljer själva per nyhet om den ska ha kommentarer (i skrivytan). Administratörer, styrelsen och nyhetens skribent kan ta bort och godkänna kommentarer, och medlemmar kan anmäla en kommentar till klubbens administratörer.</p>
+                    @if (!dpaAccepted)
+                    {
+                        <div class="alert alert-warning py-2 small">Klubben har inte godkänt personuppgiftsbiträdesavtalet (PUB-avtalet) ännu, och kommentarer kan inte slås på före det. <a href="/personuppgiftsbitradesavtal" target="_blank" rel="noopener">Läs avtalet</a> och godkänn det i klubbens administration.</div>
+                    }
+                    @Html.AntiForgeryToken()
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="snCommentsOn" @(commentSettings.Enabled ? "checked" : "") @(!dpaAccepted && !commentSettings.Enabled ? "disabled" : "")>
+                        <label class="form-check-label" for="snCommentsOn">Tillåt kommentarer på klubbens nyheter</label>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small" for="snCommentsModeration">Granskning innan en kommentar syns</label>
+                        <select class="form-select form-select-sm w-auto" id="snCommentsModeration">
+                            <option value="0" selected="@(commentSettings.Moderation == 0)">Ingen granskning</option>
+                            <option value="1" selected="@(commentSettings.Moderation == 1)">Juniorers kommentarer granskas av en moderator</option>
+                            <option value="2" selected="@(commentSettings.Moderation == 2)">Alla kommentarer granskas av en moderator</option>
+                        </select>
+                        <div class="form-text">Juniorer = under 19 år, eller okänd ålder. En kommentar som granskas syns bara för kommentatorn och moderatorerna tills den godkänts.</div>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" id="snCommentsSave">Spara</button>
+                    <span class="small ms-2" id="snCommentsMsg" role="status"></span>
+                </div>
+            </details>
+            <script>
+                (function () {
+                    const box = document.getElementById('snCommentSettings');
+                    document.getElementById('snCommentsSave').addEventListener('click', async function () {
+                        const msg = document.getElementById('snCommentsMsg'); this.disabled = true; msg.textContent = '';
+                        const fd = new FormData();
+                        fd.append('ownerType', box.dataset.ownerType); fd.append('ownerId', box.dataset.ownerId);
+                        fd.append('enabled', document.getElementById('snCommentsOn').checked ? 'true' : 'false');
+                        fd.append('moderation', document.getElementById('snCommentsModeration').value);
+                        try {
+                            const r = await fetch('/umbraco/surface/SiteNews/SetCommentsEnabled', { method: 'POST', credentials: 'same-origin', headers: { 'RequestVerificationToken': box.querySelector('input[name=__RequestVerificationToken]').value }, body: fd });
+                            const j = await r.json();
+                            if (j.success) { msg.className = 'small ms-2 text-success'; msg.textContent = 'Sparat.'; setTimeout(function () { location.reload(); }, 600); }
+                            else { msg.className = 'small ms-2 text-danger'; msg.textContent = j.message || 'Det gick inte att spara.'; this.disabled = false; }
+                        } catch (e) { msg.className = 'small ms-2 text-danger'; msg.textContent = 'Det gick inte att nå servern.'; this.disabled = false; }
+                    });
+                })();
+            </script>
+        }
         @if (rows.Count == 0)
         {
             <p class="text-muted">@(pageNo > 1 ? "Det finns inga fler nyheter." : "Det finns inga nyheter ännu.")</p>
@@ -138,6 +218,13 @@
                             @if (listReactions.TryGetValue(p.Id, out var rowReactions) && rowReactions.Total > 0 && rowReactions.Top is { } rowTop)
                             {
                                 <span class="ms-2" title="@rowReactions.Total @(rowReactions.Total == 1 ? "reaktion" : "reaktioner")"><span aria-hidden="true">@SitePostReactionKinds.Emoji(rowTop)</span> @rowReactions.Total<span class="visually-hidden"> @(rowReactions.Total == 1 ? "reaktion" : "reaktioner")</span></span>
+                            }
+                            @if (p.IsPinned && p.IsPublished) { <span class="badge text-bg-info ms-1" title="Fäst överst"><i class="bi bi-pin-angle-fill" aria-hidden="true"></i> Fäst</span> }
+                            @if (p.CommentsMode != 0 && listComments.TryGetValue(p.Id, out var rowComments))
+                            {
+                                @if (rowComments.Visible > 0) { <span class="ms-2" title="@rowComments.Visible @(rowComments.Visible == 1 ? "kommentar" : "kommentarer")"><span aria-hidden="true">💬</span> @rowComments.Visible<span class="visually-hidden"> @(rowComments.Visible == 1 ? "kommentar" : "kommentarer")</span></span> }
+                                @if (rowComments.Pending > 0) { <span class="badge text-bg-warning ms-1">@rowComments.Pending väntar på granskning</span> }
+                                @if (rowComments.Reported > 0) { <span class="badge text-bg-danger ms-1">@rowComments.Reported anmälda</span> }
                             }
                             @if (listImageRequests.TryGetValue(p.Id, out var rowRequests) && rowRequests > 0)
                             {
@@ -171,10 +258,20 @@
             @* Bilderna: galleriet (en stor och två små, "+N"), eller omslaget som en enda bild för en nyhet från före galleriet (SitePosts.GalleryFor). *@
             @if (social != null) { @await Html.PartialAsync("_SiteNewsGallery", social) }
             <div class="site-post-body">@Html.Raw(Signatures.Resolve(SiteHtmlSanitizer.Sanitize(post.BodyHtml), post.OwnerType, post.OwnerId))</div>
+            @if (canWrite && post.UpdatedDate > (post.PublishedDate ?? post.CreatedDate).AddMinutes(5))
+            {
+                @* Skribenterna ser vem som ändrade senast; andra ser bara att och när (inga namn på en sida som kan läsas av fler än skribenterna). *@
+                <p class="small text-muted mb-0">Senast ändrad @post.UpdatedDate.ToString("d MMMM yyyy HH:mm", sv)@(post.UpdatedByMemberId != null && !string.IsNullOrWhiteSpace(updatedByName) ? " av " + updatedByName : "")</p>
+            }
+            else if (post.UpdatedDate > (post.PublishedDate ?? post.CreatedDate).AddMinutes(5))
+            {
+                <p class="small text-muted mb-0">Senast ändrad @post.UpdatedDate.ToString("d MMMM yyyy", sv)</p>
+            }
             @if (social != null && post.IsPublished) { @await Html.PartialAsync("_SiteNewsReactions", social) }
+            @if (commentsModel != null) { @await Html.PartialAsync("_SiteNewsComments", commentsModel) }
             @if (social != null && canWrite) { @await Html.PartialAsync("_SiteNewsImageRequests", social) }
-            <link rel="stylesheet" href="/css/site-news.css?v=2" />
-            <script src="/js/site-news-view.js?v=1" defer></script>
+            <link rel="stylesheet" href="/css/site-news.css?v=3" />
+            <script src="/js/site-news-view.js?v=2" defer></script>
             @if (canWrite)
             {
                 <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">
@@ -210,7 +307,7 @@
     {
         <p class="mb-2"><a href="@archiveUrl" class="text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Alla nyheter</a></p>
         <h2 class="h2 mb-3">Skriv en nyhet</h2>
-        <div id="newsEditor" data-owner-type="@req.OwnerType" data-owner-id="@req.OwnerId" data-archive-url="@archiveUrl" data-can-delete="@(canDelete ? "1" : "0")" data-is-region="@(req.OwnerType == SiteTemplates.Region ? "1" : "0")">
+        <div id="newsEditor" data-owner-type="@req.OwnerType" data-owner-id="@req.OwnerId" data-archive-url="@archiveUrl" data-can-delete="@(canDelete ? "1" : "0")" data-comments-enabled="@(commentSettings?.Enabled == true ? "1" : "0")" data-is-region="@(req.OwnerType == SiteTemplates.Region ? "1" : "0")">
             @Html.AntiForgeryToken()
             <noscript><div class="alert alert-warning">Skrivytan behöver JavaScript.</div></noscript>
             <p class="text-muted">Laddar …</p>
@@ -229,7 +326,7 @@
         <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
         <script src="/js/planering-dates.js?v=1"></script>
         <script src="/js/site-signature.js?v=2"></script>
-        <script src="/js/site-news-edit.js?v=7"></script>
+        <script src="/js/site-news-edit.js?v=8"></script>
     }
 
     @if (ok)

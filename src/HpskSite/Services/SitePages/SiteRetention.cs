@@ -50,6 +50,7 @@ namespace HpskSite.Services.SitePages
             var ip = db.Execute("UPDATE dbo.SiteAudit SET IpHash = NULL WHERE IpHash IS NOT NULL AND CreatedDate < @0", now.AddDays(-IpHashDays));
             var (pnr, entries) = PurgeFormEntries(db, now);
             var posts = PurgeDeletedPosts(db, now);
+            posts += PurgeDeletedComments(db, now);
             return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip, pnr, entries, posts);
         }
 
@@ -65,6 +66,18 @@ namespace HpskSite.Services.SitePages
             if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.SitePost', N'U') IS NULL THEN 0 ELSE 1 END") == 0) return 0;
             var cut = now.AddDays(-DeletedPostDays);
             return Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SitePost WHERE DeletedDate IS NOT NULL AND DeletedDate < @0", cut));
+        }
+
+        /// <summary>
+        /// Raderade kommentarer sparas 30 dagar (så en moderator kan återställa, <see cref="SiteCommentRules.RestoreDays"/>) och är sedan slutligt borta. Anmälningarnas fria text
+        /// (<c>Reason</c>) nollas 90 dagar efter att anmälan hanterats. Körs bara när tabellerna finns.
+        /// </summary>
+        public static int PurgeDeletedComments(IDatabase db, DateTime now)
+        {
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(N'dbo.SitePostComment', N'U') IS NULL OR OBJECT_ID(N'dbo.SitePostCommentReport', N'U') IS NULL THEN 0 ELSE 1 END") == 0) return 0;
+            db.Execute("UPDATE dbo.SitePostCommentReport SET Reason = NULL WHERE Reason IS NOT NULL AND HandledDate IS NOT NULL AND HandledDate < @0", now.AddDays(-90));
+            var cut = now.AddDays(-SiteCommentRules.RestoreDays);
+            return Repeat(() => db.Execute($"DELETE TOP ({Batch}) FROM dbo.SitePostComment WHERE DeletedDate IS NOT NULL AND DeletedDate < @0", cut));
         }
 
         public const int PersonalNumberDays = 30;

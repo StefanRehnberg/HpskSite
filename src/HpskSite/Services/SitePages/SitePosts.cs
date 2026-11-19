@@ -33,6 +33,10 @@ namespace HpskSite.Services.SitePages
         public DateTime? DeletedDate { get; set; }
         public DateTime? MailedDate { get; set; }
         public int? MailedCount { get; set; }
+        /// <summary>Kommentarsläge: 0 = av (förval), 1 = på, 2 = stängd för nya men läsbar.</summary>
+        public byte CommentsMode { get; set; }
+        /// <summary>Fäst överst i arkivet.</summary>
+        public bool IsPinned { get; set; }
 
         public bool IsPublished => Status == (byte)SitePostStatus.Published;
         public SiteVisibility Visibility => (SiteVisibility)ReadVisibility;
@@ -191,10 +195,10 @@ namespace HpskSite.Services.SitePages
     /// </summary>
     public static class SitePosts
     {
-        private const string Cols = "Id, OwnerType, OwnerId, Title, Slug, Excerpt, BodyHtml, CoverFileId, CoverAlt, AuthorMemberId, AuthorName, Status, ReadVisibility, PublishedDate, FirstPublishedDate, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, DeletedDate, MailedDate, MailedCount";
+        private const string Cols = "Id, OwnerType, OwnerId, Title, Slug, Excerpt, BodyHtml, CoverFileId, CoverAlt, AuthorMemberId, AuthorName, Status, ReadVisibility, PublishedDate, FirstPublishedDate, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, DeletedDate, MailedDate, MailedCount, CommentsMode, IsPinned";
 
         /// <summary>Kolumnerna utan texten, för listor.</summary>
-        private const string ListCols = "Id, OwnerType, OwnerId, Title, Slug, Excerpt, CAST(N'' AS NVARCHAR(MAX)) AS BodyHtml, CoverFileId, CoverAlt, AuthorMemberId, AuthorName, Status, ReadVisibility, PublishedDate, FirstPublishedDate, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, DeletedDate, MailedDate, MailedCount";
+        private const string ListCols = "Id, OwnerType, OwnerId, Title, Slug, Excerpt, CAST(N'' AS NVARCHAR(MAX)) AS BodyHtml, CoverFileId, CoverAlt, AuthorMemberId, AuthorName, Status, ReadVisibility, PublishedDate, FirstPublishedDate, Revision, UpdatedByMemberId, CreatedDate, UpdatedDate, DeletedDate, MailedDate, MailedCount, CommentsMode, IsPinned";
 
         /// <summary>Lägger in en ny nyhet som utkast. Ägarens rad låses (UPDLOCK) så att två samtidiga skrivningar inte får samma adress.</summary>
         public static SitePostWrite Create(IDatabase db, string ownerType, int ownerId, SitePostInput input, SitePostAuthor author, DateTime now, SiteActor actor)
@@ -333,7 +337,7 @@ namespace HpskSite.Services.SitePages
             var total = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM dbo.SitePost WHERE {where}", ownerType, ownerId, includeDrafts ? 1 : 0);
             var rows = db.Fetch<SitePostRow>(
                 $@"SELECT {ListCols} FROM dbo.SitePost WHERE {where}
-                   ORDER BY CASE WHEN Status = 0 THEN 0 ELSE 1 END, PublishedDate DESC, Id DESC
+                   ORDER BY CASE WHEN Status = 0 THEN 0 ELSE 1 END, CASE WHEN Status = 1 AND IsPinned = 1 THEN 0 ELSE 1 END, PublishedDate DESC, Id DESC
                    OFFSET @3 ROWS FETCH NEXT @4 ROWS ONLY", ownerType, ownerId, includeDrafts ? 1 : 0, offset, take);
             return (rows, total);
         }

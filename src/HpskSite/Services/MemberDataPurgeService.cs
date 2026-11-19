@@ -206,10 +206,14 @@ namespace HpskSite.Services
             // Nyheterna (2026-11-13): nyheten hör till föreningen och står kvar; författaren släpps och namnet på raden blir neutralt ("Tidigare medlem").
             ("SitePost",                             "AuthorMemberId",    "AuthorName = N'Tidigare medlem'"),
             ("SitePost",                             "UpdatedByMemberId", "UpdatedDate = UpdatedDate"),
-            // Nyheternas galleri, kommentarer och bildförfrågningar (2026-11-19). Kommentaren står kvar med ett neutralt namn (som nyhetens byline); texten rörs inte (kommentarer har
-            // aldrig HTML och författaren släpps). Samtycket står kvar men personen som bekräftade släpps. Förfrågans fria text rensas: den kan nämna namn.
-            ("SitePostComment",                      "AuthorMemberId",    "AuthorName = N'Tidigare medlem'"),
+            // Nyheternas galleri, kommentarer och bildförfrågningar (2026-11-19). Den här kartan är GDPR-raderingsvägen: en raderingsbegäran tömmer kommentarens TEXT och namn (en kommentar
+            // kan nämna personen själv). Ett vanligt utträde anonymiserar bara namnet vid visning (SiteNewsCommentsFactory) — texten står då kvar. Samtycket står kvar men personen som
+            // bekräftade släpps. Förfrågans och anmälans fria text rensas: den kan nämna namn.
+            ("SitePostComment",                      "AuthorMemberId",    "AuthorName = N'Tidigare medlem', Body = N'(Kommentaren är raderad på begäran)'"),
             ("SitePostComment",                      "DeletedByMemberId", "CreatedDate = CreatedDate"),
+            ("SitePostCommentReport",                "ReporterMemberId",  "Reason = NULL"),
+            ("SitePostCommentReport",                "HandledByMemberId", "CreatedDate = CreatedDate"),
+            ("SiteOwner",                            "NewsCommentsEnabledByMemberId", "NewsCommentsEnabled = NewsCommentsEnabled"),
             ("SitePostImage",                        "ConsentByMemberId", "ConsentDate = ConsentDate"),
             ("SitePostImageRequest",                 "RequesterMemberId", "Message = NULL"),
             ("SitePostImageRequest",                 "HandledByMemberId", "CreatedDate = CreatedDate"),

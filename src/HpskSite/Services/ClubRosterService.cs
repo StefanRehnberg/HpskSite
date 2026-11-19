@@ -105,6 +105,30 @@ namespace HpskSite.Services
                 memberId, clubId, "Utträdd", "Avliden") > 0;
         }
 
+        /// <summary>
+        /// Av <paramref name="memberIds"/>: de som har lämnat klubben (<c>Utträdd</c>/<c>Avliden</c>) och inte finns kvar som aktiva. EN fråga. Används för att visa "Tidigare medlem" i stället för
+        /// namnet på en kommentar — en administratör eller styrelseledamot som aldrig var medlem är inte "tidigare medlem" och räknas inte hit.
+        /// </summary>
+        public HashSet<int> LeftMemberIds(int clubId, IReadOnlyCollection<int> memberIds)
+        {
+            if (clubId <= 0 || memberIds.Count == 0) return new HashSet<int>();
+            using var db = _databaseFactory.CreateDatabase();
+            return LeftMemberIds(db, clubId, memberIds);
+        }
+
+        /// <summary>Samma som <see cref="LeftMemberIds(int, IReadOnlyCollection{int})"/> på en given anslutning (testad mot riktiga rader).</summary>
+        public static HashSet<int> LeftMemberIds(NPoco.IDatabase db, int clubId, IReadOnlyCollection<int> memberIds)
+        {
+            var wanted = memberIds.Where(i => i > 0).Distinct().ToList();
+            if (clubId <= 0 || wanted.Count == 0) return new HashSet<int>();
+            var list = string.Join(",", wanted);   // heltal ur våra egna rader: aldrig text utifrån
+            return db.Fetch<int>(
+                $@"SELECT cm.MemberId FROM ClubMembership cm
+                   WHERE cm.ClubId = @0 AND cm.MemberId IN ({list}) AND cm.MembershipStatus IN (@1, @2)
+                     AND NOT EXISTS (SELECT 1 FROM ClubMembership a WHERE a.ClubId = cm.ClubId AND a.MemberId = cm.MemberId AND a.MembershipStatus NOT IN (@1, @2))",
+                clubId, "Utträdd", "Avliden").ToHashSet();
+        }
+
         /// <summary>Bara medlems-id:na — för frågor som går vidare till andra tabeller.</summary>
         public List<int> ActiveMemberIds(int clubId)
         {
