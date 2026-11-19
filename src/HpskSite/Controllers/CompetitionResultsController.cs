@@ -3469,6 +3469,9 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     enabled,
+                    // surface = ytan finns för grenen och är påslagen; enabled = dessutom får arrangören välja (inte SM/landsdel).
+                    // Redigera tävling skiljer på dem för att kunna förklara varför valet saknas.
+                    surface = MedalRulesSurfaceEnabled(comp),
                     isChampionshipScope = rule.IsChampionship,
                     awards = rule.AwardsPlacementMedals,
                     mode = rule.StoredGroupingMode,

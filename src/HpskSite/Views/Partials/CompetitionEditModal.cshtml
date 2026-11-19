@@ -660,7 +660,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         <div class="border rounded p-3">
                             <div class="fw-semibold">Medaljer och priser</div>
                             <div class="small mt-1" id="edit_medalRulesText"></div>
-                            <div class="form-text">Ändras på fliken Resultat, så att listan räknas om.</div>
+                            <div class="form-text" id="edit_medalRulesHint">Ändras på fliken Resultat, så att listan räknas om.</div>
                             <button type="button" class="btn btn-outline-secondary mt-2" id="edit_medalRulesGo" style="min-height:44px" onclick="hpskEditGoToMedalRules()">
                                 Gå till Medaljer och priser <i class="bi bi-arrow-right ms-1"></i>
                             </button>
@@ -1413,17 +1413,46 @@ async function hpskEditLoadMedalRules(competitionId) {
     var row = document.getElementById('edit_medalRulesRow');
     if (!row) return;
     row.classList.add('d-none');
+    window._hpskMedalState = null;
     if (!competitionId) return;
     try {
         var res = await fetch('/umbraco/surface/CompetitionResults/GetMedalRules?competitionId=' + competitionId);
         var d = await res.json();
         // Modalen kan ha fyllts om med en annan tävling medan svaret var på väg.
         if ((parseInt(document.getElementById('edit_competitionId').value, 10) || 0) !== competitionId) return;
-        if (!d || !d.success || !d.enabled) return;
-        document.getElementById('edit_medalRulesText').textContent = d.summary || '';
-        row.classList.remove('d-none');
+        if (!d || !d.success || !d.surface) return;
+        window._hpskMedalState = { enabled: !!d.enabled, summary: d.summary || '' };
+        hpskEditRenderMedalRow();
     } catch (e) { /* raden är en hjälp — utan den är modalen som förut */ }
 }
+
+// Ritar raden efter den VALDA omfattningen (som kan ändras i samma dialog) och det sparade läget. Svenskt mästerskap och landsdel har inget
+// val: förbundet bestämmer, och kortet på fliken Resultat finns inte — raden säger det i stället för att tiga.
+function hpskEditRenderMedalRow() {
+    var row = document.getElementById('edit_medalRulesRow'), st = window._hpskMedalState;
+    if (!row) return;
+    if (!st) { row.classList.add('d-none'); return; }
+    var kind = typeof hpskChampionshipKind === 'function' ? hpskChampionshipKind() : '';
+    var text = document.getElementById('edit_medalRulesText'), hint = document.getElementById('edit_medalRulesHint');
+    var go = document.getElementById('edit_medalRulesGo'), warn = document.getElementById('edit_medalRulesWarn');
+    var fixedByFederation = (kind === 'Sm' || kind === 'Landsdel');
+    var canChooseNow = !fixedByFederation && st.enabled;
+    if (fixedByFederation) {
+        text.textContent = 'Medaljerna delas ut enligt förbundets regler. Vid svenskt mästerskap och landsdelsmästerskap är det förbundet som bestämmer ' +
+            '(de fem C-mästerskapen: öppen, Dam, Vet Y, Vet Ä och Junior), så tävlingen är låst till dem och inga medaljval visas på fliken Resultat.';
+        hint.textContent = 'Väljer du en annan omfattning ovan kan klubben välja medaljregler själv.';
+    } else if (!st.enabled) {
+        text.textContent = 'Klubben kan välja medaljregler för tävlingen.';
+        hint.textContent = 'Valet görs på fliken Resultat, när du har sparat den nya omfattningen.';
+    } else {
+        text.textContent = st.summary;
+        hint.textContent = 'Ändras på fliken Resultat, så att listan räknas om.';
+    }
+    if (go) go.classList.toggle('d-none', !canChooseNow);
+    if (!canChooseNow && warn) warn.classList.add('d-none');
+    row.classList.remove('d-none');
+}
+document.getElementById('edit_competitionScope')?.addEventListener('change', hpskEditRenderMedalRow);
 
 // Länken: på tävlingens hanteringssida stängs modalen och fliken Resultat öppnas; från en lista går vi till hanteringssidan.
 // Osparade ändringar: en ögonblicksbild av formuläret tas en stund efter att modalen visats (då är den ifylld), och jämförs när man
