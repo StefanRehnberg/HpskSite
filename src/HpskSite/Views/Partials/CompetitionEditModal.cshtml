@@ -793,6 +793,15 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                 </div>
             </div>
             <div class="modal-footer">
+                @* Visas när någon försöker stänga rutan (klick utanför, Esc, kryss, Avbryt) med ändringar som inte sparats. *@
+                <div class="alert alert-warning small w-100 mb-0 d-none" id="edit_closeWarn" role="alert">
+                    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Du har ändringar som inte är sparade</div>
+                    <div>Stänger du rutan nu försvinner de.</div>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <button type="button" class="btn btn-warning btn-sm" style="min-height:44px" onclick="hpskEditCloseAnyway()">Stäng utan att spara</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" style="min-height:44px" onclick="hpskEditCloseStay()">Stanna kvar</button>
+                    </div>
+                </div>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     <i class="bi bi-x-circle me-1"></i>Avbryt
                 </button>
@@ -1434,13 +1443,36 @@ function hpskEditFormState() {
         window._hpskEditSnapshot = null;
         setTimeout(function () { window._hpskEditSnapshot = hpskEditFormState(); }, 1200);
     });
+    // Stängning med ändringar som inte sparats (klick utanför, Esc, kryss, Avbryt): stoppa och fråga. Egna stängningar
+    // (efter sparning, vidare till Medaljer och priser) sätter _hpskEditAllowClose och går igenom.
+    modalEl.addEventListener('hide.bs.modal', function (ev) {
+        if (window._hpskEditAllowClose) return;
+        if (window._hpskEditSnapshot && hpskEditFormState() !== window._hpskEditSnapshot) {
+            ev.preventDefault();
+            var cw = document.getElementById('edit_closeWarn');
+            if (cw) { cw.classList.remove('d-none'); cw.scrollIntoView({ block: 'nearest' }); }
+        }
+    });
     modalEl.addEventListener('hidden.bs.modal', function () {
         window._hpskEditSnapshot = null;
+        window._hpskEditAllowClose = false;
+        var cw = document.getElementById('edit_closeWarn');
+        if (cw) cw.classList.add('d-none');
         var w = document.getElementById('edit_medalRulesWarn'), b = document.getElementById('edit_medalRulesGo');
         if (w) w.classList.add('d-none');
         if (b) b.classList.remove('d-none');
     });
 })();
+
+function hpskEditCloseStay() {
+    document.getElementById('edit_closeWarn').classList.add('d-none');
+}
+function hpskEditCloseAnyway() {
+    var modalEl = document.getElementById('competitionEditModal');
+    var inst = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
+    window._hpskEditAllowClose = true;
+    if (inst) inst.hide();
+}
 
 function hpskEditMedalRulesStay() {
     document.getElementById('edit_medalRulesWarn').classList.add('d-none');
@@ -1461,6 +1493,7 @@ function hpskEditGoToMedalRules(force) {
         var inst = modalEl && window.bootstrap ? bootstrap.Modal.getInstance(modalEl) : null;
         if (inst) {
             modalEl.addEventListener('hidden.bs.modal', function () { window.hpskGoToMedalRules(); }, { once: true });
+            window._hpskEditAllowClose = true;
             inst.hide();
         } else {
             window.hpskGoToMedalRules();
@@ -1752,6 +1785,7 @@ function saveCompetition() {
                     } else {
                         showNotification('Tävlingen sparades men kunde inte flyttas till serien: ' + (moveData.message || ''), 'warning');
                     }
+                    window._hpskEditAllowClose = true;
                     bootstrap.Modal.getInstance(editModal).hide();
                     // Refresh both competition list and series list after move
                     setTimeout(() => {
@@ -1762,6 +1796,7 @@ function saveCompetition() {
                 .catch(err => {
                     console.error('Error moving competition to series:', err);
                     showNotification('Tävlingen sparades men serieflyttning misslyckades', 'warning');
+                    window._hpskEditAllowClose = true;
                     bootstrap.Modal.getInstance(editModal).hide();
                     setTimeout(() => {
                         if (typeof loadCompetitionsList === 'function') loadCompetitionsList();
@@ -1774,6 +1809,7 @@ function saveCompetition() {
             let message = isNewCompetition ? 'Tävlingen skapades framgångsrikt!' : 'Tävlingen uppdaterades framgångsrikt!';
             if (data.dpNote) message += ' ' + data.dpNote;
             showNotification(message, 'success');
+            window._hpskEditAllowClose = true;
             bootstrap.Modal.getInstance(editModal).hide();
 
             // Reload just the competitions list to update the modified row
