@@ -3515,7 +3515,10 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                if (!ChampionshipRule.For(_competitions.GetSaved(request.CompetitionId)).CanChooseMedalGrouping)
+                // Den gamla kryssrutan (bara PerWeaponGroup) gäller klubb- och kretsmästerskap. Klubbens egna regler (nytt läge/platser/oavgjort)
+                // prövas längre ned av MedalRuleEditSettings.Refusal, som också tillåter en tävling utan mästerskapsomfattning.
+                var isLegacyToggle = request.Mode == null && request.Places == null && request.TieRule == null;
+                if (isLegacyToggle && !ChampionshipRule.For(_competitions.GetSaved(request.CompetitionId)).CanChooseMedalGrouping)
                 {
                     return Json(new
                     {
