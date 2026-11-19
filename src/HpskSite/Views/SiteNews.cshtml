@@ -270,8 +270,8 @@
             @if (social != null && post.IsPublished) { @await Html.PartialAsync("_SiteNewsReactions", social) }
             @if (commentsModel != null) { @await Html.PartialAsync("_SiteNewsComments", commentsModel) }
             @if (social != null && canWrite) { @await Html.PartialAsync("_SiteNewsImageRequests", social) }
-            <link rel="stylesheet" href="/css/site-news.css?v=3" />
-            <script src="/js/site-news-view.js?v=2" defer></script>
+            <link rel="stylesheet" href="/css/site-news.css?v=4" />
+            <script src="/js/site-news-view.js?v=3" defer></script>
             @if (canWrite)
             {
                 <div class="d-flex flex-wrap gap-2 mt-4 pt-3 border-top">
@@ -326,7 +326,7 @@
         <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js"></script>
         <script src="/js/planering-dates.js?v=1"></script>
         <script src="/js/site-signature.js?v=2"></script>
-        <script src="/js/site-news-edit.js?v=8"></script>
+        <script src="/js/site-news-edit.js?v=9"></script>
     }
 
     @if (ok)

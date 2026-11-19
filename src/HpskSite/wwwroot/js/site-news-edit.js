@@ -277,7 +277,7 @@
     galleryCount.textContent = list.length + ' av ' + MAX_GALLERY + ' bilder';
     galleryBox.replaceChildren(...(list.length ? list.map((it, i) => {
       const altInp = h('input', { class: 'form-control form-control-sm', maxlength: '200', value: it.alt || '', 'aria-label': 'Beskrivning av bild ' + (i + 1), 'data-gallery-alt': String(i),
-        placeholder: i === 0 ? 'Beskriv huvudbilden för den som inte ser den (krävs)' : 'Beskriv bilden (valfritt)' });
+        placeholder: 'Beskriv bilden för den som inte ser den (valfritt)' });
       altInp.addEventListener('input', () => { it.alt = altInp.value; st.dirty = true; });
       const capInp = h('input', { class: 'form-control form-control-sm', maxlength: '200', value: it.caption || '', 'aria-label': 'Bildtext för bild ' + (i + 1), placeholder: 'Bildtext som visas vid bilden (valfritt)' });
       capInp.addEventListener('input', () => { it.caption = capInp.value; st.dirty = true; });
@@ -360,7 +360,6 @@
     clearMsg();
     const d = formData();
     if (!d.title.trim()) { say('Skriv en rubrik.', 'danger'); title.focus(); return; }
-    if (st.gallery.length && !(st.gallery[0].alt || '').trim()) { say('Beskriv huvudbilden, så att den går att läsa upp.', 'danger'); const a = galleryBox.querySelector('[data-gallery-alt="0"]'); if (a) a.focus(); return; }
     if (needsConsent() && !consent.checked) { say('Bekräfta att de som syns på bilderna har gett sitt samtycke.', 'danger'); consent.focus(); return; }
     if (dateValue() === null) { say('Datumet går inte att läsa. Skriv till exempel 16 maj 2027, eller välj i kalendern.', 'danger'); date.focus(); return; }
     setBusy(true);

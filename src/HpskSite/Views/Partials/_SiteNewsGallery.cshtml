@@ -10,7 +10,7 @@
     var imgs = Model.Gallery;
     var shown = Math.Min(imgs.Count, 3);
     var (_, _, more) = SitePostRules.GalleryLayout(imgs.Count);
-    var lightbox = imgs.Select(i => new { url = SiteImages.ThumbUrlFor(i.FileId, 1280), alt = i.AltText ?? "", caption = i.Caption ?? "", fileId = i.FileId, people = i.ShowsPeople }).ToList();
+    var lightbox = imgs.Select(i => new { url = SiteImages.UrlFor(i.FileId),   /* originalfilen (förminskad vid uppladdning till högst 2400 px) */ alt = i.AltText ?? "", caption = i.Caption ?? "", fileId = i.FileId, people = i.ShowsPeople }).ToList();
 }
 @if (imgs.Count > 0)
 {

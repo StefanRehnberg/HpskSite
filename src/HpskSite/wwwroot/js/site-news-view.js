@@ -85,7 +85,10 @@
       const img = el.querySelector('.sn-lb-img'), cap = el.querySelector('.sn-lb-cap'), count = el.querySelector('.sn-lb-count'), reqBox = el.querySelector('.sn-lb-req');
       const closeBtn = el.querySelector('.sn-lb-close'), prev = el.querySelector('.sn-lb-prev'), next = el.querySelector('.sn-lb-next');
 
+      const stage = el.querySelector('.sn-lb-stage');
+      img.addEventListener('click', () => stage.classList.toggle('sn-zoom'));   // originalstorlek / passad
       function show() {
+        stage.classList.remove('sn-zoom');
         const im = images[i];
         img.src = im.url; img.alt = im.alt || '';
         cap.textContent = im.caption || '';
