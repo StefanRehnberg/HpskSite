@@ -1403,6 +1403,17 @@ tillståndsfält (kommer aldrig ur ett formulär, följer inte med en kopia); `I
   `competitionId` måste märkas. Rå SQL mot `dbo.Competition` ska ha `IsDraft = 0` eller `competition-sql-ok:`.
 - **Migrering:** `add-isdraft-to-competition.sql` före deploy (körd i dev och prod). Sviter: `hpsk-verify/isdraft-verify.mjs`, `isdraft-lasytor-verify.mjs`.
 
+## Kretsens utlysning — `CompetitionCall` (kretsutlysningen F2, 2026-11-20, ej deployad)
+
+Kretsen **utlyser** en tävling, en klubb **önskar** (F3), kretsen **utser** en klubb. Aldrig "ansök" (klubb → krets) eller "tilldela" i texter.
+Plan: `notes/krets-utlysning-byggplan-2026-11-18.md`, läge: `notes/krets-utlysning-overlamning-2026-11-20-f2-klar.md`.
+- **Tabeller** `CompetitionCall`/`CompetitionCallWish`/`CompetitionCallEvent` (`create-competition-call-tables.sql`, före deploy). EN rad, inte en tävlingsnod;
+  kopplingen till tävlingen är `CompetitionId` (sätts i F4). Läge = text med CHECK (Planering, Utlyst, Tilldelad, Skapad, Installd) — byt aldrig en sträng.
+- **Alla tillståndsbyten går genom `CompetitionCallService`**: ETT villkorat UPDATE (radantal via `Execute()`) + händelserad i samma transaktion; `Update` har `Version`-skydd.
+- **Behörighet = `CompetitionCallAccess.CanManageCallsForRegion`** (sajtadmin, kretsadmin, kretsstyrelse, tävlingsansvarig), prövad mot utlysningens EGEN `RegionId`.
+  `AdminAuthorizationService.IsRegionalAdminForRegion` är medvetet oförändrad. Regler som rena funktioner i `CompetitionCallRules` (även `WhyNot` och årsprogrammets rader).
+- Ytan: kortet `_KretsCallsCard` i kretsens inkorg + `/kretsen/arsprogram`. Sviter: `hpsk-verify/krets-utlysning-f2-verify.mjs`.
+
 ## Common Pitfalls to Avoid
 1. ❌ Don't use file system for persistent data
 2. ❌ Don't bypass Umbraco's content management patterns
