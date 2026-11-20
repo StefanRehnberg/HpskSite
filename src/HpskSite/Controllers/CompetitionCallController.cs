@@ -32,15 +32,20 @@ namespace HpskSite.Controllers
         private readonly CompetitionCallAccess _access;
         private readonly KretsCalendarService _krets;
         private readonly CompetitionCallNotifier _notifier;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly ILogger<CompetitionCallController> _logger;
 
         public CompetitionCallController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory, ServiceContext services,
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionCallService calls, CompetitionCallAccess access, KretsCalendarService krets,
-            CompetitionCallNotifier notifier, ILogger<CompetitionCallController> logger)
+            CompetitionCallNotifier notifier, HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations, ILogger<CompetitionCallController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
+            _registrations = registrations;
             _calls = calls;
             _access = access;
             _krets = krets;
@@ -248,6 +253,7 @@ namespace HpskSite.Controllers
                 awardedClub = c.AwardedClubId is int cid ? (clubs.TryGetValue(cid, out var n) ? n : "Okänd klubb") : null,
                 competitionId = c.CompetitionId,
                 version = c.Version,
+                unawardWarning = UnawardWarningFor(c),
                 activeWishes = wishes,
                 wishes = wishList.Select(w => new
                 {
@@ -270,6 +276,21 @@ namespace HpskSite.Controllers
                 },
                 why = new { edit = Why("edit"), publish = Why("publish"), withdraw = Why("withdraw"), award = Why("award"), unaward = Why("unaward"), cancel = Why("cancel") },
             };
+        }
+
+        /// <summary>Varningen före ett byte av klubb när tävlingen redan är skapad (annars null). Ett läsfel hindrar aldrig kretsen — varningen blir då generell.</summary>
+        private string? UnawardWarningFor(CompetitionCall c)
+        {
+            if (!(c.CompetitionId > 0)) return null;
+            var published = false; var regs = 0;
+            try
+            {
+                var comp = _competitions.Get(c.CompetitionId!.Value);
+                published = comp != null && !comp.IsDraft;
+                regs = _registrations.CountByCompetition(new[] { c.CompetitionId.Value }).GetValueOrDefault(c.CompetitionId.Value);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Utlysning {Id}: tävlingens läge kunde inte läsas för varningen.", c.Id); }
+            return CompetitionCallRules.UnawardWarning(c.CompetitionId, published, regs);
         }
 
         public static string DisciplineLabel(string? id) =>

@@ -52,7 +52,7 @@ namespace HpskSite.Tests
         [InlineData("Planering", true, true, false, true, false, true)]
         [InlineData("Utlyst", true, false, true, true, false, true)]
         [InlineData("Tilldelad", true, false, false, false, true, true)]
-        [InlineData("Skapad", false, false, false, false, false, true)]
+        [InlineData("Skapad", false, false, false, false, true, true)]   // F4 (Stefan 2026-11-20): utnämningen kan tas tillbaka även efter skapad tävling
         [InlineData("Installd", false, false, false, false, false, false)]
         public void Vad_som_far_goras_i_varje_lage(string status, bool edit, bool publish, bool withdraw, bool award, bool unaward, bool cancel)
         {
@@ -71,16 +71,46 @@ namespace HpskSite.Tests
             CompetitionCallRules.CanWithdraw(CompetitionCallStatus.Utlyst, 2).Should().BeFalse();
 
         [Fact]
-        public void Skapad_tavling_hindrar_att_ta_tillbaka_och_stalla_in()
+        public void Skapad_tavling_hindrar_att_stalla_in_men_inte_att_ta_tillbaka()
         {
-            CompetitionCallRules.CanUnaward(CompetitionCallStatus.Tilldelad, 55).Should().BeFalse();
+            // Beslut 2 (Stefan 2026-11-20): kretsen får alltid byta klubb — tävlingen står kvar hos klubben, och kretsen varnas.
+            CompetitionCallRules.CanUnaward(CompetitionCallStatus.Tilldelad, 55).Should().BeTrue();
+            CompetitionCallRules.CanUnaward(CompetitionCallStatus.Skapad, 55).Should().BeTrue();
             CompetitionCallRules.CanCancel(CompetitionCallStatus.Tilldelad, 55).Should().BeFalse();
         }
+
+        [Fact]
+        public void Varningen_vid_byte_av_klubb_namnger_anmalningar_och_att_inget_aterbetalas()
+        {
+            CompetitionCallRules.UnawardWarning(null, false, 0).Should().BeNull();
+            CompetitionCallRules.UnawardWarning(55, false, 0).Should().Contain("står kvar hos klubben").And.NotContain("anmälningar");
+            var w = CompetitionCallRules.UnawardWarning(55, true, 12)!;
+            w.Should().Contain("publicerad").And.Contain("12 anmälningar").And.Contain("återbetalas inget automatiskt");
+        }
+
+        [Theory]
+        [InlineData("Tilldelad", null, "precision", null)]
+        [InlineData("Tilldelad", null, null, "gren")]            // utan gren går det inte att skapa en tävling
+        [InlineData("Tilldelad", 55, "precision", "redan skapad")]
+        [InlineData("Skapad", 55, "precision", "redan skapad")]
+        [InlineData("Utlyst", null, "precision", "inte utsett")]
+        public void Skapa_tavlingen_prövas_mot_laget(string status, int? competitionId, string? discipline, string? expectedFragment)
+        {
+            var why = CompetitionCallRules.WhyNotCreate(status, competitionId, discipline);
+            if (expectedFragment == null) why.Should().BeNull(); else why.Should().Contain(expectedFragment);
+        }
+
+        [Theory]
+        [InlineData(true, false, true)]     // fastställt + klubben  → vägras
+        [InlineData(true, true, false)]     // fastställt + kretsen  → tillåtet
+        [InlineData(false, false, false)]   // inte fastställt       → klubben får ändra själv
+        public void Datumregeln_vagrar_bara_klubben_pa_ett_fastställt_datum(bool locked, bool isKrets, bool refused) =>
+            (CompetitionCallRules.DateChangeRefusal(locked, isKrets) != null).Should().Be(refused);
 
         [Theory]
         [InlineData("edit", "Skapad")]
         [InlineData("award", "Tilldelad")]
-        [InlineData("unaward", "Skapad")]
+        [InlineData("unaward", "Utlyst")]
         [InlineData("publish", "Utlyst")]
         public void En_avstangd_handling_har_alltid_en_forklaring(string action, string status) =>
             CompetitionCallRules.WhyNot(action, status, status == "Skapad" ? 55 : null).Should().NotBeNullOrWhiteSpace();

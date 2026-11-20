@@ -97,6 +97,36 @@ namespace HpskSite.Services.CompetitionCalls
             return sent;
         }
 
+        /// <summary>
+        /// Klubben har föreslagit ett annat datum (F4, beslut 6): kretsens tävlingsansvarige får en notis. Förslaget är redan skrivet som händelse;
+        /// ett mejlfel ändrar inget. Svarsadressen är kretsens. Returnerar antalet mejl (0 loggas som varning och syns i händelsen).
+        /// </summary>
+        public async Task<int> DateProposedAsync(CompetitionCall call, string clubName, DateTime proposed, string? note, string publicBase)
+        {
+            var sent = 0;
+            try
+            {
+                if (!_rate.TryClaimOnce($"call-date-proposed:{call.Id}:{call.AwardedClubId}:{proposed:yyyyMMdd}", TimeSpan.FromHours(1))) return 0;
+                var rec = _uppdrag.Recipients(call.RegionId, BoardRoleDefinitions.RoleTavlingsansvarig);
+                var paras = new List<string>
+                {
+                    $"{clubName} föreslår att {call.Name} flyttas till {CompetitionCallRules.WeekdaySv(proposed).ToLowerInvariant()} {proposed:d MMMM yyyy}.",
+                    call.CompetitionDate.HasValue ? $"Datumet är nu {call.CompetitionDate.Value:d MMMM yyyy} och fastställt av kretsen." : "",
+                    string.IsNullOrWhiteSpace(note) ? "" : $"Meddelande från klubben: {note.Trim()}",
+                    "Förslaget ändrar ingenting förrän kretsen själv ändrar datumet.",
+                };
+                var replyTo = _reply.ForRegion(call.RegionId);
+                foreach (var r in rec.To)
+                    if (await _email.SendKretsgranskningAsync(r.Email, r.Name, $"Förslag på nytt datum: {call.Name}", paras,
+                            "Öppna kretsens utlysningar", $"{publicBase}/kretsen/ansokningar?krets={call.RegionId}",
+                            "Du får mejlet för att du ansvarar för kretsens tävlingar på pistol.nu.", replyTo))
+                        sent++;
+                if (sent == 0) _logger.LogWarning("Utlysning {Id}: ingen i kretsen kunde mejlas om datumförslaget.", call.Id);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: datumförslaget kunde inte aviseras.", call.Id); }
+            return sent;
+        }
+
         /// <summary>Klubbens Tävlingar-flik i adminpanelen (klubbens sida + <c>#clubAdmin/competitions</c>). Utan klubbsida: sajtens startsida — länken ändrar aldrig något.</summary>
         private string ClubCompetitionsUrl(int clubId, string publicBase)
         {

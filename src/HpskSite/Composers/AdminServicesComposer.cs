@@ -97,6 +97,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallService>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallAccess>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallNotifier>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallDateGuard>();
             builder.Services.AddHostedService<HpskSite.Services.CompetitionCalls.CompetitionCallSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationReminderHostedService>();

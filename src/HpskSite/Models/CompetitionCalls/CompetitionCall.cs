@@ -118,9 +118,18 @@ namespace HpskSite.Models.CompetitionCalls
         public const string WishWithdrawn = "WishWithdrawn";
         /// <summary>Utseendet är registrerat; Text = hur många mejl som gick iväg.</summary>
         public const string AwardMailed = "AwardMailed";
+        /// <summary>Klubben skapade tävlingen ur utlysningen (F4); den är dold tills klubben publicerar.</summary>
+        public const string CompetitionCreated = "CompetitionCreated";
+        /// <summary>Tävlingen raderades permanent; utlysningen är Tilldelad igen (F4).</summary>
+        public const string CompetitionRemoved = "CompetitionRemoved";
+        /// <summary>Klubben föreslog ett annat datum på en fastställd utlysning (F4).</summary>
+        public const string DateProposed = "DateProposed";
 
         public static string Label(string kind) => kind switch
         {
+            CompetitionCreated => "Klubben skapade tävlingen",
+            CompetitionRemoved => "Tävlingen raderades",
+            DateProposed => "Klubben föreslog ett annat datum",
             Wished => "Klubb önskade att arrangera",
             WishWithdrawn => "Klubb ångrade sitt önskemål",
             AwardMailed => "Utseendet aviserades",

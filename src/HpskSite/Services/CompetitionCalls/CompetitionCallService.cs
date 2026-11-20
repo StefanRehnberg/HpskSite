@@ -175,11 +175,107 @@ namespace HpskSite.Services.CompetitionCalls
                 + "WHERE Id=@3 AND Status IN ('Planering','Utlyst') AND AwardedClubId IS NULL", clubId, DateTime.Now, actorId, id);
         }
 
-        /// <summary>Ta tillbaka en utnämning (tillbaka till Utlyst) — bara när klubben inte skapat tävlingen.</summary>
-        public CallResult Unaward(int id, int actorId, string actorName) =>
-            Transition(id, actorId, actorName, CompetitionCallEventKind.Unawarded, null,
-                "UPDATE CompetitionCall SET Status='Utlyst', AwardedClubId=NULL, AwardedAt=NULL, AwardedByMemberId=NULL, UpdatedAt=@0 "
-                + "WHERE Id=@1 AND Status='Tilldelad' AND CompetitionId IS NULL", DateTime.Now, id);
+        /// <summary>
+        /// Ta tillbaka en utnämning (tillbaka till Utlyst). ⚠️ Stefans beslut 2026-11-20: det går ÄVEN när klubben skapat tävlingen,
+        /// och även när den är publicerad och har anmälningar. Tävlingen raderas aldrig och flyttas inte — den står kvar hos den
+        /// gamla klubben, bara kopplingen till utlysningen släpps. Kontrollern varnar (särskilt vid betalda anmälningar); betalningar
+        /// hanteras av klubbarna och kretsen utanför sajten. En pågående skapning (<c>CreatingAt</c>) stoppar utnämningen en kort stund.
+        /// </summary>
+        public CallResult Unaward(int id, int actorId, string actorName)
+        {
+            var before = Get(id);
+            var text = before?.CompetitionId is int cid && cid > 0 ? $"Tävlingen {cid} står kvar hos klubben" : null;
+            return Transition(id, actorId, actorName, CompetitionCallEventKind.Unawarded, text,
+                "UPDATE CompetitionCall SET Status='Utlyst', AwardedClubId=NULL, AwardedAt=NULL, AwardedByMemberId=NULL, "
+                + "CompetitionId=NULL, CreatingAt=NULL, UpdatedAt=@0 "
+                + "WHERE Id=@1 AND Status IN ('Tilldelad','Skapad') AND (CreatingAt IS NULL OR CreatingAt < @2)",
+                DateTime.Now, id, DateTime.Now.AddMinutes(-CreatingClaimMinutes));
+        }
+
+        // ── Skapa tävlingen ur utlysningen (F4) ─────────────────────────────────────────────
+
+        /// <summary>Hur länge en påbörjad skapning håller andra ute innan den räknas som övergiven.</summary>
+        public const int CreatingClaimMinutes = 5;
+
+        /// <summary>
+        /// Tar skapandet i anspråk för den utsedda klubben: ETT villkorat UPDATE som sätter <c>CreatingAt</c> när utlysningen är
+        /// Tilldelad till just den klubben och ingen tävling finns. 0 rader = någon annan håller på, eller läget har ändrats.
+        /// </summary>
+        public bool ClaimCreation(int callId, int clubId)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            var now = DateTime.Now;
+            var rows = scope.Database.Execute(
+                "UPDATE CompetitionCall SET CreatingAt=@0 WHERE Id=@1 AND Status='Tilldelad' AND AwardedClubId=@2 AND CompetitionId IS NULL "
+                + "AND (CreatingAt IS NULL OR CreatingAt < @3)", now, callId, clubId, now.AddMinutes(-CreatingClaimMinutes));
+            scope.Complete();
+            return rows == 1;
+        }
+
+        /// <summary>Släpper anspråket när skapandet misslyckades, så klubben kan försöka igen direkt.</summary>
+        public void ReleaseCreation(int callId)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            scope.Database.Execute("UPDATE CompetitionCall SET CreatingAt=NULL WHERE Id=@0 AND CompetitionId IS NULL", callId);
+            scope.Complete();
+        }
+
+        /// <summary>
+        /// Kopplar den skapade tävlingen till utlysningen (läget Skapad) och skriver händelsen, i EN transaktion. Villkoret att
+        /// anspråket fortfarande hålls (och att utnämningen inte tagits tillbaka under tiden) ligger i UPDATE:t; 0 rader = false.
+        /// </summary>
+        public bool CompleteCreation(int callId, int clubId, int competitionId, int actorId, string actorName)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var rows = db.Execute(
+                "UPDATE CompetitionCall SET Status='Skapad', CompetitionId=@0, CreatingAt=NULL, UpdatedAt=@1 "
+                + "WHERE Id=@2 AND Status='Tilldelad' AND AwardedClubId=@3 AND CompetitionId IS NULL AND CreatingAt IS NOT NULL",
+                competitionId, DateTime.Now, callId, clubId);
+            if (rows != 1) return false;
+            AddEvent(db, callId, actorId, actorName, CompetitionCallEventKind.CompetitionCreated, $"Tävling {competitionId} (dold tills klubben publicerar)");
+            scope.Complete();
+            return true;
+        }
+
+        /// <summary>
+        /// Tävlingen är permanent raderad: utlysningen släpper den och går tillbaka till Tilldelad (klubben är kvar utsedd och kan skapa en ny).
+        /// Anropas av städningen vid permanent radering. Ingen händelse om ingen utlysning pekade på tävlingen.
+        /// </summary>
+        public int DetachDeletedCompetition(int competitionId)
+        {
+            if (competitionId <= 0) return 0;
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var ids = db.Fetch<int>("SELECT Id FROM CompetitionCall WHERE CompetitionId=@0", competitionId);
+            foreach (var callId in ids)
+            {
+                db.Execute("UPDATE CompetitionCall SET Status=CASE WHEN Status='Skapad' THEN 'Tilldelad' ELSE Status END, CompetitionId=NULL, CreatingAt=NULL, UpdatedAt=@0 WHERE Id=@1", DateTime.Now, callId);
+                AddEvent(db, callId, 0, "Systemet", CompetitionCallEventKind.CompetitionRemoved, $"Tävling {competitionId} raderades");
+            }
+            scope.Complete();
+            return ids.Count;
+        }
+
+        /// <summary>Utlysningen en tävling skapats ur (omvänt uppslag — tävlingen bär ingen egen koppling, så inget kan komma ur takt).</summary>
+        public CompetitionCall? ForCompetition(int competitionId)
+        {
+            if (competitionId <= 0) return null;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.FirstOrDefault<CompetitionCall>("SELECT * FROM CompetitionCall WHERE CompetitionId=@0", competitionId);
+        }
+
+        /// <summary>Klubben föreslår ett annat datum på en fastställd utlysning: bara en händelserad (kretsen aviseras av kontrollern).</summary>
+        public void RecordDateProposal(int callId, DateTime proposed, string? note, int actorId, string actorName, string clubName) =>
+            AddEventRow(callId, actorId, actorName, CompetitionCallEventKind.DateProposed,
+                $"{clubName}: {Fmt(proposed)}{(string.IsNullOrWhiteSpace(note) ? "" : " – " + note.Trim())}");
+
+        private void AddEventRow(int callId, int actorId, string actorName, string kind, string? text)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            AddEvent(scope.Database, callId, actorId, actorName, kind, text);
+            scope.Complete();
+        }
 
         /// <summary>Ställ in utlysningen. En skapad tävling berörs inte.</summary>
         public CallResult Cancel(int id, int actorId, string actorName) =>

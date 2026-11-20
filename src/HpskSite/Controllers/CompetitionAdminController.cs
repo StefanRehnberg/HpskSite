@@ -1581,6 +1581,19 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Tävlingen finns inte." });
                 }
 
+                // Kretsutlysningen (F4): en tävling som skapats ur en utlysning släpps — utlysningen blir Tilldelad igen och
+                // klubben kan skapa en ny. Ett fel här ändrar inte raderingen (tävlingen ligger redan i papperskorgen).
+                try
+                {
+                    (HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionCalls.CompetitionCallService))
+                        as HpskSite.Services.CompetitionCalls.CompetitionCallService)?.DetachDeletedCompetition(competition.Id);
+                }
+                catch (Exception ex2)
+                {
+                    (HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<CompetitionAdminController>)) as Microsoft.Extensions.Logging.ILogger)
+                        ?.LogError(ex2, "Tävling {Comp}: utlysningen kunde inte släppa den raderade tävlingen.", competition.Id);
+                }
+
                 // Invalidate caches
                 InvalidateCompetitionCaches();
 

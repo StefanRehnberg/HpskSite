@@ -48,14 +48,49 @@ namespace HpskSite.Services.CompetitionCalls
         public static bool CanAward(string status) => status is CompetitionCallStatus.Planering or CompetitionCallStatus.Utlyst;
 
         /// <summary>
-        /// Ta tillbaka en utnämning. Bara när klubben inte skapat tävlingen — en skapad tävling raderas aldrig tyst
-        /// (F4 avgör när en skapad tävling går att byta klubb på).
+        /// Ta tillbaka en utnämning. Stefan 2026-11-20 (F4): alltid, även när klubben skapat tävlingen och även när den är publicerad
+        /// med anmälningar. Tävlingen står kvar hos klubben (raderas/flyttas aldrig); <see cref="UnawardWarning"/> varnar.
         /// </summary>
         public static bool CanUnaward(string status, int? competitionId) =>
-            status == CompetitionCallStatus.Tilldelad && !(competitionId > 0);
+            status is CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad;
+
+        /// <summary>
+        /// Varningen kretsen får innan en utnämning tas tillbaka från en klubb som skapat tävlingen; null när ingen tävling finns.
+        /// Sajten löser inga betalningar — det gör klubbarna och kretsen sinsemellan.
+        /// </summary>
+        public static string? UnawardWarning(int? competitionId, bool published, int registrations)
+        {
+            if (!(competitionId > 0)) return null;
+            var s = "Klubben har redan skapat tävlingen. Den står kvar hos klubben, men är inte längre kopplad till kretsens utlysning.";
+            if (published) s += " Tävlingen är publicerad och syns för skyttarna.";
+            if (registrations > 0)
+                s += $" Den har {registrations} anmälningar. Har någon betalat sin anmälan återbetalas inget automatiskt – "
+                   + "klubbarna och kretsen löser betalningarna sinsemellan, utanför sajten.";
+            return s;
+        }
+
+        /// <summary>
+        /// Får klubben ändra datumet? Utlysningen äger datumet tills tävlingen skapats; är det fastställt av kretsen (<c>LockedByKrets</c>)
+        /// får klubben aldrig ändra det, varken i utlysningen eller i tävlingen — bara föreslå. Efter skapandet äger tävlingen datumet
+        /// (Stefan 2026-11-20): kretsen flyttar det, klubben föreslår. Kretsens egna handlingar prövas med <paramref name="isKrets"/>.
+        /// </summary>
+        public static string? DateChangeRefusal(bool lockedByKrets, bool isKrets) =>
+            lockedByKrets && !isKrets ? "Kretsen har fastställt datumet. Föreslå ett annat datum till kretsen i stället." : null;
 
         public static bool CanCancel(string status, int? competitionId) =>
             status != CompetitionCallStatus.Installd && !(competitionId > 0);
+
+        /// <summary>
+        /// Får den utsedda klubben skapa tävlingen nu? Null = ja, annars förklaringen. Kräver läget Tilldelad, ingen tävling och en gren
+        /// (tävlingen måste ha en tävlingstyp — kretsen anger grenen i utlysningen).
+        /// </summary>
+        public static string? WhyNotCreate(string status, int? competitionId, string? discipline)
+        {
+            if (status == CompetitionCallStatus.Skapad || competitionId > 0) return "Tävlingen är redan skapad.";
+            if (status != CompetitionCallStatus.Tilldelad) return "Kretsen har inte utsett er till arrangör.";
+            if (string.IsNullOrWhiteSpace(discipline)) return "Kretsen har inte angett vilken gren tävlingen är. Hör av dig till kretsen.";
+            return null;
+        }
 
         /// <summary>Förklaringen när en handling är avstängd — knappen står aldrig avstängd utan skäl.</summary>
         public static string? WhyNot(string action, string status, int? competitionId, int activeWishes = 0)
@@ -72,9 +107,7 @@ namespace HpskSite.Services.CompetitionCalls
                     return status == CompetitionCallStatus.Tilldelad ? "En klubb är redan utsedd. Ta tillbaka utnämningen först."
                          : status == CompetitionCallStatus.Skapad ? "Klubben har redan skapat tävlingen." : "Utlysningen är inställd.";
                 case "unaward" when !CanUnaward(status, competitionId):
-                    return status == CompetitionCallStatus.Skapad || competitionId > 0
-                        ? "Klubben har redan skapat tävlingen, så utnämningen går inte att ta tillbaka här."
-                        : "Ingen klubb är utsedd.";
+                    return "Ingen klubb är utsedd.";
                 case "cancel" when !CanCancel(status, competitionId):
                     return competitionId > 0 ? "Klubben har skapat tävlingen – den berörs inte av att utlysningen ställs in." : "Utlysningen är redan inställd.";
             }

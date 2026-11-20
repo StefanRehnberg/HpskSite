@@ -413,6 +413,18 @@ namespace HpskSite.Controllers
                 // Banan (rangeId) sparas med resten genom fältpåsen (C3-planen S5b) — förut en egen
                 // sparning före grenvalet. Bara när fältet skickas, som förut.
 
+                // Datumregeln (kretsutlysningen F4, N6): fastställer kretsen datumet får klubben inte ändra det — en SERVERREGEL.
+                if (request.Fields != null && request.Fields.TryGetValue("competitionDate", out var dateRaw) && dateRaw != null
+                    && System.DateTime.TryParse(dateRaw.ToString(), System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var newDate))
+                {
+                    var dateGuard = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                        .GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallDateGuard>(HttpContext.RequestServices);
+                    var dateRefusal = await dateGuard.RefusalAsync(request.CompetitionId, content.CompetitionDate, newDate);
+                    if (dateRefusal != null)
+                        return Ok(new { success = false, message = dateRefusal });   // som övriga vägranden: 200 + meddelande, så formuläret visar texten
+                }
+
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
 

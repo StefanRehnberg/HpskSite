@@ -32,16 +32,22 @@ namespace HpskSite.Controllers
         private readonly CompetitionCallAccess _access;
         private readonly KretsCalendarService _krets;
         private readonly AdminAuthorizationService _auth;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
+        private readonly CompetitionCallNotifier _notifier;
+        private readonly AppCaches _appCaches;
         private readonly ILogger<CompetitionCallClubController> _logger;
 
         public CompetitionCallClubController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory, ServiceContext services,
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionCallService calls, CompetitionCallAccess access, KretsCalendarService krets,
-            AdminAuthorizationService auth, ILogger<CompetitionCallClubController> logger)
+            AdminAuthorizationService auth, HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Hosting.DatabaseLock dbLock, CompetitionCallNotifier notifier, ILogger<CompetitionCallClubController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _calls = calls; _access = access; _krets = krets; _auth = auth; _logger = logger;
+            _competitions = competitions; _lock = dbLock; _notifier = notifier; _appCaches = appCaches;
         }
 
         private static IActionResult Deny() => new JsonResult(new { success = false, message = "Du har inte behörighet att hantera klubbens önskemål." });
@@ -123,6 +129,108 @@ namespace HpskSite.Controllers
             return Json(new { success = true, message = "Önskemålet är ångrat.", call = Dto(_calls.Get(id)!, clubId, clubs, null) });
         }
 
+        /// <summary>
+        /// <b>Skapa tävlingen ur utlysningen</b> (F4). Bara den utsedda klubbens admin, bara när utlysningen är Tilldelad och ingen
+        /// tävling finns. Skapar EN dold rad (<c>IsDraft</c>, värdklubb, serie, datum och namn ur utlysningen) och kopplar den via
+        /// <c>CompetitionCall.CompetitionId</c> (tävlingen bär ingen egen koppling — omvänt uppslag).
+        /// <para>⚠️ Dubbelklick/två flikar: <c>DatabaseLock call-create:{id}</c> + det villkorade anspråket (<c>CreatingAt</c>). Misslyckas
+        /// skapandet släpps anspråket; misslyckas kopplingen EFTER att tävlingen skapats, tas den dolda raden bort igen så att inget
+        /// föräldralöst utkast blir kvar.</para>
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateCompetition(int clubId, int id)
+        {
+            if (clubId <= 0 || !await _auth.IsClubAdminForClub(clubId)) return Deny();
+            var c = _calls.Get(id);
+            var regionId = _krets.RegionIdForClub(clubId);
+            if (c == null || regionId <= 0 || c.RegionId != regionId || c.AwardedClubId != clubId)
+                return Json(new { success = false, message = "Utlysningen hittades inte." });
+            var why = CompetitionCallRules.WhyNotCreate(c.Status, c.CompetitionId, c.Discipline);
+            if (why != null) return Json(new { success = false, message = why });
+
+            await using var lease = await _lock.TryAcquireAsync($"call-create:{id}", TimeSpan.FromSeconds(5));
+            if (lease == null) return Json(new { success = false, message = "Tävlingen håller på att skapas. Vänta en stund och ladda om sidan." });
+            if (!_calls.ClaimCreation(id, clubId))
+                return Json(new { success = false, message = "Tävlingen håller på att skapas, eller är redan skapad. Ladda om sidan." });
+
+            var actor = await _access.CurrentMemberIdAsync();
+            var actorName = await _access.CurrentNameAsync();
+            int createdId = 0;
+            try
+            {
+                var created = _competitions.Create(c.SeriesId, c.Name, comp =>
+                {
+                    comp.IsVisible = true;
+                    comp.IsDraft = true;   // dold tills klubben trycker Publicera (F1)
+                    comp.ClubId = clubId;
+                    comp.CompetitionType = c.Discipline;
+                    comp.CompetitionName = c.Name;
+                    comp.CompetitionDate = c.CompetitionDate;   // kopieras en gång; därefter är tävlingen enda källan (N6)
+                    comp.CompetitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Krets;
+                    comp.Description = c.Description;
+                });
+                if (created.PublishProblem != null || created.Record == null)
+                    throw new InvalidOperationException(created.PublishProblem ?? "Tävlingen skapades inte.");
+                createdId = created.Record.Id;
+                if (!_calls.CompleteCreation(id, clubId, createdId, actor, actorName))
+                {
+                    // Utnämningen togs tillbaka under tiden: ingen föräldralös dold tävling.
+                    _competitions.Trash(createdId);
+                    return Json(new { success = false, message = "Kretsen ändrade utlysningen medan tävlingen skapades. Ladda om sidan." });
+                }
+            }
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
+            {
+                _logger.LogError(ex, "Utlysning {Id}, klubb {Club}: tävlingen kunde inte skapas.", id, clubId);
+                if (createdId > 0) { try { _competitions.Trash(createdId); } catch (Exception t) { _logger.LogError(t, "Utlysning {Id}: den dolda tävlingen {Comp} kunde inte tas bort.", id, createdId); } }
+                _calls.ReleaseCreation(id);
+                return Json(new { success = false, message = "Tävlingen kunde inte skapas. Försök igen om en stund." });
+            }
+            InvalidateCompetitionLists();
+            return Json(new
+            {
+                success = true,
+                message = "Tävlingen är skapad och dold. Bygg klart den under klubbens tävlingar och tryck Publicera när den är klar.",
+                call = Dto(_calls.Get(id)!, clubId, _krets.ClubsInRegion(regionId), null)
+            });
+        }
+
+        /// <summary>
+        /// Klubben föreslår ett annat datum (beslut 6). Ändrar ingenting — en händelserad och en notis till kretsen. Bara den utsedda klubben,
+        /// och bara när kretsen har fastställt datumet (annars ändrar klubben datumet själv i tävlingen).
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> ProposeDate(int clubId, int id, string? proposedDate, string? note)
+        {
+            if (clubId <= 0 || !await _auth.IsClubAdminForClub(clubId)) return Deny();
+            var c = _calls.Get(id);
+            var regionId = _krets.RegionIdForClub(clubId);
+            if (c == null || regionId <= 0 || c.RegionId != regionId || c.AwardedClubId != clubId)
+                return Json(new { success = false, message = "Utlysningen hittades inte." });
+            if (c.Status is not (CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad))
+                return Json(new { success = false, message = "Bara en utsedd klubb kan föreslå ett annat datum." });
+            if (!TryDate(proposedDate, out var d) || d == null) return Json(new { success = false, message = "Skriv datumet som ÅÅÅÅ-MM-DD." });
+            if (d.Value.Year != c.Year) return Json(new { success = false, message = $"Förslaget ligger inte i {c.Year}." });
+            if (note != null && note.Trim().Length > CompetitionCallRules.MaxWishNote)
+                return Json(new { success = false, message = $"Meddelandet får vara högst {CompetitionCallRules.MaxWishNote} tecken." });
+            var clubName = _krets.ClubsInRegion(regionId).GetValueOrDefault(clubId) ?? "";
+            var actor = await _access.CurrentMemberIdAsync();
+            var actorName = await _access.CurrentNameAsync();
+            _calls.RecordDateProposal(id, d.Value, note, actor, actorName, clubName);
+            var mailed = await _notifier.DateProposedAsync(c, clubName, d.Value, note, Request.PublicBase());
+            return Json(new { success = true, message = mailed > 0 ? "Ert förslag är skickat till kretsen." : "Ert förslag är sparat hos kretsen." });
+        }
+
+        private void InvalidateCompetitionLists()
+        {
+            try
+            {
+                _appCaches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
+                HpskSite.Services.CompetitionMenuService.Invalidate(_appCaches);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Tävlingslistornas cache kunde inte tömmas efter skapandet."); }
+        }
+
         // ── Internt ─────────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -159,6 +267,11 @@ namespace HpskSite.Controllers
                 canWish = state == "open" && open == null,
                 whyNotWish = open,
                 canUnwish = state == "wished",
+                // F4: den utsedda klubben skapar tävlingen; efter det föreslår den bara datum när kretsen fastställt det.
+                canCreate = state == "awarded-me" && CompetitionCallRules.WhyNotCreate(c.Status, c.CompetitionId, c.Discipline) == null,
+                whyNotCreate = state == "awarded-me" && c.Status == CompetitionCallStatus.Tilldelad ? CompetitionCallRules.WhyNotCreate(c.Status, c.CompetitionId, c.Discipline) : null,
+                created = state == "awarded-me" && c.Status == CompetitionCallStatus.Skapad,
+                canProposeDate = state == "awarded-me" && c.LockedByKrets,
                 mine = mine == null ? null : new { proposedDate = mine.ProposedDate?.ToString("yyyy-MM-dd"), note = mine.Note, byKrets = mine.OnBehalf },
                 others
             };

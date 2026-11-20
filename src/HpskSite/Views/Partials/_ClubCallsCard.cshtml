@@ -88,13 +88,22 @@
 
     function stateCell(c) {
         // text-wrap: ett långt klubbnamn bryts i stället för att klippas på telefon.
-        if (c.state === 'awarded-me') return '<span class="badge bg-success text-wrap text-start">Ni är utsedda att arrangera</span>';
+        if (c.state === 'awarded-me') return '<span class="badge bg-success text-wrap text-start">' + (c.created ? 'Tävlingen är skapad' : 'Ni är utsedda att arrangera') + '</span>';
         if (c.state === 'awarded-other') return '<span class="badge bg-secondary text-wrap text-start">Går i år till ' + esc(c.awardedClub) + '</span>';
         if (c.state === 'wished') return '<span class="badge bg-primary text-wrap text-start">Ni har önskat</span>'
             + (c.mine && c.mine.byKrets ? '<div class="small text-muted">Registrerat av kretsen</div>' : '');
         return '<span class="badge bg-light text-dark border">Utlyst</span>';
     }
     function actionCell(c) {
+        if (c.state === 'awarded-me') {
+            // Två handlingar får stå på samma rad; avstängd handling har sin förklaring som text.
+            let h = '';
+            if (c.canCreate) h += '<button class="btn btn-primary btn-sm" type="button" data-cc="create" data-id="' + c.id + '">Skapa tävlingen</button>';
+            else if (c.whyNotCreate) h += '<span class="small text-muted d-block">' + esc(c.whyNotCreate) + '</span>';
+            else if (c.created) h += '<span class="small text-muted d-block">Bygg klart och publicera den under Era tävlingar.</span>';
+            if (c.canProposeDate) h += '<button class="btn btn-outline-secondary btn-sm mt-1" type="button" data-cc="proposedate" data-id="' + c.id + '">Föreslå annat datum</button>';
+            return h;
+        }
         if (c.state === 'wished' && c.canUnwish)
             return '<button class="btn btn-outline-secondary btn-sm" type="button" data-cc="unwish" data-id="' + c.id + '">Ångra</button>';
         if (c.state === 'open') {
@@ -124,13 +133,30 @@
         $('ccBody').innerHTML = h + '</tbody></table></div>';
     }
 
-    function openModal(title, bodyHtml) { $('ccModalTitle').textContent = title; $('ccModalBody').innerHTML = bodyHtml; modal().show(); }
+    // Svensk datumväljare (som övriga sajten): flatpickr, locale 'sv', ÅÅÅÅ-MM-DD — aldrig <input type="date"> (följer webbläsarens språk).
+    // Adminpanelen laddar flatpickr; saknas den laddas den här. static: kalendern ligger i dialogen.
+    let fpReady = null;
+    function ensureFlatpickr() {
+        if (window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.sv) return Promise.resolve();
+        if (fpReady) return fpReady;
+        const load = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+        if (!document.querySelector('link[href*="flatpickr.min.css"]')) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css'; document.head.appendChild(l); }
+        fpReady = (window.flatpickr ? Promise.resolve() : load('https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js'))
+            .then(() => load('https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/sv.js'));
+        return fpReady;
+    }
+    function initDates() {
+        ensureFlatpickr().then(() => modalEl.querySelectorAll('input[data-date]').forEach(el => {
+            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, static: true });
+        })).catch(() => { /* utan kalender går datumet ändå att skriva som ÅÅÅÅ-MM-DD */ });
+    }
+    function openModal(title, bodyHtml) { $('ccModalTitle').textContent = title; $('ccModalBody').innerHTML = bodyHtml; modal().show(); initDates(); }
     function wishModal(c) {
         openModal('Vi vill arrangera ' + c.name,
             '<div id="ccFormMsg"></div>'
             + '<p class="small text-muted">Kretsen får en notis om ert önskemål och utser sedan en klubb. Ni kan ångra er tills dess.</p>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="ccDate">Förslag till dag (valfritt)</label>'
-            + '<input class="form-control" type="date" id="ccDate" value="">'
+            + '<input class="form-control" type="text" data-date autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccDate" value="">'
             + (c.locked ? '<div class="form-text">Kretsen har fastställt datumet – ert förslag är bara ett förslag.</div>' : '<div class="form-text">Lämna tomt om ni passar på kretsens dag eller inte har någon önskad dag.</div>') + '</div>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="ccNote">Meddelande till kretsen (valfritt)</label><textarea class="form-control" id="ccNote" rows="3" maxlength="500"></textarea></div>'
             + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
@@ -156,13 +182,47 @@
         }).catch(() => { b.disabled = false; $('ccFormMsg').innerHTML = '<div class="alert alert-warning py-2">Något gick fel. Ladda om sidan och försök igen.</div>'; });
     }
 
+    function createModal(c) {
+        openModal('Skapa tävlingen', '<div id="ccFormMsg"></div>'
+            + '<p>Tävlingen <b>' + esc(c.name) + '</b> skapas med kretsens uppgifter (namn, gren' + (c.date ? ', datum ' + esc(dateText(c.date)) : '') + ').</p>'
+            + '<p class="small text-muted">Den är <b>dold</b> för skyttarna tills ni trycker Publicera under Era tävlingar. Ni bygger klart den först.</p>'
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-primary" type="button" id="ccCreate" data-id="' + c.id + '">Skapa tävlingen</button></div>');
+    }
+    function createIt() {
+        const b = $('ccCreate'); b.disabled = true;
+        post('CreateCompetition', { clubId: CLUB_ID, id: b.dataset.id }).then(d => {
+            if (!d.success) { b.disabled = false; $('ccFormMsg').innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message) + '</div>'; return; }
+            modal().hide(); say(d.message, true); load();
+        }).catch(() => { b.disabled = false; $('ccFormMsg').innerHTML = '<div class="alert alert-warning py-2">Det gick inte att skapa tävlingen. Försök igen.</div>'; });
+    }
+    function proposeModal(c) {
+        openModal('Föreslå annat datum', '<div id="ccFormMsg"></div>'
+            + '<p class="small text-muted">Kretsen har fastställt datumet för <b>' + esc(c.name) + '</b>. Ert förslag ändrar ingenting – kretsen får en notis och beslutar.</p>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="ccPDate">Förslag till dag</label><input class="form-control" type="text" data-date autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccPDate"></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="ccPNote">Varför? (valfritt)</label><textarea class="form-control" id="ccPNote" rows="3" maxlength="500"></textarea></div>'
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-primary" type="button" id="ccPSend" data-id="' + c.id + '">Skicka förslaget</button></div>');
+    }
+    function proposeIt() {
+        const b = $('ccPSend'); b.disabled = true;
+        post('ProposeDate', { clubId: CLUB_ID, id: b.dataset.id, proposedDate: $('ccPDate').value, note: $('ccPNote').value }).then(d => {
+            if (!d.success) { b.disabled = false; $('ccFormMsg').innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message) + '</div>'; return; }
+            modal().hide(); say(d.message, true);
+        }).catch(() => { b.disabled = false; $('ccFormMsg').innerHTML = '<div class="alert alert-warning py-2">Det gick inte att skicka. Försök igen.</div>'; });
+    }
+
     document.addEventListener('click', ev => {
-        const t = ev.target.closest('[data-cc], #ccSend, #ccUnwish');
+        const t = ev.target.closest('[data-cc], #ccSend, #ccUnwish, #ccCreate, #ccPSend');
         if (!t || (!card.contains(t) && !modalEl.contains(t))) return;
         if (t.id === 'ccSend') return send();
         if (t.id === 'ccUnwish') return unwish();
+        if (t.id === 'ccCreate') return createIt();
+        if (t.id === 'ccPSend') return proposeIt();
         const c = calls[+t.dataset.id];
         if (!c) return;
+        if (t.dataset.cc === 'create') return createModal(c);
+        if (t.dataset.cc === 'proposedate') return proposeModal(c);
         if (t.dataset.cc === 'wish') return wishModal(c);
         if (t.dataset.cc === 'unwish') return unwishModal(c);
     });
