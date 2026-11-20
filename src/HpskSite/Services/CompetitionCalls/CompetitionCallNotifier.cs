@@ -157,6 +157,65 @@ namespace HpskSite.Services.CompetitionCalls
             return sent;
         }
 
+        /// <summary>
+        /// Påminnelse (F6): den utsedda klubben har inte skapat tävlingen. Spärren (<paramref name="claimKey"/>) tas FÖRE utskicket, så ett
+        /// omstartat svep aldrig mejlar två gånger. Går ingen mejlad loggas det och raden syns i kretsens gula kort. Returnerar antalet mejl.
+        /// </summary>
+        public async Task<int> CreateReminderAsync(CompetitionCall call, string clubName, string claimKey, string publicBase)
+        {
+            var sent = 0;
+            try
+            {
+                if (!_rate.TryClaimOnce(claimKey, TimeSpan.FromDays(CompetitionCallRules.CreateReminderAfterDays))) return 0;
+                var clubId = call.AwardedClubId ?? 0;
+                var admins = ClubAdmins(clubId);
+                var replyTo = _reply.ForRegion(call.RegionId);
+                var when = call.CompetitionDate.HasValue
+                    ? $"den {CompetitionCallRules.WeekdaySv(call.CompetitionDate.Value).ToLowerInvariant()} {call.CompetitionDate.Value:d MMMM yyyy}"
+                    : "på en dag som ännu inte är bestämd";
+                var paras = new List<string>
+                {
+                    $"{clubName} är utsedd att arrangera {call.Name} {when}, men tävlingen är ännu inte skapad på pistol.nu.",
+                    "Skapa den under klubbens Tävlingar → Tävlingar kretsen har utlyst. Tävlingen är dold tills ni själva trycker Publicera.",
+                    "Kan klubben inte arrangera den? Svara på det här mejlet så får kretsen veta det i tid – svaret går till kretsen.",
+                };
+                foreach (var (name, email) in admins)
+                    if (await _email.SendKretsgranskningAsync(email, name, $"Skapa tävlingen: {call.Name}", paras,
+                            "Öppna klubbens tävlingar", ClubCompetitionsUrl(clubId, publicBase),
+                            $"Du får mejlet för att du är administratör för {clubName} på pistol.nu.", replyTo))
+                        sent++;
+                if (sent == 0) _logger.LogWarning("Utlysning {Id}: ingen administratör för klubb {Club} kunde påminnas om att skapa tävlingen.", call.Id, clubId);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: påminnelsen om att skapa tävlingen kunde inte skickas.", call.Id); }
+            return sent;
+        }
+
+        /// <summary>Påminnelse (F6): sista dag för önskemål har gått, klubbar har önskat och ingen är utsedd. Går till kretsens tävlingsansvarige.</summary>
+        public async Task<int> AwardReminderAsync(CompetitionCall call, IReadOnlyList<string> wishingClubs, string claimKey, string publicBase)
+        {
+            var sent = 0;
+            try
+            {
+                if (!_rate.TryClaimOnce(claimKey, TimeSpan.FromDays(CompetitionCallRules.CreateReminderAfterDays))) return 0;
+                var rec = _uppdrag.Recipients(call.RegionId, BoardRoleDefinitions.RoleTavlingsansvarig);
+                var paras = new List<string>
+                {
+                    $"Sista dag för önskemål om {call.Name} har gått, men ingen klubb är utsedd ännu.",
+                    wishingClubs.Count == 0 ? "" : $"Klubbar som önskat: {string.Join(", ", wishingClubs)}.",
+                    "Utse en klubb under Utlysta tävlingar. Klubben får då ett mejl och kan skapa tävlingen.",
+                };
+                var replyTo = _reply.ForRegion(call.RegionId);
+                foreach (var r in rec.To)
+                    if (await _email.SendKretsgranskningAsync(r.Email, r.Name, $"Utse arrangör: {call.Name}", paras,
+                            "Öppna kretsens utlysningar", $"{publicBase}/kretsen/ansokningar?krets={call.RegionId}",
+                            "Du får mejlet för att du ansvarar för kretsens tävlingar på pistol.nu.", replyTo))
+                        sent++;
+                if (sent == 0) _logger.LogWarning("Utlysning {Id}: ingen i kretsen kunde påminnas om att utse arrangör.", call.Id);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: påminnelsen om att utse arrangör kunde inte skickas.", call.Id); }
+            return sent;
+        }
+
         /// <summary>Klubbens Tävlingar-flik i adminpanelen (klubbens sida + <c>#clubAdmin/competitions</c>). Utan klubbsida: sajtens startsida — länken ändrar aldrig något.</summary>
         private string ClubCompetitionsUrl(int clubId, string publicBase)
         {

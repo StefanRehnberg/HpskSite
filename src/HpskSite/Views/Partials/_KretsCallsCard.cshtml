@@ -117,8 +117,12 @@ window.hpskKretsCallsInit = function () {
     function attentionHtml() {
         if (!data.attention || !data.attention.length) return '';
         return '<div class="alert alert-warning mb-3" id="kcAttention"><div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle me-1"></i>Att behandla</div>'
-            + '<ul class="mb-0 ps-3">' + data.attention.map(a => '<li><b>' + esc(a.club) + '</b> är utsedd till ' + esc(a.name)
-                + (a.date ? ' (' + esc(dateText(a.date)) + ')' : '') + ', men klubben nåddes inte av något mejl. Kontakta klubben på annat sätt.</li>').join('') + '</ul></div>';
+            + '<ul class="mb-0 ps-3">' + data.attention.map(a => {
+                const when = a.date ? ' (' + esc(dateText(a.date)) + ')' : '';
+                if (a.reason === 'create') return '<li><b>' + esc(a.club) + '</b> är utsedd till ' + esc(a.name) + when + ' men har ännu inte skapat tävlingen. Klubbens administratörer påminns automatiskt var 14:e dag.</li>';
+                if (a.reason === 'award') return '<li>Sista dag för önskemål om <b>' + esc(a.name) + '</b>' + when + ' har gått. Klubbar har önskat, men ingen är utsedd.</li>';
+                return '<li><b>' + esc(a.club) + '</b> är utsedd till ' + esc(a.name) + when + ', men klubben nåddes inte av något mejl. Kontakta klubben på annat sätt.</li>';
+            }).join('') + '</ul></div>';
     }
     function wishesLine(c) {
         if (!c.wishes || !c.wishes.length) return '';
@@ -190,6 +194,11 @@ window.hpskKretsCallsInit = function () {
             '<div id="kcFormMsg"></div>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="kcName">Vad heter tävlingen?</label><input class="form-control" id="kcName" maxlength="200" value="' + esc(v.name) + '"></div>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDisc">Vilken gren?</label><select class="form-select" id="kcDisc">' + disc + '</select></div>'
+            + (data.series && data.series.length
+                ? '<div class="mb-3"><label class="form-label fw-semibold" for="kcSeries">Ingår den i en serie?</label><select class="form-select" id="kcSeries"><option value="0">Nej, fristående</option>'
+                    + data.series.map(s => '<option value="' + s.id + '"' + (s.id === v.seriesId ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('')
+                    + '</select><div class="form-text">Klubbens tävling läggs då i serien när den skapas. Varje del har sin egen arrangör.</div></div>'
+                : '')
             + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDate">Vilken dag?</label><input class="form-control" type="text" data-date autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="kcDate" value="' + esc(v.date || '') + '">'
             + '<div class="form-text">Lämna tomt om dagen inte är bestämd. Klubben kan då föreslå en dag.</div></div>'
             + '<div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="kcLocked"' + (v.locked ? ' checked' : '') + '><label class="form-check-label" for="kcLocked"><b>Datumet är fastställt av kretsen</b></label>'
@@ -211,6 +220,8 @@ window.hpskKretsCallsInit = function () {
             date: $('kcDate').value, locked: $('kcLocked').checked, description: $('kcDesc').value, wishDeadline: $('kcDeadline').value,
             wishesVisible: $('kcVisible').checked, expectedVersion: b.dataset.version, publish: !!($('kcPubYes') && $('kcPubYes').checked)
         };
+        // Utan serieväljare (kretsen har inga serier) skickas inget: servern behåller då det som finns.
+        if ($('kcSeries')) body.seriesId = $('kcSeries').value;
         b.disabled = true;
         post('SaveCall', body).then(d => {
             if (!d.success) { b.disabled = false; $('kcFormMsg').innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message) + '</div>'; return; }

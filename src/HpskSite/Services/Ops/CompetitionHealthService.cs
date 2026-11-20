@@ -36,12 +36,14 @@ namespace HpskSite.Services.Ops
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+        private readonly HpskSite.Services.CompetitionCalls.CompetitionCallService _calls;
 
         public CompetitionHealthService(IUmbracoDatabaseFactory databaseFactory, SiteSettingService settings,
             IUmbracoContextFactory contextFactory, IPublishedUrlProvider urlProvider, AppCaches caches,
             ILogger<CompetitionHealthService> logger, HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Competitions.CompetitionLinks links)
+            HpskSite.Services.Competitions.CompetitionLinks links, HpskSite.Services.CompetitionCalls.CompetitionCallService calls)
         {
+            _calls = calls;
             _competitions = competitions;
             _links = links;
             _databaseFactory = databaseFactory;
@@ -81,6 +83,10 @@ namespace HpskSite.Services.Ops
             public bool ChangeLogExists { get; init; } = true;
             /// <summary>Skrivningarna till tävlingar och serier är frysta (Competitions:WriteFreeze).</summary>
             public bool CompetitionsFrozen { get; init; }
+            /// <summary>Kretsutlysningen F6: utsedda klubbar som inte kunde mejlas om utseendet (kretsen ska kontakta dem på annat sätt).</summary>
+            public int CallsAwardedWithoutNotice { get; init; }
+            /// <summary>Kretsutlysningen F6: utsedda klubbar som inte skapat tävlingen efter <see cref="HpskSite.Services.CompetitionCalls.CompetitionCallRules.CreateReminderAfterDays"/> dagar.</summary>
+            public int CallsAwardedNotCreated { get; init; }
             public string Status { get; set; } = "OK";
             public List<string> Problems { get; set; } = new();
             public List<string> Warnings { get; set; } = new();
@@ -124,8 +130,21 @@ namespace HpskSite.Services.Ops
             };
 
             var (count, noUrl, compError) = ReadCompetitions();
+            // Utlysningarna: saknas tabellerna (före migreringen) eller går frågan inte, räknas 0 — hälsokollen får aldrig falla på dem.
+            int awardedNoMail = 0, awardedNotCreated = 0;
+            try
+            {
+                if (_calls.TablesExist())
+                {
+                    awardedNoMail = _calls.CountAwardedWithoutNotice();
+                    awardedNotCreated = _calls.OpenForReminders().Count(c => HpskSite.Services.CompetitionCalls.CompetitionCallRules.NeedsCreate(c, DateTime.Today));
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Hälsokollen kunde inte räkna kretsens utlysningar."); }
             var report = new Report
             {
+                CallsAwardedWithoutNotice = awardedNoMail,
+                CallsAwardedNotCreated = awardedNotCreated,
                 At = DateTime.Now,
                 Stores = stores,
                 Competitions = count,
@@ -168,6 +187,11 @@ namespace HpskSite.Services.Ops
                 r.Warnings.Add("Tävlingarnas ändringslogg saknas — kör Migrations/create-competition-change-tables.sql.");
             if (r.CompetitionsFrozen)
                 r.Warnings.Add("Tävlingar: skrivningar är frysta.");
+            // Kretsutlysningen: något en människa ska ta tag i, inget fel i systemet — därför en varning, aldrig ett FAIL.
+            if (r.CallsAwardedWithoutNotice > 0)
+                r.Warnings.Add($"{r.CallsAwardedWithoutNotice} utsedda klubbar fick inget mejl om utseendet (kretsen ska kontakta dem).");
+            if (r.CallsAwardedNotCreated > 0)
+                r.Warnings.Add($"{r.CallsAwardedNotCreated} utsedda klubbar har inte skapat tävlingen efter {HpskSite.Services.CompetitionCalls.CompetitionCallRules.CreateReminderAfterDays} dagar.");
             if (r.CompetitionError != null) r.Problems.Add("Tävlingarna: kunde inte läsas (" + r.CompetitionError + ").");
             if (r.CompetitionsWithoutUrl.Count > 0)
                 r.Warnings.Add($"{r.CompetitionsWithoutUrl.Count} publicerade tävlingar saknar adress.");

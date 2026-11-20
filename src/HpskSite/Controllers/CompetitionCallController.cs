@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly KretsCalendarService _krets;
         private readonly CompetitionCallNotifier _notifier;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly ILogger<CompetitionCallController> _logger;
 
@@ -41,9 +42,11 @@ namespace HpskSite.Controllers
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionCallService calls, CompetitionCallAccess access, KretsCalendarService krets,
             CompetitionCallNotifier notifier, HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations, ILogger<CompetitionCallController> logger)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations, ILogger<CompetitionCallController> logger,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore series)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _series = series;
             _competitions = competitions;
             _registrations = registrations;
             _calls = calls;
@@ -54,6 +57,20 @@ namespace HpskSite.Controllers
         }
 
         private static IActionResult Deny() => new JsonResult(new { success = false, message = "Du har inte behörighet att hantera kretsens utlysningar." });
+
+        /// <summary>
+        /// Serierna kretsen får lägga en utlysning i: de som har kretsen som värd (<c>regionalFederation</c>) eller hör till en klubb i kretsen.
+        /// ⚠️ En utlysning kan bara kopplas till en serie som tillhör kretsen — aldrig en grannkrets serie, hur id:t än kom hit.
+        /// </summary>
+        private List<HpskSite.Models.Competitions.CompetitionSeriesInfo> SeriesOfRegion(int regionId)
+        {
+            var code = _krets.Region(regionId)?.Code;
+            if (string.IsNullOrEmpty(code)) return new();
+            var clubs = _krets.ClubsInRegion(regionId);
+            return _series.List()
+                .Where(s => string.Equals(s.RegionalFederation, code, StringComparison.OrdinalIgnoreCase) || (s.ClubId > 0 && clubs.ContainsKey(s.ClubId)))
+                .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
 
         /// <summary>Kretsens utlysningar ett år, med vad varje rad får göra (och varför inte).</summary>
         [HttpGet]
@@ -76,15 +93,11 @@ namespace HpskSite.Controllers
                     years = years.OrderByDescending(v => v),
                     clubs = clubs.OrderBy(c => c.Value, StringComparer.CurrentCultureIgnoreCase).Select(c => new { id = c.Key, name = c.Value }),
                     disciplines = HpskSite.Models.CompetitionTypes.All.Select(t => new { value = t.Id, label = t.Name }),
+                    series = SeriesOfRegion(regionId).Select(s => new { id = s.Id, name = s.Name }),
                     calls = list.Select(c => Dto(c, clubs)),
                     // Gult kort "Att behandla": utsedda klubbar som inte kunde aviseras (ingen administratör, eller mejlet gick inte).
-                    attention = _calls.AwardedWithoutNotice(regionId).Select(c => new
-                    {
-                        id = c.Id,
-                        name = c.Name,
-                        club = c.AwardedClubId is int cid && clubs.TryGetValue(cid, out var cn) ? cn : "Okänd klubb",
-                        date = c.CompetitionDate?.ToString("yyyy-MM-dd")
-                    })
+                    // Samt (F6): utsedd klubb som inte skapat tävlingen efter 14 dagar, och önskemål som väntar på besked efter sista dagen.
+                    attention = AttentionRows(regionId, clubs)
                 });
             }
             catch (Exception ex)
@@ -92,6 +105,29 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Kretsens utlysningar kunde inte läsas (krets {Id}).", regionId);
                 return Json(new { success = false, message = "Utlysningarna kunde inte läsas just nu. Försök igen om en stund." });
             }
+        }
+
+        /// <summary>
+        /// Raderna i det gula kortet. <c>reason</c>: <c>nomail</c> (klubben nåddes inte av utseendet), <c>create</c> (utsedd, ingen tävling efter
+        /// 14 dagar — samma regel som påminnelsen), <c>award</c> (sista dag för önskemål har gått, ingen utsedd). En utlysning står en gång, med
+        /// det mest brådskande skälet.
+        /// </summary>
+        private List<object> AttentionRows(int regionId, Dictionary<int, string> clubs)
+        {
+            var today = DateTime.Today;
+            string Club(int? id) => id is int cid && clubs.TryGetValue(cid, out var cn) ? cn : "Okänd klubb";
+            var rows = new List<object>();
+            var seen = new HashSet<int>();
+            foreach (var c in _calls.AwardedWithoutNotice(regionId))
+                if (seen.Add(c.Id)) rows.Add(new { id = c.Id, name = c.Name, club = Club(c.AwardedClubId), date = c.CompetitionDate?.ToString("yyyy-MM-dd"), reason = "nomail" });
+            foreach (var c in _calls.OpenForReminders(regionId))
+            {
+                if (CompetitionCallRules.NeedsCreate(c, today) && seen.Add(c.Id))
+                    rows.Add(new { id = c.Id, name = c.Name, club = Club(c.AwardedClubId), date = c.CompetitionDate?.ToString("yyyy-MM-dd"), reason = "create" });
+                else if (c.Status == CompetitionCallStatus.Utlyst && CompetitionCallRules.NeedsAward(c, _calls.ActiveWishCount(c.Id), today) && seen.Add(c.Id))
+                    rows.Add(new { id = c.Id, name = c.Name, club = "", date = c.CompetitionDate?.ToString("yyyy-MM-dd"), reason = "award" });
+            }
+            return rows;
         }
 
         [HttpGet]
@@ -119,7 +155,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveCall(int id, int regionId, int year, string? name, string? description, string? discipline,
-            string? date, bool locked, string? wishDeadline, bool wishesVisible, int expectedVersion, bool publish)
+            string? date, bool locked, string? wishDeadline, bool wishesVisible, int expectedVersion, bool publish, int? seriesId = null)
         {
             int region = regionId;
             CompetitionCall? existing = null;
@@ -134,11 +170,20 @@ namespace HpskSite.Controllers
             if (!TryDate(date, out var d)) return Json(new { success = false, message = "Datumet kunde inte läsas. Skriv det som ÅÅÅÅ-MM-DD." });
             if (!TryDate(wishDeadline, out var wd)) return Json(new { success = false, message = "Sista dag för önskemål kunde inte läsas. Skriv den som ÅÅÅÅ-MM-DD." });
 
+            // Serien: utelämnad = behåll det som finns, 0 = ingen serie, annars måste serien tillhöra utlysningens EGEN krets.
+            int? series = existing?.SeriesId;
+            if (seriesId.HasValue)
+            {
+                if (seriesId.Value <= 0) series = null;
+                else if (SeriesOfRegion(region).Any(s => s.Id == seriesId.Value)) series = seriesId.Value;
+                else return Json(new { success = false, message = "Serien hittades inte i kretsen." });
+            }
+
             var edit = new CompetitionCall
             {
                 RegionId = region, Year = year, Name = name ?? "", Description = description, Discipline = ValidDiscipline(discipline),
                 CompetitionDate = d, LockedByKrets = locked && d.HasValue, WishDeadline = wd, WishesVisibleToClubs = wishesVisible,
-                SeriesId = existing?.SeriesId, ChampionshipScope = existing?.ChampionshipScope,
+                SeriesId = series, ChampionshipScope = existing?.ChampionshipScope,
             };
             var actor = await _access.CurrentMemberIdAsync();
             var actorName = await _access.CurrentNameAsync();
@@ -241,6 +286,8 @@ namespace HpskSite.Controllers
                 name = c.Name,
                 description = c.Description,
                 discipline = c.Discipline,
+                seriesId = c.SeriesId,
+                seriesName = c.SeriesId is int sid ? _series.Get(sid)?.Name : null,
                 disciplineLabel = DisciplineLabel(c.Discipline),
                 date = c.CompetitionDate?.ToString("yyyy-MM-dd"),
                 weekday = c.CompetitionDate.HasValue ? CompetitionCallRules.WeekdaySv(c.CompetitionDate.Value) : null,

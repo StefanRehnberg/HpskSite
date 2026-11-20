@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly KretsCalendarService _krets;
         private readonly AdminAuthorizationService _auth;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly HpskSite.Services.Hosting.DatabaseLock _lock;
         private readonly CompetitionCallNotifier _notifier;
         private readonly AppCaches _appCaches;
@@ -43,9 +44,11 @@ namespace HpskSite.Controllers
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionCallService calls, CompetitionCallAccess access, KretsCalendarService krets,
             AdminAuthorizationService auth, HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Hosting.DatabaseLock dbLock, CompetitionCallNotifier notifier, ILogger<CompetitionCallClubController> logger)
+            HpskSite.Services.Hosting.DatabaseLock dbLock, CompetitionCallNotifier notifier, ILogger<CompetitionCallClubController> logger,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore series)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _series = series;
             _calls = calls; _access = access; _krets = krets; _auth = auth; _logger = logger;
             _competitions = competitions; _lock = dbLock; _notifier = notifier; _appCaches = appCaches;
         }
@@ -158,7 +161,9 @@ namespace HpskSite.Controllers
             int createdId = 0;
             try
             {
-                var created = _competitions.Create(c.SeriesId, c.Name, comp =>
+                // Serien kan ha tagits bort sedan utlysningen lades: då skapas tävlingen fristående i stället för att skapandet faller.
+                var seriesId = c.SeriesId is int sid && _series.Get(sid) != null ? c.SeriesId : null;
+                var created = _competitions.Create(seriesId, c.Name, comp =>
                 {
                     comp.IsVisible = true;
                     comp.IsDraft = true;   // dold tills klubben trycker Publicera (F1)

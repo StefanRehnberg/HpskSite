@@ -441,6 +441,24 @@ namespace HpskSite.Services.CompetitionCalls
                 + "ORDER BY c.CompetitionDate, c.Id", regionId);
         }
 
+        /// <summary>Utlysningar som kan behöva en påminnelse (utlysta och utsedda, inte skapade). <paramref name="regionId"/> ≤ 0 = alla kretsar.</summary>
+        public List<CompetitionCall> OpenForReminders(int regionId = 0)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCall>(
+                "SELECT * FROM CompetitionCall WHERE Status IN ('Utlyst','Tilldelad') AND (@0 = 0 OR RegionId = @0) ORDER BY CompetitionDate, Id", regionId);
+        }
+
+        /// <summary>Antal utsedda utlysningar i alla kretsar där ingen kunde mejlas (driftskollen). Samma definition som <see cref="AwardedWithoutNotice"/>.</summary>
+        public int CountAwardedWithoutNotice()
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM CompetitionCall c WHERE c.Status='Tilldelad' AND EXISTS ("
+                + "SELECT 1 FROM CompetitionCallEvent e WHERE e.CallId=c.Id AND e.Kind='AwardMailed' AND e.[Text]='0' "
+                + "AND e.Id = (SELECT MAX(e2.Id) FROM CompetitionCallEvent e2 WHERE e2.CallId=c.Id AND e2.Kind='AwardMailed'))");
+        }
+
         // ── Internt ─────────────────────────────────────────────────────────────────────────
 
         /// <summary>Det villkorade UPDATE:t + händelseraden i EN transaktion. 0 rader = läget tillät det inte (eller någon hann före).</summary>

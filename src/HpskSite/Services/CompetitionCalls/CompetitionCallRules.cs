@@ -167,6 +167,52 @@ namespace HpskSite.Services.CompetitionCalls
         public static bool VisibleToClubs(string status) =>
             status is CompetitionCallStatus.Utlyst or CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad;
 
+        // ── Behöver åtgärd och påminnelser (F6) ────────────────────────────────────────────────
+
+        /// <summary>Så många dagar efter utseendet påminns klubben om att skapa tävlingen (därefter var 14:e dag).</summary>
+        public const int CreateReminderAfterDays = 14;
+
+        /// <summary>
+        /// Utsedd klubb som ännu inte skapat tävlingen, där det fortfarande är meningsfullt att påminna: <paramref name="today"/> är minst
+        /// <see cref="CreateReminderAfterDays"/> dagar efter utseendet, och dagen har inte passerat (en datumlös utlysning påminns tills den får ett datum).
+        /// Samma regel styr påminnelsemejlet och raden i kretsens gula kort — de kan inte säga olika saker.
+        /// </summary>
+        public static bool NeedsCreate(CompetitionCall c, DateTime today) =>
+            c.Status == CompetitionCallStatus.Tilldelad && !(c.CompetitionId is > 0) && c.AwardedClubId is > 0 && c.AwardedAt.HasValue
+            && (today.Date - c.AwardedAt.Value.Date).TotalDays >= CreateReminderAfterDays
+            && (!c.CompetitionDate.HasValue || c.CompetitionDate.Value.Date >= today.Date);
+
+        /// <summary>Sista dag för önskemål har gått, klubbar har önskat, och kretsen har ännu inte utsett någon.</summary>
+        public static bool NeedsAward(CompetitionCall c, int activeWishes, DateTime today) =>
+            c.Status == CompetitionCallStatus.Utlyst && c.WishDeadline.HasValue && c.WishDeadline.Value.Date < today.Date && activeWishes > 0;
+
+        public sealed record DueReminder(int CallId, string Kind, string Key);
+        public const string ReminderClubCreate = "club-create";
+        public const string ReminderKretsAward = "krets-award";
+
+        /// <summary>
+        /// Påminnelserna som ska gå i dag. Nyckeln bär en 14-dagarsperiod, så en påminnelse går högst en gång per period och sedan
+        /// igen så länge läget kvarstår — aldrig varje svep.
+        /// </summary>
+        public static List<DueReminder> DueReminders(IEnumerable<CompetitionCall> calls, Func<int, int> activeWishes, DateTime today)
+        {
+            var due = new List<DueReminder>();
+            foreach (var c in calls)
+            {
+                if (NeedsCreate(c, today))
+                {
+                    var period = (int)((today.Date - c.AwardedAt!.Value.Date).TotalDays / CreateReminderAfterDays);
+                    due.Add(new(c.Id, ReminderClubCreate, $"call-create-reminder:{c.Id}:{c.AwardedClubId}:{c.AwardedAt.Value:yyyyMMdd}:{period}"));
+                }
+                else if (c.Status == CompetitionCallStatus.Utlyst && c.WishDeadline.HasValue && NeedsAward(c, activeWishes(c.Id), today))
+                {
+                    var period = (int)((today.Date - c.WishDeadline.Value.Date).TotalDays / CreateReminderAfterDays);
+                    due.Add(new(c.Id, ReminderKretsAward, $"call-award-reminder:{c.Id}:{c.WishDeadline.Value:yyyyMMdd}:{period}"));
+                }
+            }
+            return due;
+        }
+
         // ── Kalendern (F5) ─────────────────────────────────────────────────────────────────────
 
         /// <summary>

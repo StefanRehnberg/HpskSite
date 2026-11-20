@@ -81,6 +81,9 @@ namespace HpskSite.Services.Kretsgranskning
             // Bangranskningen (fas 3) likaså.
             try { sentReminders += await sp.GetRequiredService<CourseReviewReminderService>().RunOnceAsync(today); }
             catch (Exception ex) { _logger.LogError(ex, "Bangranskningens påminnelser kunde inte köras."); }
+            // Kretsens utlysningar (kretsutlysningen F6) likaså.
+            try { sentReminders += await sp.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallReminderService>().RunOnceAsync(today); }
+            catch (Exception ex) { _logger.LogError(ex, "Utlysningarnas påminnelser kunde inte köras."); }
             return sentReminders;
         }
 
