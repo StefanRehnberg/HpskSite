@@ -1122,7 +1122,8 @@ namespace HpskSite.Services
         /// stycke själv. Skicka aldrig in färdig HTML; en klubbs fritext hamnar annars rakt i mejlet.</para>
         /// </summary>
         public async Task<bool> SendKretsgranskningAsync(string toEmail, string toName, string subject,
-            IEnumerable<string> paragraphs, string? buttonText, string? buttonUrl, string? notice, MailReplyTo replyTo)
+            IEnumerable<string> paragraphs, string? buttonText, string? buttonUrl, string? notice, MailReplyTo replyTo,
+            string? secondaryText = null, string? secondaryUrl = null)
         {
             if (string.IsNullOrWhiteSpace(toEmail)) return false;
             static string H(string? s) => System.Web.HttpUtility.HtmlEncode(s ?? "").Replace("\n", "<br/>");
@@ -1132,6 +1133,9 @@ namespace HpskSite.Services
                 ? ""
                 : $"<p><a class=\"btn\" href=\"{System.Web.HttpUtility.HtmlAttributeEncode(buttonUrl)}\">{H(buttonText)}</a></p>";
             var foot = string.IsNullOrWhiteSpace(notice) ? "" : $"<p class=\"notice\">{H(notice)}</p>";
+            var second = string.IsNullOrWhiteSpace(secondaryUrl) || string.IsNullOrWhiteSpace(secondaryText)
+                ? ""
+                : $"<p><a href=\"{System.Web.HttpUtility.HtmlAttributeEncode(secondaryUrl)}\">{H(secondaryText)}</a></p>";
 
             var body = $@"
 <html>
@@ -1146,6 +1150,7 @@ namespace HpskSite.Services
     <h2>{(string.IsNullOrWhiteSpace(toName) ? "Hej!" : $"Hej {H(toName)},")}</h2>
     {paras}
     {button}
+    {second}
     {foot}
     <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
 </body>

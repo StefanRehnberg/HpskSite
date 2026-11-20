@@ -1,0 +1,45 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Tacka nej som tävlingsledare";
+    var token = ViewData["MgrToken"] as string ?? "";
+    var comp = ViewData["MgrCompetition"] as string ?? "";
+    var date = ViewData["MgrDate"] as string ?? "";
+    var club = ViewData["MgrClub"] as string ?? "";
+    var result = ViewData["MgrResult"] as string ?? "";
+}
+@*
+    Tacka nej ur mejlet till en utsedd tävlingsledare (F7). UTAN inloggning. GET visar bara frågan; avböjandet är en POST.
+    Länken gäller bara den utsedde personens egen roll och kan bara tacka nej.
+*@
+<div class="container py-4" style="max-width:640px">
+    @if (string.IsNullOrEmpty(comp))
+    {
+        <h1 class="h3">Länken fungerar inte längre</h1>
+        <p>Länken har gått ut. Svara på mejlet du fick så hjälper klubben dig.</p>
+    }
+    else if (result == "ask")
+    {
+        <p class="text-muted small mb-1">@club</p>
+        <h1 class="h3 mb-3">Tacka nej som tävlingsledare</h1>
+        <div class="card"><div class="card-body">
+            <p>Du är utsedd till tävlingsledare för <b>@comp</b>@(string.IsNullOrEmpty(date) ? "" : ", " + date).</p>
+            <p>Om du tackar nej är du inte längre tävlingsledare för tävlingen, och klubbens admin får veta.</p>
+            <form method="post" action="/tavlingsledare/tacka-nej">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="t" value="@token" />
+                <button type="submit" class="btn btn-primary">Ja, jag kan inte – tacka nej</button>
+            </form>
+        </div></div>
+    }
+    else if (result == "done")
+    {
+        <h1 class="h3">Klart</h1>
+        <p>Du är inte längre tävlingsledare för <b>@comp</b>. Klubbens admin har fått veta.</p>
+    }
+    else
+    {
+        <h1 class="h3">Redan avklarat</h1>
+        <p>Du är inte tävlingsledare för <b>@comp</b>, så det finns inget att tacka nej till.</p>
+    }
+</div>

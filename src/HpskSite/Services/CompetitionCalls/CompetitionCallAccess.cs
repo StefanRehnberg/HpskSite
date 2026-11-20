@@ -70,6 +70,16 @@ namespace HpskSite.Services.CompetitionCalls
             return _roles.HasActiveRole(DocumentOwnerType.Region, regionId, me, BoardRoleDefinitions.RoleTavlingsansvarig);
         }
 
+        /// <summary>
+        /// Får den inloggade hantera klubbens program (utse tävlingsledare, stänga rollen, kopiera förra året)? Klubbens EGEN administratör
+        /// (<c>ClubAdmin_{id}</c>) eller sajtadmin — <b>inte</b> kretsadministratören, och <c>IsClubAdminForClub</c> utvidgas inte (F7).
+        /// </summary>
+        public async Task<bool> CanManageClubProgram(int clubId)
+        {
+            if (clubId <= 0 || await CurrentMemberIdAsync() <= 0) return false;
+            return await _auth.IsCurrentUserAdminAsync() || await _auth.IsOwnClubAdmin(clubId);
+        }
+
         /// <summary>Kretsar den inloggade får utlysa åt (flera när hen är med i fler, eller sajtadmin = alla).</summary>
         public async Task<List<(int Id, string Name)>> ManageableRegionsAsync()
         {

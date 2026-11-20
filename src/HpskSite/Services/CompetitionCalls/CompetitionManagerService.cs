@@ -2,7 +2,7 @@ using HpskSite.Models.CompetitionCalls;
 using HpskSite.Models.Staffing;
 using HpskSite.Services.Planning;
 using HpskSite.Services.Staffing;
-using Umbraco.Cms.Core.Scoping;
+using Umbraco.Cms.Infrastructure.Scoping;
 using Umbraco.Cms.Core.Services;
 
 namespace HpskSite.Services.CompetitionCalls
@@ -58,6 +58,15 @@ namespace HpskSite.Services.CompetitionCalls
             if (competitionIds.Count == 0) return new();
             using var s = _scopes.CreateScope(autoComplete: true);
             return s.Database.Fetch<int>("SELECT CompetitionId FROM CompetitionManagerClosure WHERE CompetitionId IN (@ids)", new { ids = competitionIds.ToList() }).ToHashSet();
+        }
+
+        /// <summary>Klubbarna medlemmen är aktiv i (medlemskapstabellen: annan status än Utträdd/Avliden).</summary>
+        public HashSet<int> ClubsOfMember(int memberId)
+        {
+            if (memberId <= 0) return new();
+            using var s = _scopes.CreateScope(autoComplete: true);
+            return s.Database.Fetch<int>(
+                "SELECT ClubId FROM ClubMembership WHERE MemberId = @0 AND Status NOT IN (N'Utträdd', N'Avliden')", memberId).ToHashSet();
         }
 
         /// <summary>Medlemmar med en tävlingsledarrad per tävling (ur rostern, den enda sanningen om rätten).</summary>
@@ -153,9 +162,31 @@ namespace HpskSite.Services.CompetitionCalls
                 var id = RosterRowId(owner, memberId);
                 if (id > 0) { _staffing.Delete(id, owner); removed = true; }
             }
+            // Tävlingsledare som bara finns i tävlingens egen lista (den gamla väljaren, ingen planering ännu) tas bort där.
+            try
+            {
+                var saved = _competitions.GetSaved(competitionId);
+                if (saved != null && saved.ManagerIds.Contains(memberId))
+                {
+                    var rest = saved.ManagerIds.Where(m => m != memberId).ToArray();
+                    var r = _competitions.Update(competitionId, null, c => c.CompetitionManagers = Newtonsoft.Json.JsonConvert.SerializeObject(rest));
+                    if (r.PublishProblem != null) _logger.LogWarning("Tävling {Comp}: tävlingsledarlistan kunde inte uppdateras: {Problem}", competitionId, r.PublishProblem);
+                    else removed = true;
+                }
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Tävling {Comp}: tävlingsledaren {Member} kunde inte tas bort ur tävlingens lista.", competitionId, memberId); throw; }
             using var s = _scopes.CreateScope(autoComplete: true);
             s.Database.Execute("DELETE FROM CompetitionManagerWish WHERE CompetitionId = @0 AND MemberId = @1", competitionId, memberId);
             return removed;
+        }
+
+        /// <summary>Antal tävlingsledare just nu (rostern och tävlingens egen lista, färskt ur lagringen).</summary>
+        public int ManagerCount(int competitionId)
+        {
+            var set = new HashSet<int>(ManagersByCompetition(new[] { competitionId })[competitionId]);
+            var saved = _competitions.GetSaved(competitionId);
+            if (saved != null) foreach (var m in saved.ManagerIds) if (m > 0) set.Add(m);
+            return set.Count;
         }
 
         /// <summary>
@@ -170,7 +201,7 @@ namespace HpskSite.Services.CompetitionCalls
             var claimed = db.Execute(@"
                 INSERT INTO CompetitionManagerClosure (CompetitionId, ClosedAt, ClosedByMemberId)
                 SELECT @0, @1, @2 WHERE NOT EXISTS (SELECT 1 FROM CompetitionManagerClosure WHERE CompetitionId = @0)",
-                competitionId, now, byMemberId > 0 ? byMemberId : (int?)null);
+                competitionId, now, byMemberId > 0 ? (object)byMemberId : DBNull.Value);
             if (claimed == 0) { s.Complete(); return null; }
             var notice = CompetitionManagerRules.WhoGetsFilledNotice(
                 db.Fetch<CompetitionManagerWish>("SELECT * FROM CompetitionManagerWish WHERE CompetitionId = @0", competitionId));
