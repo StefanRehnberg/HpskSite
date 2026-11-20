@@ -54,6 +54,12 @@
 
     <div id="kaTopMessage"></div>
 
+    @* Kretsutlysningen F2: utlysta tävlingar före ansökningarna (EN yta). Egen init: hpskKretsCallsInit. *@
+    @if (m.CanManageCalls)
+    {
+        @await Html.PartialAsync("_KretsCallsCard", m)
+    }
+
     @* ── Att behandla ─────────────────────────────────────────────────────────────────── *@
     <div class="card mb-3 border-warning d-none" id="kaPendingCard">
         <div class="card-header bg-warning text-dark">
@@ -109,6 +115,7 @@ if (!window.hpskKretsApplicationsInit) {
 window.hpskKretsApplicationsInit = function () {
     if (window.hpskKretsApplicationsInit.done) return;
     window.hpskKretsApplicationsInit.done = true;
+    if (window.hpskKretsCallsInit) window.hpskKretsCallsInit();   // utlysningskortet (om det finns på sidan)
 
     const root = document.querySelector('.ka-root');
     const REGION_ID = +root.getAttribute('data-region-id');

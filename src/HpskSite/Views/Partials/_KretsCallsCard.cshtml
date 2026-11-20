@@ -1,0 +1,238 @@
+@using HpskSite.Controllers
+@model KretsAnsokningarModel
+@*
+    Kretsutlysningen F2 — kortet "Utlysta tävlingar": kretsen lägger in årets tävlingstillfällen, släpper dem till
+    klubbarna (Utlys) och utser vilken klubb som arrangerar (Utse). Sitter före "Tävlingsansökningar" i kretsens
+    inkorg (adminpanelens flik Ansökningar och /kretsen/ansokningar) — EN yta, ingen ny meny. Kretsens styrelseledamöter
+    som inte administrerar kretsen får bara det här kortet.
+
+    ⚠️ ORDEN: utlysa · utse. Aldrig "ansök" (det är klubb → krets) eller "tilldela".
+    ⚠️ Formen är kodbasens: gult kort bara för det som väntar (finns inte i F2), blå Åtgärder överst, grå radmeny, EN dialog.
+    ⚠️ En avstängd handling står aldrig utan förklaring — raden i menyn bär skälet som text.
+    ⚠️ Inga användartexter i attribut — knappar bär bara id:n.
+    Laddas lat: window.hpskKretsCallsInit().
+*@
+@{ var m = Model; }
+<div class="kc-root card mb-4" data-region-id="@m.RegionId">
+    @Html.AntiForgeryToken()
+    <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <strong><i class="bi bi-calendar-event me-2"></i>Utlysta tävlingar</strong>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label class="visually-hidden" for="kcYear">Tävlingsår</label>
+            <select class="form-select form-select-sm w-auto" id="kcYear"></select>
+            <div class="dropdown">
+                <button class="btn btn-primary btn-sm shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" id="kcActions">
+                    <i class="bi bi-sliders me-1"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" style="min-width:260px;">
+                    <li><button class="dropdown-item" type="button" data-kc="add"><i class="bi bi-plus-circle me-2"></i>Utlys en tävling…</button></li>
+                    <li><a class="dropdown-item" id="kcPrintLink" target="_blank" rel="noopener" href="#"><i class="bi bi-printer me-2"></i>Skriv ut årsprogram…</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="small text-muted mb-3">
+            Här lägger kretsen in årets tävlingstillfällen. När en tävling är <b>utlyst</b> ser klubbarna den och kan önska att få arrangera den;
+            kretsen <b>utser</b> sedan en klubb. Tills dess syns tävlingen bara för kretsens styrelse.
+        </div>
+        <div id="kcMessage"></div>
+        <div id="kcBody"><div class="text-muted small">Laddar…</div></div>
+    </div>
+</div>
+
+@* EN dialog för formuläret, att utse en klubb, bekräftelser och historiken — innehållet byggs per åtgärd. *@
+<div class="modal fade" id="kcModal" tabindex="-1" aria-labelledby="kcModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="kcModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="kcModalBody"></div>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+if (!window.hpskKretsCallsInit) {
+window.hpskKretsCallsInit = function () {
+    if (window.hpskKretsCallsInit.done) return;
+    const root = document.querySelector('.kc-root');
+    if (!root) return;
+    window.hpskKretsCallsInit.done = true;
+
+    const REGION_ID = +root.getAttribute('data-region-id');
+    // ⚠️ Dialogen flyttas till body — i adminpanelen ligger partialen i en flik.
+    const modalEl = document.getElementById('kcModal');
+    if (modalEl.parentNode !== document.body) document.body.appendChild(modalEl);
+    const modal = () => bootstrap.Modal.getOrCreateInstance(modalEl);
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+    const base = '/umbraco/surface/CompetitionCall/';
+    const MONTHS = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
+    let data = null, calls = {};
+    const nowD = new Date();
+    let year = nowD.getMonth() >= 7 ? nowD.getFullYear() + 1 : nowD.getFullYear();
+
+    const post = (action, body) => fetch(base + action, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+        body: new URLSearchParams(body).toString()
+    }).then(r => r.json());
+
+    function say(msg, ok) {
+        const el = $('kcMessage');
+        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2';
+        el.textContent = msg;
+    }
+    const dateText = d => { if (!d) return ''; const p = d.split('-'); return +p[2] + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; };
+    const badge = c => {
+        const cls = { Planering: 'bg-secondary', Utlyst: 'bg-primary', Tilldelad: 'bg-success', Skapad: 'bg-success', Installd: 'bg-dark' }[c.status] || 'bg-secondary';
+        return '<span class="badge ' + cls + '">' + esc(c.statusLabel) + '</span>';
+    };
+
+    function load() {
+        return fetch(base + 'GetCalls?regionId=' + REGION_ID + '&year=' + year, { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { $('kcBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
+                data = d; year = d.year;
+                const sel = $('kcYear');
+                sel.innerHTML = d.years.map(y => '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>').join('');
+                $('kcPrintLink').href = '/kretsen/arsprogram?krets=' + REGION_ID + '&ar=' + year;
+                calls = {}; d.calls.forEach(c => calls[c.id] = c);
+                render();
+            }).catch(() => { $('kcBody').innerHTML = '<div class="alert alert-warning mb-0">Utlysningarna kunde inte läsas just nu. Försök igen om en stund.</div>'; });
+    }
+
+    function menuItem(c, key, icon, label, act) {
+        if (c.can[key]) return '<li><button class="dropdown-item" type="button" data-kc="' + act + '" data-id="' + c.id + '"><i class="bi ' + icon + ' me-2"></i>' + label + '</button></li>';
+        // Avstängd: skälet står som text, aldrig bara en grå knapp.
+        return '<li><span class="dropdown-item-text small text-muted"><i class="bi ' + icon + ' me-2"></i>' + label + '<br><span class="ms-4">' + esc(c.why[key] || '') + '</span></span></li>';
+    }
+
+    function render() {
+        if (!data.calls.length) {
+            $('kcBody').innerHTML = '<div class="text-center text-muted py-4">Inga tävlingar är utlysta för ' + year + ' ännu.'
+                + '<div class="mt-3"><button class="btn btn-primary" type="button" data-kc="add"><i class="bi bi-plus-circle me-1"></i>Utlys en tävling</button></div></div>';
+            return;
+        }
+        let h = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr>'
+            + '<th>Datum</th><th>Tävling</th><th class="d-none d-md-table-cell">Arrangör</th><th>Läge</th><th class="text-end"></th></tr></thead><tbody>';
+        data.calls.forEach(c => {
+            const when = c.date ? '<div class="fw-semibold">' + esc(c.weekday) + ' ' + esc(dateText(c.date)) + '</div>'
+                + (c.locked ? '<div class="small text-muted"><i class="bi bi-lock me-1"></i>Fastställt av kretsen</div>' : '')
+                : '<span class="text-muted">Datum inte bestämt</span>';
+            const org = c.awardedClub ? esc(c.awardedClub) : '<span class="text-muted">Ej utsedd</span>';
+            h += '<tr' + (c.status === 'Installd' ? ' class="text-muted"' : '') + '><td>' + when + '</td>'
+                + '<td><div class="fw-semibold">' + esc(c.name) + '</div>'
+                + (c.disciplineLabel ? '<div class="small text-muted">' + esc(c.disciplineLabel) + '</div>' : '')
+                + '<div class="d-md-none small mt-1">Arrangör: ' + org + '</div></td>'
+                + '<td class="d-none d-md-table-cell">' + org + '</td><td>' + badge(c) + '</td>'
+                + '<td class="text-end"><div class="dropdown"><button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Åtgärder för raden"><i class="bi bi-three-dots-vertical"></i></button>'
+                + '<ul class="dropdown-menu dropdown-menu-end" style="min-width:300px;">'
+                + menuItem(c, 'edit', 'bi-pencil', 'Ändra…', 'edit')
+                + menuItem(c, 'publish', 'bi-megaphone', 'Utlys – klubbarna får se den…', 'publish')
+                + menuItem(c, 'award', 'bi-trophy', 'Utse klubb…', 'award')
+                + menuItem(c, 'unaward', 'bi-arrow-counterclockwise', 'Ta tillbaka utnämningen…', 'unaward')
+                + menuItem(c, 'withdraw', 'bi-eye-slash', 'Dra tillbaka till planering…', 'withdraw')
+                + '<li><hr class="dropdown-divider"></li>'
+                + '<li><button class="dropdown-item" type="button" data-kc="history" data-id="' + c.id + '"><i class="bi bi-clock-history me-2"></i>Historik</button></li>'
+                + menuItem(c, 'cancel', 'bi-x-circle', 'Ställ in…', 'cancel')
+                + '</ul></div></td></tr>';
+        });
+        $('kcBody').innerHTML = h + '</tbody></table></div>';
+    }
+
+    function openModal(title, bodyHtml) { $('kcModalTitle').textContent = title; $('kcModalBody').innerHTML = bodyHtml; modal().show(); }
+
+    function formModal(c) {
+        const isNew = !c;
+        const v = c || { name: '', description: '', discipline: '', date: '', locked: false, wishDeadline: '', wishesVisible: true, version: 0, year: year };
+        const disc = '<option value="">Inte bestämt</option>' + data.disciplines.map(d => '<option value="' + esc(d.value) + '"' + (d.value === v.discipline ? ' selected' : '') + '>' + esc(d.label) + '</option>').join('');
+        openModal(isNew ? 'Utlys en tävling' : 'Ändra utlysningen',
+            '<div id="kcFormMsg"></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="kcName">Vad heter tävlingen?</label><input class="form-control" id="kcName" maxlength="200" value="' + esc(v.name) + '"></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDisc">Vilken gren?</label><select class="form-select" id="kcDisc">' + disc + '</select></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDate">Vilken dag?</label><input class="form-control" type="date" id="kcDate" value="' + esc(v.date || '') + '">'
+            + '<div class="form-text">Lämna tomt om dagen inte är bestämd. Klubben kan då föreslå en dag.</div></div>'
+            + '<div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="kcLocked"' + (v.locked ? ' checked' : '') + '><label class="form-check-label" for="kcLocked"><b>Datumet är fastställt – klubben kan inte ändra det</b></label>'
+            + '<div class="form-text">Klubben kan då bara föreslå en annan dag till kretsen.</div></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDesc">Anteckning (syns för klubbarna)</label><textarea class="form-control" id="kcDesc" rows="3" maxlength="1000">' + esc(v.description || '') + '</textarea></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="kcDeadline">Sista dag för önskemål (valfritt)</label><input class="form-control" type="date" id="kcDeadline" value="' + esc(v.wishDeadline || '') + '"></div>'
+            + '<div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="kcVisible"' + (v.wishesVisible ? ' checked' : '') + '><label class="form-check-label" for="kcVisible">Klubbarna får se varandras önskemål</label></div>'
+            + (isNew ? '<div class="border rounded p-2 mb-3"><div class="fw-semibold mb-1">När ska klubbarna få se den?</div>'
+                + '<div class="form-check"><input class="form-check-input" type="radio" name="kcPub" id="kcPubNo" checked><label class="form-check-label" for="kcPubNo">Inte än – jag planerar först (bara kretsens styrelse ser den)</label></div>'
+                + '<div class="form-check"><input class="form-check-input" type="radio" name="kcPub" id="kcPubYes"><label class="form-check-label" for="kcPubYes">Nu – klubbarna får se den och kan önska att arrangera</label></div></div>' : '')
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-primary" type="button" id="kcSave" data-id="' + (isNew ? 0 : v.id) + '" data-version="' + v.version + '" data-year="' + (isNew ? year : v.year) + '">Spara</button></div>');
+    }
+
+    function save() {
+        const b = $('kcSave');
+        const body = {
+            id: b.dataset.id, regionId: REGION_ID, year: b.dataset.year, name: $('kcName').value, discipline: $('kcDisc').value,
+            date: $('kcDate').value, locked: $('kcLocked').checked, description: $('kcDesc').value, wishDeadline: $('kcDeadline').value,
+            wishesVisible: $('kcVisible').checked, expectedVersion: b.dataset.version, publish: !!($('kcPubYes') && $('kcPubYes').checked)
+        };
+        b.disabled = true;
+        post('SaveCall', body).then(d => {
+            if (!d.success) { b.disabled = false; $('kcFormMsg').innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message) + '</div>'; return; }
+            modal().hide(); say(d.message, true); load();
+        }).catch(() => { b.disabled = false; $('kcFormMsg').innerHTML = '<div class="alert alert-warning py-2">Det gick inte att spara. Försök igen.</div>'; });
+    }
+
+    function confirmModal(title, text, btnLabel, btnClass, action, id, extra) {
+        openModal(title, '<div id="kcFormMsg"></div><p>' + text + '</p>'
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn ' + btnClass + '" type="button" id="kcDo" data-action="' + action + '" data-id="' + id + '">' + btnLabel + '</button></div>');
+    }
+    function doAction() {
+        const b = $('kcDo');
+        const body = { id: b.dataset.id };
+        if (b.dataset.action === 'AwardCall') body.clubId = $('kcClub').value;
+        b.disabled = true;
+        post(b.dataset.action, body).then(d => {
+            if (!d.success) { b.disabled = false; $('kcFormMsg').innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message) + '</div>'; return; }
+            modal().hide(); say(d.message, true); load();
+        }).catch(() => { b.disabled = false; $('kcFormMsg').innerHTML = '<div class="alert alert-warning py-2">Något gick fel. Ladda om sidan och försök igen.</div>'; });
+    }
+
+    function history(id) {
+        openModal('Historik – ' + calls[id].name, '<div class="text-muted small">Laddar…</div>');
+        fetch(base + 'GetEvents?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            $('kcModalBody').innerHTML = d.success && d.events.length
+                ? '<ul class="list-unstyled mb-0">' + d.events.map(e => '<li class="mb-2"><div class="fw-semibold">' + esc(e.label) + (e.text ? ' <span class="fw-normal">– ' + esc(e.text) + '</span>' : '') + '</div><div class="small text-muted">' + esc(e.at) + ' · ' + esc(e.by) + '</div></li>').join('') + '</ul>'
+                : '<div class="text-muted">Inga händelser.</div>';
+        });
+    }
+
+    // ── Klick: ett lyssnare, åtgärden står i data-kc ──
+    document.addEventListener('click', ev => {
+        const t = ev.target.closest('[data-kc], #kcSave, #kcDo');
+        if (!t || (!root.contains(t) && !modalEl.contains(t))) return;
+        if (t.id === 'kcSave') return save();
+        if (t.id === 'kcDo') return doAction();
+        const act = t.dataset.kc, c = calls[+t.dataset.id];
+        if (act === 'add') return formModal(null);
+        if (act === 'edit') return formModal(c);
+        if (act === 'history') return history(c.id);
+        if (act === 'publish') return confirmModal('Utlys tävlingen', 'Klubbarna i kretsen får se <b>' + esc(c.name) + '</b> och kan önska att få arrangera den.', 'Utlys', 'btn-primary', 'PublishCall', c.id);
+        if (act === 'withdraw') return confirmModal('Dra tillbaka till planering', 'Klubbarna ser inte längre <b>' + esc(c.name) + '</b>.', 'Dra tillbaka', 'btn-warning', 'WithdrawCall', c.id);
+        if (act === 'unaward') return confirmModal('Ta tillbaka utnämningen', 'Klubben <b>' + esc(c.awardedClub) + '</b> är inte längre utsedd till <b>' + esc(c.name) + '</b>.', 'Ta tillbaka', 'btn-warning', 'UnawardCall', c.id);
+        if (act === 'cancel') return confirmModal('Ställ in utlysningen', '<b>' + esc(c.name) + '</b> ställs in. Den syns inte längre för klubbarna och tas inte med i årsprogrammet.', 'Ställ in', 'btn-danger', 'CancelCall', c.id);
+        if (act === 'award') {
+            const opts = '<option value="">Välj klubb…</option>' + data.clubs.map(k => '<option value="' + k.id + '">' + esc(k.name) + '</option>').join('');
+            openModal('Utse klubb', '<div id="kcFormMsg"></div><p>Vilken klubb ska arrangera <b>' + esc(c.name) + '</b>?</p>'
+                + '<div class="mb-3"><label class="form-label fw-semibold" for="kcClub">Klubb</label><select class="form-select" id="kcClub">' + opts + '</select></div>'
+                + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+                + '<button class="btn btn-primary" type="button" id="kcDo" data-action="AwardCall" data-id="' + c.id + '">Utse</button></div>');
+        }
+    });
+    $('kcYear').addEventListener('change', () => { year = +$('kcYear').value; load(); });
+    load();
+};
+}
+</script>

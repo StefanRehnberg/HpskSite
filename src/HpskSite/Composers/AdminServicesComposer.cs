@@ -93,6 +93,10 @@ namespace HpskSite.Composers
             // migrering gor annars varje ansokan tyst dod.
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CompetitionApplicationService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationSchemaGuardHostedService>();
+            // Kretsutlysningen F2: kretsen utlyser, klubbar önskar, kretsen utser.
+            builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallService>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallAccess>();
+            builder.Services.AddHostedService<HpskSite.Services.CompetitionCalls.CompetitionCallSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationReminderHostedService>();
             // Resultatgranskning (fas 2): stampel, och grind bara i kretsar som valt den.

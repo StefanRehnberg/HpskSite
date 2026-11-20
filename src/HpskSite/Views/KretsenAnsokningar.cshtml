@@ -8,7 +8,10 @@
 
 @* Kretsgranskning fas 4: kretsens inkorg för tävlingsansökningar. Egen sida, eftersom den
    tävlingsansvarige ofta inte är kretsadministratör. Behörigheten prövas på servern av varje
-   endpoint; sidan visar bara en förklaring när besökaren inte får arbeta här. *@
+   endpoint; sidan visar bara en förklaring när besökaren inte får arbeta här.
+
+   Kretsutlysningen F2: kortet "Utlysta tävlingar" sitter i inkorgen (m.CanManageCalls). En ledamot i kretsens
+   styrelse som varken är kretsadmin eller tävlingsansvarig får bara det kortet. *@
 
 <style>
     .ka-page { font-size: 1.05rem; padding: 1.5rem 0 4rem; }
@@ -18,16 +21,21 @@
 <div class="container ka-page">
     <p class="mb-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>@m.RegionName</a></p>
 
-    @if (!m.Allowed)
+    @if (m.Allowed)
     {
-        <div class="alert alert-secondary mt-3" id="kaNotAllowed">
-            Den här sidan är för kretsens tävlingsansvarige och kretsadministratören.
-            Ska du ha uppdraget kan du be om det på <a href="/kretsen/kom-igang?krets=@m.RegionId">Kom igång</a>.
-        </div>
+        @await Html.PartialAsync("_KretsApplicationsInbox", m)
+    }
+    else if (m.CanManageCalls)
+    {
+        <h1 class="mb-3">Utlysta tävlingar – @m.RegionName</h1>
+        @await Html.PartialAsync("_KretsCallsCard", m)
     }
     else
     {
-        @await Html.PartialAsync("_KretsApplicationsInbox", m)
+        <div class="alert alert-secondary mt-3" id="kaNotAllowed">
+            Den här sidan är för kretsens tävlingsansvarige, kretsens styrelse och kretsadministratören.
+            Ska du ha uppdraget kan du be om det på <a href="/kretsen/kom-igang?krets=@m.RegionId">Kom igång</a>.
+        </div>
     }
 </div>
 
@@ -37,4 +45,8 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script>window.hpskKretsApplicationsInit();</script>
+}
+else if (m.CanManageCalls)
+{
+<script>window.hpskKretsCallsInit();</script>
 }

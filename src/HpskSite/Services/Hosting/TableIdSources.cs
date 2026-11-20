@@ -91,6 +91,8 @@ namespace HpskSite.Services.Hosting
         {
             IdentityFloor.NodesOfType(CompetitionSeriesFieldTable.NodeAlias),
             new("dbo.Competition", "SELECT MAX(SeriesId) FROM dbo.Competition"),
+            // Kretsutlysningen (F2): utlysningen kan höra till en kretsserie och överlever att serien raderas ur listan.
+            new("dbo.CompetitionCall", "SELECT MAX(SeriesId) FROM dbo.CompetitionCall"),
             IdentityFloor.ColumnsLike("TargetId", "TargetKind", PageAddressKinds.Series, CompetitionSeriesFieldTable.NodeAlias),
             IdentityFloor.ColumnsLike("SourceId", "SourceType", Models.Ledger.LedgerProjectSource.Series),
             new("dbo.umbracoPropertyData", @"SELECT MAX(COALESCE(pd.intValue, TRY_CONVERT(int, LEFT(pd.varcharValue, 20))))

@@ -217,6 +217,18 @@ namespace HpskSite.Services
             ("SitePostImage",                        "ConsentByMemberId", "ConsentDate = ConsentDate"),
             ("SitePostImageRequest",                 "RequesterMemberId", "Message = NULL"),
             ("SitePostImageRequest",                 "HandledByMemberId", "CreatedDate = CreatedDate"),
+            // Kretsutlysningen F2 (2026-11-20). Tävlingsansökans kontaktperson är en uppgift om personen (namn, e-post, telefon): släpps vid gallring, ansökan står kvar
+            // (den hör till klubben och kretsens beslut). Rättning av en lucka som fanns sedan fas 4 — ansökans händelserader (ByName) har ByMemberId NOT NULL och kan inte släppas utan en
+            // schemaändring i prod; den är en egen fråga.
+            ("CompetitionApplication",               "ContactMemberId",   "ContactName = NULL, ContactEmail = NULL, ContactPhone = NULL"),
+            // Utlysningens aktörer (vem som la till, ändrade datum, utsåg) och händelseloggens namn. Utlysningen och loggen står kvar (kretsens program och "varför fick klubben X tävlingen?").
+            ("CompetitionCall",                      "CreatedByMemberId",     "UpdatedAt = UpdatedAt"),
+            ("CompetitionCall",                      "AwardedByMemberId",     "UpdatedAt = UpdatedAt"),
+            ("CompetitionCall",                      "DateChangedByMemberId", "UpdatedAt = UpdatedAt"),
+            ("CompetitionCallEvent",                 "ByMemberId",            "ByName = N'Borttagen medlem'"),
+            // Klubbens önskemål (F3): kontaktpersonen och den som skrev in det åt klubben är uppgifter om personer; anteckningen kan nämna namn.
+            ("CompetitionCallWish",                  "ContactMemberId",       "Note = NULL"),
+            ("CompetitionCallWish",                  "RegisteredByMemberId",  "UpdatedAt = UpdatedAt"),
         };
 
         /// <summary>

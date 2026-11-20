@@ -31,6 +31,9 @@ namespace HpskSite.Controllers
         private readonly BoardRoleService _roles;
         private readonly KretsUppdragService _uppdrag;
         private readonly KretsLinkTokenService _tokens;
+        private readonly HpskSite.Services.CompetitionCalls.CompetitionCallAccess _callAccess;
+        private readonly HpskSite.Services.CompetitionCalls.CompetitionCallService _callService;
+        private readonly KretsCalendarService _calendar;
 
         public KretsenController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -39,8 +42,14 @@ namespace HpskSite.Controllers
             AdminAuthorizationService auth,
             BoardRoleService roles,
             KretsUppdragService uppdrag,
-            KretsLinkTokenService tokens)
+            KretsLinkTokenService tokens,
+            HpskSite.Services.CompetitionCalls.CompetitionCallAccess callAccess,
+            HpskSite.Services.CompetitionCalls.CompetitionCallService callService,
+            KretsCalendarService calendar)
         {
+            _callAccess = callAccess;
+            _callService = callService;
+            _calendar = calendar;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -148,9 +157,44 @@ namespace HpskSite.Controllers
                 RegionId = region.Id,
                 RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
                 RegionUrl = region.Url(),
-                Allowed = allowed
+                Allowed = allowed,
+                // Kretsutlysningen F2: bredare än Allowed — också kretsstyrelsens ledamöter får utlysa och utse.
+                CanManageCalls = allowed || await _callAccess.CanManageCallsForRegion(region.Id)
             };
             return View("KretsenAnsokningar", root);
+        }
+
+        /// <summary>
+        /// Kretsens årsprogram på papper (kretsutlysningen F2): datum och veckodag · tävling · arrangör · anteckning · gren,
+        /// en sida per månad, datumlösa för sig, "Ej utsedd" på tomma rader. Det som bara är planering tas med bara när
+        /// kretsen väljer det (<c>planering=1</c>) — klubbarna och skyttarna ser det inte. Samma regelfunktion som
+        /// kalendern (<c>CompetitionCallRules.ProgramRows</c>).
+        /// </summary>
+        [HttpGet("arsprogram")]
+        [HpskSite.Services.Security.InCodeAuth("CompetitionCallAccess.CanManageCallsForRegion(kretsen): sajtadmin, kretsadmin, kretsstyrelse, tävlingsansvarig")]
+        public async Task<IActionResult> Arsprogram(int? krets, int? ar, bool planering = false)
+        {
+            if (!TryRoot(out var root, out var ctx)) return StatusCode(500, "Umbraco-kontext saknas.");
+            var region = krets is > 0 ? ctx!.Content!.GetById(krets.Value) : null;
+            if (region == null || region.ContentType.Alias != "regionalPage") return NotFound("Kretsen hittades inte.");
+            var me = await CurrentMemberAsync();
+            if (me == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/kretsen/arsprogram?krets={region.Id}&ar={ar}")}");
+            if (!await _callAccess.CanManageCallsForRegion(region.Id)) return StatusCode(403);
+
+            var year = ar is >= 2000 and <= 2100 ? ar.Value : DateTime.Today.Year + 1;
+            var clubs = _calendar.ClubsInRegion(region.Id);
+            var rows = HpskSite.Services.CompetitionCalls.CompetitionCallRules.ProgramRows(
+                _callService.ForRegion(region.Id, year), id => clubs.GetValueOrDefault(id), CompetitionCallController.DisciplineLabel, planering);
+            return View("~/Views/KretsenArsprogram.cshtml", new KretsArsprogramModel
+            {
+                RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
+                Year = year,
+                IncludePlanning = planering,
+                Months = HpskSite.Services.CompetitionCalls.CompetitionCallRules.ByMonth(rows),
+                HasPlanningRows = _callService.ForRegion(region.Id, year).Any(c => c.Status == HpskSite.Models.CompetitionCalls.CompetitionCallStatus.Planering),
+                PrintedBy = $"{me.GetValue<string>("firstName")} {me.GetValue<string>("lastName")}".Trim(),
+            });
         }
 
         /// <summary>
@@ -380,6 +424,18 @@ namespace HpskSite.Controllers
         public string RegionName { get; set; } = "";
         public string RegionUrl { get; set; } = "";
         public bool Allowed { get; set; }
+        /// <summary>Kretsutlysningen F2: får besökaren utlysa och utse åt kretsen (bredare än <see cref="Allowed"/>: även kretsstyrelsens ledamöter)?</summary>
+        public bool CanManageCalls { get; set; }
+    }
+
+    public class KretsArsprogramModel
+    {
+        public string RegionName { get; set; } = "";
+        public int Year { get; set; }
+        public bool IncludePlanning { get; set; }
+        public bool HasPlanningRows { get; set; }
+        public string PrintedBy { get; set; } = "";
+        public List<(string Heading, List<HpskSite.Services.CompetitionCalls.CompetitionCallRules.ProgramRow> Rows)> Months { get; set; } = new();
     }
 
     public class KretsSammanstallningModel
