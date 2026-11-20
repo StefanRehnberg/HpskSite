@@ -94,7 +94,10 @@
             h += '<option value="0">Vilket som helst</option>';
             (lw.weapons || []).forEach(w => {
                 const sel = lw.usualFirearmId && w.id === lw.usualFirearmId ? ' selected' : '';
-                const label = w.number ? `nr ${w.number}` : esc(w.alias);
+                // Numret först, namnet efter — "nr 3 — Glock 17" — så man ser VILKET vapen man bokar.
+                const label = w.number
+                    ? (w.alias ? `nr ${w.number} — ${esc(w.alias)}` : `nr ${w.number}`)
+                    : esc(w.alias);
                 const suffix = lw.usualFirearmId && w.id === lw.usualFirearmId
                     ? ' — som förra gången' : '';
                 h += `<option value="${w.id}"${sel}>${label}${suffix}</option>`;

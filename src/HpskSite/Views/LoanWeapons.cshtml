@@ -394,7 +394,9 @@
             if (!w.isBookable) return;
             var o = document.createElement('option');
             o.value = w.id;
-            o.textContent = w.number == null ? w.alias : ('nr ' + w.number);
+            // Numret först, namnet efter — "nr 3 — Glock 17" — så man ser VILKET vapen man bokar.
+            o.textContent = w.number == null ? w.alias
+                : ('nr ' + w.number + (w.alias ? ' — ' + w.alias : ''));
             sel.appendChild(o);
         });
     }
