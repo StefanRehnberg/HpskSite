@@ -130,7 +130,8 @@ namespace HpskSite.Services.Competitions
 
         public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            if (context.ActionDescriptor is ControllerActionDescriptor descriptor)
+            if (context.ActionDescriptor is ControllerActionDescriptor descriptor
+                && !IsMarkedOk(descriptor))
             {
                 var request = context.HttpContext.Request;
                 var fromRequest = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -153,6 +154,14 @@ namespace HpskSite.Services.Competitions
             }
             await next();
         }
+
+        /// <summary>
+        /// En åtgärd (eller en hel controller) märkt <see cref="DraftGuardOkAttribute"/> prövar själv vem som får röra tävlingen och släpps förbi grinden —
+        /// det är vad märkningen säger. Klubbprogrammet (F7) behöver det: medlemmar i klubben önskar tävlingsledare till en DOLD tävling.
+        /// </summary>
+        private static bool IsMarkedOk(ControllerActionDescriptor d) =>
+            d.MethodInfo.GetCustomAttribute<DraftGuardOkAttribute>() != null
+            || d.ControllerTypeInfo.GetCustomAttribute<DraftGuardOkAttribute>() != null;
 
         private static bool WantsJson(Microsoft.AspNetCore.Http.HttpRequest request) =>
             string.Equals(request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.OrdinalIgnoreCase)

@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
     /// inga namn på tävlingsledare (Stefan 2026-11-20: namnen hålls på adminsidorna tills tävlingen är officiell).</para>
     /// </summary>
     [HpskSite.Services.Security.InCodeAuth("Medlem aktiv i tävlingens klubb (egen rad) / CompetitionCallAccess.CanManageClubProgram(klubben i anropet) + tävlingen tillhör klubben")]
+    [HpskSite.Services.Competitions.DraftGuardOk("klubbprogrammet planeras före publicering: medlemmar i klubben önskar och adminen utser för DOLDA tävlingar; varje åtgärd prövar själv klubbmedlemskap respektive klubbadmin och att tävlingen tillhör klubben")]
     public class CompetitionManagerController : SurfaceController
     {
         private readonly CompetitionManagerService _svc;
