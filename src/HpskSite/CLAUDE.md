@@ -1434,6 +1434,13 @@ Plan: `notes/krets-utlysning-byggplan-2026-11-18.md`, läge: `notes/krets-utlysn
   - Datumfälten i utlysningsdialogerna är flatpickr (`locale 'sv'`, ÅÅÅÅ-MM-DD), öppnas på utlysningens månad; på telefon ligger kalendern i dialogens flöde (annars klipps den).
   - Svit: `hpsk-verify/krets-utlysning-f4-verify.mjs` (A/B: datumvarningsgrenen bort → 1 röd). Anmälningsvarningens antal prövas bara i enhetstesten (`CompetitionCallRulesTests`).
 
+- **F5 (2026-11-20, committad, ej deployad): kalendern.** Utlysningen är fjärde källa (`Kind="call"`) i `KretsCalendarService.Build`, läst direkt ur SQL (ingen cache).
+  **Synlighet = EN ren funktion `CompetitionCallRules.CalendarStatus`:** skytt ser bara utsedda ("Detaljer kommer"), planeringskalendern även utlysta, kretsens styrelse (`viewerManagesCalls`) även planering.
+  En utlysning döljs när tävlingen *syns i kalenderindexet* (N10) — en skapad men dold tävling finns inte där, så utlysningen visas som Utsedd. Svit `krets-utlysning-f5-verify.mjs`.
+- **F6 (2026-11-20, committad, ej deployad): serier, påminnelser, Behöver åtgärd.** `SaveCall seriesId` (utelämnad = behåll, 0 = ingen, annars prövas serien mot utlysningens EGEN krets, `SeriesOfRegion`).
+  `CompetitionCallReminderService` körs i `CompetitionApplicationReminderHostedService`-svepet; reglerna `NeedsCreate`/`NeedsAward`/`DueReminders` är rena funktioner som styr både mejlet och gula kortet (`GetCalls.attention`, `reason` nomail/create/award).
+  Spärren (`RateCounterService.TryClaimOnce`) tas före utskicket, nyckeln bär en 14-dagarsperiod. Driftskollen varnar (aldrig FAIL). ⚠️ Dev har ingen SMTP → `AwardMailed=0` döljer "create"; sviten sätter eventets `Text='1'`. Svit `krets-utlysning-f6-verify.mjs`.
+
 ## Common Pitfalls to Avoid
 1. ❌ Don't use file system for persistent data
 2. ❌ Don't bypass Umbraco's content management patterns
