@@ -33,6 +33,35 @@ namespace HpskSite.Tests.Services
         public void Incheckning_kring_tillfallet(int h, int m, bool counts)
             => Assert.Equal(counts, TrainingCourseRules.CheckInCounts(Day.AddHours(h).AddMinutes(m), Day, "18:00", "20:00"));
 
+        private static readonly DateTime Then = new(2026, 11, 18, 15, 0, 0);
+
+        // Magnus 2026-11-20: Emil och Jessica hade avbokat sig själva, avprickningen "Ej här" sparades
+        // (Absent) men kursvyn hoppade över avbokade rader — knappen markerades aldrig.
+        [Theory]
+        [InlineData("Absent", true, "absent")]    // den avbokade raden med registrerad frånvaro SYNS
+        [InlineData("Present", true, "present")]
+        [InlineData("Excused", true, "excused")]
+        [InlineData("Absent", false, "absent")]   // oförändrat för en aktiv rad
+        [InlineData("Present", false, "present")]
+        [InlineData(null, true, "none")]          // avbokad utan avprickning = ingen rad alls
+        [InlineData(null, false, "signedup")]     // aktiv, anmäld, ingen avprickning
+        [InlineData("skräp", true, "none")]       // en okänd status är aldrig en närvaro
+        public void Cellen_visar_en_registrerad_narvaro_aven_pa_en_avbokad_rad(string? status, bool cancelled, string expected)
+            => Assert.Equal(expected, TrainingCourseRules.CellState(status, Then, cancelled ? Then.AddHours(2) : null, registrationRequired: true));
+
+        [Fact]
+        public void Utan_anmalningskrav_ar_en_rad_utan_status_ingen_anmalan()
+            => Assert.Equal("none", TrainingCourseRules.CellState(null, Then, null, registrationRequired: false));
+
+        [Theory]
+        [InlineData("Present", true)]   // kom → aktiv igen
+        [InlineData("Excused", true)]   // godtagen förklaring → aktiv igen
+        [InlineData("Absent", false)]   // avbokade och kom inte: avbokningen är sann
+        [InlineData(null, false)]       // rensa rör inte avbokningen
+        [InlineData("skräp", false)]
+        public void Vilken_avprickning_ateruppliver_en_avbokad_rad(string? status, bool reopens)
+            => Assert.Equal(reopens, TrainingCourseRules.ReopensCancelledRow(status));
+
         [Fact]
         public void Incheckning_annan_dag_raknas_inte()
             => Assert.False(TrainingCourseRules.CheckInCounts(Day.AddDays(1).AddHours(18), Day, "18:00", "20:00"));

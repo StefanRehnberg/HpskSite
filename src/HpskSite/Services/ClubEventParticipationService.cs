@@ -954,6 +954,22 @@ ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
         }
 
         /// <summary>
+        /// ⚠️ Här/Giltig på en AVBOKAD träningsrad gör personen aktiv igen — hen kom, och en rad som
+        /// både är avbokad och närvarande ställer till det för varje läsare. Ej här och att rensa lämnar
+        /// avbokningen orörd (den är sann). Bara träningar: för evenemang har en avbokning en annan
+        /// betydelse (plats, avgift, reservplats) och rörs inte av en avprickning. Regeln bor i
+        /// <see cref="HpskSite.Models.Training.TrainingCourseRules.ReopensCancelledRow"/>.
+        /// </summary>
+        private static void ReopenCancelledTrainingRow(ClubEventParticipant row, string kind, string? status)
+        {
+            if (row.CancelledAt == null) return;
+            if (ClubEvents.NormaliseOccasionKind(kind) != ClubEvents.OccasionTraining) return;
+            if (!HpskSite.Models.Training.TrainingCourseRules.ReopensCancelledRow(status)) return;
+            row.CancelledAt = null;
+            row.CancelledByMemberId = null;
+        }
+
+        /// <summary>
         /// Record (or clear) attendance. <paramref name="status"/> null clears it back to
         /// "ej registrerad" — which is a real state and not the same as absent.
         /// </summary>
@@ -1035,6 +1051,7 @@ ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
                 row.SignedUpByMemberId ??= actingMemberId;
             }
 
+            ReopenCancelledTrainingRow(row, kind, status);
             row.AttendanceStatus = status;
             row.AttendanceNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
             row.RecordedByMemberId = status == null ? null : actingMemberId;
@@ -1098,6 +1115,7 @@ ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
             row.RecordedByMemberId = status == null ? null : actingMemberId;
             row.RecordedAt = status == null ? null : now;
             row.UpdatedDate = now;
+            ReopenCancelledTrainingRow(row, kind, status);
             await db.UpdateAsync(row);
             return (true, null);
         }

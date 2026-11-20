@@ -248,18 +248,14 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND MemberId IN (@2) AND Status I
                 foreach (var m in memberIds)
                 {
                     var cell = new Cell { LoanBooked = loans.Contains($"{m}:{t.Id}") };
-                    if (rows.TryGetValue($"{m}:{t.Id}", out var r) && r.CancelledAt == null)
+                    if (rows.TryGetValue($"{m}:{t.Id}", out var r))
                     {
-                        cell.State = r.AttendanceStatus switch
-                        {
-                            ClubEvents.AttendancePresent => "present",
-                            ClubEvents.AttendanceAbsent => "absent",
-                            ClubEvents.AttendanceExcused => "excused",
-                            // ⚠️ När tillfället inte kräver anmälan är raden en LÅNEVAPENBOKNING
-                            // (lånevapenläget skapar raden åt vapenansvarig) — inte en anmälan.
-                            // Den lästes förut som "Du är anmäld" (Stefan 2026-10-06).
-                            _ => r.SignedUpAt != null && occ.RegistrationRequired ? "signedup" : "none"
-                        };
+                        // ⚠️ Regeln bor i TrainingCourseRules.CellState: en registrerad närvaro gäller
+                        // även på en AVBOKAD rad (Magnus 2026-11-20 — avprickningen sparades men syntes
+                        // aldrig). När tillfället inte kräver anmälan är en rad utan status en
+                        // LÅNEVAPENBOKNING (lånevapenläget skapar raden åt vapenansvarig) — inte en
+                        // anmälan; den lästes förut som "Du är anmäld" (Stefan 2026-10-06).
+                        cell.State = TrainingCourseRules.CellState(r.AttendanceStatus, r.SignedUpAt, r.CancelledAt, occ.RegistrationRequired);
                     }
                     if (cell.State is "none" or "signedup"
                         && checkIns.Any(c => c.MemberId == m

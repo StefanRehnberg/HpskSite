@@ -97,6 +97,34 @@ namespace HpskSite.Models.Training
             (NormaliseRegistration(linkOverride) ?? NormaliseRegistration(groupDefault)) == Required;
 
         /// <summary>
+        /// ⚠️⚠️ En REGISTRERAD närvaro gäller även på en avbokad rad (Magnus, 2026-11-20: "det gick inte
+        /// registrera frånvaro på vissa"). Den som avbokat sig själv står kvar som en rad med
+        /// <c>CancelledAt</c>, och <c>SetAttendance</c> skriver statusen på den raden och svarar att det
+        /// gick bra — men kursvyn hoppade över avbokade rader, så knappen markerades aldrig och personen
+        /// räknades som "missade". Funktionärens avprickning är en uppgift om vad som hände i salen och
+        /// väger tyngre än en avbokning i förväg. Cellens läge: registrerad status först; annars gäller
+        /// en avbokad rad som ingen rad alls; annars som förut (anmäld bara när tillfället kräver anmälan).
+        /// </summary>
+        public static string CellState(string? attendanceStatus, DateTime? signedUpAt, DateTime? cancelledAt, bool registrationRequired)
+        {
+            if (string.Equals(attendanceStatus, ClubEvents.AttendancePresent, StringComparison.Ordinal)) return "present";
+            if (string.Equals(attendanceStatus, ClubEvents.AttendanceAbsent, StringComparison.Ordinal)) return "absent";
+            if (string.Equals(attendanceStatus, ClubEvents.AttendanceExcused, StringComparison.Ordinal)) return "excused";
+            if (cancelledAt != null) return "none";
+            return signedUpAt != null && registrationRequired ? "signedup" : "none";
+        }
+
+        /// <summary>
+        /// Gör en avprickning en avbokad rad aktiv igen? Ja för Här och Giltig — personen kom, eller har
+        /// en godtagen förklaring, och en rad som både säger "avbokad" och "närvarade" ställer till det
+        /// för varje läsare (platsräkning, intyg). Nej för Ej här: personen avbokade, kom inte, och
+        /// avbokningen är sann. Nej för att rensa (null).
+        /// </summary>
+        public static bool ReopensCancelledRow(string? status) =>
+            string.Equals(status, ClubEvents.AttendancePresent, StringComparison.Ordinal)
+            || string.Equals(status, ClubEvents.AttendanceExcused, StringComparison.Ordinal);
+
+        /// <summary>
         /// Tolkar en serie: antingen fem skott ("X" eller 0–10, X räknas som 10 och som innertia) eller
         /// bara en total (0–50). Returnerar summa, antal X och ett fel i klartext.
         ///
