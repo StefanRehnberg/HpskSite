@@ -41,8 +41,10 @@
     </div>
 </div>
 
-@* EN dialog för formuläret, att utse en klubb, bekräftelser och historiken — innehållet byggs per åtgärd. *@
-<div class="modal fade" id="kcModal" tabindex="-1" aria-labelledby="kcModalTitle" aria-hidden="true">
+@* EN dialog för formuläret, att utse en klubb, bekräftelser och historiken — innehållet byggs per åtgärd.
+   data-bs-backdrop="static": ett klick utanför får inte kasta bort det man skrivit.
+   data-bs-focus="false": datumväljaren ritas på body, utanför dialogen; Bootstraps fokusfälla skulle annars ta fokus från månads- och årsfälten. *@
+<div class="modal fade" id="kcModal" tabindex="-1" aria-labelledby="kcModalTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-focus="false">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -181,7 +183,7 @@ window.hpskKretsCallsInit = function () {
     }
     function initDates() {
         ensureFlatpickr().then(() => modalEl.querySelectorAll('input[data-date]').forEach(el => {
-            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, static: true });
+            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, appendTo: document.body });   // svävar över dialogen, ger ingen skrollist i den
         })).catch(() => { /* utan kalender går datumet ändå att skriva som ÅÅÅÅ-MM-DD */ });
     }
     function openModal(title, bodyHtml) { $('kcModalTitle').textContent = title; $('kcModalBody').innerHTML = bodyHtml; modal().show(); initDates(); }

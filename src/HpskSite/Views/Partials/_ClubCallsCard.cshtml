@@ -44,7 +44,7 @@
     @@media (max-width: 575.98px) { #ccModalBody .flatpickr-calendar.static.open { position: relative; top: 4px; margin-bottom: 8px; } }
     @@media (max-width: 575.98px) { #ccModalBody .flatpickr-calendar.static { width: 100%; } #ccModalBody .flatpickr-calendar .dayContainer { width: 100%; min-width: 0; max-width: 100%; } #ccModalBody .flatpickr-calendar .flatpickr-days { width: 100%; } #ccModalBody .flatpickr-day { max-width: none; } }
 </style>
-<div class="modal fade" id="ccModal" tabindex="-1" aria-labelledby="ccModalTitle" aria-hidden="true">
+<div class="modal fade" id="ccModal" tabindex="-1" aria-labelledby="ccModalTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-focus="false">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -157,7 +157,7 @@
     function initDates() {
         ensureFlatpickr().then(() => modalEl.querySelectorAll('input[data-date]').forEach(el => {
             // Tom ruta: kalendern öppnas på utlysningens månad (data-start), inte på dagens.
-            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, static: true,
+            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, appendTo: document.body,   // svävar över dialogen (data-bs-focus="false" på dialogen), ger ingen skrollist i den
                 onOpen: (sel, str, inst) => { if (!sel.length && el.dataset.start) inst.jumpToDate(el.dataset.start); } });
         })).catch(() => { /* utan kalender går datumet ändå att skriva som ÅÅÅÅ-MM-DD */ });
     }
