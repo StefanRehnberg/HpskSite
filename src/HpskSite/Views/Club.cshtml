@@ -182,6 +182,11 @@ window.currentClubId = clubId;
                 @if (sp.ShowsPane("clubHome"))
                 {
                 <div class="tab-pane fade @sp.PaneClass("clubHome")" id="clubHome" role="tabpanel">
+                    @* Klubbprogrammet F7: "Nu söker vi tävlingsledare" — bara för klubbens medlemmar, döljer sig själv när inget söks. *@
+                    @if (isClubMember)
+                    {
+                        @await Html.PartialAsync("_ManagerSeekingBox", (int)clubId)
+                    }
                     @await Html.PartialAsync("_SitePageSlots", ("home", "before"))
                     @await Html.PartialAsync("_SitePanels", panelCtx with { PageKey = "home" })
                     @await Html.PartialAsync("_SitePageSlots", ("home", "after"))

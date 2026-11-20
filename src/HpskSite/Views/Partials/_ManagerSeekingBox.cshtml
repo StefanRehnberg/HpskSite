@@ -1,0 +1,107 @@
+@*
+    Klubbprogrammet F7 — medlemmens ruta "Nu söker vi tävlingsledare till följande".
+    Ligger på klubbens egen sida (för klubbens medlemmar) och på startsidan. Följer funktionärsrutans radform: namn och datum, en åtgärd till höger.
+
+    Modellen (int) = klubbens id när rutan sitter på klubbens sida (bara den klubbens rader), annars alla medlemmens klubbar.
+    Data: GET CompetitionManager/Mine. Fyra lägen per rad: open · wished · appointed · filled-not-you. Rutan döljer sig själv när det inte finns några rader.
+
+    ⚠️ Medlemmen ser ALDRIG andras önskemål, antal eller namn på tävlingsledare — servern skickar dem inte.
+    ⚠️ Tacka nej öppnar en liten bekräftelse (dialog med data-bs-backdrop="static"), aldrig confirm()/alert().
+*@
+@{
+    int seekClubId = Model is int sid ? sid : 0;
+}
+@await Html.PartialAsync("_HtmlEscape")
+<div class="card mb-4 border-success-subtle d-none" id="msCard" data-club-id="@seekClubId">
+    @Html.AntiForgeryToken()
+    <div class="card-header bg-success-subtle py-2">
+        <span class="fw-semibold"><i class="bi bi-person-badge me-2 text-success"></i>Nu söker vi tävlingsledare till följande</span>
+    </div>
+    <div class="card-body py-2">
+        <div id="msMessage" role="status"></div>
+        <div id="msBody"></div>
+    </div>
+</div>
+<div class="modal fade" id="msModal" tabindex="-1" aria-labelledby="msModalTitle" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="msModalTitle">Tacka nej</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="msModalBody"></div>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    const card = document.getElementById('msCard');
+    if (!card) return;
+    const FILTER_CLUB = +card.getAttribute('data-club-id') || 0;
+    const modalEl = document.getElementById('msModal');
+    if (modalEl.parentNode !== document.body) document.body.appendChild(modalEl);
+    const modal = () => bootstrap.Modal.getOrCreateInstance(modalEl);
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const base = '/umbraco/surface/CompetitionManager/';
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    let rows = {}, clubs = 0, all = false, lastList = [];
+    const SHOW = 5;
+
+    const post = (action, id) => fetch(base + action, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': card.querySelector('input[name="__RequestVerificationToken"]').value },
+        body: new URLSearchParams({ competitionId: id }).toString()
+    }).then(r => r.json());
+    const when = r => { if (!r.date) return ''; const p = r.date.split('-'); return (r.weekday ? r.weekday.toLowerCase() + ' ' : '') + (+p[2]) + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; };
+    function say(msg, ok) { const el = $('msMessage'); el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2'; el.textContent = msg; }
+
+    function load() {
+        return fetch(base + 'Mine', { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) return;   // rutan är en bonus: ett fel ska aldrig störa sidan
+            const list = d.rows.filter(r => !FILTER_CLUB || r.clubId === FILTER_CLUB);
+            rows = {}; list.forEach(r => rows[r.competitionId] = r);
+            clubs = new Set(list.map(r => r.clubId)).size;
+            if (!list.length) { card.classList.add('d-none'); return; }
+            card.classList.remove('d-none'); lastList = list; render(list);
+        }).catch(() => { /* tyst */ });
+    }
+    function right(r) {
+        if (r.state === 'wished') return '<span class="badge bg-primary">Du har önskat</span> <button class="btn btn-outline-secondary btn-sm ms-1" type="button" data-ms="unwish" data-id="' + r.competitionId + '">Ångra</button>';
+        if (r.state === 'appointed') return '<span class="badge bg-success">Du är utsedd</span> <button class="btn btn-outline-secondary btn-sm ms-1" type="button" data-ms="decline" data-id="' + r.competitionId + '">Tacka nej</button>';
+        if (r.state === 'filled-not-you') return '<span class="badge bg-secondary">Tillsatt, inte du</span>';
+        return '<button class="btn btn-primary btn-sm" type="button" data-ms="wish" data-id="' + r.competitionId + '">Jag vill vara tävlingsledare</button>';
+    }
+    function render(list) {
+        // Telefon: åtgärden hamnar under namnet (flex-wrap), som funktionärsrutan.
+        const shown = all ? list : list.slice(0, SHOW);
+        $('msBody').innerHTML = shown.map(r =>
+            '<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom"><div class="min-w-0"><div class="fw-semibold">' + esc(r.name) + '</div>'
+            + '<div class="small text-muted">' + esc(when(r)) + (!FILTER_CLUB && clubs > 1 ? ' · ' + esc(r.club) : '') + '</div></div><div>' + right(r) + '</div></div>').join('')
+            + (list.length > SHOW ? '<div class="pt-2"><button class="btn btn-link btn-sm p-0" type="button" data-ms="more">' + (all ? 'Visa färre' : 'Visa alla ' + list.length) + '</button></div>' : '');
+    }
+    function act(action, id, btn, doneMsg) {
+        btn.disabled = true;   // dubbelklick: ett anrop (servern är dessutom idempotent)
+        post(action, id).then(d => { say(d.message || doneMsg, !!d.success); load(); })
+            .catch(() => { btn.disabled = false; say('Något gick fel. Ladda om sidan och försök igen.', false); });
+    }
+    function declineModal(r) {
+        $('msModalBody').innerHTML = '<p>Du blir inte längre tävlingsledare för <b>' + esc(r.name) + '</b>. Klubbens admin får veta.</p>'
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-warning" type="button" id="msDoDecline" data-id="' + r.competitionId + '">Tacka nej</button></div>';
+        modal().show();
+    }
+    document.addEventListener('click', ev => {
+        const t = ev.target.closest('[data-ms], #msDoDecline');
+        if (!t || (!card.contains(t) && !modalEl.contains(t))) return;
+        if (t.id === 'msDoDecline') { t.disabled = true; post('Decline', t.dataset.id).then(d => { modal().hide(); say(d.message, !!d.success); load(); }).catch(() => { t.disabled = false; }); return; }
+        if (t.dataset.ms === 'more') { all = !all; return render(lastList); }
+        const r = rows[+t.dataset.id];
+        if (!r) return;
+        if (t.dataset.ms === 'wish') return act('Wish', r.competitionId, t, 'Ditt önskemål är registrerat.');
+        if (t.dataset.ms === 'unwish') return act('Unwish', r.competitionId, t, 'Önskemålet är ångrat.');
+        if (t.dataset.ms === 'decline') return declineModal(r);
+    });
+    load();
+})();
+</script>

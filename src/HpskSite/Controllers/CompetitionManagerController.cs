@@ -102,6 +102,7 @@ namespace HpskSite.Controllers
                         name = c.DisplayName,
                         date = c.CompetitionDate?.ToString("yyyy-MM-dd"),
                         weekday = c.CompetitionDate.HasValue ? CompetitionCallRules.WeekdaySv(c.CompetitionDate.Value) : null,
+                        clubId = c.ClubId,
                         club = ClubName(c.ClubId),
                         state,
                     });

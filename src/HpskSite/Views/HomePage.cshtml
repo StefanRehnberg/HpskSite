@@ -520,6 +520,9 @@ else
         </div>
     }
 
+    @* Klubbprogrammet F7: klubbens tävlingar som söker tävlingsledare (alla medlemmens klubbar). Döljer sig själv när inget söks. *@
+    @await Html.PartialAsync("_ManagerSeekingBox", 0)
+
     @* Shooting-range compliance reminders — only when something's due, for range admins/stewards *@
     @if (range?.HasAny == true)
     {

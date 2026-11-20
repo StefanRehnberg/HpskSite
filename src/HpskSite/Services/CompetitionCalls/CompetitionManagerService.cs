@@ -66,7 +66,7 @@ namespace HpskSite.Services.CompetitionCalls
             if (memberId <= 0) return new();
             using var s = _scopes.CreateScope(autoComplete: true);
             return s.Database.Fetch<int>(
-                "SELECT ClubId FROM ClubMembership WHERE MemberId = @0 AND Status NOT IN (N'Utträdd', N'Avliden')", memberId).ToHashSet();
+                "SELECT ClubId FROM ClubMembership WHERE MemberId = @0 AND MembershipStatus NOT IN (N'Utträdd', N'Avliden')", memberId).ToHashSet();
         }
 
         /// <summary>Medlemmar med en tävlingsledarrad per tävling (ur rostern, den enda sanningen om rätten).</summary>
