@@ -84,6 +84,14 @@ namespace HpskSite.Services.Kretsgranskning
             // Kretsens utlysningar (kretsutlysningen F6) likaså.
             try { sentReminders += await sp.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallReminderService>().RunOnceAsync(today); }
             catch (Exception ex) { _logger.LogError(ex, "Utlysningarnas påminnelser kunde inte köras."); }
+            // Gallring av tävlingsledarönskemål efter genomförd tävling (kretsutlysningen F7).
+            try
+            {
+                var mgr = sp.GetService<HpskSite.Services.CompetitionCalls.CompetitionManagerService>();
+                var purged = mgr?.PurgeAfterCompetition(today) ?? 0;
+                if (purged > 0) _logger.LogInformation("Gallrade {Count} tävlingsledarönskemål efter genomförda tävlingar.", purged);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Gallringen av tävlingsledarönskemål kunde inte köras."); }
             return sentReminders;
         }
 

@@ -107,7 +107,7 @@ namespace HpskSite.Services.CompetitionCalls
 
         // ── Adminens handlingar ────────────────────────────────────────────────────────────
 
-        public sealed record AppointResult(List<int> Appointed, List<int> AlreadyManagers, string? Error);
+        public sealed record AppointResult(List<int> Appointed, List<int> AlreadyManagers, string? Error, string? Warning = null);
 
         /// <summary>
         /// Utser. Varje medlem får en rosterrad (om den inte redan finns) och önskemålet blir Utsedd (skapas om medlemmen inte önskat).
@@ -146,7 +146,21 @@ namespace HpskSite.Services.CompetitionCalls
                 appointed.Add(mid);
             }
             if (appointed.Count == 0 && already.Count == 0) return new(appointed, already, "Utseendet kunde inte sparas. Försök igen om en stund.");
-            return new(appointed, already, null);
+
+            // Spegling till tävlingens lista (StaffingService.SyncCompetitionManagers sväljer fel): kontrollera att den faktiskt gick fram, annars syns det.
+            string? warning = null;
+            try
+            {
+                var after = _competitions.GetSaved(competitionId);
+                var missing = appointed.Where(m => after == null || !after.ManagerIds.Contains(m)).ToList();
+                if (missing.Count > 0)
+                {
+                    warning = "Utseendet är sparat, men tävlingens lista över tävlingsledare uppdaterades inte. Öppna tävlingen och kontrollera att personen kommer åt den, eller försök igen.";
+                    _logger.LogError("Tävling {Comp}: tävlingsledare {Members} finns i rostern men inte i tävlingens lista.", competitionId, string.Join(",", missing));
+                }
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Tävling {Comp}: kontrollen av tävlingens tävlingsledarlista misslyckades.", competitionId); }
+            return new(appointed, already, null, warning);
         }
 
         /// <summary>

@@ -262,7 +262,9 @@ namespace HpskSite.Controllers
                     success = true,
                     appointed = r.Appointed.Count,
                     message = r.Appointed.Count == 0 ? "De var redan tävlingsledare." :
-                        unreached == 0 ? "Utsedda. De har fått ett mejl." : $"Utsedda, men {unreached} nåddes inte av mejlet (saknar e-postadress eller fel vid utskick). Hör av dig till dem.",
+                        (unreached == 0 ? "Utsedda. De har fått ett mejl." : $"Utsedda, men {unreached} nåddes inte av mejlet (saknar e-postadress eller fel vid utskick). Hör av dig till dem.")
+                        + (r.Warning != null ? " " + r.Warning : ""),
+                    warning = r.Warning,
                 });
             }
             catch (Exception ex)
