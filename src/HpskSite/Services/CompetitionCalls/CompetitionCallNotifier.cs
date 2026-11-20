@@ -72,7 +72,7 @@ namespace HpskSite.Services.CompetitionCalls
                     {
                         $"{regionName} har utsett {clubName} att arrangera {call.Name} {when}.",
                         string.IsNullOrWhiteSpace(call.Description) ? "" : $"Från kretsen: {call.Description}",
-                        call.LockedByKrets ? "Datumet är fastställt av kretsen. Vill ni föreslå en annan dag får ni göra det till kretsen."
+                        call.LockedByKrets ? "Datumet är fastställt av kretsen. Vill ni ha en annan dag: föreslå det till kretsen, eller ändra datumet själva – kretsen får då en notis."
                                            : "",
                         "Svara på det här mejlet om något är oklart – svaret går till kretsen.",
                     };
@@ -124,6 +124,36 @@ namespace HpskSite.Services.CompetitionCalls
                 if (sent == 0) _logger.LogWarning("Utlysning {Id}: ingen i kretsen kunde mejlas om datumförslaget.", call.Id);
             }
             catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: datumförslaget kunde inte aviseras.", call.Id); }
+            return sent;
+        }
+
+        /// <summary>
+        /// Klubben har ändrat ett datum kretsen fastställt (efter varning och bekräftelse): kretsens tävlingsansvarige får en notis, så att
+        /// årsprogrammet kan rättas. Ändringen är redan gjord och loggad; ett mejlfel ändrar ingenting. Returnerar antalet mejl.
+        /// </summary>
+        public async Task<int> DateChangedByClubAsync(CompetitionCall call, string clubName, DateTime? from, DateTime? to, int registrations, string publicBase)
+        {
+            var sent = 0;
+            try
+            {
+                if (!_rate.TryClaimOnce($"call-date-changed:{call.Id}:{to:yyyyMMdd}", TimeSpan.FromHours(1))) return 0;
+                var rec = _uppdrag.Recipients(call.RegionId, BoardRoleDefinitions.RoleTavlingsansvarig);
+                string D(DateTime? d) => d.HasValue ? $"{CompetitionCallRules.WeekdaySv(d.Value).ToLowerInvariant()} {d.Value:d MMMM yyyy}" : "inget datum";
+                var paras = new List<string>
+                {
+                    $"{clubName} har ändrat datumet för {call.Name} från {D(from)} till {D(to)}. Kretsen hade fastställt datumet.",
+                    registrations > 0 ? $"Det fanns redan {registrations} anmälningar. De anmälda har inte fått något automatiskt besked, och inga betalningar har rörts." : "",
+                    "Kretsens årsprogram och kalender visar det nya datumet. Hör av dig till klubben om ändringen inte är överenskommen.",
+                };
+                var replyTo = _reply.ForRegion(call.RegionId);
+                foreach (var r in rec.To)
+                    if (await _email.SendKretsgranskningAsync(r.Email, r.Name, $"Datum ändrat: {call.Name}", paras,
+                            "Öppna kretsens utlysningar", $"{publicBase}/kretsen/ansokningar?krets={call.RegionId}",
+                            "Du får mejlet för att du ansvarar för kretsens tävlingar på pistol.nu.", replyTo))
+                        sent++;
+                if (sent == 0) _logger.LogWarning("Utlysning {Id}: ingen i kretsen kunde mejlas om det ändrade datumet.", call.Id);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: datumändringen kunde inte aviseras.", call.Id); }
             return sent;
         }
 

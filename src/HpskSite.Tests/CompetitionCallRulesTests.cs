@@ -101,11 +101,21 @@ namespace HpskSite.Tests
         }
 
         [Theory]
-        [InlineData(true, false, true)]     // fastställt + klubben  → vägras
-        [InlineData(true, true, false)]     // fastställt + kretsen  → tillåtet
-        [InlineData(false, false, false)]   // inte fastställt       → klubben får ändra själv
-        public void Datumregeln_vagrar_bara_klubben_pa_ett_fastställt_datum(bool locked, bool isKrets, bool refused) =>
-            (CompetitionCallRules.DateChangeRefusal(locked, isKrets) != null).Should().Be(refused);
+        [InlineData(true, false, true)]     // fastställt + klubben  → varning
+        [InlineData(true, true, false)]     // fastställt + kretsen  → ingen varning
+        [InlineData(false, false, false)]   // inte fastställt       → klubben ändrar utan varning
+        public void Datumregeln_varnar_bara_klubben_pa_ett_fastställt_datum(bool locked, bool isKrets, bool warned) =>
+            (CompetitionCallRules.DateChangeWarning(locked, isKrets, 0) != null).Should().Be(warned);
+
+        [Fact]
+        public void Datumvarningen_blir_hardare_med_anmalningar_och_sager_att_inget_aterbetalas()
+        {
+            var utan = CompetitionCallRules.DateChangeWarning(true, false, 0)!;
+            utan.Should().NotContain("anmält");
+            var med = CompetitionCallRules.DateChangeWarning(true, false, 7)!;
+            med.Should().Contain("7 personer har redan anmält").And.Contain("återbetalas inget automatiskt");
+            CompetitionCallRules.DateChangeWarning(true, false, 1)!.Should().Contain("1 person har redan anmält");
+        }
 
         [Theory]
         [InlineData("edit", "Skapad")]

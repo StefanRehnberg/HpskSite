@@ -70,12 +70,20 @@ namespace HpskSite.Services.CompetitionCalls
         }
 
         /// <summary>
-        /// Får klubben ändra datumet? Utlysningen äger datumet tills tävlingen skapats; är det fastställt av kretsen (<c>LockedByKrets</c>)
-        /// får klubben aldrig ändra det, varken i utlysningen eller i tävlingen — bara föreslå. Efter skapandet äger tävlingen datumet
-        /// (Stefan 2026-11-20): kretsen flyttar det, klubben föreslår. Kretsens egna handlingar prövas med <paramref name="isKrets"/>.
+        /// Varningen när någon utom kretsen ändrar ett datum kretsen fastställt (<c>LockedByKrets</c>); null = ingen varning.
+        /// ⚠️ OMGJORT 2026-11-20 (Stefan: "det är vuxna människor"): klubben SPÄRRAS inte — den varnas och bekräftar, och kretsen får en
+        /// notis och en händelserad. Finns anmälningar är varningen hårdare. Sajten flyttar inget och återbetalar inget; klubben och
+        /// kretsen tar hand om följderna. Kretsens egna ändringar (<paramref name="isKrets"/>) varnar aldrig.
         /// </summary>
-        public static string? DateChangeRefusal(bool lockedByKrets, bool isKrets) =>
-            lockedByKrets && !isKrets ? "Kretsen har fastställt datumet. Föreslå ett annat datum till kretsen i stället." : null;
+        public static string? DateChangeWarning(bool lockedByKrets, bool isKrets, int registrations)
+        {
+            if (!lockedByKrets || isKrets) return null;
+            var s = "Kretsen har fastställt datumet för den här tävlingen. Ändrar du det får kretsen en notis, och kretsens årsprogram och kalender stämmer inte längre med er.";
+            if (registrations > 0)
+                s += $" OBS: {registrations} {(registrations == 1 ? "person har" : "personer har")} redan anmält sig. De får inget automatiskt besked, "
+                   + "och har någon betalat återbetalas inget automatiskt – det löser ni och kretsen själva, utanför sajten.";
+            return s + " Vill du ändra datumet ändå?";
+        }
 
         public static bool CanCancel(string status, int? competitionId) =>
             status != CompetitionCallStatus.Installd && !(competitionId > 0);

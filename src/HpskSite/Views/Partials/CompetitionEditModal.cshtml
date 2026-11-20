@@ -1807,6 +1807,16 @@ function saveCompetition() {
         return response.json();
     })
     .then(data => {
+        // Kretsen har fastställt datumet: servern varnar (hårdare med anmälningar) och sparar först när vi bekräftar. En varning, ingen spärr.
+        if (data && data.needsDateConfirm) {
+            if (confirm(data.message)) {
+                requestBody.fields.confirmDateChange = true;
+                return sendCompetitionSave();
+            }
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalText;
+            return;
+        }
         saveBtn.disabled = false;
         saveBtn.innerHTML = originalText;
 

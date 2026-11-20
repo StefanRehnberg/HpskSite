@@ -26,7 +26,7 @@ namespace HpskSite.Models.CompetitionCalls
         public string? ChampionshipScope { get; set; }
         /// <summary>Datumet kan saknas: kretsen bestämmer senare, eller klubben föreslår.</summary>
         public DateTime? CompetitionDate { get; set; }
-        /// <summary>"Datumet är fastställt – klubben kan inte ändra det." Bara kretsnivå.</summary>
+        /// <summary>"Datumet är fastställt av kretsen." Bara kretsnivå. Ändrar klubben det varnas den och kretsen får en notis (ingen spärr, Stefan 2026-11-20).</summary>
         public bool LockedByKrets { get; set; }
         public DateTime? WishDeadline { get; set; }
         public bool WishesVisibleToClubs { get; set; } = true;
@@ -124,9 +124,12 @@ namespace HpskSite.Models.CompetitionCalls
         public const string CompetitionRemoved = "CompetitionRemoved";
         /// <summary>Klubben föreslog ett annat datum på en fastställd utlysning (F4).</summary>
         public const string DateProposed = "DateProposed";
+        /// <summary>Klubben ändrade datumet på en tävling kretsen fastställt, efter varning och bekräftelse (F4).</summary>
+        public const string DateChangedByClub = "DateChangedByClub";
 
         public static string Label(string kind) => kind switch
         {
+            DateChangedByClub => "Klubben ändrade det fastställda datumet",
             CompetitionCreated => "Klubben skapade tävlingen",
             CompetitionRemoved => "Tävlingen raderades",
             DateProposed => "Klubben föreslog ett annat datum",

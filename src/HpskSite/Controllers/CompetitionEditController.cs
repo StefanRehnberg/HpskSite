@@ -413,20 +413,55 @@ namespace HpskSite.Controllers
                 // Banan (rangeId) sparas med resten genom fältpåsen (C3-planen S5b) — förut en egen
                 // sparning före grenvalet. Bara när fältet skickas, som förut.
 
-                // Datumregeln (kretsutlysningen F4, N6): fastställer kretsen datumet får klubben inte ändra det — en SERVERREGEL.
+                // Datumregeln (kretsutlysningen F4, N6) — en VARNING, ingen spärr (Stefan 2026-11-20). Ändrar någon utom kretsen ett datum
+                // kretsen fastställt svarar servern först med varningen (hårdare om anmälningar finns) och sparar bara när formuläret
+                // skickar tillbaka confirmDateChange. Fältet är ingen tävlingsegenskap och tas bort före sparningen.
+                var confirmDateChange = request.Fields != null && request.Fields.TryGetValue("confirmDateChange", out var confirmRaw)
+                    && confirmRaw != null && string.Equals(confirmRaw.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+                request.Fields?.Remove("confirmDateChange");
+                HpskSite.Models.CompetitionCalls.CompetitionCall? warnedCall = null;
+                System.DateTime? warnedNewDate = null;
+                var warnedRegistrations = 0;
                 if (request.Fields != null && request.Fields.TryGetValue("competitionDate", out var dateRaw) && dateRaw != null
                     && System.DateTime.TryParse(dateRaw.ToString(), System.Globalization.CultureInfo.InvariantCulture,
                         System.Globalization.DateTimeStyles.None, out var newDate))
                 {
                     var dateGuard = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
                         .GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallDateGuard>(HttpContext.RequestServices);
-                    var dateRefusal = await dateGuard.RefusalAsync(request.CompetitionId, content.CompetitionDate, newDate);
-                    if (dateRefusal != null)
-                        return Ok(new { success = false, message = dateRefusal });   // som övriga vägranden: 200 + meddelande, så formuläret visar texten
+                    var check = await dateGuard.CheckAsync(request.CompetitionId, content.CompetitionDate, newDate,
+                        () => _registrations.CountByCompetition(new[] { request.CompetitionId }).GetValueOrDefault(request.CompetitionId));
+                    if (check.Warning != null && !confirmDateChange)
+                        return Ok(new { success = false, needsDateConfirm = true, message = check.Warning });   // 200 + meddelande som övriga vägranden
+                    if (check.Warning != null)
+                    {
+                        warnedCall = check.Call; warnedNewDate = newDate;
+                        warnedRegistrations = _registrations.CountByCompetition(new[] { request.CompetitionId }).GetValueOrDefault(request.CompetitionId);
+                    }
                 }
 
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
+
+                // Efter en lyckad, bekräftad datumändring på en fastställd utlysning: händelserad + notis till kretsen. Ett fel här ändrar inte sparningen.
+                if (warnedCall != null && result?.GetType().GetProperty("success")?.GetValue(result) is true)
+                {
+                    try
+                    {
+                        var sp = HttpContext.RequestServices;
+                        var calls = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallService>(sp);
+                        var access = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallAccess>(sp);
+                        var notifier = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallNotifier>(sp);
+                        var krets = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<HpskSite.Services.Kretsgranskning.KretsCalendarService>(sp);
+                        var clubName = krets.ClubsInRegion(warnedCall.RegionId).GetValueOrDefault(content.ClubId) ?? "Klubben";
+                        calls.RecordDateChangedByClub(warnedCall.Id, content.CompetitionDate, warnedNewDate, warnedRegistrations,
+                            await access.CurrentMemberIdAsync(), await access.CurrentNameAsync());
+                        await notifier.DateChangedByClubAsync(warnedCall, clubName, content.CompetitionDate, warnedNewDate, warnedRegistrations, Request.PublicBase());
+                    }
+                    catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
+                    {
+                        _logger.LogError(ex, "Tävling {CompetitionId}: datumändringen sparades men kretsen kunde inte aviseras.", request.CompetitionId);
+                    }
+                }
 
                 // Egenbokning switched on (or re-saved) over registrations that never booked a
                 // skjutlag: the organiser has seen PreviewDirektplacering and confirmed, so seat

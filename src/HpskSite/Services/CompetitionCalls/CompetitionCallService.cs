@@ -270,6 +270,11 @@ namespace HpskSite.Services.CompetitionCalls
             AddEventRow(callId, actorId, actorName, CompetitionCallEventKind.DateProposed,
                 $"{clubName}: {Fmt(proposed)}{(string.IsNullOrWhiteSpace(note) ? "" : " – " + note.Trim())}");
 
+        /// <summary>Skriver att klubben (efter varning och bekräftelse) ändrade ett datum kretsen fastställt. Egen rad, efter sparningen.</summary>
+        public void RecordDateChangedByClub(int callId, DateTime? from, DateTime? to, int registrations, int actorId, string actorName) =>
+            AddEventRow(callId, actorId, actorName, CompetitionCallEventKind.DateChangedByClub,
+                $"{Fmt(from)} → {Fmt(to)}" + (registrations > 0 ? $" ({registrations} anmälningar fanns)" : ""));
+
         private void AddEventRow(int callId, int actorId, string actorName, string kind, string? text)
         {
             using var scope = _scopeProvider.CreateScope();
