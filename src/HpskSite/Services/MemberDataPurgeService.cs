@@ -72,6 +72,9 @@ namespace HpskSite.Services
             // Reaktioner på nyheter (2026-11-19): vem som reagerade är en personuppgift och raden har inget värde utan personen → hård radering. Tabellen har ett surrogat-Id
             // (MemberMergeService.MoveRowByRow kräver det när båda kontona reagerat på samma nyhet och det unika indexet krockar vid sammanslagningen).
             ("SitePostReaction",             "MemberId"),
+            // Klubbprogrammet (F7): önskemålet om att bli tävlingsledare är en uppgift om personen och har inget värde utan den → hård radering.
+            // Surrogat-Id finns (MemberMergeService kräver det när båda kontona önskat samma tävling och det unika indexet krockar).
+            ("CompetitionManagerWish",       "MemberId"),
 
             ("MemberBadge",                  "MemberId"),
             ("MemberBadgeQualification",     "MemberId"),
@@ -229,6 +232,8 @@ namespace HpskSite.Services
             // Klubbens önskemål (F3): kontaktpersonen och den som skrev in det åt klubben är uppgifter om personer; anteckningen kan nämna namn.
             ("CompetitionCallWish",                  "ContactMemberId",       "Note = NULL"),
             ("CompetitionCallWish",                  "RegisteredByMemberId",  "UpdatedAt = UpdatedAt"),
+            // Klubbprogrammet (F7): den som stängde rollen är en aktör; stängningen står kvar.
+            ("CompetitionManagerClosure",            "ClosedByMemberId",      "ClosedAt = ClosedAt"),
         };
 
         /// <summary>
