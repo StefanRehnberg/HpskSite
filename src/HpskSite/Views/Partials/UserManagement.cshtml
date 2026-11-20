@@ -13,7 +13,7 @@
 
 <div id="userManagement">
     <!-- Superior Region Filter -->
-    <div class="card mb-3 border-primary">
+    <div class="card mb-3 border-primary" id="superiorRegionFilterCard">
         <div class="card-body py-2">
             <div class="row align-items-center">
                 <div class="col-md-4">
@@ -667,25 +667,28 @@ let handicapLoadedForMember = null;  // Track which member's handicap is loaded
 document.addEventListener('DOMContentLoaded', function() {
     const usersTab = document.getElementById('users-tab');
 
-    // Load when tab is clicked for the first time
+    function loadUserManagementOnce() {
+        if (userManagementLoaded) return;
+        // Clear search field to prevent browser autofill interference
+        const searchInput = document.getElementById('filterSearch');
+        if (searchInput) {
+            searchInput.value = '';
+            currentFilters.search = '';
+        }
+        // Load regions first - it will handle loading users, clubs, and pending approvals
+        // with the correct region filter (locked for regional admins)
+        loadRegions();
+        loadMemberGroups();
+        loadClubsForDropdown();
+        loadPendingCertRequests();
+        userManagementLoaded = true;
+    }
+
+    // Användare är förstaflik (2026-11-20): laddas direkt när fliken redan är aktiv
+    // (?tab=… kan ha valt en annan — då laddas den första gången fliken visas).
     if (usersTab) {
-        usersTab.addEventListener('shown.bs.tab', function() {
-            if (!userManagementLoaded) {
-                // Clear search field to prevent browser autofill interference
-                const searchInput = document.getElementById('filterSearch');
-                if (searchInput) {
-                    searchInput.value = '';
-                    currentFilters.search = '';
-                }
-                // Load regions first - it will handle loading users, clubs, and pending approvals
-                // with the correct region filter (locked for regional admins)
-                loadRegions();
-                loadMemberGroups();
-                loadClubsForDropdown();
-                loadPendingCertRequests();
-                userManagementLoaded = true;
-            }
-        });
+        if (usersTab.classList.contains('active')) loadUserManagementOnce();
+        usersTab.addEventListener('shown.bs.tab', loadUserManagementOnce);
     }
 
     // Prevent dropdown from closing when clicking inside
@@ -812,68 +815,50 @@ function loadRegions() {
         .then(data => {
             const regionSelect = document.getElementById('superiorRegionFilter');
             if (data.success && data.regions && regionSelect) {
-                if (isRegionalAdmin) {
-                    // Regional admin - show only their managed regions
-                    if (managedRegions.length === 1) {
-                        // Single region - show only that region, disabled
-                        regionSelect.innerHTML = '';
-                        const regionData = data.regions.find(r => r.id === managedRegions[0]);
-                        if (regionData) {
-                            const option = document.createElement('option');
-                            option.value = regionData.id;
-                            option.textContent = regionData.name;
-                            option.selected = true;
-                            regionSelect.appendChild(option);
-                        }
-                        regionSelect.disabled = true;
-                        currentFilters.region = managedRegions[0];
-                        loadClubsForRegion(managedRegions[0]);
-                    } else {
-                        // Multiple regions - show dropdown with their regions
-                        regionSelect.innerHTML = '<option value="">Alla mina kretsar</option>';
+                if (!isSiteAdmin) {
+                    // Alla utom sajtadmin: filtret är låst till den egna kretsen och dolt (2026-11-20),
+                    // utom för den som administrerar flera kretsar — hen väljer bland sina egna.
+                    // Egen krets = användarens standardkrets; saknas den (eller ligger utanför det man
+                    // administrerar) tas första kretsen man administrerar.
+                    const own = (userDefaultRegion && (managedRegions.length === 0 || managedRegions.includes(userDefaultRegion)))
+                        ? userDefaultRegion
+                        : (managedRegions[0] || '');
+                    regionSelect.innerHTML = '';
+                    if (managedRegions.length > 1) {
+                        // Admin för flera kretsar: får välja mellan just sina (förvald = egen krets)
                         data.regions
                             .filter(r => managedRegions.includes(r.id))
                             .forEach(region => {
                                 const option = document.createElement('option');
                                 option.value = region.id;
                                 option.textContent = region.name;
-                                if (region.id === userDefaultRegion) {
-                                    option.selected = true;
-                                }
                                 regionSelect.appendChild(option);
                             });
-                        // Set initial filter
-                        if (userDefaultRegion && managedRegions.includes(userDefaultRegion)) {
-                            currentFilters.region = userDefaultRegion;
-                            loadClubsForRegion(userDefaultRegion);
-                        } else {
-                            // Default to first region for multi-region admins
-                            currentFilters.region = managedRegions[0];
-                            regionSelect.value = managedRegions[0];
-                            loadClubsForRegion(managedRegions[0]);
-                        }
+                        regionSelect.value = own;
+                    } else {
+                        // En krets: låst och dold
+                        const regionData = data.regions.find(r => r.id === own);
+                        const option = document.createElement('option');
+                        option.value = own;
+                        option.textContent = regionData ? regionData.name : 'Min krets';
+                        option.selected = true;
+                        regionSelect.appendChild(option);
+                        regionSelect.disabled = true;
+                        document.getElementById('superiorRegionFilterCard')?.classList.add('d-none');
                     }
+                    currentFilters.region = own;
+                    loadClubsForRegion(own);
                 } else {
-                    // Site admin - show all regions with "Alla kretsar" option
+                    // Sajtadmin - alla kretsar förvalt, kan välja vilken som helst
                     regionSelect.innerHTML = '<option value="">Alla kretsar</option>';
                     data.regions.forEach(region => {
                         const option = document.createElement('option');
                         option.value = region.id;
                         option.textContent = region.name;
-                        // Pre-select user's default region
-                        if (region.id === userDefaultRegion) {
-                            option.selected = true;
-                        }
                         regionSelect.appendChild(option);
                     });
-                    // Load data with appropriate filter
-                    if (userDefaultRegion && regionSelect.value === userDefaultRegion) {
-                        currentFilters.region = userDefaultRegion;
-                        loadClubsForRegion(userDefaultRegion);
-                    } else {
-                        // No default region - load all clubs
-                        loadClubsForRegion('');
-                    }
+                    regionSelect.value = '';
+                    loadClubsForRegion('');
                 }
                 loadPendingApprovals();
                 loadUsers();

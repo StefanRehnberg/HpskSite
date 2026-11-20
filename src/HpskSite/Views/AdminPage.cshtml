@@ -117,16 +117,16 @@
     <!-- Navigation tabs -->
     <ul class="nav nav-tabs" id="adminTabs" role="tablist">
         <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitions" type="button" role="tab">Tävlingar</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="series-tab" data-bs-toggle="tab" data-bs-target="#series" type="button" role="tab">Serier</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Användare</button>
+            <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Användare</button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="clubs-tab" data-bs-toggle="tab" data-bs-target="#clubs" type="button" role="tab">Klubbar</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitions" type="button" role="tab">Tävlingar</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="series-tab" data-bs-toggle="tab" data-bs-target="#series" type="button" role="tab">Serier</button>
         </li>
         @* Fakturor moved to each krets's own admin page (RegionalAdminPanel -> Fakturor) 2026-08-03.
            It always forced you to pick a krets here anyway — there was never an "Alla kretsar" view —
@@ -150,15 +150,18 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="utbildning-tab" data-bs-toggle="tab" data-bs-target="#utbildning" type="button" role="tab">Utbildning</button>
             </li>
-            @* Sajtstrukturens underhållsfönster (2026-10-10) — tas bort i contract-steget. *@
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="underhall-tab" data-bs-toggle="tab" data-bs-target="#underhall" type="button" role="tab">Underhåll</button>
-            </li>
         }
         @if (isSiteAdmin || isRegionalAdmin)
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="figurkatalog-tab" data-bs-toggle="tab" data-bs-target="#figurkatalog" type="button" role="tab">Figurkatalog</button>
+            </li>
+        }
+        @if (isSiteAdmin)
+        {
+            @* Sajtstrukturens underhållsfönster (2026-10-10) — sista fliken. Tas bort i contract-steget. *@
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="underhall-tab" data-bs-toggle="tab" data-bs-target="#underhall" type="button" role="tab">Underhåll</button>
             </li>
         }
     </ul>
@@ -189,7 +192,7 @@
 
     <!-- Tab content -->
     <div class="tab-content" id="adminTabContent">
-        <div class="tab-pane fade show active" id="competitions" role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
+        <div class="tab-pane fade" id="competitions"role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("AdminCompetitionsList")
@@ -205,7 +208,7 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="users" role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
+        <div class="tab-pane fade show active" id="users"role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
             <div class="card mt-3">
                 <div class="card-body">
                     @await Html.PartialAsync("UserManagement")
