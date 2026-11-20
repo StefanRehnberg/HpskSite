@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly ClubRosterService _roster;
         private readonly MemberDirectoryService _directory;
         private readonly ClubService _clubs;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
         private readonly ILogger<CompetitionManagerController> _logger;
 
         public CompetitionManagerController(
@@ -42,10 +43,10 @@ namespace HpskSite.Controllers
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionManagerService svc, CompetitionManagerNotifier notifier, CompetitionCallAccess access,
             HpskSite.Services.Competitions.ICompetitionStore competitions, ClubRosterService roster, MemberDirectoryService directory,
-            ClubService clubs, ILogger<CompetitionManagerController> logger)
+            ClubService clubs, HpskSite.Services.Competitions.CompetitionLinks links, ILogger<CompetitionManagerController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
-            _svc = svc; _notifier = notifier; _access = access; _competitions = competitions; _roster = roster; _directory = directory; _clubs = clubs; _logger = logger;
+            _svc = svc; _notifier = notifier; _access = access; _competitions = competitions; _roster = roster; _directory = directory; _clubs = clubs; _links = links; _logger = logger;
         }
 
         /// <summary>
@@ -205,6 +206,7 @@ namespace HpskSite.Controllers
                         date = c.CompetitionDate?.ToString("yyyy-MM-dd"),
                         weekday = c.CompetitionDate.HasValue ? CompetitionCallRules.WeekdaySv(c.CompetitionDate.Value) : null,
                         isDraft = c.IsDraft,
+                        url = _links.Url(c.Id),
                         state = CompetitionManagerRules.AdminState(managers[c.Id].Count, isClosed, wl.Count(w => w.Status == CompetitionManagerWishStatus.Aktiv)),
                         seeking = CompetitionManagerRules.IsSeeking(isClosed, c.CompetitionDate, today, managers[c.Id].Count > 0, wl.Count > 0),
                         closed = isClosed,

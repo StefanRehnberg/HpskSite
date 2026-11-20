@@ -1,0 +1,243 @@
+@*
+    Klubbprogrammet F7 — klubbadminens lista "Tävlingsledare" per år, överst i klubbadminpanelens Tävlingar-flik (under utlysningskortet).
+    Klubbens admin ser klubbens tävlingar ett år, vilka som är tävlingsledare, vilka medlemmar som önskat, och kan utse, ta bort och stänga rollen.
+
+    ViewData["ManagersClubId"] = klubbens id. Data: GET CompetitionManager/ForClub. Allt prövas på servern (CanManageClubProgram + tävlingen tillhör klubben).
+
+    ⚠️ ORDEN: önska · utse · tävlingsledare. Aldrig "tilldela".
+    ⚠️ Formen är kodbasens: EN dialog med data-bs-backdrop="static", inga prompt()/alert()/confirm(), knappar bär bara id:n (aldrig fritext i attribut),
+       radens "Åtgärder"-meny (tre eller fler handlingar), telefon som kort. Medlemmarnas namn visas bara här (adminsidan) — aldrig i medlemmens vy.
+*@
+@{
+    var mgrClubId = ViewData["ManagersClubId"] as int? ?? 0;
+}
+@if (mgrClubId > 0)
+{
+@await Html.PartialAsync("_HtmlEscape")
+<div class="card mb-3" id="cmCard" data-club-id="@mgrClubId">
+    @Html.AntiForgeryToken()
+    <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <strong><i class="bi bi-person-badge me-1"></i>Tävlingsledare</strong>
+            <span class="text-muted small d-block">Utse vem som leder klubbens tävlingar. Medlemmar kan önska, och ni väljer.</span>
+        </div>
+        <div>
+            <label class="visually-hidden" for="cmYear">Tävlingsår</label>
+            <select class="form-select form-select-sm w-auto" id="cmYear"></select>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="cmMessage" role="status"></div>
+        <div id="cmBody"><div class="text-muted small">Laddar…</div></div>
+    </div>
+</div>
+
+<div class="modal fade" id="cmModal" tabindex="-1" aria-labelledby="cmModalTitle" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cmModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="cmModalBody"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const card = document.getElementById('cmCard');
+    if (!card) return;
+    const CLUB_ID = +card.getAttribute('data-club-id');
+    const modalEl = document.getElementById('cmModal');
+    // ⚠️ Dialogen flyttas till body — i adminpanelen ligger partialen i en flik.
+    if (modalEl.parentNode !== document.body) document.body.appendChild(modalEl);
+    const modal = () => bootstrap.Modal.getOrCreateInstance(modalEl);
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => card.querySelector('input[name="__RequestVerificationToken"]').value;
+    const base = '/umbraco/surface/CompetitionManager/';
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    let data = null, rows = {}, year = null;
+    // Utse-dialogens val: memberId -> namn (förkryssade önskare + de som sökts fram).
+    let picked = new Map(), searchTimer = null;
+
+    const post = (action, body) => fetch(base + action, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+        body: new URLSearchParams(body).toString()
+    }).then(r => r.json());
+    const dateText = r => { if (!r.date) return 'Datum inte bestämt'; const p = r.date.split('-'); return (r.weekday ? r.weekday.toLowerCase() + ' ' : '') + (+p[2]) + ' ' + MONTHS[+p[1] - 1]; };
+    function say(msg, ok) { const el = $('cmMessage'); el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2'; el.textContent = msg; }
+
+    function load() {
+        const q = base + 'ForClub?clubId=' + CLUB_ID + (year ? '&year=' + year : '');
+        return fetch(q, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            // Inte behörig (t.ex. kretsadmin som tittar in i klubbens panel): ingen tom ruta med ett fel.
+            if (!d.success && !data) { card.classList.add('d-none'); return; }
+            if (!d.success) { $('cmBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
+            data = d; year = d.year;
+            rows = {}; d.rows.forEach(r => rows[r.competitionId] = r);
+            $('cmYear').innerHTML = d.years.map(y => '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>').join('');
+            render();
+        }).catch(() => { $('cmBody').innerHTML = '<div class="alert alert-warning mb-0">Listan kunde inte läsas just nu. Försök igen om en stund.</div>'; });
+    }
+
+    function managersCell(r) {
+        if (r.state === 'closed') return (r.managers.length ? esc(r.managers.map(m => m.name).join(', ')) + ' ' : '') + '<span class="badge bg-success">Tillsatt</span>';
+        if (r.state === 'partial') return esc(r.managers.map(m => m.name).join(', ')) + ' <span class="badge bg-primary">Utsedd</span>';
+        return '<span class="badge bg-warning text-dark">Saknas</span>';
+    }
+    function wishesCell(r) {
+        const n = r.wishes.length;
+        if (!n) return '<span class="text-muted">Inga</span>';
+        return '<button type="button" class="btn btn-link btn-sm p-0" data-cm="appoint" data-id="' + r.competitionId + '">' + n + (n === 1 ? ' har önskat' : ' har önskat') + '</button>';
+    }
+    function actionCell(r) {
+        if (r.state === 'missing') return '<button class="btn btn-primary btn-sm" type="button" data-cm="appoint" data-id="' + r.competitionId + '">Utse…</button>';
+        const id = ' data-id="' + r.competitionId + '"';
+        let m = '<li><button class="dropdown-item" type="button" data-cm="appoint"' + id + '>Utse fler…</button></li>'
+            + '<li><button class="dropdown-item" type="button" data-cm="remove"' + id + '>Ta bort tävlingsledare…</button></li>';
+        m += r.closed
+            ? '<li><button class="dropdown-item" type="button" data-cm="reopen"' + id + '>Öppna rollen igen</button></li>'
+            : '<li><button class="dropdown-item" type="button" data-cm="close"' + id + '>Klart, tävlingsledare tillsatt</button></li>';
+        if (r.url) m += '<li><hr class="dropdown-divider"></li><li><a class="dropdown-item" href="' + esc(r.url) + '">Öppna tävlingen</a></li>';
+        // strategy fixed: menyn klipps inte av table-responsive.
+        return '<div class="dropdown"><button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">Åtgärder</button>'
+            + '<ul class="dropdown-menu dropdown-menu-end">' + m + '</ul></div>';
+    }
+    function nameCell(r) {
+        return '<div class="fw-semibold">' + esc(r.name) + '</div>' + (r.isDraft ? '<div class="small text-muted">Dold för skyttarna tills den publiceras</div>' : '');
+    }
+    function render() {
+        if (!data.rows.length) { $('cmBody').innerHTML = '<div class="text-muted">Klubben har inga tävlingar ' + year + ' ännu.</div>'; return; }
+        // Behöver åtgärd: kommande tävlingar utan tävlingsledare (gult kort, som kretsens).
+        const today = new Date().toISOString().slice(0, 10);
+        const need = data.rows.filter(r => r.state === 'missing' && (!r.date || r.date >= today));
+        let h = need.length ? '<div class="alert alert-warning py-2"><strong>Behöver åtgärd:</strong> ' + need.length + (need.length === 1 ? ' tävling saknar tävlingsledare' : ' tävlingar saknar tävlingsledare') + '.</div>' : '';
+        h += '<div class="table-responsive d-none d-md-block"><table class="table table-sm align-middle mb-0"><thead><tr>'
+            + '<th>Tävling</th><th>Datum</th><th>Tävlingsledare</th><th>Önskemål</th><th class="text-end"></th></tr></thead><tbody>';
+        data.rows.forEach(r => {
+            h += '<tr><td>' + nameCell(r) + '</td><td>' + esc(dateText(r)) + '</td><td>' + managersCell(r) + '</td><td>' + wishesCell(r) + '</td><td class="text-end">' + actionCell(r) + '</td></tr>';
+        });
+        h += '</tbody></table></div><div class="d-md-none">';
+        data.rows.forEach(r => {
+            h += '<div class="border-bottom py-2"><div class="d-flex justify-content-between align-items-start gap-2"><div class="min-w-0">' + nameCell(r)
+                + '<div class="small text-muted">' + esc(dateText(r)) + '</div><div class="mt-1">' + managersCell(r) + '</div>'
+                + '<div class="small mt-1">' + (r.wishes.length ? wishesCell(r) : '') + '</div></div><div>' + actionCell(r) + '</div></div></div>';
+        });
+        $('cmBody').innerHTML = h + '</div>';
+    }
+
+    function openModal(title, bodyHtml) { $('cmModalTitle').textContent = title; $('cmModalBody').innerHTML = bodyHtml; modal().show(); }
+    function formMsg(msg) { $('cmFormMsg').innerHTML = msg ? '<div class="alert alert-warning py-2">' + esc(msg) + '</div>' : ''; }
+
+    // ── Utse ──
+    function appointModal(r) {
+        picked = new Map(); r.wishes.forEach(w => picked.set(w.memberId, { name: w.name, note: 'önskade ' + w.at, on: true }));
+        openModal('Utse tävlingsledare: ' + r.name,
+            '<div id="cmFormMsg"></div>'
+            + '<p class="small text-muted">Du kan utse flera. De som önskat är förkryssade.</p>'
+            + '<div id="cmPicked"></div>'
+            + '<div class="mt-3"><label class="form-label fw-semibold" for="cmSearch">Utse någon annan</label>'
+            + '<input class="form-control" type="search" id="cmSearch" autocomplete="off" placeholder="Sök medlem i klubben…"><div id="cmHits" class="list-group mt-1"></div></div>'
+            + '<div class="alert alert-light border small mt-3 mb-0">Utsedda får ett mejl och ser att de är utsedda. Övriga som önskat får inget mejl.</div>'
+            + '<div class="d-flex gap-2 justify-content-end mt-3"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-primary" type="button" id="cmDoAppoint" data-id="' + r.competitionId + '"></button></div>');
+        drawPicked();
+    }
+    function drawPicked() {
+        let h = '';
+        picked.forEach((v, id) => {
+            h += '<div class="form-check py-1"><input class="form-check-input" type="checkbox"' + (v.on ? ' checked' : '') + ' data-pick="' + id + '" id="cmP' + id + '">'
+                + '<label class="form-check-label" for="cmP' + id + '">' + esc(v.name) + (v.note ? ' <span class="badge bg-light text-dark border ms-1">' + esc(v.note) + '</span>' : '') + '</label></div>';
+        });
+        $('cmPicked').innerHTML = h || '<div class="text-muted small">Ingen vald ännu.</div>';
+        const n = Array.from(picked.values()).filter(v => v.on).length;
+        const b = $('cmDoAppoint'); b.textContent = 'Utse ' + n; b.disabled = n === 0;
+    }
+    function search() {
+        const q = $('cmSearch').value.trim();
+        if (q.length < 2) { $('cmHits').innerHTML = ''; return; }
+        fetch(base + 'SearchMembers?clubId=' + CLUB_ID + '&q=' + encodeURIComponent(q), { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { $('cmHits').innerHTML = '<div class="list-group-item small text-muted">' + esc(d.message) + '</div>'; return; }
+            const hits = d.members.filter(m => !picked.has(m.memberId));
+            $('cmHits').innerHTML = hits.length ? hits.map(m => '<button type="button" class="list-group-item list-group-item-action" data-hit="' + m.memberId + '" data-name="' + esc(m.name) + '">' + esc(m.name) + '</button>').join('')
+                : '<div class="list-group-item small text-muted">Ingen träff.</div>';
+        }).catch(() => { $('cmHits').innerHTML = '<div class="list-group-item small text-muted">Sökningen misslyckades.</div>'; });
+    }
+    function doAppoint() {
+        const b = $('cmDoAppoint');
+        const ids = Array.from(picked.entries()).filter(e => e[1].on).map(e => e[0]);
+        if (!ids.length) return;
+        b.disabled = true;   // dubbelklick ger ett anrop; servern är dessutom idempotent
+        const body = new URLSearchParams(); body.append('clubId', CLUB_ID); body.append('competitionId', b.dataset.id);
+        ids.forEach(i => body.append('memberIds', i));
+        fetch(base + 'Appoint', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() }, body: body.toString() })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { b.disabled = false; formMsg(d.message); return; }
+                modal().hide(); say(d.message, !d.warning); load();
+            }).catch(() => { b.disabled = false; formMsg('Det gick inte att utse. Försök igen.'); });
+    }
+
+    // ── Ta bort ──
+    function removeModal(r) {
+        openModal('Ta bort tävlingsledare: ' + r.name, '<div id="cmFormMsg"></div>'
+            + r.managers.map(m => '<div class="d-flex justify-content-between align-items-center border-bottom py-2"><span>' + esc(m.name) + '</span>'
+                + '<button class="btn btn-outline-danger btn-sm" type="button" data-cm="doremove" data-id="' + r.competitionId + '" data-member="' + m.memberId + '">Ta bort</button></div>').join('')
+            + '<div class="small text-muted mt-2">Personen förlorar tillgången till tävlingen direkt. Personen får inget mejl.</div>'
+            + '<div class="d-flex justify-content-end mt-3"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Stäng</button></div>');
+    }
+    function doRemove(btn) {
+        btn.disabled = true;
+        post('RemoveManager', { clubId: CLUB_ID, competitionId: btn.dataset.id, memberId: btn.dataset.member }).then(d => {
+            if (!d.success) { btn.disabled = false; formMsg(d.message); return; }
+            modal().hide(); say(d.message, true); load();
+        }).catch(() => { btn.disabled = false; formMsg('Något gick fel. Försök igen.'); });
+    }
+
+    // ── Klart / Öppna igen ──
+    function closeModal(r) {
+        const n = r.wishes.length;
+        openModal('Klart, tävlingsledare tillsatt', '<div id="cmFormMsg"></div>'
+            + '<p>Rollen för <b>' + esc(r.name) + '</b> stängs. Raden försvinner för medlemmarna.</p>'
+            + '<p class="small text-muted">' + (n ? n + (n === 1 ? ' medlem har önskat men är inte utsedd och får ett mejl om att tävlingsledare är tillsatta (utan namn).' : ' medlemmar har önskat men är inte utsedda och får ett mejl om att tävlingsledare är tillsatta (utan namn).') : 'Ingen annan har önskat, så inga mejl skickas.') + '</p>'
+            + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
+            + '<button class="btn btn-primary" type="button" id="cmDoClose" data-id="' + r.competitionId + '">Klart</button></div>');
+    }
+    function doSimple(action, btn, failMsg) {
+        btn.disabled = true;
+        post(action, { clubId: CLUB_ID, competitionId: btn.dataset.id }).then(d => {
+            if (!d.success) { btn.disabled = false; if ($('cmFormMsg')) formMsg(d.message); else say(d.message, false); return; }
+            modal().hide(); say(d.message, true); load();
+        }).catch(() => { btn.disabled = false; formMsg(failMsg); });
+    }
+    function reopen(r) {
+        post('Reopen', { clubId: CLUB_ID, competitionId: r.competitionId }).then(d => { say(d.message, !!d.success); if (d.success) load(); })
+            .catch(() => say('Något gick fel. Försök igen.', false));
+    }
+
+    document.addEventListener('click', ev => {
+        const t = ev.target.closest('[data-cm], [data-hit], #cmDoAppoint, #cmDoClose');
+        if (!t || (!card.contains(t) && !modalEl.contains(t))) return;
+        if (t.id === 'cmDoAppoint') return doAppoint();
+        if (t.id === 'cmDoClose') return doSimple('Close', t, 'Något gick fel. Försök igen.');
+        if (t.dataset.hit) {
+            picked.set(+t.dataset.hit, { name: t.dataset.name, note: '', on: true });
+            $('cmSearch').value = ''; $('cmHits').innerHTML = ''; drawPicked(); return;
+        }
+        if (t.dataset.cm === 'doremove') return doRemove(t);
+        const r = rows[+t.dataset.id];
+        if (!r) return;
+        if (t.dataset.cm === 'appoint') return appointModal(r);
+        if (t.dataset.cm === 'remove') return removeModal(r);
+        if (t.dataset.cm === 'close') return closeModal(r);
+        if (t.dataset.cm === 'reopen') return reopen(r);
+    });
+    modalEl.addEventListener('change', ev => { if (ev.target.matches('[data-pick]')) { const v = picked.get(+ev.target.dataset.pick); if (v) v.on = ev.target.checked; drawPicked(); } });
+    modalEl.addEventListener('input', ev => { if (ev.target.id === 'cmSearch') { clearTimeout(searchTimer); searchTimer = setTimeout(search, 250); } });
+    $('cmYear').addEventListener('change', () => { year = +$('cmYear').value; load(); });
+    load();
+})();
+</script>
+}
