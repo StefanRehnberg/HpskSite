@@ -4,6 +4,9 @@ using HpskSite.Services.Hosting;
 using HpskSite.Services.Kretsgranskning;
 using HpskSite.Services.Mail;
 using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Web;
+using Umbraco.Cms.Core.Models.PublishedContent;
+using Umbraco.Extensions;
 
 namespace HpskSite.Services.CompetitionCalls
 {
@@ -28,12 +31,13 @@ namespace HpskSite.Services.CompetitionCalls
         private readonly KretsCalendarService _krets;
         private readonly RateCounterService _rate;
         private readonly CompetitionCallService _calls;
+        private readonly IUmbracoContextAccessor _ctx;
         private readonly ILogger<CompetitionCallNotifier> _logger;
 
         public CompetitionCallNotifier(IMemberService members, EmailService email, ReplyContactResolver reply, KretsUppdragService uppdrag,
-            KretsCalendarService krets, RateCounterService rate, CompetitionCallService calls, ILogger<CompetitionCallNotifier> logger)
+            KretsCalendarService krets, RateCounterService rate, CompetitionCallService calls, IUmbracoContextAccessor ctx, ILogger<CompetitionCallNotifier> logger)
         {
-            _members = members; _email = email; _reply = reply; _uppdrag = uppdrag; _krets = krets; _rate = rate; _calls = calls; _logger = logger;
+            _members = members; _email = email; _reply = reply; _uppdrag = uppdrag; _krets = krets; _rate = rate; _calls = calls; _ctx = ctx; _logger = logger;
         }
 
         /// <summary>Klubbens egna administratörer med e-postadress (en gång per adress). Kretsens och sajtens administratörer räknas inte.</summary>
@@ -74,7 +78,7 @@ namespace HpskSite.Services.CompetitionCalls
                     };
                     foreach (var (name, email) in admins)
                         if (await _email.SendKretsgranskningAsync(email, name, $"Ni är utsedda att arrangera {call.Name}", paras,
-                                "Öppna klubbens tävlingar", $"{publicBase}/klubbar", // länken ändrar aldrig något
+                                "Öppna klubbens tävlingar", ClubCompetitionsUrl(clubId, publicBase), // länken ändrar aldrig något
                                 $"Du får mejlet för att du är administratör för {clubName} på pistol.nu.", replyTo))
                             sent++;
                 }
@@ -91,6 +95,17 @@ namespace HpskSite.Services.CompetitionCalls
             try { _calls.RecordAwardMailed(call.Id, sent, actorId, actorName); }
             catch (Exception ex) { _logger.LogError(ex, "Utlysning {Id}: aviseringens utfall kunde inte skrivas.", call.Id); }
             return sent;
+        }
+
+        /// <summary>Klubbens Tävlingar-flik i adminpanelen (klubbens sida + <c>#clubAdmin/competitions</c>). Utan klubbsida: sajtens startsida — länken ändrar aldrig något.</summary>
+        private string ClubCompetitionsUrl(int clubId, string publicBase)
+        {
+            if (clubId > 0 && _ctx.TryGetUmbracoContext(out var ctx))
+            {
+                var n = ctx.Content?.GetById(clubId);
+                if (n != null && n.ContentType.Alias == "club") return publicBase + n.Url(mode: UrlMode.Relative) + "#clubAdmin/competitions";
+            }
+            return publicBase;
         }
 
         /// <summary>Kretsens tävlingsansvarige (annars kretsens kontakt och administratörer): klubben saknar administratör att mejla.</summary>

@@ -1413,6 +1413,14 @@ Plan: `notes/krets-utlysning-byggplan-2026-11-18.md`, läge: `notes/krets-utlysn
 - **Behörighet = `CompetitionCallAccess.CanManageCallsForRegion`** (sajtadmin, kretsadmin, kretsstyrelse, tävlingsansvarig), prövad mot utlysningens EGEN `RegionId`.
   `AdminAuthorizationService.IsRegionalAdminForRegion` är medvetet oförändrad. Regler som rena funktioner i `CompetitionCallRules` (även `WhyNot` och årsprogrammets rader).
 - Ytan: kortet `_KretsCallsCard` i kretsens inkorg + `/kretsen/arsprogram`. Sviter: `hpsk-verify/krets-utlysning-f2-verify.mjs`.
+- **F3 (2026-11-20, committad, ej deployad): klubbens yta och önskemål.** `CompetitionCallClubController` (egen, klubbadmin för klubben i anropet,
+  utlysningen måste tillhöra klubbens krets via `RegionIdForClub`) + kortet `_ClubCallsCard` överst i klubbadminpanelens Tävlingar-flik (döljer sig själv när kretsen inte utlyst något).
+  **Klubbens DTO bär aldrig kontaktuppgifter** (andra klubbars önskemål = namn, förslag, meddelande; bara när `WishesVisibleToClubs`). Önskemål: `Express`/`WithdrawWish` i
+  `CompetitionCallService` — ett önskemål per (utlysning, klubb), ett återkallat återupplivas, villkoret `Status='Utlyst'` ligger i själva UPDATE/INSERT. Kretsen skriver in åt en klubb
+  med `WishForClub` (`OnBehalf`, sista dagen gäller inte). **Utse:** utseendet registreras FÖRE mejlet; `CompetitionCallNotifier.AwardedAsync` mejlar klubbens `ClubAdmin_{id}` (Reply-To = kretsen,
+  claim före utskick) och skriver händelsen `AwardMailed` med antalet mejl; `0` ⇒ gula kortet *Att behandla* i kretsens kort (`GetCalls.attention`) + mejl till tävlingsansvarig/kretsadmin.
+  Sviter: `krets-utlysning-f3-verify.mjs` 68/68 (rent klubbadmin via tillfällig `cmsMember2MemberGroup`-rad), A/B: IDOR och kontaktläckage röda. ⚠️ Kapplöpningsprovet (önska mot utse)
+  faller INTE under A/B — fönstret går inte att träffa över HTTP; skyddet är det villkorade INSERT:et. Ingen flagga per krets (Stefan: ska fungera för alla vid deploy).
 
 ## Common Pitfalls to Avoid
 1. ❌ Don't use file system for persistent data
