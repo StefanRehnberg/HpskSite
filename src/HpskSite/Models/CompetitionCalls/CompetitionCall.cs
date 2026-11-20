@@ -114,9 +114,16 @@ namespace HpskSite.Models.CompetitionCalls
         public const string Awarded = "Awarded";
         public const string Unawarded = "Unawarded";
         public const string Cancelled = "Cancelled";
+        public const string Wished = "Wished";
+        public const string WishWithdrawn = "WishWithdrawn";
+        /// <summary>Utseendet är registrerat; Text = hur många mejl som gick iväg.</summary>
+        public const string AwardMailed = "AwardMailed";
 
         public static string Label(string kind) => kind switch
         {
+            Wished => "Klubb önskade att arrangera",
+            WishWithdrawn => "Klubb ångrade sitt önskemål",
+            AwardMailed => "Utseendet aviserades",
             Created => "Utlysningen lades till",
             Edited => "Uppgifterna ändrades",
             DateChanged => "Datumet ändrades",

@@ -81,6 +81,51 @@ namespace HpskSite.Services.CompetitionCalls
             return null;
         }
 
+        // ── Önskemål (F3) ──────────────────────────────────────────────────────────────────────
+
+        public const int MaxWishNote = 500;
+
+        /// <summary>
+        /// Får en klubb önska nu? Bara en UTLYST utlysning, och inte efter sista dagen — utom när kretsen själv
+        /// skriver in åt klubben (<paramref name="onBehalf"/>): kretsen får ta emot ett svar som kommit per mejl i efterhand.
+        /// </summary>
+        public static bool CanWish(string status, DateTime? deadline, DateTime today, bool onBehalf) =>
+            status == CompetitionCallStatus.Utlyst && (onBehalf || !deadline.HasValue || today.Date <= deadline.Value.Date);
+
+        public static string? WhyNotWish(string status, DateTime? deadline, DateTime today, bool onBehalf)
+        {
+            if (CanWish(status, deadline, today, onBehalf)) return null;
+            if (status == CompetitionCallStatus.Utlyst)
+                return $"Sista dag för önskemål var {deadline!.Value.ToString("d MMMM yyyy", Sv)}. Hör av dig till kretsen om ni ändå vill arrangera.";
+            return status switch
+            {
+                CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad => "Kretsen har redan utsett en klubb.",
+                CompetitionCallStatus.Installd => "Utlysningen är inställd.",
+                _ => "Utlysningen är inte utlyst än."
+            };
+        }
+
+        /// <summary>Felmeddelande om önskemålets uppgifter, annars null. Förslaget till dag ska ligga i utlysningens år.</summary>
+        public static string? ValidateWish(CompetitionCall call, DateTime? proposedDate, string? note)
+        {
+            if (note != null && note.Trim().Length > MaxWishNote) return $"Meddelandet får vara högst {MaxWishNote} tecken.";
+            if (proposedDate.HasValue && proposedDate.Value.Year != call.Year) return $"Förslaget till dag ligger inte i {call.Year}.";
+            return null;
+        }
+
+        /// <summary>Klubbens läge mot en utlysning — styr vad kortet visar och vilka knappar som finns.</summary>
+        public static string ClubState(string status, int? awardedClubId, int clubId, bool myActiveWish) => status switch
+        {
+            CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad =>
+                awardedClubId == clubId ? "awarded-me" : "awarded-other",
+            CompetitionCallStatus.Utlyst => myActiveWish ? "wished" : "open",
+            _ => "hidden"
+        };
+
+        /// <summary>Utlysningar en klubb ser alls: aldrig planering och aldrig inställda.</summary>
+        public static bool VisibleToClubs(string status) =>
+            status is CompetitionCallStatus.Utlyst or CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad;
+
         // ── Årsprogrammet (utskrift och, i F5, kalendern) ──────────────────────────────────────
 
         /// <summary>

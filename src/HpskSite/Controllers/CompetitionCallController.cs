@@ -1,6 +1,7 @@
 using System.Globalization;
 using HpskSite.Models.CompetitionCalls;
 using HpskSite.Services.CompetitionCalls;
+using HpskSite.Services.Hosting;
 using HpskSite.Services.Kretsgranskning;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
@@ -30,18 +31,20 @@ namespace HpskSite.Controllers
         private readonly CompetitionCallService _calls;
         private readonly CompetitionCallAccess _access;
         private readonly KretsCalendarService _krets;
+        private readonly CompetitionCallNotifier _notifier;
         private readonly ILogger<CompetitionCallController> _logger;
 
         public CompetitionCallController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory, ServiceContext services,
             AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             CompetitionCallService calls, CompetitionCallAccess access, KretsCalendarService krets,
-            ILogger<CompetitionCallController> logger)
+            CompetitionCallNotifier notifier, ILogger<CompetitionCallController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _calls = calls;
             _access = access;
             _krets = krets;
+            _notifier = notifier;
             _logger = logger;
         }
 
@@ -68,7 +71,15 @@ namespace HpskSite.Controllers
                     years = years.OrderByDescending(v => v),
                     clubs = clubs.OrderBy(c => c.Value, StringComparer.CurrentCultureIgnoreCase).Select(c => new { id = c.Key, name = c.Value }),
                     disciplines = HpskSite.Models.CompetitionTypes.All.Select(t => new { value = t.Id, label = t.Name }),
-                    calls = list.Select(c => Dto(c, clubs))
+                    calls = list.Select(c => Dto(c, clubs)),
+                    // Gult kort "Att behandla": utsedda klubbar som inte kunde aviseras (ingen administratör, eller mejlet gick inte).
+                    attention = _calls.AwardedWithoutNotice(regionId).Select(c => new
+                    {
+                        id = c.Id,
+                        name = c.Name,
+                        club = c.AwardedClubId is int cid && clubs.TryGetValue(cid, out var cn) ? cn : "Okänd klubb",
+                        date = c.CompetitionDate?.ToString("yyyy-MM-dd")
+                    })
                 });
             }
             catch (Exception ex)
@@ -146,13 +157,45 @@ namespace HpskSite.Controllers
 
         /// <summary>Utse en klubb. Klubben måste höra till utlysningens krets (kretsens klubblista, serverns data).</summary>
         [HttpPost, ValidateAntiForgeryToken]
-        public Task<IActionResult> AwardCall(int id, int clubId) => Act(id, (c, a, n) =>
+        public async Task<IActionResult> AwardCall(int id, int clubId)
         {
-            if (clubId <= 0) return new(null, "Välj en klubb.");
+            CompetitionCallService.CallResult? awarded = null;
+            string clubNameOut = "";
+            int actorOut = 0; string actorNameOut = "";
+            var result = await Act(id, (c, a, n) =>
+            {
+                if (clubId <= 0) return new(null, "Välj en klubb.");
+                var clubs = _krets.ClubsInRegion(c.RegionId);
+                if (!clubs.TryGetValue(clubId, out var clubName)) return new(null, "Klubben hör inte till kretsen.");
+                var r = _calls.Award(id, clubId, clubName, a, n);
+                if (r.Call != null) { awarded = r; clubNameOut = clubName; actorOut = a; actorNameOut = n; }
+                return r;
+            }, "Klubben är utsedd.");
+            // Utseendet är registrerat. Mejlet skickas EFTER det, och ett mejlfel ändrar inte utseendet.
+            if (awarded?.Call != null)
+                await _notifier.AwardedAsync(awarded.Value.Call!, clubNameOut, Request.PublicBase(), actorOut, actorNameOut);
+            return result;
+        }
+
+        /// <summary>
+        /// Kretsen skriver in ett önskemål åt en klubb som svarat per mejl (märkt "Registrerat av kretsen"). Bara medan utlysningen är utlyst;
+        /// sista dagen för önskemål gäller inte här. Klubben måste höra till utlysningens krets.
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> WishForClub(int id, int clubId, string? proposedDate, string? note)
+        {
+            var c = _calls.Get(id);
+            if (c == null) return Json(new { success = false, message = "Utlysningen hittades inte." });
+            if (!await _access.CanManageCallsForRegion(c.RegionId)) return Deny();
             var clubs = _krets.ClubsInRegion(c.RegionId);
-            if (!clubs.TryGetValue(clubId, out var clubName)) return new(null, "Klubben hör inte till kretsen.");
-            return _calls.Award(id, clubId, clubName, a, n);
-        }, "Klubben är utsedd.");
+            if (clubId <= 0 || !clubs.TryGetValue(clubId, out var clubName)) return Json(new { success = false, message = "Klubben hör inte till kretsen." });
+            if (!TryDate(proposedDate, out var d)) return Json(new { success = false, message = "Datumet kunde inte läsas. Skriv det som ÅÅÅÅ-MM-DD." });
+            var actor = await _access.CurrentMemberIdAsync();
+            var actorName = await _access.CurrentNameAsync();
+            var r = _calls.Express(id, clubId, d, note, 0, actor, actorName, clubName, onBehalf: true);
+            if (r.Wish == null) return Json(new { success = false, message = r.Error ?? CompetitionCallService.LostRace });
+            return Json(new { success = true, message = $"Önskemålet från {clubName} är registrerat.", call = Dto(_calls.Get(id)!, clubs) });
+        }
 
         // ── Internt ─────────────────────────────────────────────────────────────────────────
 
@@ -179,7 +222,11 @@ namespace HpskSite.Controllers
 
         private object Dto(CompetitionCall c, Dictionary<int, string> clubs)
         {
-            var wishes = c.Status == CompetitionCallStatus.Utlyst ? _calls.ActiveWishCount(c.Id) : 0;
+            var wishList = _calls.Wishes(c.Id).Where(w => w.Status == "Aktiv").ToList();
+            var wishes = c.Status == CompetitionCallStatus.Utlyst ? wishList.Count : 0;
+            // Kretsen ser kontaktpersonen (klubbarna gör det aldrig). Namnet slås upp här; en gallrad medlem blir "Borttagen medlem".
+            string? ContactName(int? memberId) =>
+                memberId is int mid && mid > 0 ? (Services.MemberService.GetById(mid)?.Name ?? "Borttagen medlem") : null;
             string? Why(string a) => CompetitionCallRules.WhyNot(a, c.Status, c.CompetitionId, wishes);
             return new
             {
@@ -202,6 +249,16 @@ namespace HpskSite.Controllers
                 competitionId = c.CompetitionId,
                 version = c.Version,
                 activeWishes = wishes,
+                wishes = wishList.Select(w => new
+                {
+                    clubId = w.ClubId,
+                    club = clubs.TryGetValue(w.ClubId, out var wn) ? wn : "Okänd klubb",
+                    proposedDate = w.ProposedDate?.ToString("yyyy-MM-dd"),
+                    note = w.Note,
+                    onBehalf = w.OnBehalf,
+                    contact = ContactName(w.ContactMemberId),
+                    at = w.CreatedAt.ToString("yyyy-MM-dd")
+                }),
                 can = new
                 {
                     edit = CompetitionCallRules.CanEdit(c.Status),

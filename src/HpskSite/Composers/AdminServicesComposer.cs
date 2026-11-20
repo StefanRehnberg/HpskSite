@@ -96,6 +96,7 @@ namespace HpskSite.Composers
             // Kretsutlysningen F2: kretsen utlyser, klubbar önskar, kretsen utser.
             builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallService>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallAccess>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionCalls.CompetitionCallNotifier>();
             builder.Services.AddHostedService<HpskSite.Services.CompetitionCalls.CompetitionCallSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationReminderHostedService>();

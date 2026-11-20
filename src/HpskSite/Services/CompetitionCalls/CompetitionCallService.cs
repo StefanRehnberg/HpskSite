@@ -186,6 +186,146 @@ namespace HpskSite.Services.CompetitionCalls
             Transition(id, actorId, actorName, CompetitionCallEventKind.Cancelled, null,
                 "UPDATE CompetitionCall SET Status='Installd', UpdatedAt=@0 WHERE Id=@1 AND Status<>'Installd' AND CompetitionId IS NULL", DateTime.Now, id);
 
+        // ── Önskemål (F3) ───────────────────────────────────────────────────────────────────
+
+        public const string AlreadyWished = "Ni har redan önskat att arrangera den här tävlingen.";
+
+        public readonly record struct WishResult(CompetitionCallWish? Wish, string? Error);
+
+        /// <summary>Alla önskemål på en utlysning (aktiva först).</summary>
+        public List<CompetitionCallWish> Wishes(int callId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCallWish>(
+                "SELECT * FROM CompetitionCallWish WHERE CallId = @0 ORDER BY CASE WHEN Status='Aktiv' THEN 0 ELSE 1 END, CreatedAt, Id", callId);
+        }
+
+        public CompetitionCallWish? WishOf(int callId, int clubId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.FirstOrDefault<CompetitionCallWish>("SELECT * FROM CompetitionCallWish WHERE CallId=@0 AND ClubId=@1", callId, clubId);
+        }
+
+        /// <summary>De utlysningar en klubbs krets har släppt till klubbarna (utlysta, utsedda, skapade) ett år — aldrig planering eller inställda.</summary>
+        public List<CompetitionCall> VisibleToClubsIn(int regionId, int year)
+        {
+            if (regionId <= 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCall>(
+                "SELECT * FROM CompetitionCall WHERE RegionId=@0 AND [Year]=@1 AND Status IN ('Utlyst','Tilldelad','Skapad') "
+                + "ORDER BY CASE WHEN CompetitionDate IS NULL THEN 1 ELSE 0 END, CompetitionDate, Name, Id", regionId, year);
+        }
+
+        /// <summary>Åren kretsen har släppt något för till klubbarna, stigande.</summary>
+        public List<int> VisibleYearsIn(int regionId)
+        {
+            if (regionId <= 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<int>("SELECT DISTINCT [Year] FROM CompetitionCall WHERE RegionId=@0 AND Status IN ('Utlyst','Tilldelad','Skapad') ORDER BY [Year]", regionId);
+        }
+
+        /// <summary>Klubbens egna önskemål på de angivna utlysningarna (aktiva), nycklade på utlysningen.</summary>
+        public Dictionary<int, CompetitionCallWish> ActiveWishesOf(int clubId, IReadOnlyCollection<int> callIds)
+        {
+            if (callIds.Count == 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCallWish>(
+                "SELECT * FROM CompetitionCallWish WHERE ClubId=@0 AND Status='Aktiv' AND CallId IN (@1)", clubId, callIds.ToArray())
+                .ToDictionary(w => w.CallId);
+        }
+
+        /// <summary>
+        /// Klubben önskar att arrangera. Ett önskemål per (utlysning, klubb): finns ett återkallat återupplivas det, finns ett aktivt
+        /// svarar vi "Ni har redan önskat" — aldrig ett 500 från det unika indexet. Villkoret att utlysningen fortfarande är UTLYST
+        /// ligger i själva INSERT/UPDATE:t, så ett önskemål som kommer samtidigt med att kretsen utser aldrig sparas.
+        /// Behörigheten (klubbens admin, eller kretsen när <paramref name="onBehalf"/>) och att klubben hör till kretsen prövar kontrollern.
+        /// </summary>
+        public WishResult Express(int callId, int clubId, DateTime? proposedDate, string? note, int contactMemberId,
+            int actorId, string actorName, string clubName, bool onBehalf)
+        {
+            var call = Get(callId);
+            if (call == null) return new(null, "Utlysningen hittades inte.");
+            var why = CompetitionCallRules.WhyNotWish(call.Status, call.WishDeadline, DateTime.Today, onBehalf);
+            if (why != null) return new(null, why);
+            var bad = CompetitionCallRules.ValidateWish(call, proposedDate?.Date, note);
+            if (bad != null) return new(null, bad);
+
+            var now = DateTime.Now;
+            var cleanNote = Clean(note);
+            var contact = contactMemberId > 0 ? (int?)contactMemberId : null;
+            var by = actorId > 0 ? (int?)actorId : null;
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var rows = db.Execute(
+                "UPDATE w SET Status='Aktiv', ProposedDate=@2, Note=@3, ContactMemberId=@4, RegisteredByMemberId=@5, OnBehalf=@6, UpdatedAt=@7 "
+                + "FROM CompetitionCallWish w WHERE w.CallId=@0 AND w.ClubId=@1 AND w.Status='Aterkallad' "
+                + "AND EXISTS (SELECT 1 FROM CompetitionCall c WHERE c.Id=@0 AND c.Status='Utlyst')",
+                callId, clubId, proposedDate?.Date, cleanNote, contact, by, onBehalf, now);
+            if (rows == 0)
+            {
+                rows = db.Execute(
+                    "INSERT INTO CompetitionCallWish (CallId, ClubId, ProposedDate, Note, Status, ContactMemberId, RegisteredByMemberId, OnBehalf, CreatedAt, UpdatedAt) "
+                    + "SELECT @0, @1, @2, @3, 'Aktiv', @4, @5, @6, @7, @7 "
+                    + "WHERE EXISTS (SELECT 1 FROM CompetitionCall c WHERE c.Id=@0 AND c.Status='Utlyst') "
+                    + "AND NOT EXISTS (SELECT 1 FROM CompetitionCallWish w WHERE w.CallId=@0 AND w.ClubId=@1)",
+                    callId, clubId, proposedDate?.Date, cleanNote, contact, by, onBehalf, now);
+            }
+            if (rows == 0)
+            {
+                var again = Get(callId);
+                if (again != null && again.Status != CompetitionCallStatus.Utlyst) return new(null, "Kretsen hann utse en klubb. Ladda om sidan.");
+                return new(null, AlreadyWished);
+            }
+            AddEvent(db, callId, actorId, actorName, CompetitionCallEventKind.Wished,
+                onBehalf ? $"{clubName} (registrerat av kretsen)" : clubName);
+            scope.Complete();
+            return new(WishOf(callId, clubId), null);
+        }
+
+        /// <summary>Ångra ett önskemål — bara medan utlysningen är utlyst (en utsedd klubb ångrar sig hos kretsen).</summary>
+        public WishResult WithdrawWish(int callId, int clubId, int actorId, string actorName, string clubName)
+        {
+            if (Get(callId) == null) return new(null, "Utlysningen hittades inte.");
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var rows = db.Execute(
+                "UPDATE w SET Status='Aterkallad', UpdatedAt=@2 FROM CompetitionCallWish w WHERE w.CallId=@0 AND w.ClubId=@1 AND w.Status='Aktiv' "
+                + "AND EXISTS (SELECT 1 FROM CompetitionCall c WHERE c.Id=@0 AND c.Status='Utlyst')", callId, clubId, DateTime.Now);
+            if (rows == 0)
+            {
+                var c = Get(callId);
+                return new(null, c != null && c.Status != CompetitionCallStatus.Utlyst
+                    ? "Kretsen har redan utsett en klubb. Hör av dig till kretsen om ni inte vill arrangera."
+                    : "Ni har inget önskemål att ångra.");
+            }
+            AddEvent(db, callId, actorId, actorName, CompetitionCallEventKind.WishWithdrawn, clubName);
+            scope.Complete();
+            return new(WishOf(callId, clubId), null);
+        }
+
+        /// <summary>Skriver att utseendet aviserats (och hur många mejl som gick). Egen rad, aldrig i utseendets transaktion.</summary>
+        public void RecordAwardMailed(int callId, int mailed, int actorId, string actorName)
+        {
+            using var scope = _scopeProvider.CreateScope();
+            AddEvent(scope.Database, callId, actorId, actorName, CompetitionCallEventKind.AwardMailed, mailed.ToString());
+            scope.Complete();
+        }
+
+        /// <summary>
+        /// Utsedda utlysningar i kretsen (inte skapade) där ingen mejlades — det kretsen ska ta tag i: klubben saknar aktiv
+        /// administratör, eller mejlet gick inte. Hämtas ur händelsen <c>AwardMailed</c> med värdet 0 efter senaste utseendet.
+        /// </summary>
+        public List<CompetitionCall> AwardedWithoutNotice(int regionId)
+        {
+            if (regionId <= 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCall>(
+                "SELECT c.* FROM CompetitionCall c WHERE c.RegionId=@0 AND c.Status='Tilldelad' AND EXISTS ("
+                + "SELECT 1 FROM CompetitionCallEvent e WHERE e.CallId=c.Id AND e.Kind='AwardMailed' AND e.[Text]='0' "
+                + "AND e.Id = (SELECT MAX(e2.Id) FROM CompetitionCallEvent e2 WHERE e2.CallId=c.Id AND e2.Kind='AwardMailed')) "
+                + "ORDER BY c.CompetitionDate, c.Id", regionId);
+        }
+
         // ── Internt ─────────────────────────────────────────────────────────────────────────
 
         /// <summary>Det villkorade UPDATE:t + händelseraden i EN transaktion. 0 rader = läget tillät det inte (eller någon hann före).</summary>
