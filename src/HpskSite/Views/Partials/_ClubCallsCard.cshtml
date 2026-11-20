@@ -35,6 +35,15 @@
     </div>
 </div>
 
+<style>
+    /* Fältet under sin etikett och kalendern inom dialogen (telefon): flatpickr static sitter annars till höger om fältet och klipps. */
+    #ccModalBody .mb-3 { display: block; position: relative; }
+    #ccModalBody .mb-3 > .form-label { display: block; }
+    #ccModalBody .flatpickr-wrapper { display: block; }
+    #ccModalBody .flatpickr-calendar.static { left: 0; right: auto; max-width: 100%; }
+    @@media (max-width: 575.98px) { #ccModalBody .flatpickr-calendar.static.open { position: relative; top: 4px; margin-bottom: 8px; } }
+    @@media (max-width: 575.98px) { #ccModalBody .flatpickr-calendar.static { width: 100%; } #ccModalBody .flatpickr-calendar .dayContainer { width: 100%; min-width: 0; max-width: 100%; } #ccModalBody .flatpickr-calendar .flatpickr-days { width: 100%; } #ccModalBody .flatpickr-day { max-width: none; } }
+</style>
 <div class="modal fade" id="ccModal" tabindex="-1" aria-labelledby="ccModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
@@ -147,7 +156,9 @@
     }
     function initDates() {
         ensureFlatpickr().then(() => modalEl.querySelectorAll('input[data-date]').forEach(el => {
-            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, static: true });
+            // Tom ruta: kalendern öppnas på utlysningens månad (data-start), inte på dagens.
+            if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, static: true,
+                onOpen: (sel, str, inst) => { if (!sel.length && el.dataset.start) inst.jumpToDate(el.dataset.start); } });
         })).catch(() => { /* utan kalender går datumet ändå att skriva som ÅÅÅÅ-MM-DD */ });
     }
     function openModal(title, bodyHtml) { $('ccModalTitle').textContent = title; $('ccModalBody').innerHTML = bodyHtml; modal().show(); initDates(); }
@@ -156,7 +167,7 @@
             '<div id="ccFormMsg"></div>'
             + '<p class="small text-muted">Kretsen får en notis om ert önskemål och utser sedan en klubb. Ni kan ångra er tills dess.</p>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="ccDate">Förslag till dag (valfritt)</label>'
-            + '<input class="form-control" type="text" data-date autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccDate" value="">'
+            + '<input class="form-control" type="text" data-date data-start="' + esc(c.date || '') + '" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccDate" value="">'
             + (c.locked ? '<div class="form-text">Kretsen har fastställt datumet – ert förslag är bara ett förslag.</div>' : '<div class="form-text">Lämna tomt om ni passar på kretsens dag eller inte har någon önskad dag.</div>') + '</div>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="ccNote">Meddelande till kretsen (valfritt)</label><textarea class="form-control" id="ccNote" rows="3" maxlength="500"></textarea></div>'
             + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
@@ -199,7 +210,7 @@
     function proposeModal(c) {
         openModal('Föreslå annat datum', '<div id="ccFormMsg"></div>'
             + '<p class="small text-muted">Kretsen har fastställt datumet för <b>' + esc(c.name) + '</b>. Ert förslag ändrar ingenting – kretsen får en notis och beslutar.</p>'
-            + '<div class="mb-3"><label class="form-label fw-semibold" for="ccPDate">Förslag till dag</label><input class="form-control" type="text" data-date autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccPDate"></div>'
+            + '<div class="mb-3"><label class="form-label fw-semibold" for="ccPDate">Förslag till dag</label><input class="form-control" type="text" data-date data-start="' + esc(c.date || '') + '" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD" id="ccPDate"></div>'
             + '<div class="mb-3"><label class="form-label fw-semibold" for="ccPNote">Varför? (valfritt)</label><textarea class="form-control" id="ccPNote" rows="3" maxlength="500"></textarea></div>'
             + '<div class="d-flex gap-2 justify-content-end"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Avbryt</button>'
             + '<button class="btn btn-primary" type="button" id="ccPSend" data-id="' + c.id + '">Skicka förslaget</button></div>');
