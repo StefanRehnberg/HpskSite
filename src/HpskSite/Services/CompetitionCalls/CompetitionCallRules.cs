@@ -167,6 +167,40 @@ namespace HpskSite.Services.CompetitionCalls
         public static bool VisibleToClubs(string status) =>
             status is CompetitionCallStatus.Utlyst or CompetitionCallStatus.Tilldelad or CompetitionCallStatus.Skapad;
 
+        // ── Kalendern (F5) ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Vilken kalenderstatus en utlysning får, eller null = visas inte. EN regel för kalendern (matrisen i planens 4.5):
+        /// <list type="bullet">
+        /// <item>Inställd och datumlös visas aldrig.</item>
+        /// <item><b>Samma tävling står aldrig två gånger:</b> är tävlingen publicerad (<paramref name="competitionPublished"/>) visas
+        /// tävlingen, inte utlysningen. En skapad men DOLD tävling finns inte i kalendern, så utlysningen visas som Utsedd.</item>
+        /// <item>Utsedd/Skapad: för alla (skyttar ser klubb · namn · datum), även grannkretsens.</item>
+        /// <item>Utlyst: bara planeringskalendern, och grannens bara för inloggade administratörer.</item>
+        /// <item>Under planering: bara kretsens egen styrelse, i planeringskalendern.</item>
+        /// </list>
+        /// </summary>
+        public static string? CalendarStatus(CompetitionCall c, bool planning, bool ownRegion, bool viewerIsAdmin,
+            bool viewerManagesCalls, bool competitionPublished)
+        {
+            if (c.Status == CompetitionCallStatus.Installd || !c.CompetitionDate.HasValue) return null;
+            if (c.CompetitionId is > 0 && competitionPublished) return null;
+            switch (c.Status)
+            {
+                case CompetitionCallStatus.Tilldelad:
+                case CompetitionCallStatus.Skapad:
+                    return Models.Kretsgranskning.KretsCalendarStatus.Utsedd;
+                case CompetitionCallStatus.Utlyst:
+                    if (!planning) return null;
+                    if (!ownRegion && !viewerIsAdmin) return null;
+                    return Models.Kretsgranskning.KretsCalendarStatus.Utlyst;
+                case CompetitionCallStatus.Planering:
+                    return planning && ownRegion && viewerManagesCalls ? Models.Kretsgranskning.KretsCalendarStatus.Planering : null;
+                default:
+                    return null;
+            }
+        }
+
         // ── Årsprogrammet (utskrift och, i F5, kalendern) ──────────────────────────────────────
 
         /// <summary>

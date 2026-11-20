@@ -63,6 +63,20 @@ namespace HpskSite.Services.CompetitionCalls
             return scope.Database.Fetch<CompetitionCall>(sql, regionId, year ?? 0);
         }
 
+        /// <summary>
+        /// Utlysningar med datum i intervallet, för kretskalendern (F5): flera kretsar (egen + grannar), inte inställda,
+        /// datumlösa utesluts (kalendern har ingen dag att visa dem på). Raden bär sitt läge; kalendern avgör vem som får se vilket.
+        /// </summary>
+        public List<CompetitionCall> ForCalendar(IReadOnlyCollection<int> regionIds, DateTime from, DateTime to)
+        {
+            if (regionIds.Count == 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionCall>(
+                "SELECT * FROM CompetitionCall WHERE RegionId IN (@0) AND Status <> @1 AND CompetitionDate IS NOT NULL "
+                + "AND CompetitionDate >= @2 AND CompetitionDate < @3 ORDER BY CompetitionDate, Name, Id",
+                regionIds.ToArray(), CompetitionCallStatus.Installd, from.Date, to.Date.AddDays(1));
+        }
+
         /// <summary>Åren kretsen har utlysningar för, nyaste först.</summary>
         public List<int> YearsFor(int regionId)
         {

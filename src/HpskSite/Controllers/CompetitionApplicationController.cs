@@ -721,7 +721,10 @@ namespace HpskSite.Controllers
             var siteViewer = viewerMember == null ? HpskSite.Services.SitePages.SiteViewer.Anonymous
                 : new HpskSite.Services.SitePages.SiteViewer(true, HttpContext.RequestServices.GetRequiredService<ClubRosterService>().IsActiveInRegion(viewerMember.Id, regionId),
                     _roles.IsBoardMemberOf(HpskSite.Models.DocumentOwnerType.Region, regionId, viewerMember.Id), viewerIsAdmin);
-            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin, planning, siteViewer);
+            // Utlysningar som bara är planering syns bara för dem som får utlysa åt kretsen (F5).
+            var managesCalls = planning && viewerMember != null
+                && await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.CompetitionCalls.CompetitionCallAccess>().CanManageCallsForRegion(regionId);
+            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin, planning, siteViewer, managesCalls);
 
             // Kan besökaren ansöka här? Klubbarna i kretsen där hen är admin, och kretsen själv. Bara i planeringen.
             var applyClubs = new List<object>();

@@ -7,7 +7,7 @@ namespace HpskSite.Models.Kretsgranskning
     /// </summary>
     public class KretsCalendarEntry
     {
-        /// <summary>competition, application, event, stomprogram.</summary>
+        /// <summary>competition, application, call (kretsens utlysning), event, stomprogram.</summary>
         public string Kind { get; set; } = "";
         public int Id { get; set; }
         public string Name { get; set; } = "";
@@ -48,9 +48,16 @@ namespace HpskSite.Models.Kretsgranskning
         public const string Tavling = "tavling";
         public const string Handelse = "handelse";
         public const string Stomprogram = "stomprogram";
+        /// <summary>Kretsens utlysning: bara planering (syns för kretsens styrelse), utlyst (klubbarna kan önska) eller utsedd (klubb vald, tävlingen ej publicerad).</summary>
+        public const string Planering = "planering";
+        public const string Utlyst = "utlyst";
+        public const string Utsedd = "utsedd";
 
         public static string Label(string s) => s switch
         {
+            Planering => "Under planering",
+            Utlyst => "Utlyst",
+            Utsedd => "Utsedd",
             Preliminar => "Preliminär",
             Godkand => "Godkänd",
             Installd => "Inställd",

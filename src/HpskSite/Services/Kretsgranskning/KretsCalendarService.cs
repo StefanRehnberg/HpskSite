@@ -42,14 +42,17 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
 
         private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+        private readonly HpskSite.Services.CompetitionCalls.CompetitionCallService _calls;
 
         public KretsCalendarService(IUmbracoContextFactory contextFactory, AppCaches caches,
             CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger,
             HpskSite.Services.Events.IClubEventStore events,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.Competitions.ICompetitionSeriesStore series,
-            HpskSite.Services.Competitions.CompetitionLinks links)
+            HpskSite.Services.Competitions.CompetitionLinks links,
+            HpskSite.Services.CompetitionCalls.CompetitionCallService calls)
         {
+            _calls = calls;
             _links = links;
             _competitions = competitions;
             _series = series;
@@ -157,7 +160,9 @@ namespace HpskSite.Services.Kretsgranskning
         /// tävlingar, godkända ansökningar och kretsens händelser — utan krockar: en skytt har ingen
         /// nytta av "samma gren samma dag i grannkretsen", och en preliminär ansökan är inget löfte.
         /// </param>
-        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin, bool planning, HpskSite.Services.SitePages.SiteViewer viewer)
+        /// <param name="viewerManagesCalls">Tittaren får utlysa åt kretsen (CanManageCallsForRegion): ser även utlysningar som bara är planering.</param>
+        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin, bool planning, HpskSite.Services.SitePages.SiteViewer viewer,
+            bool viewerManagesCalls = false)
         {
             var idx = GetIndex();
             var region = idx.Regions.GetValueOrDefault(regionId);
@@ -228,6 +233,37 @@ namespace HpskSite.Services.Kretsgranskning
                     Status = status, StatusLabel = KretsCalendarStatus.Label(status),
                     RegionCode = rinfo?.Code ?? "", RegionName = rinfo?.Name ?? "",
                     IsNeighbour = isNeighbour
+                });
+            }
+
+            // Kretsens utlysningar (F5) — den fjärde källan. Läses direkt (SQL), så en utlysning eller ett utseende syns genast.
+            // Vem som ser vad och att en publicerad tävling ersätter sin utlysning avgörs av CompetitionCallRules.CalendarStatus.
+            List<HpskSite.Models.CompetitionCalls.CompetitionCall> calls;
+            try { calls = _calls.ForCalendar(regionIds, from, to); }
+            catch (Exception ex)
+            {
+                // Saknas tabellerna får kalendern inte falla — tävlingarna visas ändå.
+                _logger.LogWarning(ex, "Kretskalendern kunde inte läsa utlysningarna för krets {Region}.", regionId);
+                calls = new();
+            }
+            foreach (var c in calls)
+            {
+                var own = c.RegionId == regionId;
+                var published = c.CompetitionId is > 0 && idx.CompetitionRegion.ContainsKey(c.CompetitionId.Value);
+                var status = HpskSite.Services.CompetitionCalls.CompetitionCallRules.CalendarStatus(c, planning, own, viewerIsAdmin, viewerManagesCalls && own, published);
+                if (status == null) continue;
+                var rinfo = idx.Regions.GetValueOrDefault(c.RegionId);
+                var awarded = status == KretsCalendarStatus.Utsedd;
+                list.Add(new KretsCalendarEntry
+                {
+                    Kind = "call", Id = c.Id, Name = c.Name, Date = c.CompetitionDate!.Value,
+                    Discipline = ActivityDiscipline.Canonical(c.Discipline ?? ""), DisciplineLabel = ActivityDiscipline.Label(c.Discipline ?? ""),
+                    Level = c.Level,
+                    Organiser = c.AwardedClubId is > 0 ? idx.ClubName.GetValueOrDefault(c.AwardedClubId.Value, "") : (awarded ? "" : (rinfo?.Name ?? "")),
+                    Place = awarded ? "Detaljer kommer" : "",
+                    Status = status, StatusLabel = KretsCalendarStatus.Label(status),
+                    RegionCode = rinfo?.Code ?? "", RegionName = rinfo?.Name ?? "",
+                    IsNeighbour = !own
                 });
             }
 
