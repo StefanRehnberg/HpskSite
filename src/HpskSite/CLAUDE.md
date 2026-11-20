@@ -1390,6 +1390,19 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.
 
+## ⚠️⚠️ Dolda tävlingar — `IsDraft` (kretsutlysningen F1, 2026-11-19)
+
+En ny tävling (guiden, annonsen, kopian) är **dold tills någon trycker Publicera**. `Competition.IsDraft` är ett
+tillståndsfält (kommer aldrig ur ett formulär, följer inte med en kopia); `IsVisible` betyder fortfarande "Inaktiv".
+- **Storen:** `List`/`ListBySeries` **utesluter** utkast som standard (`includeDrafts: false`); `Get`/`GetSaved`/`GetMany`/
+  `ListAllInSeries` **inkluderar** dem — ett känt id är en arbetsyta. Ny kod som visar tävlingar för allmänheten använder
+  `List()` utan `includeDrafts`; bara arrangörens egna vyer och underhåll får `includeDrafts: true`.
+- **Grinden** (`Services/Competitions/DraftCompetitionGuard.cs`): globalt filter för varje åtgärd med `competitionId`/`[CompetitionIdArg]`,
+  `ServeCompetition`, URL-findern, vyerna `?c=`. Personalen (`HasCompetitionStaffAccessAsync`) ser den, andra får 404/"finns inte".
+- **Spärrtest:** `DraftCompetitionGuardTests` — varje fil som anropar `List()` är granskad; en ny åtgärd med annat id-namn än
+  `competitionId` måste märkas. Rå SQL mot `dbo.Competition` ska ha `IsDraft = 0` eller `competition-sql-ok:`.
+- **Migrering:** `add-isdraft-to-competition.sql` före deploy (körd i dev och prod). Sviter: `hpsk-verify/isdraft-verify.mjs`, `isdraft-lasytor-verify.mjs`.
+
 ## Common Pitfalls to Avoid
 1. ❌ Don't use file system for persistent data
 2. ❌ Don't bypass Umbraco's content management patterns
