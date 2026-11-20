@@ -1422,6 +1422,18 @@ Plan: `notes/krets-utlysning-byggplan-2026-11-18.md`, läge: `notes/krets-utlysn
   Sviter: `krets-utlysning-f3-verify.mjs` 68/68 (rent klubbadmin via tillfällig `cmsMember2MemberGroup`-rad), A/B: IDOR och kontaktläckage röda. ⚠️ Kapplöpningsprovet (önska mot utse)
   faller INTE under A/B — fönstret går inte att träffa över HTTP; skyddet är det villkorade INSERT:et. Ingen flagga per krets (Stefan: ska fungera för alla vid deploy).
 
+- **F4 (2026-11-20, committad, webbläsarsvit 56/56, ej deployad): klubben skapar tävlingen.** `CompetitionCallClubController.CreateCompetition` (utsedd klubbs admin;
+  `DatabaseLock call-create:{id}` + villkorat anspråk `ClaimCreation`/`CreatingAt`) skapar en DOLD tävling (`IsDraft`) och sätter `CompetitionCall.CompetitionId` (Tilldelad → Skapad).
+  Ingen `CallId` på tävlingen — kopplingen är bara `CompetitionId` på utlysningen. Efter skapandet äger tävlingen datumet.
+  - **Datumet är en VARNING, ingen spärr:** ändrar någon utom kretsen ett fastställt datum (`LockedByKrets`) svarar `CompetitionEdit/SaveCompetition` med `needsDateConfirm` och sparar först
+    när formuläret skickar `confirmDateChange`; därefter händelsen `DateChangedByClub` + mejl till kretsen. Klubben kan också *Föreslå annat datum* (`ProposeDate`, ändrar inget).
+  - **Byte av klubb** (`UnawardCall`) tillåts alltid, även efter skapad tävling; kretsens dialog visar `unawardWarning`. Tävlingen står kvar hos gamla klubben, bara kopplingen släpps.
+  - **Raderar klubben sin dolda tävling** (`CompetitionAdmin/DeleteCompetition`) släpper `DetachDeletedCompetition` kopplingen (Skapad → Tilldelad).
+  - ⚠️ `CompetitionCallEvent.ByMemberId` MÅSTE vara nullbar (systemhändelser). Dev hade `NOT NULL` från en äldre skriptversion — det fäller `DetachDeletedCompetition` tyst (loggas bara).
+    **Kontrollera prod:** `SELECT is_nullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='CompetitionCallEvent' AND COLUMN_NAME='ByMemberId'` ska ge YES; annars `ALTER TABLE dbo.CompetitionCallEvent ALTER COLUMN ByMemberId INT NULL`.
+  - Datumfälten i utlysningsdialogerna är flatpickr (`locale 'sv'`, ÅÅÅÅ-MM-DD), öppnas på utlysningens månad; på telefon ligger kalendern i dialogens flöde (annars klipps den).
+  - Svit: `hpsk-verify/krets-utlysning-f4-verify.mjs` (A/B: datumvarningsgrenen bort → 1 röd). Anmälningsvarningens antal prövas bara i enhetstesten (`CompetitionCallRulesTests`).
+
 ## Common Pitfalls to Avoid
 1. ❌ Don't use file system for persistent data
 2. ❌ Don't bypass Umbraco's content management patterns
