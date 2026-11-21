@@ -144,6 +144,22 @@
                 .catch(() => alert('Kontakten med servern bröts. Försök igen.'));
         };
 
+        // Valfri kolumn "Tävlingsledare" (klubbens Tävlingar-sida): scope.managers = { [competitionId]: { state, names, wishes } }
+        // från CompetitionManager/ForClub. Ingen post = "–" (året har inte lästs in eller ytan får inte se rollen).
+        // En avslutad tävling utan ledare är inte något att åtgärda, så den får inget "saknas".
+        const managerCell = (comp, map) => {
+            const m = map[comp.id];
+            if (!m) return '<td class="text-muted">–</td>';
+            if (m.state === 'missing') {
+                return comp.status === 'Completed'
+                    ? '<td class="text-muted">–</td>'
+                    : '<td><span class="badge bg-warning text-dark">Saknas</span>'
+                        + (m.wishes ? `<div class="small text-muted">${m.wishes} har önskat</div>` : '') + '</td>';
+            }
+            const names = window.hpskCompEscape((m.names || []).join(', '));
+            return `<td>${names}${m.wishes && m.state !== 'closed' ? `<div class="small text-muted">${m.wishes} har önskat</div>` : ''}</td>`;
+        };
+
         window.hpskRenderCompetitionRow = function (comp, scope) {
             scope = scope || {};
             const name = window.hpskCompEscape(comp.name);
@@ -189,6 +205,7 @@
                 <td><span class="badge bg-secondary">${typeLabel}</span></td>
                 <td>${window.hpskFormatCompetitionDate(comp.startDate)}</td>
                 <td>${window.hpskCompetitionStatusBadge(comp)}${comp.isDraft ? ' <span class="badge bg-warning text-dark hpsk-draft-badge" title="Syns bara för er tills ni publicerar den"><i class="bi bi-eye-slash me-1"></i>Dold – syns bara för er</span>' : ''}${window.hpskCompetitionRegistrationBadge(comp)}</td>
+                ${scope.managers ? managerCell(comp, scope.managers) : ''}
                 <td class="text-center"><span class="badge bg-info">${comp.registrationCount || 0}</span></td>
                 <td class="text-end">
                     <div class="dropdown">
@@ -233,7 +250,7 @@
                 }
             });
 
-            const cs = window.HPSK_COMP_LIST_COLSPAN;
+            const cs = window.HPSK_COMP_LIST_COLSPAN + (scope.managers ? 1 : 0);
             let html = '';
             if (loose.length) {
                 html += `<tr class="table-secondary"><td colspan="${cs}" class="fw-bold"><i class="bi bi-calendar me-2"></i>Individuella tävlingar <span class="badge bg-secondary ms-2">${loose.length}</span></td></tr>`;
@@ -296,11 +313,13 @@
             if (sortable) {
                 window._hpskCompRerender = scope.rerender;
                 rows = window.hpskSortRows(rows, window.HPSK_COMP_COLUMNS, window.hpskCompSort);
-                head = window.HPSK_COMP_COLUMNS
-                    .map(col => window.hpskSortableTh(col, window.hpskCompSort, 'hpskSortCompetitionList'))
-                    .join('');
+                const ths = window.HPSK_COMP_COLUMNS
+                    .map(col => window.hpskSortableTh(col, window.hpskCompSort, 'hpskSortCompetitionList'));
+                if (scope.managers) ths.splice(4, 0, '<th>Tävlingsledare</th>');   // före Anmälningar
+                head = ths.join('');
             } else {
                 head = '<th>Namn</th><th>Typ</th><th>Startdatum</th><th>Status</th>'
+                     + (scope.managers ? '<th>Tävlingsledare</th>' : '')
                      + '<th class="text-center">Anmälningar</th>';
             }
 

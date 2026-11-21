@@ -91,6 +91,11 @@
                     <option value="#eventsTab" selected>Händelser</option>
                     <option value="#clubTrainingsTab">Träningar</option>
                     <option value="#competitionsTab">Tävlingar</option>
+                    @* Utlysningar/Tävlingsledare/Ansökningar: egna platser. De två första visas först när servern svarat
+                       att klubben har något där (se _ClubCallsCard/_ClubManagersCard), därför `hidden` från start. *@
+                    <option value="#clubCallsTab" id="clubCallsOption" hidden>Utlysningar från kretsen</option>
+                    <option value="#clubManagersTab" id="clubManagersOption" hidden>Tävlingsledare</option>
+                    <option value="#clubAppsTab" id="clubAppsOption">Ansökningar</option>
                     <option value="#clubSeriesTab">Serier</option>
                     @if (clubRegionId > 0)
                     {
@@ -137,6 +142,20 @@
                 </button>
                 <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button" role="tab" aria-controls="competitionsTab" aria-selected="false">
                     <i class="bi bi-trophy me-2"></i>Tävlingar
+                </button>
+                @* Platserna för det som hänger ihop med tävlingarna. Gula märket = något väntar (som Träningar).
+                   Utlysningar och Tävlingsledare är dolda tills kortens egen laddning visar att klubben har något. *@
+                <button class="nav-link d-none align-items-center" id="clubCalls-tab" data-bs-toggle="tab" data-bs-target="#clubCallsTab" type="button" role="tab" aria-controls="clubCallsTab" aria-selected="false">
+                    <i class="bi bi-calendar-event me-2"></i>Utlysningar från kretsen
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="ccRailCount" title="Utlysningar ni kan önska att arrangera">0</span>
+                </button>
+                <button class="nav-link d-none align-items-center" id="clubManagers-tab" data-bs-toggle="tab" data-bs-target="#clubManagersTab" type="button" role="tab" aria-controls="clubManagersTab" aria-selected="false">
+                    <i class="bi bi-person-badge me-2"></i>Tävlingsledare
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="cmRailCount" title="Kommande tävlingar som saknar tävlingsledare">0</span>
+                </button>
+                <button class="nav-link d-flex align-items-center" id="clubApps-tab" data-bs-toggle="tab" data-bs-target="#clubAppsTab" type="button" role="tab" aria-controls="clubAppsTab" aria-selected="false">
+                    <i class="bi bi-envelope-paper me-2"></i>Ansökningar
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="caRailCount" title="Ansökningar där kretsen väntar på er, eller som kan bli en tävling">0</span>
                 </button>
                 <button class="nav-link" id="clubseries-tab" data-bs-toggle="tab" data-bs-target="#clubSeriesTab" type="button" role="tab" aria-controls="clubSeriesTab" aria-selected="false">
                     <i class="bi bi-collection me-2"></i>Serier
@@ -324,57 +343,46 @@
 
         <!-- Competitions Tab -->
         <div class="tab-pane fade" id="competitionsTab">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5>Klubbtävlingar</h5>
-                <button class="btn btn-primary" onclick="showCreateClubCompetitionModal()">
-                    <i class="bi bi-plus-circle me-2"></i>Ny Tävling
-                </button>
-            </div>
-
-            @* Kretsutlysningen F3: det kretsen utlyst och klubben kan önska att arrangera — överst i fliken. *@
-            @{ ViewData["CallsClubId"] = clubId; }
-            @await Html.PartialAsync("_ClubCallsCard", ViewData)
-
-            @* Klubbprogrammet F7: vem som är tävlingsledare, vilka medlemmar som önskat — klubbens admin utser. *@
-            @{ ViewData["ManagersClubId"] = clubId; }
-            @await Html.PartialAsync("_ClubManagersCard", ViewData)
-
-            @* Kretsgranskning fas 4: ansökningar till kretsen, överst i fliken — en godkänd ansökan
-               blir en tävling härifrån (Skapa tävlingen öppnar guiden förifylld). *@
-            @{ ViewData["ApplicationsClubId"] = clubId; }
-            @await Html.PartialAsync("_CompetitionApplications", ViewData)
-
-            <!-- Filter Section -->
-            <div class="card mb-3">
-                <div class="card-body">
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-3">
-                            <label for="clubYearFilter" class="form-label">År</label>
-                            <select class="form-select" id="clubYearFilter" onchange="onClubYearFilterChange()">
-                                <!-- Populated by JavaScript -->
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="clubTypeFilter" class="form-label">Tävlingstyp</label>
-                            <select class="form-select" id="clubTypeFilter" onchange="onClubTypeFilterChange()">
-                                <option value="">Alla typer</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="clubShowCompleted" onchange="onClubShowCompletedChange()">
-                                <label class="form-check-label" for="clubShowCompleted">
-                                    Visa avslutade tävlingar
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-outline-secondary w-100" onclick="clearClubCompetitionFilters()">
-                                <i class="bi bi-x-circle me-1"></i>Rensa filter
-                            </button>
-                        </div>
-                    </div>
+            @* Tävlingar = bara listan (Träningar-formen): rubrik, EN blå Åtgärder, förklarande rad, filter + antal ovanför
+               listan. Utlysningar, Tävlingsledare och Ansökningar har egna platser i rälsen (se ovan) och egna panes nedan. *@
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>Tävlingar</h5>
+                <div class="dropdown" id="clubCompActions">
+                    <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px">
+                        <li><h6 class="dropdown-header">Skapa</h6></li>
+                        <li><button class="dropdown-item" type="button" onclick="showCreateClubCompetitionModal()"><i class="bi bi-plus-circle me-2"></i>Ny tävling</button></li>
+                        <li><button class="dropdown-item" type="button" id="clubCompApplyItem"><i class="bi bi-envelope-paper me-2"></i>Ansök om en tävling hos kretsen</button></li>
+                    </ul>
                 </div>
+            </div>
+            <p class="text-muted small">
+                Klubbens tävlingar. Välj <strong>Åtgärder</strong> på en rad för att ändra, kopiera eller publicera en tävling.
+                Kretsens utlysningar, tävlingsledare och ansökningar ligger under <em>Kalender &amp; tävlingar</em> i menyn.
+            </p>
+            <div id="compNeedsAlert"></div>
+
+            @* Filter + antal ovanför listan (som Träningar). *@
+            <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="small mb-0" for="clubYearFilter">År</label>
+                    <select class="form-select form-select-sm w-auto" id="clubYearFilter" onchange="onClubYearFilterChange()">
+                        <!-- Populated by JavaScript -->
+                    </select>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="small mb-0 text-nowrap" for="clubTypeFilter">Typ</label>
+                    <select class="form-select form-select-sm w-auto" id="clubTypeFilter" onchange="onClubTypeFilterChange()">
+                        <option value="">Alla typer</option>
+                    </select>
+                </div>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="clubShowCompleted" onchange="onClubShowCompletedChange()">
+                    <label class="form-check-label small" for="clubShowCompleted">Visa avslutade tävlingar</label>
+                </div>
+                <span class="small text-muted ms-auto" id="clubCompCount"></span>
             </div>
 
             <div id="competitionsTableContainer">
@@ -384,6 +392,25 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        @* Egna platser för det som hänger ihop med tävlingarna (var tidigare tre kort överst i Tävlingar). Partialerna
+           ritar själva sidans innehåll och styr sin rälspost (visa/dölj + gult märke). *@
+        <div class="tab-pane fade" id="clubCallsTab">
+            @* Kretsutlysningen F3: det kretsen utlyst och klubben kan önska att arrangera. *@
+            @{ ViewData["CallsClubId"] = clubId; }
+            @await Html.PartialAsync("_ClubCallsCard", ViewData)
+        </div>
+        <div class="tab-pane fade" id="clubManagersTab">
+            @* Klubbprogrammet F7: vem som är tävlingsledare, vilka medlemmar som önskat — klubbens admin utser. *@
+            @{ ViewData["ManagersClubId"] = clubId; }
+            @await Html.PartialAsync("_ClubManagersCard", ViewData)
+        </div>
+        <div class="tab-pane fade" id="clubAppsTab">
+            @* Kretsgranskning fas 4: ansökningar till kretsen — en godkänd ansökan blir en tävling härifrån
+               (Skapa tävlingen öppnar guiden förifylld). *@
+            @{ ViewData["ApplicationsClubId"] = clubId; }
+            @await Html.PartialAsync("_CompetitionApplications", ViewData)
         </div>
 
         <!-- Series Tab -->
@@ -4615,7 +4642,11 @@ function loadClubCompetitions() {
                 const noClubComps = data.isSiteAdmin
                     ? []
                     : (data.data || []).filter(comp => !comp.clubId || comp.clubId <= 0);
-                displayClubCompetitions(clubCompetitions, noClubComps);
+                // Tävlingsledare är en kolumn i listan — hämtas för samma år som listan visar (inget år = ingen kolumn).
+                loadClubManagersMap().then(m => {
+                    clubCompetitionsManagers = m;
+                    displayClubCompetitions(clubCompetitions, noClubComps);
+                });
             } else {
                 container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda tävlingar.</div>';
             }
@@ -4666,6 +4697,43 @@ function showAllClubCompetitions() {
 // heller kan visa något annat än det som redan står på skärmen, om datat hunnit ändras).
 let clubCompetitionsData = [];
 let clubCompetitionsNoClub = [];
+let clubCompetitionsManagers = null;   // { [competitionId]: { state, names, wishes } } för listans år, eller null
+
+// Klubbens tävlingsledare per tävling för listans år (CompetitionManager/ForClub — samma källa som platsen Tävlingsledare).
+// null när inget år är valt eller anropet inte är tillåtet (t.ex. kretsadmin som tittar in): då ritas ingen kolumn.
+function loadClubManagersMap() {
+    const y = clubCompetitionsFilters.year;
+    if (!y) return Promise.resolve(null);
+    return fetch('/umbraco/surface/CompetitionManager/ForClub?clubId=' + clubId + '&year=' + y, { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.success) return null;
+            const m = {};
+            d.rows.forEach(r => { m[r.competitionId] = { state: r.state, names: (r.managers || []).map(x => x.name), wishes: (r.wishes || []).length }; });
+            return m;
+        })
+        .catch(() => null);
+}
+
+// Gul rad ovanför listan när kommande tävlingar saknar tävlingsledare. Siffran kommer från platsen Tävlingsledare
+// (hpsk-club-needs); knappen går dit. Raden finns bara när något väntar.
+function showClubNeeds(n, year) {
+    const box = document.getElementById('compNeedsAlert'); if (!box) return;
+    if (!n) { box.innerHTML = ''; return; }
+    const yr = year ? ' ' + year : '';   // siffran gäller platsens år, inte nödvändigtvis listans — säg vilket
+    box.innerHTML = '<div class="alert alert-warning py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">'
+        + '<span><strong>Behöver åtgärd:</strong> ' + n + (n === 1 ? ' kommande tävling' + yr + ' saknar tävlingsledare.' : ' kommande tävlingar' + yr + ' saknar tävlingsledare.') + '</span>'
+        + '<button type="button" class="btn btn-sm btn-outline-secondary" id="compNeedsGo">Tävlingsledare →</button></div>';
+    document.getElementById('compNeedsGo').addEventListener('click', function () {
+        const t = document.getElementById('clubManagers-tab');
+        if (t && window.bootstrap) bootstrap.Tab.getOrCreateInstance(t).show();
+    });
+}
+document.addEventListener('hpsk-club-needs', function (e) {
+    if (e.detail && e.detail.key === 'managers') showClubNeeds(e.detail.count, e.detail.year);
+});
+// Platsen Tävlingsledare kan ha hunnit svara innan den här lyssnaren fanns — läs det den lämnat.
+if (window.hpskClubNeeds && typeof window.hpskClubNeeds.managers === 'number') showClubNeeds(window.hpskClubNeeds.managers, window.hpskClubNeeds.managersYear);
 
 function rerenderClubCompetitions() {
     displayClubCompetitions(clubCompetitionsData, clubCompetitionsNoClub);
@@ -4675,6 +4743,8 @@ function displayClubCompetitions(competitions, noClubComps) {
     const container = document.getElementById('competitionsTableContainer');
     clubCompetitionsData = competitions || [];
     clubCompetitionsNoClub = noClubComps || [];
+    const countEl = document.getElementById('clubCompCount');
+    if (countEl) countEl.textContent = clubCompetitionsData.length + (clubCompetitionsData.length === 1 ? ' tävling' : ' tävlingar');
 
     // Hint: comps the user manages that have no club (krets/nationell) don't appear in this
     // club list. Point them to where those are managed instead.
@@ -4701,7 +4771,8 @@ function displayClubCompetitions(competitions, noClubComps) {
         copy: 'copyClubCompetition',
         copyArgs: 'idAndType',
         del: 'deleteClubCompetition',
-        rerender: 'rerenderClubCompetitions'
+        rerender: 'rerenderClubCompetitions',
+        managers: clubCompetitionsManagers   // null = ingen kolumn
     });
 }
 

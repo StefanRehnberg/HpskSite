@@ -3,8 +3,9 @@
     Klubben ser vad kretsen utlyst, trycker "Vi vill arrangera" (valfritt förslag till dag + ett meddelande) och kan ångra sig
     så länge kretsen inte utsett en klubb. Utsedd klubb syns som rubrik för alla klubbar i kretsen.
 
-    ViewData["CallsClubId"] = klubbens id. Kortet döljer sig självt när kretsen inte utlyst något för året — ingen tom ruta
-    för klubbar vars krets inte använder utlysningen.
+    ViewData["CallsClubId"] = klubbens id. Sidan är en egen post i klubbadminens räls (#clubCallsTab, "Utlysningar från kretsen"). Rälsposten
+    och mobilvalet är dolda tills servern svarat att kretsen utlyst något (railUpdate) — ingen tom plats för klubbar vars krets inte
+    använder utlysningen. Gult märke = utlysningar som går att önska.
 
     ⚠️ ORDEN: utlysa · önska · utse. Aldrig "ansök" (det är klubb → krets) eller "tilldela".
     ⚠️ Formen är kodbasens: EN dialog, inga prompt()/alert(), knappar bär bara id:n (aldrig fritext i attribut),
@@ -17,22 +18,20 @@
 @if (callsClubId > 0)
 {
 @await Html.PartialAsync("_HtmlEscape")
-<div class="card mb-3 d-none" id="ccCard" data-club-id="@callsClubId">
+@* Egen plats i rälsen (Utlysningar från kretsen). Sidan har inga sidhandlingar, så ingen blå Åtgärder. *@
+<div id="ccCard" data-club-id="@callsClubId">
     @Html.AntiForgeryToken()
-    <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <div>
-            <strong><i class="bi bi-calendar-event me-1"></i>Tävlingar <span id="ccRegion">kretsen</span> har utlyst</strong>
-            <span class="text-muted small d-block">Kretsen utlyser årets tävlingar och utser vilken klubb som arrangerar. Önska de ni vill arrangera.</span>
-        </div>
-        <div>
-            <label class="visually-hidden" for="ccYear">Tävlingsår</label>
+    <h5 class="mb-2"><i class="bi bi-calendar-event me-2"></i>Utlysningar från kretsen</h5>
+    <p class="text-muted small"><span id="ccRegion">Kretsen</span> utlyser årets tävlingar och utser vilken klubb som arrangerar. Önska de ni vill arrangera.</p>
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+        <div class="d-flex align-items-center gap-2">
+            <label class="small mb-0" for="ccYear">År</label>
             <select class="form-select form-select-sm w-auto" id="ccYear"></select>
         </div>
+        <span class="small text-muted ms-auto" id="ccCount"></span>
     </div>
-    <div class="card-body">
-        <div id="ccMessage"></div>
-        <div id="ccBody"><div class="text-muted small">Laddar…</div></div>
-    </div>
+    <div id="ccMessage" role="status"></div>
+    <div id="ccBody"><div class="text-muted small">Laddar…</div></div>
 </div>
 
 <style>
@@ -80,16 +79,29 @@
     const dateText = d => { if (!d) return ''; const p = d.split('-'); return +p[2] + ' ' + MONTHS[+p[1] - 1] + ' ' + p[0]; };
     function say(msg, ok) { const el = $('ccMessage'); el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2'; el.textContent = msg; }
 
+    // Rälsposten + mobilvalet visas när klubben har något här; det gula märket = utlysningar ni kan önska.
+    function railUpdate() {
+        const btn = $('clubCalls-tab'); if (!btn) return;
+        btn.classList.remove('d-none'); btn.classList.add('d-flex');
+        const opt = $('clubCallsOption'); if (opt) opt.hidden = false;
+        const n = data ? data.calls.filter(c => c.state === 'open' && c.canWish).length : 0;
+        const badge = $('ccRailCount');
+        if (badge) { badge.textContent = n; badge.classList.toggle('d-none', n === 0); }
+        if (opt) opt.textContent = 'Utlysningar från kretsen' + (n ? ' (' + n + ')' : '');
+        document.dispatchEvent(new CustomEvent('hpsk-club-needs', { detail: { key: 'calls', count: n } }));
+    }
+
     function load() {
         const q = base + 'GetForClub?clubId=' + CLUB_ID + (year ? '&year=' + year : '');
         return fetch(q, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
             if (!d.success) { if (shown) $('ccBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
             data = d; year = d.year;
             calls = {}; d.calls.forEach(c => calls[c.id] = c);
-            // Inget utlyst och kortet har aldrig visats: dölj det helt.
-            if (!d.calls.length && !shown) { card.classList.add('d-none'); return; }
-            shown = true; card.classList.remove('d-none');
-            $('ccRegion').textContent = d.regionName || 'kretsen';
+            // Inget utlyst och platsen har aldrig visats: rälsposten förblir dold (klubbar vars krets inte utlyser något ser ingen tom plats).
+            if (!d.calls.length && !shown) return;
+            shown = true; railUpdate();
+            $('ccRegion').textContent = d.regionName || 'Kretsen';
+            $('ccCount').textContent = d.calls.length + (d.calls.length === 1 ? ' utlysning' : ' utlysningar');
             $('ccYear').innerHTML = d.years.map(y => '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>').join('');
             render();
         }).catch(() => { if (shown) $('ccBody').innerHTML = '<div class="alert alert-warning mb-0">Utlysningarna kunde inte läsas just nu. Försök igen om en stund.</div>'; });

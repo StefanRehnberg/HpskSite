@@ -14,22 +14,20 @@
 @if (mgrClubId > 0)
 {
 @await Html.PartialAsync("_HtmlEscape")
-<div class="card mb-3" id="cmCard" data-club-id="@mgrClubId">
+@* Egen plats i rälsen (Tävlingsledare). Enskild tävlings ledare syns också som kolumn i Tävlingar; här sköts rollen i bulk. *@
+<div id="cmCard" data-club-id="@mgrClubId">
     @Html.AntiForgeryToken()
-    <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <div>
-            <strong><i class="bi bi-person-badge me-1"></i>Tävlingsledare</strong>
-            <span class="text-muted small d-block">Utse vem som leder klubbens tävlingar. Medlemmar kan önska, och ni väljer.</span>
-        </div>
-        <div>
-            <label class="visually-hidden" for="cmYear">Tävlingsår</label>
+    <h5 class="mb-2"><i class="bi bi-person-badge me-2"></i>Tävlingsledare</h5>
+    <p class="text-muted small">Utse vem som leder klubbens tävlingar. Medlemmar kan önska, och ni väljer.</p>
+    <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+        <div class="d-flex align-items-center gap-2">
+            <label class="small mb-0" for="cmYear">År</label>
             <select class="form-select form-select-sm w-auto" id="cmYear"></select>
         </div>
+        <span class="small text-muted ms-auto" id="cmCount"></span>
     </div>
-    <div class="card-body">
-        <div id="cmMessage" role="status"></div>
-        <div id="cmBody"><div class="text-muted small">Laddar…</div></div>
-    </div>
+    <div id="cmMessage" role="status"></div>
+    <div id="cmBody"><div class="text-muted small">Laddar…</div></div>
 </div>
 
 <div class="modal fade" id="cmModal" tabindex="-1" aria-labelledby="cmModalTitle" aria-hidden="true" data-bs-backdrop="static">
@@ -70,14 +68,34 @@
     const dateText = r => { if (!r.date) return 'Datum inte bestämt'; const p = r.date.split('-'); return (r.weekday ? r.weekday.toLowerCase() + ' ' : '') + (+p[2]) + ' ' + MONTHS[+p[1] - 1]; };
     function say(msg, ok) { const el = $('cmMessage'); el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2'; el.textContent = msg; }
 
+    // Kommande tävlingar utan tävlingsledare — samma urval som den gula raden i listan.
+    function needRows() {
+        const today = new Date().toISOString().slice(0, 10);
+        return data.rows.filter(r => r.state === 'missing' && (!r.date || r.date >= today));
+    }
+    // Rälsposten visas för den som får hantera rollen; det gula märket = antal som saknar tävlingsledare.
+    function railUpdate() {
+        const btn = $('clubManagers-tab'); if (!btn) return;
+        btn.classList.remove('d-none'); btn.classList.add('d-flex');
+        const opt = $('clubManagersOption'); if (opt) opt.hidden = false;
+        const n = needRows().length;
+        const badge = $('cmRailCount');
+        if (badge) { badge.textContent = n; badge.classList.toggle('d-none', n === 0); }
+        if (opt) opt.textContent = 'Tävlingsledare' + (n ? ' (' + n + ')' : '');
+        window.hpskClubNeeds = Object.assign(window.hpskClubNeeds || {}, { managers: n, managersYear: year });   // för den som lyssnar senare än svaret
+        document.dispatchEvent(new CustomEvent('hpsk-club-needs', { detail: { key: 'managers', count: n, year: year } }));
+    }
+
     function load() {
         const q = base + 'ForClub?clubId=' + CLUB_ID + (year ? '&year=' + year : '');
         return fetch(q, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
-            // Inte behörig (t.ex. kretsadmin som tittar in i klubbens panel): ingen tom ruta med ett fel.
-            if (!d.success && !data) { card.classList.add('d-none'); return; }
+            // Inte behörig (t.ex. kretsadmin som tittar in i klubbens panel): rälsposten förblir dold, ingen tom plats med ett fel.
+            if (!d.success && !data) return;
             if (!d.success) { $('cmBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
             data = d; year = d.year;
             rows = {}; d.rows.forEach(r => rows[r.competitionId] = r);
+            railUpdate();
+            $('cmCount').textContent = d.rows.length + (d.rows.length === 1 ? ' tävling' : ' tävlingar');
             $('cmYear').innerHTML = d.years.map(y => '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>').join('');
             render();
         }).catch(() => { $('cmBody').innerHTML = '<div class="alert alert-warning mb-0">Listan kunde inte läsas just nu. Försök igen om en stund.</div>'; });
@@ -112,8 +130,7 @@
     function render() {
         if (!data.rows.length) { $('cmBody').innerHTML = '<div class="text-muted">Klubben har inga tävlingar ' + year + ' ännu.</div>'; return; }
         // Behöver åtgärd: kommande tävlingar utan tävlingsledare (gult kort, som kretsens).
-        const today = new Date().toISOString().slice(0, 10);
-        const need = data.rows.filter(r => r.state === 'missing' && (!r.date || r.date >= today));
+        const need = needRows();
         let h = need.length ? '<div class="alert alert-warning py-2"><strong>Behöver åtgärd:</strong> ' + need.length + (need.length === 1 ? ' tävling saknar tävlingsledare' : ' tävlingar saknar tävlingsledare') + '.</div>' : '';
         h += '<div class="table-responsive d-none d-md-block"><table class="table table-sm align-middle mb-0"><thead><tr>'
             + '<th>Tävling</th><th>Datum</th><th>Tävlingsledare</th><th>Önskemål</th><th class="text-end"></th></tr></thead><tbody>';

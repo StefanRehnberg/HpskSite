@@ -24,15 +24,13 @@
 
 @if (appsClubId > 0)
 {
-<div class="card mb-3" id="caAppsCard" data-club-id="@appsClubId">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div>
-            <strong><i class="bi bi-envelope-paper me-1"></i>Ansökningar till kretsen</strong>
-            <span class="text-muted small d-block">Kretstävlingar, landsdelstävlingar och nationella tävlingar söks hos kretsen. En föreningstävling söks inte.</span>
-        </div>
-        <button type="button" class="btn btn-outline-primary btn-sm" id="caNewBtn"><i class="bi bi-plus-lg me-1"></i>Ansök om en tävling</button>
-    </div>
-    <div class="card-body" id="caAppsBox"><div class="text-muted small">Hämtar…</div></div>
+@* Egen plats i rälsen (Ansökningar). Att skapa en ansökan sker via Åtgärder → "Ansök om en tävling hos kretsen" på Tävlingar
+   (#clubCompApplyItem), inte med en knapp här. *@
+<div id="caAppsCard" data-club-id="@appsClubId">
+    <h5 class="mb-2"><i class="bi bi-envelope-paper me-2"></i>Ansökningar till kretsen</h5>
+    <p class="text-muted small">Kretstävlingar, landsdelstävlingar och nationella tävlingar söks hos kretsen. En föreningstävling söks inte.</p>
+    <div class="small text-muted mb-2" id="caCount"></div>
+    <div id="caAppsBox"><div class="text-muted small">Hämtar…</div></div>
 </div>
 }
 
@@ -216,9 +214,19 @@
                 state.apps = {};
                 (d.applications || []).forEach(a => state.apps[a.id] = a);
                 render(box, d);
+                railBadge(d.applications || []);
             })
             .catch(() => { box.innerHTML = '<div class="text-danger small">Kunde inte hämta ansökningarna.</div>'; });
     };
+
+    // Rälsens gula märke: ansökningar där kretsen väntar på er (svara) eller som kan bli en tävling (skapa).
+    function railBadge(list) {
+        const n = list.filter(a => a.canReply || a.canCreateCompetition).length;
+        const badge = $('caRailCount');
+        if (badge) { badge.textContent = n; badge.classList.toggle('d-none', n === 0); }
+        const opt = $('clubAppsOption'); if (opt) opt.textContent = 'Ansökningar' + (n ? ' (' + n + ')' : '');
+        const c = $('caCount'); if (c) c.textContent = list.length ? list.length + (list.length === 1 ? ' ansökan' : ' ansökningar') : '';
+    }
 
     function kretsNotice(d) {
         if (!d.region || d.kretsReceivesLoggedIn) return '';
@@ -239,7 +247,7 @@
                 + d.deadlines.map(x => esc(x.year + ' ' + levelLabel(x.level).toLocaleLowerCase('sv-SE') + ': ' + x.lastDate)).join(' · ') + '</div>';
         }
         if (!list.length) {
-            box.innerHTML = html + '<div class="text-muted">Klubben har inga ansökningar. Tryck <strong>Ansök om en tävling</strong> för att söka en kretstävling eller en nationell tävling.</div>';
+            box.innerHTML = html + '<div class="text-muted">Klubben har inga ansökningar. Välj <strong>Åtgärder → Ansök om en tävling hos kretsen</strong> under Tävlingar för att söka en kretstävling eller en nationell tävling.</div>';
             return;
         }
         html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0" id="caAppsTable"><thead><tr>'
@@ -364,7 +372,7 @@
         const box = $('caAppsBox'); if (!box) return;
         let el = $('caTopMessage');
         if (!el) { el = document.createElement('div'); el.id = 'caTopMessage'; box.parentNode.insertBefore(el, box); }
-        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' mx-3 mt-3 mb-0 py-2';
+        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' mb-3 py-2';
         el.textContent = msg;
     }
 
@@ -513,13 +521,17 @@
             if (!r.success) { res.className = 'mt-3 alert alert-warning py-2'; res.textContent = r.message || 'Det gick inte att spara.'; return; }
             bootstrap.Modal.getInstance($('caAppModal')).hide();
             if ($('caAppsBox') && clubId === state.clubId) { showTopMessage(r.message, true); window.hpskAppsLoad(state.clubId); }
+            // Skapad via Åtgärder på Tävlingar: visa resultatet där ansökningarna bor, annars syns bekräftelsen aldrig.
+            if (state.goToApps) { state.goToApps = false; const t = document.getElementById('clubApps-tab'); if (t && window.bootstrap) bootstrap.Tab.getOrCreateInstance(t).show(); }
             if (state.onSaved) state.onSaved(r);
             else if (typeof window.hpskAppSaved === 'function') window.hpskAppSaved(r);
         }).catch(() => { $('caSubmit').disabled = $('caSaveDraft').disabled = false; res.className = 'mt-3 alert alert-warning py-2'; res.textContent = 'Det gick inte att spara.'; });
     }
     $('caSubmit')?.addEventListener('click', () => save(true));
     $('caSaveDraft')?.addEventListener('click', () => save(false));
-    $('caNewBtn')?.addEventListener('click', () => window.hpskAppOpenForm({ clubId: state.clubId }));
+    // Åtgärder → "Ansök om en tävling hos kretsen" (menyvalet ligger på Tävlingar, partialen i Ansökningar).
+    $('clubCompApplyItem')?.addEventListener('click', () => { state.goToApps = true; window.hpskAppOpenForm({ clubId: state.clubId }); });
+    $('caAppModal')?.addEventListener('hidden.bs.modal', () => { state.goToApps = false; });
 
     // ── Skapa tävlingen ──────────────────────────────────────────────────────────────
     // onSaved (omgång 2, planeringen): får guidens svar och returnerar true när den själv berättar att tävlingen
@@ -563,16 +575,14 @@
         });
     });
 
-    // Klubbens Tävlingar-flik: läs in när fliken visas första gången.
+    // Klubbens Ansökningar-plats: läses in direkt (rälsens märke behöver siffran) och om när platsen öppnas.
     const card = $('caAppsCard');
     if (card) {
         const cid = parseInt(card.dataset.clubId, 10);
         state.clubId = cid;
-        const tab = document.getElementById('competitions-tab');
-        let loaded = false;
-        const load = () => { if (!loaded) { loaded = true; window.hpskAppsLoad(cid); } };
-        if (tab) { tab.addEventListener('shown.bs.tab', load); tab.addEventListener('click', load); }
-        if (document.getElementById('competitionsTab')?.classList.contains('active')) load();
+        window.hpskAppsLoad(cid);
+        const tab = document.getElementById('clubApps-tab');
+        if (tab) tab.addEventListener('shown.bs.tab', () => window.hpskAppsLoad(cid));
     }
 })();
 </script>
