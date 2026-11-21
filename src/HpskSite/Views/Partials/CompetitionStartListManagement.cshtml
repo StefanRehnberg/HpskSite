@@ -3,6 +3,7 @@
  * Handles creation and management of start lists for a specific competition
 *@
 @using HpskSite.Models
+@inject HpskSite.Services.Competitions.ICompetitionStore StartListCompetitions
 
 @* hpskEsc() — the shooter's name and club are member-supplied and are rendered into innerHTML here.
    Included by this partial rather than by its host pages, so the helper travels with the code that
@@ -190,6 +191,22 @@
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
     var competitionType = ViewData["CompetitionType"]?.ToString() ?? "Precision";
+
+    // Klassbytet och "Lägg till skytt" erbjuder bara de klasser TÄVLINGEN har valt (shootingClassIds),
+    // inte hela klassregistret (Michael Henriksson, tävling 5574). En tävling utan valda klasser
+    // (äldre rader) erbjuder alla, som förut. Listan är registrets ordning, aldrig en egen.
+    IEnumerable<ShootingClass> offeredClasses = ShootingClasses.All;
+    if (int.TryParse(competitionId, out var offeredCompId))
+    {
+        var offeredComp = StartListCompetitions.Get(offeredCompId);
+        var chosenIds = ShootingClassIdsValue.ReadIds(offeredComp?.ShootingClassIds);
+        if (chosenIds.Count > 0)
+        {
+            var chosen = new HashSet<string>(chosenIds, StringComparer.OrdinalIgnoreCase);
+            var narrowed = ShootingClasses.All.Where(sc => chosen.Contains(sc.Id)).ToList();
+            if (narrowed.Count > 0) { offeredClasses = narrowed; }
+        }
+    }
 
     var isDirektplacering = false;
     try
@@ -693,7 +710,7 @@
             <div class="modal-body">
                 <p class="small text-muted mb-2">Ändra vapenklass för: <strong id="editWeaponShooterName"></strong></p>
                 <select id="editWeaponClassSelect" class="form-select">
-                    @foreach (var sc in ShootingClasses.All)
+                    @foreach (var sc in offeredClasses)
                     {
                         <option value="@sc.Id">@sc.Name</option>
                     }
@@ -764,7 +781,7 @@
                         <label for="targetWeaponClass" class="form-label">Välj Vapenklass:</label>
                         <select class="form-select" id="targetWeaponClass" required>
                             <option value="">-- Välj vapenklass --</option>
-                            @foreach (var sc in ShootingClasses.All)
+                            @foreach (var sc in offeredClasses)
                             {
                                 <option value="@sc.Id">@sc.Name</option>
                             }
@@ -2411,7 +2428,16 @@ function openEditWeaponClassModal(memberId, name, currentClass, teamNumber) {
     currentEditTeamNumber = teamNumber;  // Store the team number
     currentEditOldWeaponClass = currentClass;  // Store the original class
     document.getElementById('editWeaponShooterName').textContent = name;
-    document.getElementById('editWeaponClassSelect').value = currentClass;
+    const editSelect = document.getElementById('editWeaponClassSelect');
+    // En skytt kan stå i en klass som tävlingen inte (längre) har valt — då måste hens nuvarande
+    // klass ändå synas, annars blir rutan blank och Spara ser ut att välja något annat.
+    Array.from(editSelect.options).filter(o => o.dataset.extra).forEach(o => o.remove());   // förra skyttens tillfälliga val
+    if (currentClass && !Array.from(editSelect.options).some(o => o.value === currentClass)) {
+        const extra = new Option(window.getShootingClassName(currentClass), currentClass);
+        extra.dataset.extra = '1';
+        editSelect.add(extra, 0);
+    }
+    editSelect.value = currentClass;
 
     if (!editWeaponClassModal) {
         editWeaponClassModal = new bootstrap.Modal(document.getElementById('editWeaponClassModal'));
