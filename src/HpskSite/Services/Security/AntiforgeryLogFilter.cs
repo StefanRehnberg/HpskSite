@@ -34,6 +34,39 @@ namespace HpskSite.Services.Security
             _logger = logger;
         }
 
+        /// <summary>
+        /// En action med eget beslut (<c>[ValidateAntiForgeryToken]</c>) nekar själv med ett TOMT 400 som MVC loggar som Information — prod loggar
+        /// bara Warning, så orsaken syns aldrig. Här prövas tokenen en gång till (idempotent) enbart för att logga VARFÖR, en gång per
+        /// action och orsak. Ändrar aldrig utfallet. Inga personuppgifter loggas, bara om kaka och huvud fanns.
+        /// </summary>
+        private async Task LogReasonForDecidedActionAsync(HttpContext http, ControllerActionDescriptor cad)
+        {
+            try
+            {
+                if (HttpMethods.IsGet(http.Request.Method) || HttpMethods.IsHead(http.Request.Method)
+                    || HttpMethods.IsOptions(http.Request.Method) || HttpMethods.IsTrace(http.Request.Method)) return;
+                if (!cad.MethodInfo.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true).Any()
+                    && !cad.ControllerTypeInfo.GetCustomAttributes(typeof(ValidateAntiForgeryTokenAttribute), true).Any()) return;
+                try { await _antiforgery.ValidateRequestAsync(http); }
+                catch (AntiforgeryValidationException ex)
+                {
+                    var key = EndpointAuthClassifier.Key(cad.MethodInfo);
+                    var cookieNames = http.Request.Cookies.Keys.Where(k => k.Contains("Antiforgery", StringComparison.OrdinalIgnoreCase)).Count();
+                    var reason = ex.Message;
+                    if (Seen.TryAdd(key + "|" + reason, 0))
+                        _logger.LogWarning("SEC: Antiforgery nekade {Endpoint} ({Method} {Path}, referer {Referer}): {Reason}; antiforgery-kakor={Cookies}, tokenhuvud={Header}, inloggningskaka={Auth}, https={Https}, scheme={Scheme}",
+                            key, http.Request.Method, http.Request.Path, http.Request.Headers.Referer.ToString(), reason, cookieNames,
+                            http.Request.Headers.ContainsKey("RequestVerificationToken"),
+                            http.Request.Cookies.Keys.Any(k => k.Contains("Identity.Application", StringComparison.Ordinal)),
+                            http.Request.IsHttps, http.Request.Scheme);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SEC: Orsaken till antiforgery-nekandet kunde inte läsas");
+            }
+        }
+
         public static string ModeOf(string? configured) => configured?.Trim().ToLowerInvariant() switch
         {
             "enforce" => "enforce",
@@ -47,9 +80,13 @@ namespace HpskSite.Services.Security
             if (mode == "off") return;
             if (context.ActionDescriptor is not ControllerActionDescriptor cad) return;
             if (cad.ControllerTypeInfo.Assembly != typeof(AntiforgeryLogFilter).Assembly) return;
-            if (!AntiforgeryCoverage.IsUnsafeVerb(cad.MethodInfo) || AntiforgeryCoverage.HasDecision(cad.MethodInfo)) return;
-
+            if (!AntiforgeryCoverage.IsUnsafeVerb(cad.MethodInfo)) return;
             var http = context.HttpContext;
+            if (AntiforgeryCoverage.HasDecision(cad.MethodInfo))
+            {
+                await LogReasonForDecidedActionAsync(http, cad);
+                return;
+            }
             // En action utan angivet verb svarar på alla — prövningen gäller bara det anrop som faktiskt skriver.
             if (HttpMethods.IsGet(http.Request.Method) || HttpMethods.IsHead(http.Request.Method)
                 || HttpMethods.IsOptions(http.Request.Method) || HttpMethods.IsTrace(http.Request.Method)) return;

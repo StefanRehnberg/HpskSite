@@ -151,7 +151,7 @@ window.hpskKretsCallsInit = function () {
                 + (c.disciplineLabel ? '<div class="small text-muted">' + esc(c.disciplineLabel) + '</div>' : '')
                 + '<div class="d-md-none small mt-1">Arrangör: ' + org + '</div>' + wishesLine(c) + '</td>'
                 + '<td class="d-none d-md-table-cell">' + org + '</td><td>' + badge(c) + '</td>'
-                + '<td class="text-end"><div class="dropdown"><button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Åtgärder för raden"><i class="bi bi-three-dots-vertical"></i></button>'
+                + '<td class="text-end"><div class="dropdown"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false"><i class="bi bi-sliders me-1"></i>Åtgärder</button>'
                 + '<ul class="dropdown-menu dropdown-menu-end" style="min-width:300px;">'
                 + menuItem(c, 'edit', 'bi-pencil', 'Ändra…', 'edit')
                 + menuItem(c, 'publish', 'bi-megaphone', 'Utlys – klubbarna får se den…', 'publish')
