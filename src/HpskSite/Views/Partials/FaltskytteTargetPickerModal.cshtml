@@ -1,3 +1,4 @@
+@await Html.PartialAsync("_FaltskytteShbRules")
 @*
  * Fältskytte Target Picker Modal
  * Split layout: scrollable grid on the left, fixed detail panel on the right.
@@ -120,26 +121,8 @@ var _faltPickerCallback = null;
 var _faltPickerWeaponClass = 'C';
 var _faltPickerIsAdmin = false;
 
-// SHB diagram 1-3 max distances per storleksgrupp (SHB 2026 pp 100-122),
-// formatted for the section-header label. Group 15 is the "ej grupperad"
-// bucket — figures whose admin hasn't bucketed them yet.
-var FALT_PICKER_GROUP_LABELS = {
-    1:  'A&R 70 m · B 80 m · C 90 m',
-    2:  'A&R 60 m · B 65 m · C 75 m',
-    3:  'A&R 50 m · B 55 m · C 65 m',
-    4:  'A&R 45 m · B 50 m · C 55 m',
-    5:  'A&R 40 m · B 45 m · C 50 m',
-    6:  'A&R 35 m · B 40 m · C 45 m',
-    7:  'A&R 30 m · B 35 m · C 40 m',
-    8:  'A&R 27 m · B 32 m · C 36 m',
-    9:  'A&R 24 m · B 27 m · C 30 m',
-    10: 'A&R 20 m · B 22 m · C 25 m',
-    11: 'A&R 16 m · B 18 m · C 20 m',
-    12: 'A&R 14 m · B 16 m · C 18 m',
-    13: 'A&R 12 m · B 14 m · C 16 m',
-    14: 'A&R 7 m · B 8 m · C 9 m',
-    15: ''
-};
+// Rubrikens avstånd per storleksgrupp ("A&R 70 m · B 80 m · C 90 m · M 180 m") härleds ur SHB-tabellen i C#
+// (faltShbGroupLabel i partialen _FaltskytteShbRules). Ingen egen kopia av tabellen här. Grupp 15 = ej grupperad, ingen text.
 var FALT_PICKER_STORAGE_KEY = 'faltPickerVisibleGroups';
 var _faltPickerVisibleGroups = null;
 
@@ -190,7 +173,7 @@ function faltPickerRenderFilterChips() {
         var label = g === 15 ? 'Ej' : g;
         var title = g === 15
             ? 'Ej grupperad'
-            : ('Storleksgrupp ' + g + (FALT_PICKER_GROUP_LABELS[g] ? ' — ' + FALT_PICKER_GROUP_LABELS[g] : ''));
+            : ('Storleksgrupp ' + g + (faltShbGroupLabel(g) ? ' — ' + faltShbGroupLabel(g) : ''));
         html += '<button type="button" class="btn btn-sm py-0 px-2 ' + (on ? 'btn-primary' : 'btn-outline-secondary') + '" onclick="faltPickerToggleGroup(' + g + ')" title="' + title + '">' + label + '</button>';
     }
     c.innerHTML = html;
@@ -254,11 +237,13 @@ function faltPickerRenderGrid(targets) {
 
     groupNums.forEach(function(g) {
         var labelText = g === 15 ? 'Ej grupperad' : 'Storleksgrupp ' + g;
-        var distText = FALT_PICKER_GROUP_LABELS[g] || '';
-        var header = '<div class="d-flex align-items-center gap-2 small text-muted mb-1 mt-2">' +
-            '<span class="fw-bold text-body">' + labelText + '</span>' +
-            (distText ? '<span>· ' + distText + '</span>' : '') +
-            '<hr class="flex-grow-1 my-0 opacity-25">' +
+        var distText = faltShbGroupLabel(g);
+        // flex-wrap + text-nowrap: på telefon får avståndstexten (fyra hinkar) en egen rad i stället för att
+        // bryta mitt i "Storleksgrupp 1" och "180 m". Linjen visas först när det finns plats (sm och uppåt).
+        var header = '<div class="d-flex flex-wrap align-items-center column-gap-2 small text-muted mb-1 mt-2">' +
+            '<span class="fw-bold text-body text-nowrap">' + labelText + '</span>' +
+            (distText ? '<span class="text-nowrap">· ' + distText + '</span>' : '') +
+            '<hr class="flex-grow-1 my-0 opacity-25 d-none d-sm-block">' +
         '</div>';
 
         var cardsHtml = '<div class="d-flex flex-wrap gap-2">';

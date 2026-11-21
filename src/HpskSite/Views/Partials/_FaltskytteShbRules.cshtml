@@ -1,0 +1,36 @@
+@using HpskSite.CompetitionTypes.Faltskytte.Services
+@*
+ * SHB:s tabell för fältstationer i webbläsaren — EN enhet, hämtad ur C# (ShbFieldRules.TableJson()).
+ * Läses av konfiguratorn (_FaltskytteConfiguratorScript) och figurväljaren (FaltskytteTargetPickerModal,
+ * som även ingår på AdminPage). Båda partialerna tar med den här; den skriver bara en gång per sida.
+ * ⚠️ Lägg ingen tabell, ingen vapengruppshink och ingen rubriksträng med avstånd någon annanstans i JS.
+ *@
+<script>
+if (!window.FALT_SHB) {
+    window.FALT_SHB = @Html.Raw(ShbFieldRules.TableJson());
+
+    // Vapenklass (A, A_Opt, A_M, A_P, A_G, B, C, R, M, M1–M9) → SHB-diagrammets hink (AR / B / C / M).
+    // Speglar ShbFieldRules.Bucket; paritetstestet jämför dem.
+    window.faltShbBucket = function (wc) {
+        if (!wc) return 'AR';
+        if (wc === 'B') return 'B';
+        if (wc === 'C') return 'C';
+        if (wc === 'M' || /^M\d/.test(wc)) return 'M';
+        return 'AR';
+    };
+
+    // Rubrikens avståndstext för en storleksgrupp: "A&R 70 m · B 80 m · C 90 m · M 180 m".
+    // Tom för grupper utan rad (15 = ej grupperad). Alla fyra hinkar, även i läge utan vapenklass (admin).
+    window.faltShbGroupLabel = function (g) {
+        var row = window.FALT_SHB.maxDistances[g];
+        if (!row) return '';
+        var parts = [['A&R', 'AR'], ['B', 'B'], ['C', 'C'], ['M', 'M']];
+        var out = [];
+        for (var i = 0; i < parts.length; i++) {
+            var v = row[parts[i][1]];
+            if (v) out.push(parts[i][0] + ' ' + v + ' m');
+        }
+        return out.join(' · ');
+    };
+}
+</script>

@@ -3,9 +3,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     /// <summary>
     /// SHB:s regler för fältstationer, på servern — för kretsens bangranskning (fas 3).
     ///
-    /// <para><b>⚠️⚠️ EN SPEGEL AV KONFIGURATORNS JAVASCRIPT, och de två MÅSTE säga samma sak.</b>
-    /// Källan är <c>_FaltskytteConfiguratorScript.cshtml</c>: <c>SHB_MAX_DISTANCES</c>,
-    /// <c>faltShbBucket</c>, <c>faltLookupSizeGroup</c> (stödhand ett steg upp, mörker ett steg ner) och
+    /// <para><b>⚠️⚠️ Avståndstabellen har sedan fas 1a EN källa: <c>MaxDistances</c> här (webbläsaren får den som JSON).
+    /// Resten är fortfarande EN SPEGEL AV KONFIGURATORNS JAVASCRIPT, och de två MÅSTE säga samma sak.</b>
+    /// Källan är <c>_FaltskytteConfiguratorScript.cshtml</c>: <c>faltLookupSizeGroup</c> (stödhand ett steg upp, mörker ett steg ner) och
     /// <c>faltSuggestShootingTime</c> (Normal: girig fördelning av 6 skott på de svåraste figurerna;
     /// Poäng: minst ett skott per figur, överskottet på de enklaste; tillägg för 45° vapenläge, omriktning
     /// och mörker ×1,30). Ändras en regel där måste den ändras här — annars säger granskarens checklista
@@ -15,6 +15,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     /// </summary>
     public static class ShbFieldRules
     {
+        // Källanmärkningar (flyttade hit från konfiguratorns JS i fas 1a; tabellen har nu EN källa, den här):
+        // - Diagram 1–3 (SHB 2026 s. 120–122) går alla genom origo; maxavståndet motsvarar diagrammets maxtid per skott
+        //   (AR 2,0 s, B 1,75 s, C 1,5 s). Värdena kontrollerade mot SHB s. 100–109 (Fältskyttefigurer).
+        // - M-kolumnen är Magnumfältskjutning, SHB 2026 Del E, E.7 (s. 143–151), avskriven i
+        //   Documentation/SHB_MAGNUMFALT_MAL_OCH_AVSTAND.md (käll-PDF:en är en skanning utan textlager).
+        // - ⚠ Magnum når MYCKET längre: grupp 1 är 180 m mot A/R:s 70.
+        // - ⚠ Två figurer avviker inom sin grupp och kan inte uttryckas i en tabell per grupp: grupp 7 "1/1 miniatyr"
+        //   är 70 m (gruppen säger 80) och grupp 9 "Ovalen nr 3" är 50 m (gruppen säger 60). De får gruppvärdet,
+        //   alltså något för generöst för just de två.
+        // - ⚠ Grupp 14 är 17 m enligt måltabellen men diagram 4 slutar nära 13 m. Kolumnen heter "Max skjutavstånd", så 17 används.
+        // - SHB har ingen grupp 0 för Magnum. Den behövs inte: storleksgrupp 0 betyder "ej satt" och hoppas över av både
+        //   avståndsgången och tidsberäkningen, så raden nås aldrig.
+
         /// <summary>SHB:s maxavstånd (m) per storleksgrupp och vapengruppshink. Grupp 15 = ej grupperad (ingen rad).</summary>
         private static readonly Dictionary<int, (int AR, int B, int C, int? M)> MaxDistances = new()
         {
@@ -43,6 +56,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <summary>SHB E.7.1.1: skjutavstånd över 180 meter är inte tillåtet (magnum).</summary>
         public const int MagnumMaxDistance = 180;
         public const string SupportHandAllowed = "Stödhand tillåten";
+
+        /// <summary>
+        /// Tabelldata som JSON för webbläsaren (partialen <c>_FaltskytteShbRules.cshtml</c> → <c>FALT_SHB</c>).
+        /// ⚠️ Fas 1a: detta är ENDA källan. Konfiguratorn och figurväljaren har ingen egen kopia av tabellen,
+        /// och väljarens rubriker ("A&amp;R 70 m · B 80 m · C 90 m · M 180 m") härleds ur den här.
+        /// </summary>
+        public static string TableJson() => _tableJson.Value;
+
+        private static readonly Lazy<string> _tableJson = new(() =>
+        {
+            var rows = MaxDistances.OrderBy(kv => kv.Key).ToDictionary(
+                kv => kv.Key.ToString(),
+                kv => new Dictionary<string, int?> { ["AR"] = kv.Value.AR, ["B"] = kv.Value.B, ["C"] = kv.Value.C, ["M"] = kv.Value.M });
+            return System.Text.Json.JsonSerializer.Serialize(new
+            {
+                maxDistances = rows,
+                maxTimePerShot = MaxTimePerShot,
+            });
+        });
 
         /// <summary>Vapengrupp → SHB-diagrammets hink (AR / B / C / M). Hela A-familjen och R delar diagram 1.</summary>
         public static string Bucket(string? weaponClass)

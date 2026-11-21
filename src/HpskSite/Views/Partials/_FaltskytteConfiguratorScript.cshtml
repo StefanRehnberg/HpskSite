@@ -1,4 +1,5 @@
-﻿<script>
+﻿@await Html.PartialAsync("_FaltskytteShbRules")
+<script>
 // Station Configurator State
 let faltCfgData = {}; // { "C": { stations: [...] }, "A": { ... } }
 let faltCfgWeaponClasses = ["C"]; // Active weapon classes
@@ -202,45 +203,10 @@ const SUPPORT_HAND = ["Ej stödhand", "Stödhand tillåten"];
 const TARGET_BEHAVIORS = ["Fast", "Framsvängande", "Bortsvängande", "Rörligt"];
 
 // ─── SHB shoot-time suggestion ──────────────────────────────────────
-// Max distance per (sizeGroup, SHB weapon-diagram). Lines in diagrams 1-3
-// (SHB 2026 pp. 120-122) all pass through origin; max distance corresponds
-// to the diagram's max time/shot (AR=2,0 s, B=1,75 s, C=1,5 s).
-// Values verified against SHB pp. 100-109 (Fältskyttefigurer).
-// The M column is Magnumfältskjutning, SHB 2026 Del E, E.7 (pp. 143-151) —
-// transcribed in Documentation/SHB_MAGNUMFALT_MAL_OCH_AVSTAND.md, because the
-// source PDF is a scan with no text layer and cannot be grepped.
-// ⚠ Magnum reaches MUCH further: group 1 is 180 m against A/R's 70.
-// ⚠ Two figures deviate inside their own group and cannot be expressed in a
-//   per-group table — grupp 7 "1/1 miniatyr" is 70 m (group says 80) and
-//   grupp 9 "Ovalen nr 3" is 50 m (group says 60). They get the group value,
-//   i.e. slightly too generous for those two figures. Noted in the doc.
-// ⚠ Grupp 14 is 17 m per the target table but Diagram 4 ends near 13 m. The
-//   table column is literally headed "Max skjutavstånd", so 17 is used.
-// SHB has no grupp 0 for Magnum. It needs none: sizeGroup 0 means "not set"
-// and is skipped by both the bounds walk and the time calc, so the row is
-// unreachable for every weapon group.
-const SHB_MAX_DISTANCES = {
-    0:  { AR: 80, B: 90, C: 100 },
-    1:  { AR: 70, B: 80, C: 90,  M: 180 },
-    2:  { AR: 60, B: 65, C: 75,  M: 150 },
-    3:  { AR: 50, B: 55, C: 65,  M: 130 },
-    4:  { AR: 45, B: 50, C: 55,  M: 110 },
-    5:  { AR: 40, B: 45, C: 50,  M: 100 },
-    6:  { AR: 35, B: 40, C: 45,  M: 90 },
-    7:  { AR: 30, B: 35, C: 40,  M: 80 },
-    8:  { AR: 27, B: 32, C: 36,  M: 68 },
-    9:  { AR: 24, B: 27, C: 30,  M: 60 },
-    10: { AR: 20, B: 22, C: 25,  M: 50 },
-    11: { AR: 16, B: 18, C: 20,  M: 40 },
-    12: { AR: 14, B: 16, C: 18,  M: 36 },
-    13: { AR: 12, B: 14, C: 16,  M: 32 },
-    14: { AR: 7,  B: 8,  C: 9,   M: 17 }
-    // SizeGroup 15 is reserved (no SHB row); treated as "unset" → no bound.
-};
-// M: Diagram 4's lines end at 20 s/shot on the group's max distance, the same
-// shape as Diagrams 1-3. The text's "cirka 10 sek/skott" is the typical value
-// that falls out of it (a group-8 figure at 34 m of its 68 m max = 10 s).
-const SHB_MAX_TIME_PER_SHOT = { AR: 2.0, B: 1.75, C: 1.5, M: 20 };
+// SHB:s avståndstabell (SHB_MAX_DISTANCES) och tid per skott (SHB_MAX_TIME_PER_SHOT) finns INTE här längre:
+// de kommer ur C# (ShbFieldRules.TableJson() -> window.FALT_SHB, partialen _FaltskytteShbRules) så att
+// konfiguratorn och figurväljaren inte kan säga olika. Källornas anmärkningar (diagram 1-4, Magnum E.7,
+// grupp 7/9/14, ingen grupp 0 för M) står vid tabellen i ShbFieldRules.cs.
 const SHB_TILLAGG_WEAPON_45 = 2;     // Vapenläge 45 grader → +2 sek
 const SHB_TILLAGG_OMRIKTNING = 2;    // per omriktning mellan målgrupper (n-1)
 const SHB_MORKER_MULTIPLIER = 1.30;  // Mörkerfältskjutning → +30 % på total
@@ -248,20 +214,7 @@ const SLIDER_MIN_DISTANCE = 5;       // m — practical floor regardless of figu
 const FALT_STATION_SHOTS = 6;        // SHB-konvention: alltid 6 skott per fältskyttestation
 const SHB_MAGNUM_MAX_DISTANCE = 180; // E.7.1.1: "Skjutavstånd över 180 meter är inte tillåtet"
 
-// Maps any weapon-class code (A, A_Opt, A_M, A_P, A_G, B, C, R, M) to the SHB
-// diagram bucket (AR / B / C / M). All A-family + R share Diagram 1.
-//
-// ⚠ M was missing and fell through to 'AR', so every Magnumfält station was
-// dimensioned with A/R distances — a grupp-1 figure was capped at 70 m where
-// SHB allows 180. A magnum competition's classes are M1-M9 (ShootingClass.cs,
-// all WeaponClass.M), so this hit every one of them.
-function faltShbBucket(wc) {
-    if (!wc) return 'AR';
-    if (wc === 'B') return 'B';
-    if (wc === 'C') return 'C';
-    if (wc === 'M' || /^M\d/.test(wc)) return 'M';
-    return 'AR';
-}
+// faltShbBucket(wc) (vapenklass -> AR/B/C/M) ligger i den delade partialen _FaltskytteShbRules.
 
 // True when the station is being dimensioned for vapengrupp M. Magnum differs
 // from A/R/B/C in more than the distance table, so several rules branch on it.
@@ -274,7 +227,7 @@ function faltIsMagnum(wc) {
 // or outside the SHB table.
 function faltFigureMaxDistance(sizeGroup, wc) {
     if (sizeGroup == null) return null;
-    var row = SHB_MAX_DISTANCES[sizeGroup];
+    var row = FALT_SHB.maxDistances[sizeGroup];
     if (!row) return null;
     return row[faltShbBucket(wc)] || null;
 }
@@ -394,7 +347,7 @@ function faltTargetGroupBounds(tg, wc, station, morker) {
 function faltSuggestShootingTime(station, wc, morker) {
     if (!station || !station.targetGroups || station.targetGroups.length === 0) return null;
     var bucket = faltShbBucket(wc);
-    var maxTime = SHB_MAX_TIME_PER_SHOT[bucket];
+    var maxTime = FALT_SHB.maxTimePerShot[bucket];
     var mode = faltCfgScoringMode();
     var lines = [];
     var anyApplicable = false;
@@ -1478,7 +1431,7 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
     var bodyEl = document.getElementById('faltCfgSuggDetailsBody');
     var footEl = document.getElementById('faltCfgSuggDetailsFoot');
     if (!ctxEl || !bodyEl || !footEl) return;
-    ctxEl.textContent = 'Station ' + stationNum + ' — vapenklass ' + wc + ' (diagram ' + faltShbBucket(wc) + ', max ' + SHB_MAX_TIME_PER_SHOT[faltShbBucket(wc)] + ' sek/skott)';
+    ctxEl.textContent = 'Station ' + stationNum + ' — vapenklass ' + wc + ' (diagram ' + faltShbBucket(wc) + ', max ' + FALT_SHB.maxTimePerShot[faltShbBucket(wc)] + ' sek/skott)';
     if (!sugg) {
         bodyEl.innerHTML = '<tr><td colspan="2" class="text-muted">Kalkyl saknas — ingen figur har en giltig storleksgrupp.</td></tr>';
         footEl.innerHTML = '';
