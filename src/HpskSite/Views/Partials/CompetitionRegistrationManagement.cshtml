@@ -355,11 +355,16 @@
     @* Vilka som deltar i mästerskapet och vilka vapengrupper som avgör det ställs in i Redigera tävling (under Mästerskap), inte här. *@
     @* "N föreslås utanför mästerskapet" — bara när tävlingen använder beteendet och något förslag väntar på beslut.
        Förslaget blir ett beslut när resultatlistan publiceras; därför försvinner bannern av sig själv efteråt. *@
-    <div class="alert alert-warning d-none align-items-center flex-wrap gap-2 mb-3" id="regOocBanner" role="status">
-        <i class="bi bi-lightbulb"></i>
-        <span id="regOocBannerText" class="flex-grow-1"></span>
-        <button type="button" class="btn btn-sm btn-warning" id="regOocShowBtn"
-                onclick="showOocSuggested()">Visa dem</button>
+    @* Vilka det gäller visas i en expander (som Startlistor-fliken), aldrig som ett dolt filter på listan. *@
+    <div class="alert alert-warning d-none gap-2 mb-3" id="regOocBanner" role="status">
+        <i class="bi bi-lightbulb mt-1"></i>
+        <div class="flex-grow-1">
+            <span id="regOocBannerText"></span>
+            <details class="mt-2">
+                <summary class="small">Visa vilka det gäller</summary>
+                <ul class="mb-0 mt-2 small list-unstyled" id="regOocBannerList"></ul>
+            </details>
+        </div>
     </div>
     @* Skyttar som avanmält sig SJÄLVA med betald avgift: de ska ha pengarna tillbaka. Fylls av loadWithdrawals() (RegistrationAdmin/GetWithdrawals)
        och syns bara när det finns något. Sajten återbetalar inte — den påminner tills arrangören markerat raden som gjord. *@
@@ -3135,17 +3140,22 @@ function updateOocBanner() {
         (n === 1 ? '1 skytt föreslås' : n + ' skyttar föreslås') +
         ' skjuta utanför mästerskapet (annan krets, landsdel eller klubb). De räknas redan som utanför i resultaten och på live-tavlan, och förslaget blir ett beslut när resultatlistan publiceras. ' +
         'Ska någon vara med: öppna Redigera anmälan och kryssa ur.';
+    const list = document.getElementById('regOocBannerList');
+    if (list) {
+        list.replaceChildren();
+        competitionRegistrations.filter(r => oocStateOf(r).suggested)
+            .sort((a, b) => (a.memberName || '').localeCompare(b.memberName || '', 'sv'))
+            .forEach(r => {
+                const li = document.createElement('li');
+                const strong = document.createElement('strong');
+                strong.textContent = r.memberName || '';
+                li.appendChild(strong);
+                const club = r.memberClub ? ' — ' + r.memberClub : '';
+                li.appendChild(document.createTextNode(club));
+                list.appendChild(li);
+            });
+    }
     banner.classList.remove('d-none'); banner.classList.add('d-flex');
-}
-
-function showOocSuggested() {
-    const sel = document.getElementById('competitionOocFilter');
-    if (!sel) return;
-    sel.value = 'suggested';
-    // Filtret ligger bakom "Fler filter" på telefon — öppna det så att ett aktivt filter inte är osynligt.
-    document.getElementById('regFilterCard')?.classList.add('reg-show-more');
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    filterCompetitionRegistrations();
 }
 
 function filterCompetitionRegistrations() {
