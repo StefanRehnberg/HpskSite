@@ -1928,13 +1928,24 @@ function submitWizard() {
     btnCreate.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Skapar...';
 
     // Submit to backend
-    fetch('/umbraco/surface/CompetitionAdmin/CreateCompetition', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
-        },
-        body: JSON.stringify(requestBody)
+    // ⚠️ Färsk token precis före skickandet (samma endpoint som Ekonomi och fakturasidan). Tokenen som låg i sidan kan höra till
+    //    en annan inloggning/kaka än den som POST:en bär och ger då ett tomt 400 ("Sidan har varit öppen för länge").
+    //    Faller hämtningen används sidans token som förut.
+    fetch('/umbraco/surface/Club/GetFormToken', { credentials: 'same-origin', cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null)
+    .then(t => {
+        const pageTok = document.querySelector('input[name="__RequestVerificationToken"]');
+        const tok = (t && t.token) ? t.token : (pageTok ? pageTok.value : '');
+        return fetch('/umbraco/surface/CompetitionAdmin/CreateCompetition', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': tok
+            },
+            body: JSON.stringify(requestBody)
+        });
     })
     .then(response => response.json())
     .then(data => {

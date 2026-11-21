@@ -67,6 +67,52 @@
         if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
     };
 
+    // 0. ⚠️ Tom 400 på ett skrivande anrop som bär en antiforgery-token = tokenen hörde inte ihop med kakan/inloggningen
+    //    (guiden "Skapa tävling" gav det i prod 2026-11-21; en färsk token från samma endpoint löste det). Hämta en färsk token och
+    //    skicka om EN gång. Säkert: antiforgery-nekandet sker före action-koden, och bara anrop som själva skickade en token berörs.
+    //    Bara kroppar som går att spela upp igen (text, FormData, URLSearchParams) och bara anrop mot sajten själv.
+    if (window.fetch && !window.fetch.hpskTokenRetry) {
+        var origFetch = window.fetch;
+        var TOKEN_URL = '/umbraco/surface/Club/GetFormToken';
+        var retryFetch = function (input, init) {
+            var p = origFetch.apply(this, arguments);
+            try {
+                if (typeof input !== 'string' && !(input instanceof URL)) return p;
+                var url = String(input);
+                var method = String((init && init.method) || 'GET').toUpperCase();
+                if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return p;
+                if (!sameOrigin(url) || url.indexOf('GetFormToken') >= 0) return p;
+                var body = init && init.body;
+                var replayable = body == null || typeof body === 'string' || body instanceof FormData || body instanceof URLSearchParams;
+                if (!replayable) return p;
+                var headers = new Headers((init && init.headers) || {});
+                var hadHeader = headers.has('RequestVerificationToken');
+                var hadField = (body instanceof FormData || body instanceof URLSearchParams) && body.has('__RequestVerificationToken');
+                if (!hadHeader && !hadField) return p;
+                var self = this;
+                return p.then(function (resp) {
+                    if (resp.status !== 400) return resp;
+                    return resp.clone().text().then(function (txt) {
+                        if (txt) return resp;   // ett riktigt svar med innehåll — inte antiforgery
+                        return origFetch.call(self, TOKEN_URL, { credentials: 'same-origin', cache: 'no-store' })
+                            .then(function (r) { return r.ok ? r.json() : null; })
+                            .then(function (t) {
+                                if (!t || !t.token) return resp;
+                                if (hadHeader) headers.set('RequestVerificationToken', t.token);
+                                if (hadField) body.set('__RequestVerificationToken', t.token);
+                                var next = {}; for (var k in init) next[k] = init[k];
+                                next.headers = headers;
+                                return origFetch.call(self, input, next);
+                            })
+                            .catch(function () { return resp; });
+                    });
+                });
+            } catch (e) { return p; }
+        };
+        retryFetch.hpskTokenRetry = true;
+        window.fetch = retryFetch;
+    }
+
     // 1. r.json() på ett svar som inte är JSON: kasta ett fel som bär statusen.
     if (window.Response && Response.prototype.json && !Response.prototype.json.hpskWrapped) {
         var origJson = Response.prototype.json;
