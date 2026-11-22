@@ -102,7 +102,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// Ett krav som inte kan tillämpas (kamraten är DNS, reserv eller inte längre anmäld i gruppen) lämnas utanför motorn och redovisas med namn i <see cref="LinkSetupResult.Problems"/>:
         /// generatorn bryter aldrig tyst och ändrar aldrig anmälan. Önskemål gäller bara om alla klassanmälningar i samma start vill samma sak.
         /// </summary>
-        public static LinkSetupResult LinkSetup(IReadOnlyList<CompetitionRegistration> regs, ISet<int> reserves, ISet<string> dnsKeys)
+        public static LinkSetupResult LinkSetup(IReadOnlyList<CompetitionRegistration> regs, ISet<int> reserves, ISet<string> dnsKeys, bool mixMagnum = true)
         {
             var together = new Dictionary<string, string>(); var wish = new Dictionary<string, int>(); var problems = new List<string>();
             string NameOf(int id) => regs.FirstOrDefault(r => r.MemberId == id)?.MemberName ?? $"Medlem {id}";
@@ -116,7 +116,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             foreach (var r in regs.Where(r => r.JoinMemberId is > 0))
             {
                 var group = GroupOf(r.MemberClass); var other = r.JoinMemberId!.Value;
-                var me = new Start(r.MemberId, group).Key; var you = new Start(other, group).Key;
+                // Magnum: kamraten får ligga i en annan magnumklass (samma vapengrupp M). Klasserna hålls isär i patrullplaneringen; kravet gäller bara när de blandas.
+                var partnerGroup = group;
+                if (FaltPatrolEngine.IsMagnumGroup(group))
+                {
+                    var partnerReg = regs.FirstOrDefault(x => x.MemberId == other && GroupOf(x.MemberClass) == group)
+                                     ?? regs.FirstOrDefault(x => x.MemberId == other && FaltPatrolEngine.IsMagnumGroup(GroupOf(x.MemberClass)));
+                    if (partnerReg != null) partnerGroup = GroupOf(partnerReg.MemberClass);
+                    if (partnerGroup != group && !mixMagnum)
+                    {
+                        problems.Add($"{NameOf(r.MemberId)} ska gå i samma patrull som {NameOf(other)}, men de skjuter olika magnumklasser ({group} och {partnerGroup}) som hålls isär i patrullplaneringen. Välj att blanda klasserna för att de ska kunna dela patrull. Kravet följs inte.");
+                        continue;
+                    }
+                }
+                var me = new Start(r.MemberId, group).Key; var you = new Start(other, partnerGroup).Key;
                 if (!seen.Add(me + ">" + you)) continue;
                 var what = $"{NameOf(r.MemberId)} ska gå i samma patrull som {NameOf(other)} i klass {group}";
                 if (reserves.Contains(r.MemberId) || reserves.Contains(other)) { problems.Add(what + ", men en av dem är reserv utan fast start. Kravet följs inte."); continue; }
@@ -227,7 +240,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     if (l.IsDns) p.Dns[st.Key] = Mins(l.StartTime, day); else p.Locked[st.Key] = Mins(l.StartTime, day);
                 }
             }
-            var link = LinkSetup(regs, reserves, p.Dns.Keys.ToHashSet());
+            var link = LinkSetup(regs, reserves, p.Dns.Keys.ToHashSet(), p.Order == "all");
             p.Together = link.Together; p.Wish = link.Wish;
             var input = new List<EPatrol> { new() { N = 1, S = open, E = open + shootWindow, P = starts } };
             return (p, input, regByKey);
@@ -366,7 +379,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     res.Q.Under, rr.UnderWish.Count, rr.NeedAdd, rr.Mixed, res.Q.Coll, ordered.Count > 0 ? ordered.Max(x => x.StartTime)?.ToString("HH:mm") : null, ordered.Count > 0 ? Hm(rr.LastEnd) : null);
                 timeline = new PlanTimeline(tps, persons, pauses, kpi, Math.Round(Math.Max(p.R, p.N * p.Interval), 0), stationInfo);
             }
-            var outcome = Outcome(res, LinkSetup(regs, reserves, p.Dns!.Keys.ToHashSet()), regs, day);
+            var outcome = Outcome(res, LinkSetup(regs, reserves, p.Dns!.Keys.ToHashSet(), p.Order == "all"), regs, day);
             return new PatrolPlan
             {
                 LinksTotal = outcome.LinksTotal, LinksMet = outcome.LinksMet, LinkIssues = outcome.LinkIssues, WishesTotal = outcome.WishesTotal, WishesMet = outcome.WishesMet, WishesMissed = outcome.WishesMissed,

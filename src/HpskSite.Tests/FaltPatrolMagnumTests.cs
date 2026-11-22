@@ -1,3 +1,5 @@
+using HpskSite.CompetitionTypes.Faltskytte.Services;
+using HpskSite.Models.Staffing;
 using HpskSite.CompetitionTypes.Faltskytte.Engine;
 using HpskSite.Controllers;
 using Xunit;
@@ -132,6 +134,62 @@ namespace HpskSite.Tests
             var p = Params();
             foreach (var st in p.St) st.Sec!.Remove("M2");
             Assert.Equal(new[] { "M2" }, FaltPatrolEngine.Generate("m", Starts(("M1", 4), ("M2", 4)), p).Ungrouped);
+        }
+
+        [Fact]
+        public void Valj_automatiskt_blandar_aldrig_magnumklasser()
+        {
+            // Förvalet i patrullsidan är "auto". Blandat packar tätare, så utan skyddet hade auto valt det: att blanda är ett AKTIVT val.
+            var input = Starts(("M1", 4), ("M2", 4), ("M6", 4));
+            var auto = FaltPatrolEngine.Generate("m", input, Params("auto"));
+            Assert.Equal(12, auto.Patrols.SelectMany(q => q.P).Count());
+            Assert.All(auto.Patrols, q => Assert.Single(q.P.Select(z => z.G).Distinct()));
+            var all = FaltPatrolEngine.Generate("m", input, Params("all"));
+            Assert.Contains(all.Patrols, q => q.P.Select(z => z.G).Distinct().Count() > 1);   // skyddet för att testet inte är tomt: "all" blandar
+        }
+
+        static HpskSite.Models.ViewModels.Competition.CompetitionRegistration MReg(int id, string cls, int? join = null) =>
+            new() { MemberId = id, MemberClass = cls, MemberName = "Skytt " + id, MemberClub = "Klubb", JoinMemberId = join, StartPreference = "Inget" };
+
+        static PatrolPlan MPlan(string grouping, List<HpskSite.Models.ViewModels.Competition.CompetitionRegistration> regs) =>
+            HpskSite.CompetitionTypes.Faltskytte.Services.FaltPatrolAdapter.Plan(regs, new List<LockedPlacement>(), new PatrolConstraints(), new HashSet<int>(),
+                new PatrolPlanSettings { PatrolSize = 4, IntervalMinutes = 15, FirstStart = new DateTime(2027, 6, 12, 9, 0, 0), WeaponGrouping = grouping, MultiClassGapMinutes = 30 },
+                null, null, new DateTime(2027, 6, 12), out _);
+
+        [Fact]
+        public void Kamratkrav_mellan_magnumklasser_galler_bara_nar_klasserna_blandas()
+        {
+            List<HpskSite.Models.ViewModels.Competition.CompetitionRegistration> Regs() => Enumerable.Range(1, 4).Select(i => MReg(i, "M1", i == 1 ? 5 : null))
+                .Concat(Enumerable.Range(5, 4).Select(i => MReg(i, "M2"))).ToList();
+            int PatrolOf(PatrolPlan plan, int member) => plan.Patrols.First(p => p.Members.Any(m => m.MemberId == member)).PatrolNumber;
+
+            var sep = MPlan("Separate", Regs());
+            Assert.Equal(0, sep.LinksTotal);
+            Assert.Contains(sep.LinkIssues, s => s.Contains("olika magnumklasser (M1 och M2)"));
+            Assert.NotEqual(PatrolOf(sep, 1), PatrolOf(sep, 5));
+            Assert.All(sep.Patrols, p => Assert.Single(p.Members.Select(m => m.ShootingClass).Distinct()));
+
+            var mix = MPlan("MixAll", Regs());
+            Assert.Equal(1, mix.LinksTotal);
+            Assert.Equal(1, mix.LinksMet);
+            Assert.Empty(mix.LinkIssues);
+            Assert.Equal(PatrolOf(mix, 1), PatrolOf(mix, 5));
+        }
+
+        [Fact]
+        public void En_magnumskytt_med_kamrat_i_samma_klass_fungerar_som_forut()
+        {
+            var regs = Enumerable.Range(1, 8).Select(i => MReg(i, "M1", i == 1 ? 6 : null)).ToList();
+            var plan = MPlan("Separate", regs);
+            Assert.Equal(1, plan.LinksTotal);
+            Assert.Equal(1, plan.LinksMet);
+        }
+
+        [Fact]
+        public void Patrullens_lagrade_etikett_ar_M_aven_nar_klasserna_halls_isar()
+        {
+            var regs = Enumerable.Range(1, 4).Select(i => MReg(i, "M1")).Concat(Enumerable.Range(5, 4).Select(i => MReg(i, "M2"))).ToList();
+            Assert.All(MPlan("Separate", regs).Patrols, p => Assert.Equal("M", p.WeaponGroup));
         }
 
         [Fact]

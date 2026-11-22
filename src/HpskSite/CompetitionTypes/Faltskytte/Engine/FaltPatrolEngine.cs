@@ -315,7 +315,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             foreach (var kv in p.Together)
             {
                 if (!present.Contains(kv.Key) || !present.Contains(kv.Value) || kv.Key == kv.Value) continue;
-                if (Tg(kv.Key[(kv.Key.IndexOf('|') + 1)..]) != Tg(kv.Value[(kv.Value.IndexOf('|') + 1)..])) continue;   // bara inom samma vapengrupp
+                // Bara inom samma vapengrupp. Magnumklasserna (M1..M9) är samma vapengrupp: adaptern släpper bara igenom ett krav mellan dem när klasserna blandas ("all").
+                static string Wg(string key) { var g = Tg(key[(key.IndexOf('|') + 1)..]); return IsMagnumGroup(g) ? MagnumGroup : g; }
+                if (Wg(kv.Key) != Wg(kv.Value)) continue;
                 parent.TryAdd(kv.Key, kv.Key); parent.TryAdd(kv.Value, kv.Value);
                 var ra = Find(kv.Key); var rb = Find(kv.Value); if (ra != rb) parent[ra] = rb;
             }
@@ -860,9 +862,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         static PlanResult GenerateAuto(string id, IReadOnlyList<EPatrol> patrols, PlanParams p)
         {
             var cands = new List<(PlanResult G, Qual Q, string O)>();
+            // Att blanda magnumklasser (M1..M9) är arrangörens aktiva val: "välj automatiskt" provar aldrig "alla blandade" när det finns flera.
+            var magnumClassCount = patrols.SelectMany(q => q.P).Select(z => Tg(z.G)).Where(g => IsMagnumGroup(g) && g != MagnumGroup).Distinct().Count();
             foreach (var o in OrderKeys)
             {
                 p.Ct.ThrowIfCancellationRequested();
+                if (o == "all" && magnumClassCount > 1) continue;
                 var b = BlocksFor(patrols, p, o);
                 if (p.Day2 && p.DayBreak > 0 && p.DayBreak >= b.Count) continue;
                 var pp = p.Clone(); pp.Order = o; pp.Improve = false;
