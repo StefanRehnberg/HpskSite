@@ -1411,6 +1411,8 @@
                     const displayName = group.displayClassName || group.className || '';
                     // Per-class "Sär" column only when at least one shooter has shoot-off rounds.
                     const classHasShootOff = (group.shooters || []).some(s => Array.isArray(s.shootOffRounds) && s.shootOffRounds.length > 0);
+                    // EN kolumn per särskjutningsomgång, så att varje omgång står på samma ställe för alla skyttar som deltog.
+                    const soRoundCols = (group.shooters || []).reduce((m, s) => Math.max(m, Array.isArray(s.shootOffRounds) ? s.shootOffRounds.length : 0), 0);
 
                     html += `<div class="mb-4">`;
                     html += `<h4 class="border-bottom pb-2">${displayName} <small class="text-muted">(${crParticipantCount(group.shooters)} deltagare)</small></h4>`;
@@ -1428,7 +1430,7 @@
                         ? `<th class="text-center fw-bold">Poäng</th>`
                         : `<th class="text-center fw-bold">Tot</th>`;
                     html += `<th class="text-center">Pm</th>`;
-                    if (classHasShootOff) html += `<th class="text-center" title="Särskjutning">Sär</th>`;
+                    if (classHasShootOff) for (let r = 1; r <= soRoundCols; r++) html += `<th class="text-center" title="Särskjutning, omgång ${r}">Sär ${r}</th>`;
                     if (faltAwardingMedals) html += `<th class="text-center">Std</th>`;
                     html += `</tr></thead><tbody>`;
 
@@ -1460,12 +1462,10 @@
                         html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
                         if (classHasShootOff) {
                             const rounds = Array.isArray(shooter.shootOffRounds) ? shooter.shootOffRounds : [];
-                            if (rounds.length > 0) {
-                                const tip = rounds.map((t, i) => 'Runda ' + (i + 1) + ': ' + t).join(', ');
-                                html += `<td class="text-center" title="${tip}"><strong>${rounds.join(' / ')}</strong></td>`;
-                            } else {
-                                html += `<td class="text-center"></td>`;
-                            }
+                            for (let r = 0; r < soRoundCols; r++)
+                                html += r < rounds.length
+                                    ? `<td class="text-center fw-bold" title="Omgång ${r + 1}">${rounds[r]}</td>`
+                                    : `<td class="text-center"></td>`;
                         }
                         if (faltAwardingMedals) {
                             var stdM = shooter.standardMedal || '';
