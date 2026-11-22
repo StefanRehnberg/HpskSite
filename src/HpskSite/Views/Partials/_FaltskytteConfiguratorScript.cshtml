@@ -531,7 +531,35 @@ function faltDifficultyPercent(station, wc, morker) {
 // ─── Model-update helpers ───────────────────────────────────────────
 // Every form control calls one of these on change. The model is always current.
 
+// Magnum (vapengrupp M): stationsupplägget mot SHB Del E (E.6.1, E.10.5.1, E.6.11.3). Servern räknar (MagnumStationRules) på det
+// editorn har i minnet; här visas bara svaret. Anmärkningar, ingen spärr. Fördröjd så att varje tangenttryck inte frågar servern.
+var _faltCfgMagnumTimer = null;
+function faltCfgMagnumNotesRefresh() {
+    clearTimeout(_faltCfgMagnumTimer);
+    _faltCfgMagnumTimer = setTimeout(async function () {
+        var box = document.getElementById('faltCfgMagnumNotes');
+        if (!box) return;
+        if (!faltCfgData || faltCfgWeaponClasses.indexOf('M') < 0) { box.style.display = 'none'; box.innerHTML = ''; return; }
+        try {
+            var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+            var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/MagnumNotes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ json: JSON.stringify(faltCfgData) })
+            });
+            if (!resp.ok) { box.style.display = 'none'; return; }
+            var data = await resp.json();
+            var notes = (data && data.notes) || [];
+            if (!notes.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+            box.innerHTML = '<strong>Magnum, att se över (SHB Del E):</strong><ul class="mb-0 ps-3">' +
+                notes.map(function (n) { return '<li>' + faltCfgEscapeHtml(n) + '</li>'; }).join('') + '</ul>';
+            box.style.display = '';
+        } catch (e) { box.style.display = 'none'; }
+    }, 700);
+}
+
 function faltCfgMarkDirty(wc, stationNum) {
+    faltCfgMagnumNotesRefresh();
     if (faltCfgMode === 'simple') {
         // Order matters: faltCfgSyncLinked first so any linked siblings of wc
         // pick up its updated per-class params (Skjuttid, positions, …);
@@ -662,6 +690,7 @@ function faltCfgOpen(weaponClasses, existingConfig) {
     faltCfgWeaponClasses = weaponClasses || ["C"];
     faltCfgData = existingConfig || {};
     faltCfgDirtyStations = new Set();
+    faltCfgMagnumNotesRefresh(); // Magnum: stationsupplägget mot SHB Del E (fördröjd; körs när konfigurationen är normaliserad)
 
     // Handle wrapped format from server: { WeaponConfigs: { C: {...} } } or { weaponConfigs: { C: {...} } }
     if (faltCfgData.WeaponConfigs || faltCfgData.weaponConfigs) {

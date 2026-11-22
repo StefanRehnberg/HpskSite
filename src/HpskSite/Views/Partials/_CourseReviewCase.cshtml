@@ -41,6 +41,12 @@ if (!window.hpskRenderCourseCase) {
             if (noDist.length) ok(false, 'Avstånd saknas på ' + noDist.map(s => esc(s.weaponClass) + ' st ' + s.station).join(', ') + ' — kunde inte mätas.');
             const noSize = (c.stations || []).filter(s => s.figuresWithoutSizeGroup > 0);
             if (noSize.length) ok(false, 'Figurer utan storleksgrupp på ' + noSize.map(s => esc(s.weaponClass) + ' st ' + s.station).join(', ') + ' — avstånd och skjuttid kunde inte mätas för dem.');
+            // Magnumfält (vapengrupp M): stationsupplägget mot SHB Del E (E.6.1, E.10.5.1, E.6.11.3). Anmärkningar, ingen spärr.
+            if ((c.weaponClasses || []).some(w => w.weaponClass === 'M')) {
+                const mn = c.magnumNotes || [];
+                if (mn.length) mn.forEach(t => ok(false, 'Magnum: ' + esc(t)));
+                else ok(true, 'Magnum: stationsupplägget stämmer med SHB Del E (stationsantal, poängmål, Hands-up).');
+            }
             const a = c.banlaggareApproval;
             if (a) ok(a.status === 'Approved' && a.contentMatches,
                 'Banan kommer från den sparade konfigurationen <strong>' + esc(a.name) + '</strong>, '

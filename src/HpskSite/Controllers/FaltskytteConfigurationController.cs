@@ -97,6 +97,23 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Magnum-stationernas anmärkningar (SHB Del E: stationsantal, poängmål, Hands-up, särskjutningsstation) för det editorn har just nu.
+        /// Reglerna finns bara i <c>MagnumStationRules</c>; konfiguratorn visar svaret. Ger bara tillbaka anmärkningar för det som
+        /// skickades in.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("GetCurrentMemberIdAsync: inloggad medlem; räknar bara på det som skickades in")]
+        public async Task<IActionResult> MagnumNotes([FromBody] StationCardFromEditorRequest request)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return StatusCode(401, "Inloggning krävs.");
+            if (string.IsNullOrWhiteSpace(request.Json) || request.Json.Length > 4_000_000)
+                return BadRequest("Konfigurationen saknas eller är för stor.");
+            return Json(new { success = true, notes = HpskSite.Services.Kretsgranskning.CourseReviewChecklist.MagnumNotesOf(request.Json) });
+        }
+
+        /// <summary>
         /// Konfiguratorns "Skriv ut stationskort": samma renderare som tävlingens kort (StationCardRenderer), men ur
         /// det editorn har just nu. Ger bara tillbaka kortet för det som skickades in, så den som är inloggad kan
         /// inte läsa något hen inte redan hade. Texten HTML-kodas i renderaren.

@@ -235,6 +235,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ".tg { border: 2px solid #666; border-radius: 8px; padding: 15px; margin: 20px 0; page-break-inside: avoid; }\n" +
             ".tg h3 { margin: 0 0 10px; font-size: 1.2em; }\n" +
             ".tg-desc { font-style: italic; margin: 10px 0; font-size: 0.95em; line-height: 1.4; }\n" +
+            ".magnum-note { margin: 6px 0 10px; padding: 6px 10px; border-left: 3px solid #999; background: #f5f5f5; font-size: 0.88em; line-height: 1.4; }\n" +
+            ".magnum-note p { margin: 2px 0; }\n" +
             ".tg-img { text-align: center; margin: 10px 0; }\n" +
             ".tg-img img { max-width: 80%; max-height: 200px; border-radius: 6px; }\n" +
             ".fig { margin: 8px 0; padding: 8px; background: #fafafa; border-radius: 4px; display: flex; align-items: center; gap: 12px; }\n" +
@@ -342,10 +344,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 sb.Append(Sep).Append("<strong>").Append(E(primary.SupportHand)).Append("</strong>");
                 if (primary.MinShotsPerFigure > 0)
                     sb.Append("<br><strong>Min träff/fig:</strong> ").Append(primary.MinShotsPerFigure);
-                if (!isPoang && primary.MaxShotsPerFigure > 0 && primary.MaxShotsPerFigure < 6)
+                // Magnum: SHB E.9.14 kräver att högsta antal tillåtna träff per figur står i förutsättningen, även när det är 6.
+                if (!isPoang && primary.MaxShotsPerFigure > 0 && (primary.MaxShotsPerFigure < 6 || b.Classes.Contains(MagnumStationRules.WeaponGroup)))
                     sb.Append(Sep).Append("<strong>Max träff/fig:</strong> ").Append(primary.MaxShotsPerFigure);
             }
             sb.Append("</div>\n");
+            RenderMagnumNote(sb, b);
 
             // Målgrupper och figurer
             for (var tgIdx = 0; tgIdx < primary.TargetGroups.Count; tgIdx++)
@@ -414,6 +418,25 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
 
         sealed record Field(string Label, string Suffix, bool Descriptive, Func<FaltskytteStationConfig, string> Get);
+
+        /// <summary>
+        /// Magnumfält (vapengrupp M): det SHB Del E kräver på förutsättningen utöver siffrorna (E.9.14, E.6.1, E.6.3.1, E.6.4, E.6.10.1,
+        /// E.10.5.1). Texten är fast; det som är stationens eget (Hands-up) styrs av vapenläget. Ingen rad för övriga vapengrupper.
+        /// </summary>
+        static void RenderMagnumNote(StringBuilder sb, StationCardBlock b)
+        {
+            if (!b.Classes.Contains(MagnumStationRules.WeaponGroup) || !b.ByClass.TryGetValue(MagnumStationRules.WeaponGroup, out var m)) return;
+            sb.Append("<div class=\"magnum-note\">");
+            sb.Append("<p>Magnumfält: sex skott på stationen. Träff räknas i hela tapeten, kantskott räknas, rikoschett är bom (SHB E.6.4, E.6.10.1).</p>");
+            if (m.TargetGroups.Any(g => g.Figures.Any(f => f.IsPoangmal)))
+                sb.Append("<p>Poängmålen visas vid haltpålen, och högsta poäng ligger i centrum (SHB E.6.1).</p>");
+            if (string.Equals(m.WeaponStartPosition, ShbFieldRules.HandsUp, StringComparison.Ordinal))
+                sb.Append("<p><strong>Hands-up:</strong> vid \"10 sekunder kvar\" står skytten med båda händerna på huvudet och vapnet laddat " +
+                          "(revolver: trumman infälld, hanen inte spänd; pistol: slutstycket framfört med spänd hane, ingen patron i patronläget). " +
+                          "Vapnet får ligga på en patronask. Vid \"Eld\" böjer skytten sig ned, hämtar vapnet, slutför laddningen och skjuter. " +
+                          "Underlaget ska skydda vapnet mot smuts (SHB E.6.3.1, E.10.5.1).</p>");
+            sb.Append("</div>\n");
+        }
 
         static void RenderCombinedRules(StringBuilder sb, StationCardBlock b, bool isPoang)
         {

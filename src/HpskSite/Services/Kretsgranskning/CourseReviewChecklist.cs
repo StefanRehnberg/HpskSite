@@ -37,7 +37,7 @@ namespace HpskSite.Services.Kretsgranskning
         public record WeaponClassSummary(string WeaponClass, int Stations, bool EnoughStations);
         public record Approval(int ConfigId, string Name, string Status, string? ApprovedBy, DateTime? ApprovedAt, bool ContentMatches);
         public record Result(List<WeaponClassSummary> WeaponClasses, List<StationRow> Stations, List<string> CustomTargets,
-            bool Morker, bool PoangMode, Approval? BanlaggareApproval, string? Error);
+            bool Morker, bool PoangMode, Approval? BanlaggareApproval, string? Error, List<string>? MagnumNotes = null);
 
         public Result Build(string? stationConfig, Func<int, string?> memberName)
         {
@@ -54,6 +54,7 @@ namespace HpskSite.Services.Kretsgranskning
             var morker = root.Value<bool?>("_morker") == true;
             var poang = string.Equals(root.Value<string>("_scoringMode"), "Poang", StringComparison.OrdinalIgnoreCase);
             var catalogue = Catalogue();
+            var magnumNotes = new List<string>();
 
             // Formerna: { "C": { stations: [...] } } (konfiguratorn) eller { WeaponConfigs: { "C": {...} } }.
             var weaponsObj = root["WeaponConfigs"] as JObject ?? root;
@@ -63,8 +64,10 @@ namespace HpskSite.Services.Kretsgranskning
                 if (stationsArr == null) continue;
                 var wc = prop.Name;
                 var count = 0;
+                var magnumStations = new List<MagnumStationRules.Station>();
                 foreach (var s in stationsArr.OfType<JObject>())
                 {
+                    if (wc == MagnumStationRules.WeaponGroup) magnumStations.Add(MagnumOf(s, Int(s, "station") ?? magnumStations.Count + 1));
                     if (Bool(s, "isShootOffOnly")) continue;
                     count++;
                     var groups = new List<ShbFieldRules.TargetGroup>();
@@ -104,9 +107,11 @@ namespace HpskSite.Services.Kretsgranskning
                         min != null && station.ShootingTimeSec < min.Value, tooFar, noDistance, noSize, figs, groups.Count));
                 }
                 wcs.Add(new WeaponClassSummary(wc, count, count >= MinimumStations));
+                // Magnum (nyckeln M): stationsupplägget mot SHB Del E (stationsantal, poängmål, Hands-up, särskjutningsstationen).
+                if (wc == MagnumStationRules.WeaponGroup) magnumNotes.AddRange(MagnumStationRules.Notes(magnumStations));
             }
 
-            return new Result(wcs, rows, custom.ToList(), morker, poang, BanlaggareApproval(root, stationConfig, memberName), null);
+            return new Result(wcs, rows, custom.ToList(), morker, poang, BanlaggareApproval(root, stationConfig, memberName), null, magnumNotes);
         }
 
         /// <summary>
@@ -149,6 +154,33 @@ namespace HpskSite.Services.Kretsgranskning
                 _logger.LogWarning(ex, "Figurkatalogen kunde inte läsas för bangranskningen.");
                 return new(StringComparer.OrdinalIgnoreCase);
             }
+        }
+
+        /// <summary>
+        /// Anmärkningarna för Magnum-stationerna (nyckeln M) i en konfigurationsblob, utan databas: konfiguratorn frågar med det den har
+        /// i minnet, så att regeln finns på ETT ställe (<see cref="MagnumStationRules"/>) och inte som en andra JS-kopia.
+        /// </summary>
+        public static List<string> MagnumNotesOf(string? stationConfig)
+        {
+            try
+            {
+                var root = JObject.Parse(string.IsNullOrWhiteSpace(stationConfig) ? "{}" : stationConfig);
+                var weapons = root["WeaponConfigs"] as JObject ?? root;
+                var prop = weapons.Properties().FirstOrDefault(p => p.Name == MagnumStationRules.WeaponGroup);
+                if (prop == null) return new List<string>();
+                var arr = prop.Value is JArray ja ? ja : (prop.Value["stations"] ?? prop.Value["Stations"]) as JArray;
+                if (arr == null) return new List<string>();
+                return MagnumStationRules.Notes(arr.OfType<JObject>().Select((s, i) => MagnumOf(s, Int(s, "station") ?? i + 1)).ToList());
+            }
+            catch { return new List<string>(); }
+        }
+
+        private static MagnumStationRules.Station MagnumOf(JObject s, int number)
+        {
+            var figures = Arr(s, "targetGroups").OfType<JObject>().SelectMany(g => Arr(g, "figures").OfType<JObject>()).ToList();
+            return new MagnumStationRules.Station(number, Bool(s, "isShootOffOnly"),
+                string.Equals(Str(s, "weaponStartPosition"), ShbFieldRules.HandsUp, StringComparison.Ordinal),
+                figures.Count, figures.Count(f => Bool(f, "isPoangmal")), Int(s, "maxShotsPerFigure") ?? 6);
         }
 
         private static JArray Arr(JObject o, string key) => (o[key] ?? o[char.ToUpper(key[0]) + key[1..]]) as JArray ?? new JArray();
