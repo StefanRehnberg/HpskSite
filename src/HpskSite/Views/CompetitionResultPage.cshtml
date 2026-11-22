@@ -295,6 +295,11 @@
        i den här kodbasen. hpskEsc bor i EN partial; inkludera den, skriv ingen egen. *@
     @await Html.PartialAsync("_HtmlEscape")
     <div class="container-fluid">
+        @* Bara på papper: sidans rubrikrad är no-print (och dold i fliken), så utskriften skulle annars sakna tävlingens namn. *@
+        <div class="d-none d-print-block mb-3">
+            <h1 class="h4 mb-0">@(isSubCompetitionView ? subCompetitionName : competition.Name)</h1>
+            <div class="small text-muted">@(isSubCompetitionView ? competition.Name + " · " : "")Resultatlista</div>
+        </div>
         <!-- Header -->
         <div class="d-flex justify-content-between align-items-center mb-4 no-print@(isEmbed ? " d-none" : "")">
             <div>
