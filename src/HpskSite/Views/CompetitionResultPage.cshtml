@@ -777,7 +777,11 @@
                         // separately from the qualification Tot — they only decide medal order.
                         const classHasShootOff = classGroup.shooters.some(s =>
                             Array.isArray(s.shootOffRoundTotals) && s.shootOffRoundTotals.length > 0);
-                        if (classHasShootOff) totalColCount += 2; // Sj column gets double width to fit "49 / 47"
+                        // EN kolumn "Sär" med ett rutnät av smala fasta platser (en per omgång); bredden växer med antalet omgångar.
+                        const soRoundCols = classGroup.shooters.reduce((m, s) =>
+                            Math.max(m, Array.isArray(s.shootOffRoundTotals) ? s.shootOffRoundTotals.length : 0), 0);
+                        const soUnits = Math.max(2, Math.ceil(soRoundCols * 0.8));
+                        if (classHasShootOff) totalColCount += soUnits;
                         const deleteColCount = canDeleteResults ? 1 : 0;
 
                         const platsPct = 4;
@@ -871,8 +875,10 @@
                                             <th style="width:${totalPct}%">X</th>
                         `;
 
+                        const soGrid = `display:inline-grid;grid-template-columns:repeat(${soRoundCols},2.6em);justify-items:center;white-space:nowrap`;
                         if (classHasShootOff) {
-                            html += `<th style="width:${totalPct * 2}%" title="Särskjutning">Sär</th>`;
+                            const nums = Array.from({ length: soRoundCols }, (_, i) => `<span class="text-muted fw-normal small">${i + 1}</span>`).join('');
+                            html += `<th style="width:${totalPct * soUnits}%" title="Särskjutning, omgång för omgång">Sär<div style="${soGrid}">${nums}</div></th>`;
                         }
 
                         if (isAwardingStandardMedals) {
@@ -962,13 +968,12 @@
                                 // shooters who weren't part of a shoot-off in this class — a dash
                                 // reads as a recorded result.
                                 const rounds = Array.isArray(shooter.shootOffRoundTotals) ? shooter.shootOffRoundTotals : [];
-                                if (rounds.length > 0) {
-                                    const tip = rounds.map((t, i) => `Runda ${i + 1}: ${t}`).join(', ');
-                                    const display = rounds.join(' / ');
-                                    html += `<td class="text-center" title="${tip}"><strong>${display}</strong></td>`;
-                                } else {
-                                    html += `<td class="text-center"></td>`;
-                                }
+                                let cells = '';
+                                for (let r = 0; r < soRoundCols; r++)
+                                    cells += r < rounds.length
+                                        ? `<span class="fw-bold" title="Omgång ${r + 1}">${rounds[r]}</span>`
+                                        : `<span></span>`;
+                                html += `<td class="text-center"><div style="${soGrid}">${cells}</div></td>`;
                             }
 
                             if (isAwardingStandardMedals) {
