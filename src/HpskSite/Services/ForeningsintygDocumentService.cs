@@ -389,8 +389,7 @@ namespace HpskSite.Services
             {
                 var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year);
                 var falt = awards.FirstOrDefault(a =>
-                    string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(a.Discipline, StandardMedals.MagnumFalt, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase));   // inte Magnumfält: se MarkenCandidateService
                 medalDate = falt?.CompetitionDate;
             }
 

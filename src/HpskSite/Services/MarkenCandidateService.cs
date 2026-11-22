@@ -108,9 +108,10 @@ namespace HpskSite.Services
             // ── Part 2 (SHB 5.1.1.1 pt 2): a held Standardmedalj i fält satisfies the whole part;
             //    otherwise 3 verified Guld Snabbserier are required. ──
             var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year, includeRejected: false);
+            // Magnumfält räknas INTE (beslut 2026-11-22, SHB-expertens läsning): SHB P.5.1.1.1 och P.5.7 säger "fältskjutning", och SHB skiljer
+            // genomgående på fältskjutning och magnumfältskjutning (C.3, C.5.1.1). Det finns ingen M-tabell för Fältskyttemärket.
             var faltMedal = awards.FirstOrDefault(a =>
-                string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(a.Discipline, StandardMedals.MagnumFalt, StringComparison.OrdinalIgnoreCase));
+                string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase));
             if (faltMedal != null)
             {
                 result.Part2Met = true;

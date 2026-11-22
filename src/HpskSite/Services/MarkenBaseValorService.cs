@@ -41,8 +41,7 @@ namespace HpskSite.Services
                 var series = (await _ledger.GetAllVerifiedSeriesAsync(memberId))
                     .Where(s => s.BadgeFamily == Family).ToList();
                 var medalYears = (await _standardMedals.GetAwardsForMemberAsync(memberId))
-                    .Where(a => string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(a.Discipline, StandardMedals.MagnumFalt, StringComparison.OrdinalIgnoreCase))
+                    .Where(a => string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase))   // inte Magnumfält: se MarkenCandidateService
                     .Select(a => a.Year).ToHashSet();
                 var guldYears = (await _ledger.GetQualificationsForMemberAsync(memberId, Family))
                     .Where(q => q.Fulfilled && q.Status == Marken.StatusVerified).Select(q => q.Year).ToHashSet();
