@@ -36,12 +36,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             else if (scored.Count < RecommendedStations)
                 notes.Add($"Magnum har {scored.Count} stationer. SHB E.6.1 säger minst {RecommendedStations} (\"bör\"; \"skall\" vid SM).");
 
-            if (scored[0].PoangmalFigures > 0)
-                notes.Add($"Station {scored[0].Number} har poängmål. Första stationen ska ge inskjutning och får inte ha poängmål (SHB E.6.1).");
+            // Station 1 får inte ha poängmål, så den räknas aldrig med i kravet på två poängmålsstationer. Annars säger två rader emot varandra
+            // ("får inte ha poängmål" men "räknas som en").
+            var firstHasPoangmal = scored[0].PoangmalFigures > 0;
+            if (firstHasPoangmal)
+                notes.Add($"Station {scored[0].Number} har poängmål. Första stationen ska ge inskjutning och får inte ha poängmål (SHB E.6.1). Den räknas inte med nedan.");
 
-            var withPoangmal = scored.Count(s => s.PoangmalFigures > 0);
+            var withPoangmal = scored.Skip(1).Count(s => s.PoangmalFigures > 0);
             if (withPoangmal < 2)
-                notes.Add($"Magnum har {withPoangmal} station{(withPoangmal == 1 ? "" : "er")} med poängmål. Minst två stationer ska ha poängmål (SHB E.6.1).");
+                notes.Add($"Magnum har {withPoangmal} station{(withPoangmal == 1 ? "" : "er")} med giltigt poängmål" +
+                          (firstHasPoangmal ? $" (utan station {scored[0].Number})" : "") + ". Minst två stationer ska ha poängmål (SHB E.6.1).");
 
             var handsUp = scored.Where(s => s.HandsUp).ToList();
             var allowed = scored.Count > RecommendedStations ? 2 : 1;

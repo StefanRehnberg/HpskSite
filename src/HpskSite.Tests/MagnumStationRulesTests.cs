@@ -46,9 +46,25 @@ namespace HpskSite.Tests
         public void Minst_tva_stationer_ska_ha_poangmal()
         {
             var s = Good().Select(x => x with { PoangmalFigures = x.Number == 3 ? 1 : 0 }).ToList();
-            Notes(s).Should().ContainSingle(n => n.Contains("1 station med poängmål"));
+            Notes(s).Should().ContainSingle(n => n.Contains("1 station med giltigt poängmål"));
             var none = Good().Select(x => x with { PoangmalFigures = 0 }).ToList();
-            Notes(none).Should().Contain(n => n.Contains("0 stationer med poängmål"));
+            Notes(none).Should().Contain(n => n.Contains("0 stationer med giltigt poängmål"));
+        }
+
+        [Fact]
+        public void Station_ett_raknas_aldrig_som_poangmalsstation()
+        {
+            // Station 1 + station 3 har poängmål: bara station 3 är giltig, så en till krävs, och raderna säger inte emot varandra.
+            var s = Good().Select(x => x with { PoangmalFigures = x.Number == 1 || x.Number == 3 ? 1 : 0 }).ToList();
+            var notes = Notes(s);
+            notes.Should().Contain(n => n.Contains("Första stationen ska ge inskjutning") && n.Contains("räknas inte med"));
+            notes.Should().ContainSingle(n => n.Contains("1 station med giltigt poängmål") && n.Contains("utan station 1"));
+            // Station 1 + 3 + 6: station 3 och 6 räcker, så kravet är uppfyllt trots station 1.
+            var ok = Good().Select(x => x with { PoangmalFigures = x.Number is 1 or 3 or 6 ? 1 : 0 }).ToList();
+            Notes(ok).Should().NotContain(n => n.Contains("Minst två stationer"));
+            // Bara station 1 har poängmål: noll giltiga.
+            var onlyFirst = Good().Select(x => x with { PoangmalFigures = x.Number == 1 ? 1 : 0 }).ToList();
+            Notes(onlyFirst).Should().Contain(n => n.Contains("0 stationer med giltigt poängmål") && n.Contains("utan station 1"));
         }
 
         [Fact]
