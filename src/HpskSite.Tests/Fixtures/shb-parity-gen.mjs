@@ -40,7 +40,13 @@ const wrapped = new Function('state', 'FALT_SHB_DATA', `
   var faltCfgMorker = state.morker;
   ${code}
   return { faltSuggestShootingTime, faltShbBucket, faltShbGroupLabel: window.faltShbGroupLabel };`);
-const FALT_SHB = { maxDistances, maxTimePerShot };
+// Magnumfigurernas egna tak och omriktningen ur C# (samma källa som partialen serverar till webbläsaren).
+const capsBlock = csSrc.match(/MagnumFigureCaps = new\([^)]*\)\s*\{([^}]*)\}/)[1];
+const magnumFigureCaps = {};
+for (const m of capsBlock.matchAll(/\["((?:[^"\\]|\\.)*)"\] = (\d+),/g)) magnumFigureCaps[m[1].replace(/\\"/g, '"').toLowerCase()] = +m[2];
+const omriktning = { normal: +csSrc.match(/OmriktningSupplement = (\d+);/)[1], magnum: +csSrc.match(/MagnumOmriktningSupplement = ([\d.]+);/)[1] };
+if (Object.keys(magnumFigureCaps).length < 2) throw new Error('kunde inte läsa MagnumFigureCaps ur ShbFieldRules.cs');
+const FALT_SHB = { maxDistances, maxTimePerShot, magnumFigureCaps, omriktning };
 
 let seed = 7;
 const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
@@ -52,7 +58,7 @@ for (let i = 0; i < 400; i++) {
   for (let g = 0; g < ng; g++) {
     const figs = [];
     const nf = 1 + rnd(4);
-    for (let f = 0; f < nf; f++) figs.push({ sizeGroup: rnd(16), targetsPerFigure: 1 + rnd(2) });
+    for (let f = 0; f < nf; f++) figs.push({ sizeGroup: rnd(16), targetsPerFigure: 1 + rnd(2), targetName: ['', '', 'Ovalen nr 3', 'Helfigur "mini"'][rnd(4)] });
     groups.push({ distance: rnd(4) === 0 ? null : 5 + rnd(120), figures: figs });
   }
   const st = {

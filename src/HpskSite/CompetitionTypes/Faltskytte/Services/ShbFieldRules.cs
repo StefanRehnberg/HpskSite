@@ -51,6 +51,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private static readonly Dictionary<string, double> MaxTimePerShot = new() { ["AR"] = 2.0, ["B"] = 1.75, ["C"] = 1.5, ["M"] = 20 };
         public const int Weapon45Supplement = 2;
         public const int OmriktningSupplement = 2;
+        /// <summary>Magnum: SHB E.7.1.2 anger "omriktning mellan målgrupper 1,5-2 sek". SHB-minimum är den nedre gränsen, 1,5 s (beslut 2026-11-22, SHB-expertens läsning).</summary>
+        public const double MagnumOmriktningSupplement = 1.5;
+        public static double OmriktningFor(string? weaponClass) => IsMagnum(weaponClass) ? MagnumOmriktningSupplement : OmriktningSupplement;
+
+        /// <summary>
+        /// Magnumfält: figurer med eget maxavstånd under gruppens (SHB E.7, måltabellen s. 143-151): 1/1 miniatyr (katalogens namn <c>Helfigur "mini"</c>) 70 m mot gruppens 80,
+        /// Ovalen nr 3 50 m mot gruppens 60. Nyckel = figurens namn i katalogen (skiftlägesokänsligt). Ändra aldrig bara här: tabellen går till webbläsaren via <see cref="TableJson"/>.
+        /// </summary>
+        private static readonly Dictionary<string, int> MagnumFigureCaps = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Helfigur \"mini\""] = 70,
+            ["Ovalen nr 3"] = 50,
+        };
+        /// <summary>Figurer som SHB förbjuder som poängmål (måltabellen: "Ej som poängmål"). Katalogens namn, början av namnet.</summary>
+        public static bool IsNeverPoangmal(string? figureName) => figureName != null && figureName.Trim().StartsWith("Lurifaxen", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Figurens eget tak i Magnumfält, annars null (gruppens tak gäller).</summary>
+        public static int? MagnumFigureCap(string? figureName) => !string.IsNullOrWhiteSpace(figureName) && MagnumFigureCaps.TryGetValue(figureName.Trim(), out var c) ? c : null;
         public const double MorkerMultiplier = 1.30;
         public const int StationShots = 6;
         /// <summary>SHB E.7.1.1: skjutavstånd över 180 meter är inte tillåtet (magnum).</summary>
@@ -75,6 +93,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 maxDistances = rows,
                 maxTimePerShot = MaxTimePerShot,
+                magnumFigureCaps = MagnumFigureCaps.ToDictionary(kv => kv.Key.ToLowerInvariant(), kv => kv.Value),
+                omriktning = new { normal = (double)OmriktningSupplement, magnum = MagnumOmriktningSupplement },
             });
         });
 
@@ -110,7 +130,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             return step == 0 ? sizeGroup : Math.Min(14, Math.Max(1, sizeGroup + step));
         }
 
-        public record Figure(int? SizeGroup, int TargetsPerFigure);
+        public record Figure(int? SizeGroup, int TargetsPerFigure, string? TargetName = null);
+
+        /// <summary>Figurens maxavstånd: gruppens tak (efter stödhand/mörker), för Magnum även figurens eget tak. Null när figuren saknar storleksgrupp.</summary>
+        public static int? FigureMaxDistance(Figure f, string? weaponClass, bool supportHandAllowed, bool morker)
+        {
+            if (f.SizeGroup is null or 0) return null;
+            var m = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, supportHandAllowed, morker, weaponClass), weaponClass);
+            if (m != null && IsMagnum(weaponClass) && MagnumFigureCap(f.TargetName) is int cap) m = Math.Min(m.Value, cap);
+            return m;
+        }
         public record TargetGroup(int? Distance, IReadOnlyList<Figure> Figures);
         public record Station(int ShootingTimeSec, string? SupportHand, string? WeaponStartPosition,
             int MinShotsPerFigure, int MaxShotsPerFigure, IReadOnlyList<TargetGroup> Groups);
@@ -122,8 +151,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             int? max = null;
             foreach (var f in g.Figures)
             {
-                if (f.SizeGroup is null or 0) continue;
-                var m = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker, weaponClass), weaponClass);
+                var m = FigureMaxDistance(f, weaponClass, eased, morker);
                 if (m != null) max = max == null ? m : Math.Min(max.Value, m.Value);
             }
             if (max != null && IsMagnum(weaponClass)) max = Math.Min(max.Value, MagnumMaxDistance);
@@ -150,8 +178,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var groupMax = GroupMaxDistance(g, weaponClass, s, morker);
                 foreach (var f in g.Figures)
                 {
-                    if (f.SizeGroup is null or 0) continue;
-                    var maxD = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker, weaponClass), weaponClass);
+                    var maxD = FigureMaxDistance(f, weaponClass, eased, morker);
                     if (maxD is null or 0) continue;
                     var d = g.Distance ?? groupMax ?? maxD.Value;
                     var targets = f.TargetsPerFigure > 0 ? f.TargetsPerFigure : 1;
@@ -175,7 +202,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             // ⚠ 45°-tillägget gäller inte magnum (E.7.1.2) — samma undantag som konfiguratorn.
             if (s.WeaponStartPosition == "45 grader" && !IsMagnum(weaponClass)) sum += Weapon45Supplement;
-            sum += Math.Max(0, s.Groups.Count - 1) * OmriktningSupplement;
+            sum = (int)Math.Ceiling(sum + Math.Max(0, s.Groups.Count - 1) * OmriktningFor(weaponClass));   // M: 1,5 s per byte, avrundat uppåt
             if (morker) sum = (int)Math.Ceiling(sum * MorkerMultiplier);
             return sum;
         }

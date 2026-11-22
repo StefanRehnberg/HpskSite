@@ -85,7 +85,7 @@ namespace HpskSite.Services.Kretsgranskning
                             // Mål utanför SHB:s förteckning: inte i katalogen, eller "ej grupperad" (grupp 15).
                             if (name.Length > 0 && (!catalogue.ContainsKey(name) || size == 15)) custom.Add(name);
                             if (size is null or 0 or 15) noSize++;
-                            figures.Add(new ShbFieldRules.Figure(size is 15 ? null : size, Int(f, "targetsPerFigure") ?? 1));
+                            figures.Add(new ShbFieldRules.Figure(size is 15 ? null : size, Int(f, "targetsPerFigure") ?? 1, name));
                         }
                         var dist = Int(g, "distance");
                         if (dist == null) noDistance++;
@@ -180,7 +180,9 @@ namespace HpskSite.Services.Kretsgranskning
             var figures = Arr(s, "targetGroups").OfType<JObject>().SelectMany(g => Arr(g, "figures").OfType<JObject>()).ToList();
             return new MagnumStationRules.Station(number, Bool(s, "isShootOffOnly"),
                 string.Equals(Str(s, "weaponStartPosition"), ShbFieldRules.HandsUp, StringComparison.Ordinal),
-                figures.Count, figures.Count(f => Bool(f, "isPoangmal")), Int(s, "maxShotsPerFigure") ?? 6);
+                figures.Count, figures.Count(f => Bool(f, "isPoangmal")), Int(s, "maxShotsPerFigure") ?? 6,
+                figures.Sum(f => Math.Max(1, Int(f, "targetsPerFigure") ?? 1)),
+                figures.Count(f => Bool(f, "isPoangmal") && ShbFieldRules.IsNeverPoangmal(Str(f, "targetName"))));
         }
 
         private static JArray Arr(JObject o, string key) => (o[key] ?? o[char.ToUpper(key[0]) + key[1..]]) as JArray ?? new JArray();

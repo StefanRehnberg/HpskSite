@@ -15,7 +15,7 @@ namespace HpskSite.Tests
     /// </summary>
     public class ShbFieldRulesParityTests
     {
-        private record FigureJ(int? sizeGroup, int targetsPerFigure);
+        private record FigureJ(int? sizeGroup, int targetsPerFigure, string? targetName = null);
         private record GroupJ(int? distance, List<FigureJ> figures);
         private record StationJ(int shootingTimeSec, string? supportHand, string? weaponStartPosition,
             int minShotsPerFigure, int maxShotsPerFigure, List<GroupJ> targetGroups);
@@ -107,7 +107,7 @@ namespace HpskSite.Tests
                 var st = new Station(c.st.shootingTimeSec, c.st.supportHand, c.st.weaponStartPosition,
                     c.st.minShotsPerFigure, c.st.maxShotsPerFigure,
                     c.st.targetGroups.Select(g => new TargetGroup(g.distance,
-                        g.figures.Select(f => new Figure(f.sizeGroup, f.targetsPerFigure)).ToList())).ToList());
+                        g.figures.Select(f => new Figure(f.sizeGroup, f.targetsPerFigure, f.targetName)).ToList())).ToList());
                 var got = MinimumShootingTime(st, c.wc, c.morker, c.poang);
                 if (got != c.expected) wrong.Add($"{c.wc} mörker={c.morker} poäng={c.poang}: C# {got?.ToString() ?? "null"} ≠ JS {c.expected?.ToString() ?? "null"} — {JsonSerializer.Serialize(c.st)}");
             }

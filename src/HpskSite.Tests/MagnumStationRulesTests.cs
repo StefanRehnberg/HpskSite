@@ -99,8 +99,36 @@ namespace HpskSite.Tests
             var notes = Notes(s);
             notes.Should().Contain(n => n.Contains("alla figurer ska vara poängmål"));
             notes.Should().Contain(n => n.Contains("högst en träff per figur"));
-            var ok = Good(); ok.Add(new(9, true, false, 4, 4, 1));
+            var ok = Good(); ok.Add(new(9, true, false, 6, 6, 1));
             Notes(ok).Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Lurifaxen_far_inte_vara_poangmal()
+        {
+            var s = Good(); s[2] = s[2] with { ForbiddenPoangmal = 1 };
+            Notes(s).Should().ContainSingle(n => n.Contains("Station 3: Lurifaxen får inte vara poängmål"));
+            Notes(Good()).Should().NotContain(n => n.Contains("Lurifaxen"));
+            ShbFieldRules.IsNeverPoangmal("Lurifaxen 18x27cm").Should().BeTrue();
+            ShbFieldRules.IsNeverPoangmal("Ovalen nr 3").Should().BeFalse();
+        }
+
+        [Fact]
+        public void En_station_som_inte_kan_ge_sex_traff_varnar()
+        {
+            // En figur med högst 2 träff: kapaciteten 2 < 6 (E.6.4 sex skott).
+            var s = Good(); s[2] = s[2] with { Figures = 1, MaxShotsPerFigure = 2 };
+            Notes(s).Should().ContainSingle(n => n.Contains("Station 3 kan högst ge 2 träff"));
+            // Två figurer med max 3 = 6: precis nog. Hands-up med två figurer och max 5 = 10: ok.
+            var enough = Good(); enough[2] = enough[2] with { Figures = 2, MaxShotsPerFigure = 3 };
+            Notes(enough).Should().NotContain(n => n.Contains("kan högst ge"));
+            Notes(Good()).Should().NotContain(n => n.Contains("kan högst ge"));
+            // Mål per figur räknas: en figur med två mål och max 3 = 6.
+            var targets = Good(); targets[2] = targets[2] with { Figures = 1, MaxShotsPerFigure = 3, Slots = 2 };
+            Notes(targets).Should().NotContain(n => n.Contains("kan högst ge"));
+            // Särskjutningsstation med fyra figurer och max 1 träff ger bara 4.
+            var shootOff = Good(); shootOff.Add(new(9, true, false, 4, 4, 1));
+            Notes(shootOff).Should().ContainSingle(n => n.Contains("Särskjutningsstation 9 kan högst ge 4 träff"));
         }
 
         [Fact]

@@ -225,12 +225,25 @@ function faltIsMagnum(wc) {
 // Max shooting distance (m) for a figure given its sizeGroup + the weapon
 // class. Returns null when sizeGroup is unset (0 with no figure picked yet)
 // or outside the SHB table.
-function faltFigureMaxDistance(sizeGroup, wc) {
+// Magnum: några figurer har ett eget tak under gruppens (SHB E.7, måltabellen): 1/1 miniatyr 70 m, Ovalen nr 3 50 m. Tabellen kommer
+// ur C# (ShbFieldRules.MagnumFigureCaps via FALT_SHB.magnumFigureCaps, nyckel = katalogens namn i gemener). `targetName` är valfri.
+function faltFigureMaxDistance(sizeGroup, wc, targetName) {
     if (sizeGroup == null) return null;
     var row = FALT_SHB.maxDistances[sizeGroup];
     if (!row) return null;
-    return row[faltShbBucket(wc)] || null;
+    var m = row[faltShbBucket(wc)] || null;
+    if (m != null && targetName && faltIsMagnum(wc)) {
+        var cap = (FALT_SHB.magnumFigureCaps || {})[String(targetName).trim().toLowerCase()];
+        if (cap != null && cap < m) m = cap;
+    }
+    return m;
 }
+// Omriktning per byte av målgrupp: 2 s, för Magnum 1,5 s (SHB E.7.1.2 "1,5-2 sek", minimum = nedre gränsen).
+function faltOmriktningFor(wc) {
+    var o = FALT_SHB.omriktning || { normal: 2, magnum: 1.5 };
+    return faltIsMagnum(wc) ? o.magnum : o.normal;
+}
+function faltSecText(x) { return Number.isInteger(x) ? String(x) : x.toFixed(1).replace('.', ','); }
 
 // Stödhand easing, per SHB D.10.6.1 (verbatim):
 //   "Med stödhand kan en figur från en ett nummer högre grupp användas.
@@ -312,7 +325,7 @@ function faltTargetGroupBounds(tg, wc, station, morker) {
         // Skip figures with no picked target or sizeGroup 0 (treated as "not set").
         var sg = figs[i].sizeGroup;
         if (sg == null || sg === 0) continue;
-        var m = faltFigureMaxDistance(faltLookupSizeGroup(sg, station, dark, wc), wc);
+        var m = faltFigureMaxDistance(faltLookupSizeGroup(sg, station, dark, wc), wc, figs[i].targetName);
         if (m != null) maxes.push(m);
     }
     if (maxes.length === 0) return null;
@@ -392,7 +405,7 @@ function faltSuggestShootingTime(station, wc, morker) {
             // Stödhand eases one group, mörker hardens one — shared helper, so
             // the per-shot time and the slider ceiling read the same table row.
             var lookupGroup = faltLookupSizeGroup(f.sizeGroup, station, morker, wc);
-            var maxD = faltFigureMaxDistance(lookupGroup, wc);
+            var maxD = faltFigureMaxDistance(lookupGroup, wc, f.targetName);
             if (!maxD) return;
             anyApplicable = true;
             var d = effectiveDistance != null ? effectiveDistance : maxD;
@@ -504,14 +517,15 @@ function faltSuggestShootingTime(station, wc, morker) {
     }
     var omriktningCount = Math.max(0, station.targetGroups.length - 1);
     if (omriktningCount > 0) {
-        var omr = omriktningCount * SHB_TILLAGG_OMRIKTNING;
+        var omr = omriktningCount * faltOmriktningFor(wc);
         sumSec += omr;
-        lines.push({ label: 'Omriktning mellan målgrupper (×' + omriktningCount + ')', sec: omr });
+        lines.push({ label: 'Omriktning mellan målgrupper (×' + omriktningCount + (faltIsMagnum(wc) ? ', 1,5 s för Magnum' : '') + ')', sec: omr });
+        if (!Number.isInteger(sumSec)) { var up = Math.ceil(sumSec) - sumSec; sumSec = Math.ceil(sumSec); lines.push({ label: 'Avrundning uppåt', sec: up }); }
     }
     if (morker) {
         var morkerExtra = Math.ceil(sumSec * SHB_MORKER_MULTIPLIER) - sumSec;
         sumSec += morkerExtra;
-        lines.push({ label: 'Mörker-tillägg (+30 %)', sec: morkerExtra });
+        lines.push({ label: 'Mörker-tillägg (+30 %' + (faltIsMagnum(wc) ? '; SHB Del E har ingen mörkerregel, arrangörens val' : '') + ')', sec: morkerExtra });
     }
     return { totalSec: sumSec, breakdown: lines };
 }
@@ -1396,6 +1410,7 @@ function renderActiveTab() {
                                     onchange="faltCfgUpdateStation('${wc}',${st.station},'isShootOffOnly',this.checked)">
                                 <label class="form-check-label small">Endast särskjutning</label>
                             </div>
+                            ${faltIsMagnum(wc) ? `<button type="button" class="btn btn-outline-secondary btn-sm py-0 mt-1" onclick="faltCfgApplyShootOffTemplate('${wc}',${st.station})" title="SHB E.6.11.3: särskild station, alla figurer poängmål, högst en träff per figur, väl tilltagen tid. Du väljer figurerna efteråt.">Fyll i som särskjutningsstation</button>` : ''}
                         </div>
                     </div>
                     <label class="form-label small fw-bold mb-1">Målgrupper</label>
@@ -1529,7 +1544,7 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
                 return '<tr class="text-muted small"><td>' + b.label + '</td><td class="text-end text-nowrap">' + b.info + '</td></tr>';
             }
             var prefix = b.sec > 0 ? '+' : '';
-            var primary = '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + b.sec + ' sek</td></tr>';
+            var primary = '<tr><td>' + b.label + '</td><td class="text-end text-nowrap">' + prefix + faltSecText(b.sec) + ' sek</td></tr>';
             if (b.info) {
                 primary += '<tr class="text-muted fst-italic"><td colspan="2" style="font-size:0.75em;padding-top:0;padding-left:1.5em;line-height:1.3">' + b.info + '</td></tr>';
             }
@@ -1551,6 +1566,30 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
         footEl.innerHTML = foot;
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCfgSuggDetailsModal')).show();
+}
+
+// Mall för Magnums särskjutningsstation (SHB E.6.11.3): egen station, alla figurer poängmål, högst en träff per figur, väl tilltagen skjuttid,
+// vid omgång 2 och senare får avståndet ökas men inte tiden. Förslag (arrangörens val inom reglerna): sex figurer så att sex träff är möjliga (E.6.4),
+// storleksgrupp 8 på 34 m (halva maxavståndet: 10 s/skott enligt Diagram 4), valfri skjutställning. Figurerna väljs efteråt.
+var FALT_SHOOTOFF_TEMPLATE = { figures: 6, sizeGroup: 8, distance: 34 };
+function faltCfgApplyShootOffTemplate(wc, stationNum) {
+    var station = faltCfgData[wc] && faltCfgData[wc].stations
+        ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
+    if (!station) return;
+    var hasContent = (station.targetGroups || []).some(function(tg) { return (tg.figures || []).some(function(f) { return f.sizeGroup || f.targetName; }); });
+    if (hasContent && !confirm('Stationen har redan figurer. Ersätta dem med särskjutningsmallen (' + FALT_SHOOTOFF_TEMPLATE.figures + ' poängmål i storleksgrupp ' + FALT_SHOOTOFF_TEMPLATE.sizeGroup + ' på ' + FALT_SHOOTOFF_TEMPLATE.distance + ' m)?')) return;
+    faltCfgUpdateStation(wc, stationNum, 'isShootOffOnly', true);   // sätter flaggan för alla klasser och markerar ändrad
+    var t = FALT_SHOOTOFF_TEMPLATE, figs = [];
+    for (var i = 1; i <= t.figures; i++) figs.push({ figureNumber: i, isPoangmal: true, behavior: 'Fast', sizeGroup: t.sizeGroup, targetsPerFigure: 1 });
+    station.targetGroups = [{ group: 1, distance: t.distance, figures: figs }];
+    station.maxShotsPerFigure = 1;
+    station.shooterStartPosition = 'Valfri';
+    station.weaponStartPosition = 'Riktning tillåten';
+    station.supportHand = station.supportHand || 'Ej stödhand';
+    var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
+    station.shootingTimeSec = sugg ? sugg.totalSec : 60;
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
 }
 
 function faltCfgApplySuggestion(wc, stationNum) {

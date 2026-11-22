@@ -437,6 +437,8 @@
         if (wcCfg) {
             var fpHtml = wcCfg.shootingTimeSec + 's \u00b7 ' + wcCfg.shooterStartPosition + ' \u00b7 ' + wcCfg.weaponStartPosition + ' \u00b7 ' + wcCfg.supportHand;
             if (scoringMode === 'Normal' && wcCfg.maxShotsPerFigure < 6) fpHtml += ' \u00b7 Max ' + wcCfg.maxShotsPerFigure + ' skott/fig';
+            // Hands-up (SHB E.6.3.1): skytten st\u00e5r upp med b\u00e5da h\u00e4nderna p\u00e5 huvudet fr\u00e5n "10 sekunder kvar" till "Eld". Tidurets kommandon \u00e4r desamma.
+            if (wcCfg.weaponStartPosition === 'Hands-up') fpHtml += '<div class="mt-1 border-top pt-1"><strong>Hands-up:</strong> skytten st\u00e5r upp med b\u00e5da h\u00e4nderna p\u00e5 huvudet fr\u00e5n \u201c10 sekunder kvar\u201d till \u201cEld\u201d. Vapnet \u00e4r laddat enligt E.6.3.1.</div>';
             (wcCfg.targetGroups || []).forEach(function(tg) {
                 if (tg.description) {
                     var tgLetter = String.fromCharCode(64 + tg.group);

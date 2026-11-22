@@ -23,6 +23,45 @@ namespace HpskSite.Tests
         [InlineData(14, "R", 7)]
         public void Maxavstand_PerVapengrupp(int sg, string wc, int expected) => MaxDistance(sg, wc).Should().Be(expected);
 
+        [Theory]
+        [InlineData("Helfigur \"mini\"", 7, "M3", 70)]   // 1/1 miniatyr: gruppens 80, egen gräns 70
+        [InlineData("Ovalen nr 3", 9, "M3", 50)]         // gruppens 60, egen gräns 50
+        [InlineData("ovalen nr 3", 9, "M", 50)]          // skiftlägesokänsligt
+        [InlineData("Helfigur \"mini\"", 7, "A", 30)]    // vanlig fält: oförändrat gruppens tak
+        [InlineData("C 30", 7, "M3", 80)]                // annan figur i grupp 7: gruppens
+        public void Magnum_figurer_med_eget_tak(string name, int sg, string wc, int expected)
+        {
+            var f = new Figure(sg, 1, name);
+            FigureMaxDistance(f, wc, supportHandAllowed: false, morker: false).Should().Be(expected);
+            GroupMaxDistance(new TargetGroup(null, new[] { f }), wc, new Station(20, null, null, 0, 6, Array.Empty<TargetGroup>()), false).Should().Be(expected);
+        }
+
+        [Fact]
+        public void Magnum_figurens_tak_slar_igenom_i_skjuttiden()
+        {
+            // Ovalen nr 3 (grupp 9) på 50 m: tiden räknas mot 50 m, inte gruppens 60 m (20 s vid taket => 6 skott x 20 = 120 s).
+            var oval = new Station(20, null, null, 0, 6, new[] { new TargetGroup(50, new[] { new Figure(9, 1, "Ovalen nr 3") }) });
+            MinimumShootingTime(oval, "M3", false, false).Should().Be(120);
+            var other = new Station(20, null, null, 0, 6, new[] { new TargetGroup(50, new[] { new Figure(9, 1, "L1 Vertikal") }) });
+            MinimumShootingTime(other, "M3", false, false).Should().Be((int)Math.Ceiling(6 * (50 / 60.0 * 20)));   // 50/60 x 20 x 6 (samma flyttalsräkning som koden)
+            MinimumShootingTime(oval, "M3", false, false)!.Value.Should().BeGreaterThan(MinimumShootingTime(other, "M3", false, false)!.Value);
+        }
+
+        [Fact]
+        public void Magnum_omriktning_ar_en_och_en_halv_sekund_annars_tva()
+        {
+            // Två målgrupper, grupp 8 (68 m) på 34 m = 10 s/skott x 6 = 60 s + omriktning.
+            Station Two(string? w = null) => new(20, null, w, 0, 6, new[] { new TargetGroup(34, new[] { new Figure(8, 1) }), new TargetGroup(34, new[] { new Figure(8, 1) }) });
+            MinimumShootingTime(Two(), "M3", false, false).Should().Be(62);   // 60 + 1,5 = 61,5 -> 62
+            // Tre målgrupper: 60 + 3 = 63.
+            var three = new Station(20, null, null, 0, 6, Enumerable.Range(0, 3).Select(_ => new TargetGroup(34, new[] { new Figure(8, 1) })).ToList());
+            MinimumShootingTime(three, "M3", false, false).Should().Be(63);
+            // Vanlig fält är oförändrat 2 s per byte: C grupp 8 (36 m) på 18 m = 0,75 x 1,5... kontrollerat som skillnaden mot en grupp.
+            var c2 = new Station(20, null, null, 0, 6, new[] { new TargetGroup(18, new[] { new Figure(8, 1) }), new TargetGroup(18, new[] { new Figure(8, 1) }) });
+            var c1 = new Station(20, null, null, 0, 6, new[] { new TargetGroup(18, new[] { new Figure(8, 1) }) });
+            (MinimumShootingTime(c2, "C", false, false) - MinimumShootingTime(c1, "C", false, false)).Should().Be(2);
+        }
+
         [Fact]
         public void EjGrupperad_HarIngetMaxavstand() => MaxDistance(15, "C").Should().BeNull();
 

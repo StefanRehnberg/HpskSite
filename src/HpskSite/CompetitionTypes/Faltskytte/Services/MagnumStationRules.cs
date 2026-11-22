@@ -23,7 +23,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <param name="Figures">Antal figurer på stationen.</param>
         /// <param name="PoangmalFigures">Antal av dem som är poängmål.</param>
         /// <param name="MaxShotsPerFigure">Stationens max antal träff per figur.</param>
-        public record Station(int Number, bool ShootOffOnly, bool HandsUp, int Figures, int PoangmalFigures, int MaxShotsPerFigure);
+        /// <param name="Slots">Antal träffplatser på stationen (figurer × mål per figur); -1 = okänt, då räknas figurantalet.</param>
+        public record Station(int Number, bool ShootOffOnly, bool HandsUp, int Figures, int PoangmalFigures, int MaxShotsPerFigure, int Slots = -1, int ForbiddenPoangmal = 0);
+
+        /// <summary>Det mesta antalet träff stationen kan ge: träffplatser × Max träff/fig (ett skott är alltid en träffplats i taget).</summary>
+        public static int Capacity(Station s) => (s.Slots >= 0 ? s.Slots : s.Figures) * (s.MaxShotsPerFigure > 0 ? s.MaxShotsPerFigure : 6);   // 0 = ej satt = sex, som i ShbFieldRules
 
         public static List<string> Notes(IReadOnlyList<Station> stations)
         {
@@ -56,6 +60,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                           (allowed == 1 ? " (en till vid fler än 8 stationer)." : "."));
             foreach (var h in handsUp.Where(h => h.Figures > 2))
                 notes.Add($"Station {h.Number} (Hands-up) har {h.Figures} figurer. Högst 2 figurer är tillåtet (SHB E.10.5.1).");
+
+            // Måltabellen: Lurifaxen får inte vara poängmål.
+            foreach (var bad in stations.Where(s => s.ForbiddenPoangmal > 0).OrderBy(s => s.Number))
+                notes.Add($"Station {bad.Number}: Lurifaxen får inte vara poängmål (SHB:s måltabell: \"Ej som poängmål\").");
+
+            // E.6.4: sex skott på varje station. Kan stationen aldrig ge sex träff (färre träffplatser × Max träff/fig) är det en varning, ingen spärr.
+            // Skottet är alltid sex; det är antalet räknade träff som kan bli lägre (E.6.10.1: bara träff i tapeten räknas).
+            foreach (var low in stations.Where(s => s.Figures > 0 && Capacity(s) < 6).OrderBy(s => s.Number))
+                notes.Add($"{(low.ShootOffOnly ? "Särskjutningsstation" : "Station")} {low.Number} kan högst ge {Capacity(low)} träff (figurer × Max träff/fig). SHB E.6.4 säger sex skott på varje station.");
 
             foreach (var so in stations.Where(s => s.ShootOffOnly).OrderBy(s => s.Number))
             {
