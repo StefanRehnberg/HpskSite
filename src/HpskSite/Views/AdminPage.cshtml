@@ -182,14 +182,6 @@
     @await Html.PartialAsync("SeriesCopyModal")
     @await Html.PartialAsync("SeriesDeleteConfirmModal")
 
-    @* Figurkatalog tab launches this modal via faltPickerOpen(null, null).
-       Used to be pulled in transitively through the old configurator modal;
-       now included directly. *@
-    @if (isSiteAdmin || isRegionalAdmin)
-    {
-        @await Html.PartialAsync("FaltskytteTargetPickerModal")
-    }
-
     <!-- Tab content -->
     <div class="tab-content" id="adminTabContent">
         <div class="tab-pane fade" id="competitions"role="tabpanel" data-user-default-region="@userDefaultRegion" data-managed-regions="@managedRegionsJson" data-is-site-admin="@isSiteAdmin.ToString().ToLower()">
@@ -272,15 +264,14 @@
         @if (isSiteAdmin || isRegionalAdmin)
         {
             <div class="tab-pane fade" id="figurkatalog" role="tabpanel">
+                @* Katalogen ligger direkt på sidan (samma partial som konfiguratorns figurval, i inbäddat läge). *@
                 <div class="card mt-3">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Figurkatalog — Fältskytte</h5>
-                            <button class="btn btn-primary btn-sm" onclick="faltPickerOpen(null, null)">
-                                <i class="bi bi-pencil-square me-1"></i>Öppna katalogen
-                            </button>
-                        </div>
-                        <p class="text-muted">Hantera figurer, varianter, avstånd och bilder för fältskyttemål.</p>
+                    <div class="card-body pb-2">
+                        <h5 class="mb-1"><i class="bi bi-bullseye me-2"></i>Figurkatalog — Fältskytte</h5>
+                        <p class="text-muted small mb-0">Hantera figurer, varianter, avstånd och bilder för fältskyttemål.</p>
+                    </div>
+                    <div class="border-top">
+                        @await Html.PartialAsync("FaltskytteTargetPickerModal", null, new ViewDataDictionary(ViewData) { ["faltPickerInline"] = true })
                     </div>
                 </div>
             </div>
@@ -294,6 +285,11 @@
         const want = new URLSearchParams(location.search).get('tab');
         const btn = want && /^[a-z0-9-]+$/i.test(want) ? document.getElementById(want + '-tab') : null;
         const stom = document.getElementById('stomprogram-tab');
+        // Figurkatalogen hämtas första gången fliken visas (inte vid varje sidladdning).
+        const figTab = document.getElementById('figurkatalog-tab');
+        if (figTab) figTab.addEventListener('shown.bs.tab', () => {
+            if (!window._hpskFigCatalogOpened && window.faltPickerOpen) { window._hpskFigCatalogOpened = true; faltPickerOpen(null, null); }
+        }, { once: false });
         if (stom) stom.addEventListener('shown.bs.tab', () => { if (window.hpskLoadStomprogram) window.hpskLoadStomprogram(); });
         if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
     });

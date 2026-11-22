@@ -11,107 +11,50 @@
        modal-fullscreen-md-down (on the dialog below) gives us full
        viewport space to stack into. */
     @@media (max-width: 767.98px) {
-        #faltTargetPickerModal .faltPicker-body {
+        .faltPicker-body {
             height: auto !important;
             min-height: calc(100vh - 60px);
         }
-        #faltTargetPickerModal #faltPickerDetailPanel {
+        #faltPickerDetailPanel {
             width: 100% !important;
             border-left: 0 !important;
             border-top: 1px solid var(--bs-border-color);
         }
     }
+    /* Inbäddat läge (Figurkatalog-fliken): sidan skrollar, så detaljpanelen följer med och försvinner aldrig ur bild.
+       Är panelen högre än fönstret får den eget skroll (max-height), annars klipps knapparna nederst. */
+    @@media (min-width: 768px) {
+        .faltPicker-inline #faltPickerDetailPanel {
+            position: sticky;
+            top: 0.5rem;
+            align-self: flex-start;
+            max-height: calc(100vh - 1rem);
+        }
+    }
 </style>
-<div class="modal fade" id="faltTargetPickerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true" style="z-index:1070">
-    <div class="modal-dialog modal-xl modal-fullscreen-md-down modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-bullseye me-2"></i>Figurkatalog</h5>
-                <button type="button" class="btn-close" onclick="faltPickerClose()"></button>
-            </div>
-            <div class="modal-body p-0 faltPicker-body" style="height:70vh">
-                <div class="d-flex flex-column flex-md-row h-100">
-                    <!-- Left: search + grid -->
-                    <div class="flex-grow-1 overflow-auto p-3" style="min-width:0">
-                        <div class="d-flex gap-2 mb-2">
-                            <input type="text" class="form-control form-control-sm" id="faltPickerSearch" placeholder="Sök figur..." oninput="faltPickerFilter()">
-                            <button class="btn btn-primary btn-sm text-nowrap" onclick="faltPickerCreateNew()"><i class="bi bi-plus-lg me-1"></i>Ny figur</button>
-                        </div>
-                        <div class="d-flex flex-wrap gap-1 mb-2 align-items-center small">
-                            <span class="text-muted me-1">Storleksgrupp:</span>
-                            <button class="btn btn-link btn-sm py-0 px-1" onclick="faltPickerFilterAll(true)">Alla</button>
-                            <button class="btn btn-link btn-sm py-0 px-1" onclick="faltPickerFilterAll(false)">Inga</button>
-                            <span class="vr mx-1"></span>
-                            <div id="faltPickerGroupChips" class="d-flex flex-wrap gap-1"></div>
-                        </div>
-                        <div id="faltPickerGrid"></div>
-                    </div>
-                    <!-- Right: detail panel -->
-                    <div id="faltPickerDetailPanel" class="border-start bg-body-tertiary overflow-auto p-3" style="width:340px;flex-shrink:0">
-                        <div id="faltPickerNoSelection" class="text-center text-muted py-5">
-                            <i class="bi bi-arrow-left-circle" style="font-size:2rem"></i>
-                            <p class="mt-2">Klicka på en figur för att se detaljer</p>
-                        </div>
-                        <div id="faltPickerDetail" style="display:none">
-                            <div class="text-center mb-3">
-                                <img id="faltPickerDetailImg" src="" style="max-height:150px;max-width:100%;border-radius:6px" alt="">
-                            </div>
-                            <h6 id="faltPickerDetailName" class="mb-2"></h6>
-
-                            <!-- Color selector -->
-                            <div class="mb-3">
-                                <label class="form-label small mb-1 fw-bold">Färg</label>
-                                <select class="form-select form-select-sm" id="faltPickerColorSelect" onchange="faltPickerColorChanged()"></select>
-                            </div>
-
-                            <!-- Pick button (shown in pick mode, right below color selector) -->
-                            <div id="faltPickerSelectSection" style="display:none" class="mb-3">
-                                <button class="btn btn-primary w-100" onclick="faltPickerSelect()">
-                                    <i class="bi bi-check-circle me-1"></i>Välj denna figur
-                                </button>
-                            </div>
-
-                            <!-- Admin edit section (hidden in pick mode) -->
-                            <div id="faltPickerAdminSection" style="display:none">
-                                <hr>
-                                <div class="mb-2">
-                                    <label class="form-label small mb-1 fw-bold">Namn</label>
-                                    <input type="text" class="form-control form-control-sm" id="faltPickerEditName" placeholder="Namn" autocomplete="off" data-1p-ignore="true">
-                                </div>
-                                <div class="row g-2 mb-2">
-                                    <div class="col-7">
-                                        <label class="form-label small mb-1 fw-bold">Antal m&aring;l i figuren</label>
-                                        <input type="number" class="form-control form-control-sm" id="faltPickerEditTargetsPerFig" min="1" max="6" value="1" style="width:80px">
-                                        <div class="form-text small">Flerm&aring;lsfigurer (ex. Ballongmål) har fler &auml;n 1.</div>
-                                    </div>
-                                    <div class="col-5 text-end">
-                                        <label class="form-label small mb-1 fw-bold">Storleksgrupp</label>
-                                        <input type="number" class="form-control form-control-sm ms-auto text-end" id="faltPickerEditSizeGroup" min="1" max="15" value="15" style="width:80px;margin-left:auto">
-                                        <div class="form-text small">1&ndash;14 styr max avst&aring;nd. 15 = ej grupperad.</div>
-                                    </div>
-                                </div>
-                                <!-- Variant editing -->
-                                <div id="faltPickerVariantEdits" class="mb-2"></div>
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-outline-primary btn-sm" onclick="faltPickerAddVariant()">
-                                        <i class="bi bi-plus me-1"></i>Ny variant
-                                    </button>
-                                    <button class="btn btn-sm btn-primary flex-grow-1" onclick="faltPickerSaveTarget()">
-                                        <i class="bi bi-check-lg me-1"></i>Spara
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="faltPickerDeleteTarget()" title="Ta bort figur">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-
-                        </div>
-                    </div>
+@{
+    // Samma kod i två lägen: modal (konfiguratorns figurval) eller direkt på sidan (Figurkatalog-fliken på /admin-page,
+    // som ber om det med ViewData["faltPickerInline"] = true).
+    var faltPickerInline = ViewData["faltPickerInline"] as bool? == true;
+}
+@if (faltPickerInline)
+{
+    @await Html.PartialAsync("_FaltskytteTargetPickerBody", "auto; min-height:480px")
+}
+else
+{
+    <div class="modal fade" id="faltTargetPickerModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true" style="z-index:1070">
+        <div class="modal-dialog modal-xl modal-fullscreen-md-down modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-bullseye me-2"></i>Figurkatalog</h5>
+                    <button type="button" class="btn-close" onclick="faltPickerClose()"></button>
                 </div>
+                @await Html.PartialAsync("_FaltskytteTargetPickerBody", "70vh")
             </div>
         </div>
     </div>
-</div>
+}
 
 <script>
 var _faltPickerCatalog = [];
@@ -202,11 +145,14 @@ async function faltPickerOpen(weaponClass, callback) {
     faltPickerLoadVisibleGroups();
     faltPickerRenderFilterChips();
     faltPickerFilter(); // applies search + group filter to render
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('faltTargetPickerModal')).show();
+    // Inbäddat läge (Figurkatalog-fliken) har ingen modal — katalogen ligger redan på sidan.
+    var modalEl = document.getElementById('faltTargetPickerModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 function faltPickerClose() {
-    bootstrap.Modal.getInstance(document.getElementById('faltTargetPickerModal')).hide();
+    var modalEl = document.getElementById('faltTargetPickerModal');
+    if (modalEl) bootstrap.Modal.getInstance(modalEl).hide();
 }
 
 function faltPickerFilter() {
