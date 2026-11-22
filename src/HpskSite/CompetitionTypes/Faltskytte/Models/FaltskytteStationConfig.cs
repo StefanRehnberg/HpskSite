@@ -118,6 +118,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public bool HasPoangmal => Figures.Any(f => f.IsPoangmal);
     }
 
+    /// <summary>En extra visning av en figur: börjar FromSec sekunder in i skjuttiden och varar DurSec sekunder.</summary>
+    public class FaltskytteExposure
+    {
+        public int FromSec { get; set; }
+        public int DurSec { get; set; }
+    }
+
     /// <summary>An individual target figure within a Målgrupp.</summary>
     public class FaltskytteFigure
     {
@@ -129,6 +136,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public int? ShowTimeSec { get; set; }
         public int? HideAfterSec { get; set; }
         public int? ReappearSec { get; set; }
+        /// <summary>Extra visningar efter den första (som bärs av fälten ovan). Skrivs bara när det finns några.</summary>
+        public List<FaltskytteExposure> Exposures { get; set; } = new();
         public string? ImageUrl { get; set; }
         /// <summary>Optional reference to a catalog target name</summary>
         public string? TargetName { get; set; }

@@ -225,6 +225,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string? Notice { get; set; }
         /// <summary>false = öppna utan att skriva ut direkt (granskaren läser på skärmen).</summary>
         public bool AutoPrint { get; set; } = true;
+        /// <summary>Avancerat läge (förutsättningarna måste vara lika för att klasser ska dela kort). Läses ur konfigurationens `_mode`.</summary>
+        public bool StrictGrouping { get; set; } = true;
+        /// <summary>`_courseStations`: tävlingens stationsnummer när konfigurationen är en del av banan.</summary>
+        public List<int> CourseStations { get; set; } = new();
     }
 
     public class StationPrintItem
@@ -235,6 +239,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public Dictionary<string, FaltskytteStationConfig> StationsByWeaponClass { get; set; } = new();
         public string Qr1Url { get; set; } = "";  // Förutsättningar (GetStationInfoQr)
         public string Qr2Url { get; set; } = "";  // Result entry (GenerateQrCode → /station?c&s)
+        /// <summary>Kompakt (1 sida) i stället för Full; sparat per station (StationPrintOptionService).</summary>
+        public bool Compact { get; set; }
     }
 
     // ── Public patrol-list page (/patrullista/{id}) ───────────────

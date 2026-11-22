@@ -631,7 +631,12 @@ function faltCfgUpdateGroup(wc, stationNum, tgIdx, field, value) {
 function faltCfgUpdateFigure(wc, stationNum, tgIdx, fIdx, field, value) {
     var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
     var fig = station?.targetGroups[tgIdx]?.figures[fIdx];
-    if (fig) { fig[field] = value; faltCfgMarkDirty(wc, stationNum); }
+    if (fig) {
+        fig[field] = value;
+        // Extra visningar hör bara till Framsvängande/Rörligt; lämnar man dem ska inga gömda visningar ligga kvar.
+        if (field === 'behavior' && value !== 'Framsvängande' && value !== 'Rörligt') delete fig.exposures;
+        faltCfgMarkDirty(wc, stationNum);
+    }
 }
 
 // ─── Initialization ─────────────────────────────────────────────────
@@ -975,6 +980,10 @@ function faltCfgCopyFrom() {
                     if (fig.showTimeSec) fig.showTimeSec = Math.max(1, Math.round(fig.showTimeSec * ratio));
                     if (fig.hideAfterSec) fig.hideAfterSec = Math.max(1, Math.round(fig.hideAfterSec * ratio));
                     if (fig.reappearSec) fig.reappearSec = Math.max(0, Math.round(fig.reappearSec * ratio));
+                    (fig.exposures || []).forEach(function(e) {
+                        e.fromSec = Math.max(0, Math.round((e.fromSec || 0) * ratio));
+                        e.durSec = Math.max(1, Math.round((e.durSec || 0) * ratio));
+                    });
                 });
             });
         });
@@ -1193,7 +1202,7 @@ function faltCfgStationMenuHtml(stationNum, wc, includeCopy) {
         'data-station-menu="' + stationNum + '">Åtgärder</button>' +
         '<ul class="dropdown-menu dropdown-menu-end">' +
         (includeCopy ? item("faltCfgCopyStation(" + stationNum + ",'" + wc + "')", 'bi-copy', 'Kopiera från annan vapenklass') : '') +
-        item("faltCfgPrintStation(" + stationNum + ",'" + wc + "')", 'bi-printer', 'Skriv ut stationskort') +
+        item("faltCfgPrintStation(" + stationNum + ",'" + wc + "')", 'bi-printer', 'Förhandsgranska och skriv ut…') +
         '<li><hr class="dropdown-divider"></li>' +
         item('faltCfgDeleteStation(' + stationNum + ')', 'bi-trash', 'Ta bort stationen', 'text-danger') +
         '</ul></span>';
@@ -1507,7 +1516,7 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
         }
 
         var figLabel = fig.figureNumber;
-        figuresHtml += '<div class="d-flex align-items-center gap-2 fig-row ' + (fIdx > 0 ? 'mt-1' : '') + '">' +
+        figuresHtml += '<div class="d-flex flex-wrap align-items-center gap-2 fig-row ' + (fIdx > 0 ? 'mt-1' : '') + '">' +
             (!isLastFig ? '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltCfgRemoveFigure(' + stationNum + ',' + "'" + wc + "'" + ',' + tgIdx + ',' + fIdx + ')" title="Ta bort figur"><i class="bi bi-trash"><\/i><\/button>' : '') +
             '<span class="text-muted small text-nowrap" style="width:55px">Figur ' + figLabel + '<\/span>' +
             '<div class="form-check mb-0"><input class="form-check-input" type="checkbox"' + (fig.isPoangmal ? ' checked' : '') +
@@ -1521,17 +1530,22 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
                 ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'behavior'" + ',this.value); faltCfgToggleFigBehavior(this)">' +
                 TARGET_BEHAVIORS.map(function(b) { return '<option' + (b === fig.behavior ? ' selected' : '') + '>' + b + '<\/option>'; }).join('') +
             '<\/select>' +
-            '<span class="fig-framCol" style="display:' + (fig.behavior === 'Framsv\u00e4ngande' ? '' : 'none') + '">' +
+            '<div class="d-flex align-items-center gap-1 border rounded px-1 bg-body-secondary" style="height:30px">' + imgHtml + '<\/div>' +
+            '<span class="fig-framCol flex-wrap align-items-center gap-1 w-100 ps-4" style="display:' + (fig.behavior === 'Framsv\u00e4ngande' || fig.behavior === 'R\u00f6rligt' ? 'flex' : 'none') + '">' +
+                '<label class="small text-muted text-nowrap mb-0">Fram efter (sek)<\/label>' +
                 '<input type="number" class="form-control form-control-sm d-inline-block" min="0" max="60" value="' + (fig.delayBeforeShowSec || 0) + '" style="width:50px" title="Fram efter (sek)"' +
                     ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'delayBeforeShowSec'" + ',parseInt(this.value)||0)">' +
+                '<label class="small text-muted text-nowrap mb-0">Visas (sek)<\/label>' +
                 '<input type="number" class="form-control form-control-sm d-inline-block" min="1" max="60" value="' + (fig.showTimeSec || 8) + '" style="width:50px" title="Visas (sek)"' +
-                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'showTimeSec'" + ',parseInt(this.value)||8)"><\/span>' +
-            '<span class="fig-bortCol" style="display:' + (fig.behavior === 'Bortsv\u00e4ngande' ? '' : 'none') + '">' +
+                    ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'showTimeSec'" + ',parseInt(this.value)||8)">' +
+                faltCfgExposureHtml(wc, stationNum, tgIdx, fIdx, fig) + '<\/span>' +
+            '<span class="fig-bortCol flex-wrap align-items-center gap-1 w-100 ps-4" style="display:' + (fig.behavior === 'Bortsv\u00e4ngande' ? 'flex' : 'none') + '">' +
+                '<label class="small text-muted text-nowrap mb-0">Bort efter (sek)<\/label>' +
                 '<input type="number" class="form-control form-control-sm d-inline-block" min="1" max="60" value="' + (fig.hideAfterSec || 8) + '" style="width:50px" title="Bort efter (sek)"' +
                     ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'hideAfterSec'" + ',parseInt(this.value)||8)">' +
+                '<label class="small text-muted text-nowrap mb-0">Visar igen efter (sek)<\/label>' +
                 '<input type="number" class="form-control form-control-sm d-inline-block" min="0" max="60" value="' + (fig.reappearSec || 0) + '" style="width:50px" title="Igen (sek)"' +
                     ' onchange="faltCfgUpdateFigure(' + "'" + wc + "'" + ',' + stationNum + ',' + tgIdx + ',' + fIdx + ',' + "'reappearSec'" + ',parseInt(this.value)||0)"><\/span>' +
-            '<div class="d-flex align-items-center gap-1 border rounded px-1 bg-body-secondary" style="height:30px">' + imgHtml + '<\/div>' +
         '<\/div>';
     });
 
@@ -1616,13 +1630,89 @@ function renderTargetGroup(tg, tgIdx, stationNum, wc, isPoang, isLastGroup) {
     '<\/div>';
 }
 
+// ─── Upprepad exponering (fas 4): extra visningar efter den första ───
+// Visning 1 = fälten "Fram efter" / "Visas". Extra visningar lagras i fig.exposures [{fromSec, durSec}] och
+// skrivs bara när det finns några (nyckeln tas bort annars, så en oförändrad bana ser oförändrad ut).
+
+function faltCfgFigRef(wc, stationNum, tgIdx, fIdx) {
+    var station = faltCfgData[wc]?.stations?.find(function(s) { return s.station === stationNum; });
+    return { station: station, fig: station?.targetGroups[tgIdx]?.figures[fIdx] };
+}
+
+function faltCfgExposureHtml(wc, stationNum, tgIdx, fIdx, fig) {
+    var ref = faltCfgFigRef(wc, stationNum, tgIdx, fIdx);
+    var args = stationNum + ",'" + wc + "'," + tgIdx + ',' + fIdx;
+    var html = '<div class="fig-expList w-100 mt-1" data-key="' + stationNum + '|' + wc + '|' + tgIdx + '|' + fIdx + '">';
+    var exps = fig.exposures || [];
+    exps.forEach(function(e, i) {
+        html += '<div class="d-flex flex-wrap align-items-center gap-1 mb-1">' +
+            '<span class="small text-muted text-nowrap">Visning ' + (i + 2) + ' &ndash;<\/span>' +
+            '<label class="small text-muted text-nowrap mb-0">Fram efter (sek)<\/label>' +
+            '<input type="number" class="form-control form-control-sm d-inline-block" min="0" max="600" value="' + (e.fromSec || 0) + '" style="width:60px"' +
+                ' onchange="faltCfgUpdateExposure(' + args + ',' + i + ",'fromSec',parseInt(this.value)||0)\">" +
+            '<label class="small text-muted text-nowrap mb-0">Visas (sek)<\/label>' +
+            '<input type="number" class="form-control form-control-sm d-inline-block" min="1" max="600" value="' + (e.durSec || 1) + '" style="width:60px"' +
+                ' onchange="faltCfgUpdateExposure(' + args + ',' + i + ",'durSec',parseInt(this.value)||1)\">" +
+            '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" title="Ta bort visningen" onclick="faltCfgRemoveExposure(' + args + ',' + i + ')"><i class="bi bi-x-lg"><\/i><\/button>' +
+            '<\/div>';
+    });
+    html += '<button type="button" class="btn btn-outline-secondary btn-sm py-0" onclick="faltCfgAddExposure(' + args + ')"><i class="bi bi-arrow-repeat me-1"><\/i>Upprepa visning<\/button>';
+    // Varning: sista visningen slutar efter skjuttiden (den skulle klippas).
+    var shoot = ref.station && ref.station.shootingTimeSec;
+    var lastEnd = (fig.delayBeforeShowSec || 0) + (fig.showTimeSec || 8);
+    exps.forEach(function(e) { if (e.durSec > 0) lastEnd = Math.max(lastEnd, (e.fromSec || 0) + e.durSec); });
+    if (exps.length && shoot && lastEnd > shoot) {
+        html += '<div class="fig-expWarn text-danger small mt-1">Sista visningen slutar efter ' + lastEnd + ' s men skjuttiden är ' + shoot + ' s. Visningen klipps vid skjuttidens slut.<\/div>';
+    }
+    return html + '<\/div>';
+}
+
+function faltCfgAddExposure(stationNum, wc, tgIdx, fIdx) {
+    var r = faltCfgFigRef(wc, stationNum, tgIdx, fIdx);
+    if (!r.fig) return;
+    faltCfgExpandedStation = stationNum;
+    var exps = r.fig.exposures || (r.fig.exposures = []);
+    var end = (r.fig.delayBeforeShowSec || 0) + (r.fig.showTimeSec || 8);
+    exps.forEach(function(e) { end = Math.max(end, (e.fromSec || 0) + (e.durSec || 0)); });
+    exps.push({ fromSec: end, durSec: r.fig.showTimeSec || 8 });
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
+}
+
+function faltCfgUpdateExposure(stationNum, wc, tgIdx, fIdx, eIdx, field, value) {
+    var r = faltCfgFigRef(wc, stationNum, tgIdx, fIdx);
+    if (!r.fig || !r.fig.exposures || !r.fig.exposures[eIdx]) return;
+    r.fig.exposures[eIdx][field] = value;
+    faltCfgMarkDirty(wc, stationNum);
+    // Bara varningen ritas om (inte inmatningsfälten, så fokus och markör står kvar).
+    var list = document.querySelector('.fig-expList[data-key="' + stationNum + '|' + wc + '|' + tgIdx + '|' + fIdx + '"]');
+    if (list) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = faltCfgExposureHtml(wc, stationNum, tgIdx, fIdx, r.fig);
+        var warn = list.querySelector('.fig-expWarn');
+        var nw = tmp.querySelector('.fig-expWarn');
+        if (warn) warn.remove();
+        if (nw) list.appendChild(nw);
+    }
+}
+
+function faltCfgRemoveExposure(stationNum, wc, tgIdx, fIdx, eIdx) {
+    var r = faltCfgFigRef(wc, stationNum, tgIdx, fIdx);
+    if (!r.fig || !r.fig.exposures) return;
+    faltCfgExpandedStation = stationNum;
+    r.fig.exposures.splice(eIdx, 1);
+    if (!r.fig.exposures.length) delete r.fig.exposures;
+    faltCfgMarkDirty(wc, stationNum);
+    renderActiveTab();
+}
+
 // ─── Figure behavior toggle (visual only) ───────────────────────────
 
 function faltCfgToggleFigBehavior(selectEl) {
     var row = selectEl.closest('.fig-row');
     var val = selectEl.value;
-    row.querySelector('.fig-framCol').style.display = val === 'Framsvängande' ? '' : 'none';
-    row.querySelector('.fig-bortCol').style.display = val === 'Bortsvängande' ? '' : 'none';
+    row.querySelector('.fig-framCol').style.display = (val === 'Framsvängande' || val === 'Rörligt') ? 'flex' : 'none';
+    row.querySelector('.fig-bortCol').style.display = val === 'Bortsvängande' ? 'flex' : 'none';
 }
 
 // ─── Add / Remove figures and groups ────────────────────────────────
@@ -1801,6 +1891,7 @@ function faltCfgAutoDescription(stationNum, wc, tgIdx) {
         if (fig.behavior === 'Framsv\u00e4ngande') {
             if (fig.delayBeforeShowSec) desc += ', sv\u00e4nger fram efter ' + fig.delayBeforeShowSec + ' sek';
             if (fig.showTimeSec) desc += ' och visas i ' + fig.showTimeSec + ' sek';
+            (fig.exposures || []).forEach(function(e) { if (e.durSec > 0) desc += ', visas igen ' + (e.fromSec || 0) + ' sek in, i ' + e.durSec + ' sek'; });
         } else if (fig.behavior === 'Bortsv\u00e4ngande') {
             if (fig.hideAfterSec) desc += ', sv\u00e4nger bort efter ' + fig.hideAfterSec + ' sek';
             if (fig.reappearSec) desc += ', visar igen efter ' + fig.reappearSec + ' sek';
@@ -2353,280 +2444,62 @@ function faltCfgClose() {
 }
 
 // ─── Print ──────────────────────────────────────────────────────────
-
-function faltDescribeBehavior(tg) {
-    if (tg.behavior === 'Framsv\u00e4ngande') {
-        var s = 'Framsv\u00e4ngande';
-        if (tg.delayBeforeShowSec > 0) s += ', fram efter ' + tg.delayBeforeShowSec + ' sek';
-        if (tg.showTimeSec > 0) s += ', visas i ' + tg.showTimeSec + ' sek';
-        return s;
-    }
-    if (tg.behavior === 'Bortsv\u00e4ngande') {
-        var s = 'Bortsv\u00e4ngande';
-        if (tg.hideAfterSec > 0) s += ', bort efter ' + tg.hideAfterSec + ' sek';
-        if (tg.reappearSec > 0) s += ', visar igen efter ' + tg.reappearSec + ' sek';
-        return s;
-    }
-    if (tg.behavior === 'R\u00f6rligt') {
-        return 'R\u00f6rligt';
-    }
-    return 'Fast';
+// Stationskortet ritas av servern (StationCardRenderer), densamma som tävlingens kort (fas 3a, 2026-11-21).
+// Editorns aktuella data skickas med, så även osparade ändringar följer med. Fönstret öppnas FÖRE anropet
+// (webbläsaren tillåter bara en popup direkt i klicket).
+function faltCfgPrintConfigId() {
+    return window._faltCfgConfigurationId || faltCfgData._attachedConfigId || null;
 }
 
-// Compare two station configs ignoring timing fields. Returns true if structure is identical.
-function faltCfgStationsStructurallyEqual(a, b) {
-    if (!a || !b) return false;
-    if (a.shooterStartPosition !== b.shooterStartPosition) return false;
-    if (a.weaponStartPosition !== b.weaponStartPosition) return false;
-    if (a.supportHand !== b.supportHand) return false;
-    if (a.maxShotsPerFigure !== b.maxShotsPerFigure) return false;
-    if ((a.minShotsPerFigure || 0) !== (b.minShotsPerFigure || 0)) return false;
-    if ((a.targetGroups||[]).length !== (b.targetGroups||[]).length) return false;
-    for (var g = 0; g < a.targetGroups.length; g++) {
-        var ga = a.targetGroups[g], gb = b.targetGroups[g];
-        if ((ga.figures||[]).length !== (gb.figures||[]).length) return false;
-        for (var f = 0; f < ga.figures.length; f++) {
-            var fa = ga.figures[f], fb = gb.figures[f];
-            if (fa.isPoangmal !== fb.isPoangmal) return false;
-            if (fa.behavior !== fb.behavior) return false;
-        }
+// Full/Kompakt per station (fas 3b). Anropas av förhandsvisningens knappar (window.opener). Sparar valet
+// (egen tabell, rör inte konfigurationen) och ritar om SAMMA fönster.
+async function faltCfgPrintStationMode(stationNum, wc, mode, popup) {
+    try {
+        var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/SetStationPrintMode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ configId: faltCfgPrintConfigId(), station: stationNum, mode: mode })
+        });
+        if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
+    } catch (err) {
+        console.error(err);
+        if (popup && !popup.closed) { popup.document.body.style.opacity = '1'; popup.alert('Valet kunde inte sparas: ' + (err && err.message ? err.message : err)); }
+        return;
     }
-    return true;
+    await faltCfgPrintStation(stationNum, wc, popup);
 }
 
-function faltCfgPrintStation(stationNum, wc) {
-    var station = faltCfgData[wc]?.stations?.find(function(s){return s.station===stationNum;});
-    if (!station) return;
-    var stNameSuffix = (station.name ? ' – ' + faltCfgEscapeHtml(station.name) : '') + faltCfgCourseSuffix(stationNum);
-
-    // Combine classes that share STRUCTURE — figures, behaviours, images. In
-    // simple mode per-class params (Skjuttid, positions, Stödhand, Max skott)
-    // are intentionally allowed to differ, so we use shape-equal there;
-    // advanced mode keeps the stricter structural check (params must also
-    // match) so its existing print behaviour is unchanged.
-    var equalityFn = (faltCfgMode === 'simple') ? faltCfgShapeEqual : faltCfgStationsStructurallyEqual;
-    var combinedClasses = {};  // { wc: stationConfig }
-    faltCfgWeaponClasses.forEach(function(c) {
-        var st = faltCfgData[c]?.stations?.find(function(s){return s.station===stationNum;});
-        if (st && equalityFn(station, st)) combinedClasses[c] = st;
-    });
-    var classKeys = Object.keys(combinedClasses);
-    var isCombined = classKeys.length > 1;
-    // In Poäng mode the Max träff/fig control is hidden in the editor, so the
-    // value is never user-set — don't print it as a station condition either.
-    var isPoang = faltCfgScoringMode() === 'Poang';
-
-    // Group classes by the value of `field`. When all classes share the
-    // same value, prefixes are dropped ("16 sek" instead of "A,B,C: 16 sek").
-    function groupByField(classes, field, suffix) {
-        suffix = suffix || '';
-        var groups = {};
-        var order = [];
-        classes.forEach(function(c) {
-            var val = combinedClasses[c][field];
-            var key = (val == null || val === '') ? '—' : String(val);
-            if (!groups[key]) { groups[key] = []; order.push(key); }
-            groups[key].push(c);
+async function faltCfgPrintStation(stationNum, wc, existingWindow) {
+    var w = existingWindow || window.open('', '_blank');
+    if (!w) { alert('Webbläsaren stoppade fönstret. Tillåt popup-fönster för sidan och försök igen.'); return; }
+    if (!existingWindow) w.document.write('<p style="font-family:sans-serif">Förbereder stationskortet …</p>');
+    try {
+        var token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+        var snapshot = Object.assign({}, faltCfgData, { _mode: faltCfgMode });
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/StationCardHtml', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({
+                json: JSON.stringify(snapshot),
+                station: stationNum,
+                weaponClass: wc,
+                competitionId: faltCfgGetCompetitionId(),
+                scoringMode: faltCfgScoringMode(),
+                configId: faltCfgPrintConfigId()
+            })
         });
-        if (order.length === 1) return order[0] + suffix;
-        return order.map(function(k) { return groups[k].join(',') + ': ' + k + suffix; }).join(' &nbsp;|&nbsp; ');
+        if (!resp.ok) throw new Error(await resp.text() || ('HTTP ' + resp.status));
+        var html = await resp.text();
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+    } catch (err) {
+        console.error(err);
+        w.document.body.textContent = 'Kunde inte skapa stationskortet: ' + (err && err.message ? err.message : err);
     }
-
-    var w = window.open('', '_blank');
-    w.document.write('<html><head><title>Station ' + stationNum + (isCombined ? '' : ' \u2014 ' + wc) + '<' + '/title>');
-    w.document.write('<style>');
-    w.document.write('body{font-family:sans-serif;margin:30px;max-width:210mm}');
-    w.document.write('h1{font-size:1.8em;border-bottom:3px solid #333;padding-bottom:8px}');
-    w.document.write('.rules{background:#f0f0f0;padding:12px;border-radius:6px;margin:15px 0;font-size:0.95em}');
-    w.document.write('.rules-shared{margin-bottom:4px}');
-    w.document.write('.rules-tbl{border-collapse:collapse;margin-top:4px;font-size:0.95em}');
-    w.document.write('.rules-tbl th,.rules-tbl td{padding:1px 10px 1px 0;text-align:left}');
-    w.document.write('.rules-tbl th{font-weight:600;border-bottom:1px solid #888}');
-    w.document.write('.rules-tbl td{border-bottom:1px solid #ddd}');
-    w.document.write('.rules-tbl tr:last-child td{border-bottom:none}');
-    w.document.write('.tg{border:2px solid #666;border-radius:8px;padding:15px;margin:20px 0;page-break-inside:avoid}');
-    w.document.write('.tg h3{margin:0 0 10px;font-size:1.2em}');
-    w.document.write('.tg-desc{font-style:italic;margin:10px 0;font-size:0.95em;line-height:1.4}');
-    w.document.write('.tg-img{text-align:center;margin:10px 0}');
-    w.document.write('.tg-img img{max-width:80%;max-height:200px;border-radius:6px}');
-    w.document.write('.fig{margin:8px 0;padding:8px;background:#fafafa;border-radius:4px;display:flex;align-items:center;gap:12px}');
-    w.document.write('.fig img{height:50px;border-radius:4px}');
-    w.document.write('.fig-info{flex:1}');
-    w.document.write('.pm-badge{background:#ffc107;color:#000;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:0.85em}');
-    w.document.write('.time-variants{margin:2px 0 2px 20px;font-size:0.9em;color:#444}');
-    w.document.write('@@media print{body{margin:15mm}}');
-    w.document.write('<' + '/style><' + '/head><body>');
-
-    // Header
-    if (isCombined) {
-        w.document.write('<h1>Station ' + stationNum + stNameSuffix + '<' + '/h1>');
-    } else {
-        w.document.write('<h1>Station ' + stationNum + stNameSuffix + ' \u2014 Vapenklass ' + wc + '<' + '/h1>');
-    }
-
-    // Förutsättningar
-    w.document.write('<div class="rules">');
-    if (isCombined) {
-        // Compact table layout: pull params that all classes share into a
-        // single line above (saves vertical space + reduces visual noise),
-        // and tabulate the varying ones with rows merged by full signature
-        // so e.g. A,A_Opt,R collapse onto one row when their entire param
-        // set matches.
-        var fields = [
-            { key: 'shootingTimeSec', label: 'Skjuttid', suffix: ' sek' },
-            { key: 'shooterStartPosition', label: 'Utg\u00e5ngsl\u00e4ge' },
-            { key: 'weaponStartPosition', label: 'Vapenl\u00e4ge' },
-            { key: 'supportHand', label: 'St\u00f6dhand', descriptive: true }
-        ];
-        // Min skott column only when any class actually has a minimum (> 0).
-        var anyMinSet = classKeys.some(function (c) {
-            var v = combinedClasses[c].minShotsPerFigure;
-            return v && v > 0;
-        });
-        if (anyMinSet) fields.push({ key: 'minShotsPerFigure', label: 'Min träff/fig' });
-        // Max skott column only when any class actually limits it (< 6).
-        var anyMaxLimited = !isPoang && classKeys.some(function (c) {
-            var v = combinedClasses[c].maxShotsPerFigure;
-            return v && v < 6;
-        });
-        if (anyMaxLimited) fields.push({ key: 'maxShotsPerFigure', label: 'Max träff/fig' });
-
-        var sharedFields = [];
-        var varyingFields = [];
-        fields.forEach(function (f) {
-            var firstVal = combinedClasses[classKeys[0]][f.key];
-            var allSame = classKeys.every(function (c) { return combinedClasses[c][f.key] === firstVal; });
-            (allSame ? sharedFields : varyingFields).push(f);
-        });
-
-        if (sharedFields.length > 0) {
-            var parts = sharedFields.map(function (f) {
-                var v = combinedClasses[classKeys[0]][f.key];
-                if (f.descriptive) return '<strong>' + v + '<' + '/strong>';
-                return '<strong>' + f.label + ':<' + '/strong> ' + v + (f.suffix || '');
-            });
-            w.document.write('<div class="rules-shared">' + parts.join(' &nbsp;|&nbsp; ') + '<' + '/div>');
-        }
-
-        if (varyingFields.length > 0) {
-            // Group classes by their full varying-field signature
-            var sigGroups = {};
-            var sigOrder = [];
-            classKeys.forEach(function (c) {
-                var sig = varyingFields.map(function (f) { return String(combinedClasses[c][f.key]); }).join('|');
-                if (!sigGroups[sig]) { sigGroups[sig] = []; sigOrder.push(sig); }
-                sigGroups[sig].push(c);
-            });
-            w.document.write('<table class="rules-tbl"><thead><tr><th>Vapenklass<' + '/th>');
-            varyingFields.forEach(function (f) { w.document.write('<th>' + f.label + '<' + '/th>'); });
-            w.document.write('<' + '/tr><' + '/thead><tbody>');
-            sigOrder.forEach(function (sig) {
-                w.document.write('<tr><td>' + sigGroups[sig].join(', ') + '<' + '/td>');
-                varyingFields.forEach(function (f) {
-                    var v = combinedClasses[sigGroups[sig][0]][f.key];
-                    var cell = (v == null ? '' : v) + (f.suffix || '');
-                    w.document.write('<td>' + cell + '<' + '/td>');
-                });
-                w.document.write('<' + '/tr>');
-            });
-            w.document.write('<' + '/tbody><' + '/table>');
-        }
-    } else {
-        w.document.write('<strong>Skjuttid:<' + '/strong> ' + station.shootingTimeSec + ' sek');
-        w.document.write(' &nbsp;|&nbsp; <strong>Utg\u00e5ngsl\u00e4ge:<' + '/strong> ' + station.shooterStartPosition);
-        w.document.write(' &nbsp;|&nbsp; <strong>Vapenl\u00e4ge:<' + '/strong> ' + station.weaponStartPosition);
-        w.document.write(' &nbsp;|&nbsp; <strong>' + station.supportHand + '<' + '/strong>');
-        if (station.minShotsPerFigure && station.minShotsPerFigure > 0) w.document.write('<br><strong>Min träff/fig:<' + '/strong> ' + station.minShotsPerFigure);
-        if (!isPoang && station.maxShotsPerFigure && station.maxShotsPerFigure < 6) w.document.write(' &nbsp;|&nbsp; <strong>Max träff/fig:<' + '/strong> ' + station.maxShotsPerFigure);
-    }
-    w.document.write('<' + '/div>');
-
-    // Target groups and figures
-    (station.targetGroups || []).forEach(function(tg, tgIdx) {
-        var tgLetter = String.fromCharCode(64 + tg.group);
-        w.document.write('<div class="tg">');
-        w.document.write('<h3>M\u00e5lgrupp ' + tgLetter + '<' + '/h3>');
-        if (tg.description) w.document.write('<div class="tg-desc">' + tg.description.replace(/\n/g, '<br>') + '<' + '/div>');
-        if (tg.imageUrl) w.document.write('<div class="tg-img"><img src="' + tg.imageUrl + '" alt="M\u00e5lgrupp ' + tgLetter + '"><' + '/div>');
-        (tg.figures || []).forEach(function(fig, fIdx) {
-            w.document.write('<div class="fig">');
-            if (fig.imageUrl) w.document.write('<img src="' + fig.imageUrl + '" alt="">');
-            w.document.write('<div class="fig-info">');
-            w.document.write('<strong>Figur ' + fig.figureNumber + '<' + '/strong>');
-            if (fig.isPoangmal) w.document.write(' <span class="pm-badge">Po\u00e4ngr\u00e4kning<' + '/span>');
-
-            // For moving figures in combined mode: show per-class timing
-            if (isCombined && fig.behavior !== 'Fast') {
-                w.document.write(' \u2014 ' + fig.behavior);
-                // Group classes by their timing for this figure
-                var timingGroups = {};
-                classKeys.forEach(function(c) {
-                    var cFig = combinedClasses[c].targetGroups[tgIdx].figures[fIdx];
-                    var desc = faltDescribeBehavior(cFig);
-                    // Strip the behavior name prefix since we already printed it
-                    desc = desc.replace(/^(Framsv\u00e4ngande|Bortsv\u00e4ngande|R\u00f6rligt)/, '').replace(/^,\s*/, '');
-                    if (!timingGroups[desc]) timingGroups[desc] = [];
-                    timingGroups[desc].push(c);
-                });
-                var tKeys = Object.keys(timingGroups);
-                if (tKeys.length === 1) {
-                    // All classes have same timing — show once
-                    if (tKeys[0]) w.document.write(', ' + tKeys[0]);
-                } else {
-                    // Different timing per class group
-                    w.document.write('<br>');
-                    tKeys.forEach(function(desc) {
-                        w.document.write('<div class="time-variants">' + timingGroups[desc].join(',') + ': ' + (desc || 'inga tider') + '<' + '/div>');
-                    });
-                }
-            } else {
-                w.document.write(' \u2014 ' + faltDescribeBehavior(fig));
-            }
-
-            w.document.write('<' + '/div><' + '/div>');
-        });
-        w.document.write('<' + '/div>');
-    });
-
-    // Two QR codes: QR-1 (F\u00f6ruts\u00e4ttningar, secret token) stays on the card;
-    // QR-2 (result entry) is a separate cut-out to place by the m\u00e5lgrupper.
-    var compId = faltCfgGetCompetitionId();
-    if (compId) {
-        // QR-1 \u2014 F\u00f6ruts\u00e4ttningar. Token minted + rendered server-side
-        // (GetStationInfoQr): non-enumerable, no login. Slightly larger because
-        // the token URL is denser than ?c&s.
-        var qr1Src = '/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId=' + compId + '&stationNumber=' + stationNum;
-        w.document.write('<div style="margin-top:20px;text-align:center;page-break-inside:avoid">');
-        w.document.write('<img src="' + qr1Src + '" alt="QR F\u00f6ruts\u00e4ttningar" style="width:150px;height:150px">');
-        w.document.write('<div style="font-size:0.85em;color:#333;margin-top:4px;font-weight:bold">F\u00f6ruts\u00e4ttningar \u2014 skanna h\u00e4r<' + '/div>');
-        w.document.write('<' + '/div>');
-
-        // QR-2 \u2014 Result entry (login required). Own page; cut out + place by targets.
-        var entryUrl = window.location.origin + '/station?c=' + compId + '&s=' + stationNum;
-        var qr2Src = '/umbraco/surface/Faltskytte/GenerateQrCode?url=' + encodeURIComponent(entryUrl);
-        w.document.write('<div style="margin-top:24px;page-break-before:always;border:2px dashed #888;border-radius:8px;padding:16px;text-align:center">');
-        w.document.write('<div style="font-size:1.1em;font-weight:bold;margin-bottom:8px">Station ' + stationNum + ' \u2014 Resultatregistrering<' + '/div>');
-        w.document.write('<img src="' + qr2Src + '" alt="QR Resultat" style="width:150px;height:150px">');
-        w.document.write('<div style="font-size:0.85em;color:#333;margin-top:4px">Klipp ut och placera vid m\u00e5lgrupperna<' + '/div>');
-        w.document.write('<div style="font-size:0.8em;color:#666">Kr\u00e4ver inloggning<' + '/div>');
-        w.document.write('<' + '/div>');
-    }
-
-    w.document.write('<' + '/body><' + '/html>');
-    w.document.close();
-    faltCfgPrintWhenReady(w);
 }
 
-function faltCfgPrintWhenReady(w) {
-    var imgs = w.document.querySelectorAll('img');
-    if (imgs.length === 0) { w.print(); return; }
-    var remaining = imgs.length;
-    function done() { remaining--; if (remaining <= 0) w.print(); }
-    imgs.forEach(function(img) {
-        if (img.complete) { done(); }
-        else { img.onload = done; img.onerror = done; }
-    });
-}
 
 // ─── Banan i planeringen (2026-10-24) ───────────────────────────────
 // #station=N (länken från planeringens uppgift "Bygg station N") fäller ut och rullar fram stationen, en gång.

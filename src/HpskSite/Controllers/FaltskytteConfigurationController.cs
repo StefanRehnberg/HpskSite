@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly ILogger<FaltskytteConfigurationController> _logger;
         private readonly HpskSite.Services.MemberDirectoryService _directory;
+        private readonly HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService _printOptions;
 
         public FaltskytteConfigurationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -36,14 +37,116 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             ClubService clubService,
             ILogger<FaltskytteConfigurationController> logger,
-            HpskSite.Services.MemberDirectoryService directory)
+            HpskSite.Services.MemberDirectoryService directory,
+            HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService printOptions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _printOptions = printOptions;
             _directory = directory;
             _configService = configService;
             _memberService = memberService;
             _clubService = clubService;
             _logger = logger;
+        }
+
+        // ── Stationskort ur editorn ──────────────────────────────────────
+
+        public sealed class StationCardFromEditorRequest
+        {
+            /// <summary>Editorns aktuella konfiguration (faltCfgData som JSON), även osparade ändringar.</summary>
+            public string? Json { get; set; }
+            public int Station { get; set; }
+            public string? WeaponClass { get; set; }
+            public int? CompetitionId { get; set; }
+            /// <summary>Tävlingstypen när konfigurationen själv inte bär `_scoringMode`.</summary>
+            public string? ScoringMode { get; set; }
+            /// <summary>Konfigurationens id när den är sparad (fristående editor eller ansluten); bär Full/Kompakt per station.</summary>
+            public int? ConfigId { get; set; }
+        }
+
+        public sealed class StationPrintModeRequest
+        {
+            public int ConfigId { get; set; }
+            public int Station { get; set; }
+            public string? Mode { get; set; }
+        }
+
+        /// <summary>Full eller Kompakt för en station. Den som får ändra konfigurationen får välja; valet rör aldrig konfigurationens blob.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("GetByIdAsync + CanEditAsync: bara den som får ändra konfigurationen")]
+        public async Task<IActionResult> SetStationPrintMode([FromBody] StationPrintModeRequest request)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return StatusCode(401, "Inloggning krävs.");
+            if (!HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintMode.IsValid(request.Mode) || request.Station <= 0)
+                return BadRequest("Okänt läge eller station.");
+            var cfg = await _configService.GetByIdAsync(request.ConfigId);
+            if (cfg == null || !await _configService.CanEditAsync(cfg, viewerId))
+                return StatusCode(403, "Du får inte ändra den här konfigurationen.");
+            try
+            {
+                _printOptions.Set(cfg.Id, request.Station, request.Mode!, viewerId);
+                return Json(new { success = true, mode = request.Mode });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte spara utskriftsläge för konfiguration {ConfigId} station {Station}", cfg.Id, request.Station);
+                return StatusCode(500, "Valet kunde inte sparas.");
+            }
+        }
+
+        /// <summary>
+        /// Konfiguratorns "Skriv ut stationskort": samma renderare som tävlingens kort (StationCardRenderer), men ur
+        /// det editorn har just nu. Ger bara tillbaka kortet för det som skickades in, så den som är inloggad kan
+        /// inte läsa något hen inte redan hade. Texten HTML-kodas i renderaren.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("GetCurrentMemberIdAsync: inloggad medlem; ger bara tillbaka det som skickades in")]
+        public async Task<IActionResult> StationCardHtml([FromBody] StationCardFromEditorRequest request)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return StatusCode(401, "Inloggning krävs.");
+            if (string.IsNullOrWhiteSpace(request.Json) || request.Json.Length > 4_000_000)
+                return BadRequest("Konfigurationen saknas eller är för stor.");
+
+            var config = FaltskytteConfigParser.Parse(request.Json);
+            var meta = HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.ReadMeta(request.Json);
+            var byWc = new Dictionary<string, FaltskytteStationConfig>();
+            foreach (var kv in config.WeaponConfigs)
+            {
+                var st = kv.Value.Stations.FirstOrDefault(s => s.Station == request.Station);
+                if (st != null) byWc[kv.Key] = st;
+            }
+            if (byWc.Count == 0) return NotFound("Stationen finns inte.");
+
+            var item = new StationPrintItem { Station = request.Station, StationsByWeaponClass = byWc };
+            // Full/Kompakt ligger utanför blobben: läs det sparade valet för den här konfigurationen.
+            var printMode = HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintMode.Full;
+            var canSetMode = false;
+            var cfgId = request.ConfigId ?? 0;
+            if (cfgId > 0)
+            {
+                item.Compact = _printOptions.CompactStations(cfgId).Contains(request.Station);
+                if (item.Compact) printMode = HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintMode.Kompakt;
+                var cfg = await _configService.GetByIdAsync(cfgId);
+                canSetMode = cfg != null && await _configService.CanEditAsync(cfg, viewerId);
+            }
+            if (request.CompetitionId is int compId && compId > 0)
+            {
+                var entryUrl = $"{Request.PublicBase()}/station?c={compId}&s={request.Station}";
+                item.Qr1Url = $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={compId}&stationNumber={request.Station}";
+                item.Qr2Url = $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}";
+            }
+
+            var blocks = HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.BuildBlocks(item, meta.Strict, meta.CourseStations, request.WeaponClass);
+            var isPoang = FaltskytteScoringMode.IsPoang(config, request.ScoringMode);
+            var title = "Station " + request.Station + (blocks.Count == 1 && blocks[0].ShowClassesInHeader ? " — " + string.Join(", ", blocks[0].Classes) : "");
+            // Förhandsvisning med verktygsfält (Full/Kompakt, sidräknare, Skriv ut) i stället för att skrivardialogen öppnas direkt.
+            var toolbar = new HpskSite.CompetitionTypes.Faltskytte.Services.StationCardToolbar { Station = request.Station, WeaponClass = request.WeaponClass, Mode = printMode, CanSetMode = canSetMode };
+            var html = HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.RenderDocument(title, null, blocks, isPoang, autoPrint: false, toolbar: toolbar);
+            return Content(html, "text/html; charset=utf-8");
         }
 
         // ── Reads ────────────────────────────────────────────────────────

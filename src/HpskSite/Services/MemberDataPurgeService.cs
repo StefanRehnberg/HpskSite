@@ -234,6 +234,8 @@ namespace HpskSite.Services
             ("CompetitionCallWish",                  "RegisteredByMemberId",  "UpdatedAt = UpdatedAt"),
             // Klubbprogrammet (F7): den som stängde rollen är en aktör; stängningen står kvar.
             ("CompetitionManagerClosure",            "ClosedByMemberId",      "ClosedAt = ClosedAt"),
+            // Stationskortets Full/Kompakt (fas 3b): den som satte valet är en aktör; valet står kvar.
+            ("FaltskytteStationPrintOption",         "UpdatedByMemberId",     "UpdatedAt = UpdatedAt"),
         };
 
         /// <summary>

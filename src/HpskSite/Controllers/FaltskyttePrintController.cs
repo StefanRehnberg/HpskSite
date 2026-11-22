@@ -22,9 +22,13 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
+        private readonly HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService _printOptions;
+
         public FaltskyttePrintController(IContentService contentService, AdminAuthorizationService auth,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService printOptions)
         {
+            _printOptions = printOptions;
             _competitions = competitions;
             _contentService = contentService;
             _auth = auth;
@@ -41,7 +45,9 @@ namespace HpskSite.Controllers
             var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
-            var model = BuildModel(competition, competitionId, station, $"{Request.PublicBase()}", withQr: true);
+            // Full/Kompakt per station läses via den anslutna konfigurationen (utanför blobben); saknas den blir det Full.
+            var compact = _printOptions.CompactStations(HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.ReadAttachedConfigId(competition.StationConfig));
+            var model = BuildModel(competition, competitionId, station, $"{Request.PublicBase()}", withQr: true, compactStations: compact);
 
             return View("~/Views/FaltskyttePrintStationCards.cshtml", model);
         }
@@ -50,7 +56,7 @@ namespace HpskSite.Controllers
         /// Stationskortens modell ur tävlingens stationConfig. Delas med kretsens bangranskning
         /// (KretsenController, utan QR-koder), så granskaren ser samma kort som arrangören skriver ut.
         /// </summary>
-        internal static FaltskyttePrintStationCardsModel BuildModel(HpskSite.Models.Competitions.CompetitionInfo competition, int competitionId, int? station, string baseUrl, bool withQr)
+        internal static FaltskyttePrintStationCardsModel BuildModel(HpskSite.Models.Competitions.CompetitionInfo competition, int competitionId, int? station, string baseUrl, bool withQr, IReadOnlySet<int>? compactStations = null)
         {
                 var config = FaltskytteConfigParser.Parse(competition.StationConfig ?? "");
                 var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
@@ -61,8 +67,11 @@ namespace HpskSite.Controllers
                     .Where(n => station == null || n == station.Value)
                     .ToList();
     
+                var meta = HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.ReadMeta(competition.StationConfig);
                 var model = new FaltskyttePrintStationCardsModel
                 {
+                    StrictGrouping = meta.Strict,
+                    CourseStations = meta.CourseStations,
                     CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                     // Config wins over the competition's mirrored property — see
                     // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
@@ -81,6 +90,7 @@ namespace HpskSite.Controllers
                         {
                             Station = n,
                             StationsByWeaponClass = byWc,
+                            Compact = compactStations != null && compactStations.Contains(n),
                             // QR-1 mints its token + renders server-side; relative img src is fine.
                             Qr1Url = !withQr ? "" : $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={competitionId}&stationNumber={n}",
                             // QR-2 encodes the absolute entry URL.

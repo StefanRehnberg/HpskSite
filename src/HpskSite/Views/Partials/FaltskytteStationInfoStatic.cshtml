@@ -21,46 +21,12 @@
     // in FaltskytteStationEntry.cshtml. Plain int[]{from,to} arrays — named tuples
     // are fragile inside Razor @functions/ternaries.
     static List<int[]> FigBands(FaltskytteFigure fig, int shootSec)
-    {
-        var bands = new List<int[]>();
-        var b = fig.Behavior ?? "Fast";
-        if (b == "Framsvängande")
-        {
-            int delay = fig.DelayBeforeShowSec ?? 0;
-            int dur = fig.ShowTimeSec ?? 8;
-            if (dur <= 0) return bands;
-            int from = Math.Max(0, Math.Min(shootSec, delay));
-            int to = Math.Max(from, Math.Min(shootSec, delay + dur));
-            if (from < to) bands.Add(new[] { from, to });
-            return bands;
-        }
-        if (b == "Bortsvängande")
-        {
-            int hideAt = fig.HideAfterSec ?? 8;
-            int reappear = fig.ReappearSec ?? 0;
-            if (hideAt > 0) bands.Add(new[] { 0, Math.Min(shootSec, hideAt) });
-            if (reappear > 0 && reappear < shootSec) bands.Add(new[] { reappear, shootSec });
-            return bands;
-        }
-        bands.Add(new[] { 0, shootSec }); // Fast/static → visible whole time
-        return bands;
-    }
+        => HpskSite.CompetitionTypes.Faltskytte.Services.ExposureWindows.For(fig, shootSec);
 
     static string Pct(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
-    // Mirrors faltDescribeBehavior in _FaltskytteConfiguratorScript.cshtml.
-    static string FigTiming(FaltskytteFigure fig)
-    {
-        var b = fig.Behavior ?? "Fast";
-        if (b == "Framsvängande")
-            return $"Framsvängande, fram {fig.DelayBeforeShowSec ?? 0} s, syns {fig.ShowTimeSec ?? 8} s";
-        if (b == "Bortsvängande")
-        {
-            var r = fig.ReappearSec ?? 0;
-            return $"Bortsvängande, ut {fig.HideAfterSec ?? 8} s" + (r > 0 ? $", åter {r} s" : "");
-        }
-        return b;
-    }
+    // EN beteendetext för alla stationsytor (Stefan 2026-11-21): samma funktion som stationskortet.
+    static string FigTiming(FaltskytteFigure fig) => HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.BehaviorText(fig);
 
     static readonly string[] WcOrder = new[] { "C", "B", "A", "A_Opt", "R", "L", "M" };
     static string OrderKey(string wc)
