@@ -265,6 +265,37 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             }
         }
 
+        /// <summary>
+        /// ApplyShootOffOverride omsorterar kategoriställningen (<paramref name="categoryOrdered"/>), men resultatlistan ritas ur
+        /// KLASSGRUPPERNA — en annan lista med samma skytteobjekt. Utan den här synkningen låg listan kvar i poängmålsordning och
+        /// visade fel plats efter en avgjord särskjutning (Mikael Kotschy, KM fält 7557, 2026-11-22). De tiade skyttarna
+        /// byter bara plats SINSEMELLAN: de platser de redan upptar i klassgruppen återanvänds, så ingen annan flyttas.
+        /// </summary>
+        public static void SyncClassGroupsWithShootOff(
+            IEnumerable<FaltskytteClassGroup> classGroups,
+            List<FaltskytteShooterResult> categoryOrdered,
+            List<FaltskytteTiedMedalGroup> tiedGroups)
+        {
+            foreach (var group in tiedGroups)
+            {
+                if (group.RoundsCompleted <= 0) continue;
+                var members = categoryOrdered.GetRange(group.FirstRank - 1, group.Shooters.Count);
+                var rank = new Dictionary<FaltskytteShooterResult, int>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+                for (var i = 0; i < members.Count; i++) rank[members[i]] = i;
+
+                foreach (var cg in classGroups)
+                {
+                    var slots = new List<int>();
+                    for (var i = 0; i < cg.Shooters.Count; i++)
+                        if (rank.ContainsKey(cg.Shooters[i])) slots.Add(i);
+                    if (slots.Count < 2) continue;
+
+                    var reordered = slots.Select(i => cg.Shooters[i]).OrderBy(s => rank[s]).ToList();
+                    for (var k = 0; k < slots.Count; k++) cg.Shooters[slots[k]] = reordered[k];
+                }
+            }
+        }
+
         // ── Progressive resolution ────────────────────────────────────────
 
         internal static void ComputeProgressiveStatus(

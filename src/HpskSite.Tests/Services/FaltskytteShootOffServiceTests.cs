@@ -316,6 +316,35 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
+        public void SyncClassGroups_KM7557_ResultatlistanFoljerSarskjutningen()
+        {
+            // Mikael Kotschys rapport: 48/32 för alla fyra, listan låg kvar i poängmålsordning (Simon, Mikael, Daniel, Fredrik)
+            // fast särskjutningen avgjorde Daniel, Simon, Mikael, Fredrik.
+            FaltskytteShooterResult S(int id, string n, int pm) =>
+                new() { MemberId = id, Name = n, ShootingClass = "A3", TotalHits = 48, TotalFigures = 32, TotalTiebreakerScore = pm };
+            var simon = S(1, "Simon", 34); var mikael = S(2, "Mikael", 25); var daniel = S(3, "Daniel", 24); var fredrik = S(4, "Fredrik", 22);
+            var other = new FaltskytteShooterResult { MemberId = 5, Name = "Jan", ShootingClass = "A3", TotalHits = 46, TotalFigures = 31 };
+            var sorted = new List<FaltskytteShooterResult> { simon, mikael, daniel, fredrik };
+            var cg = new FaltskytteClassGroup { ClassName = "A3", Shooters = new List<FaltskytteShooterResult> { simon, mikael, daniel, fredrik, other } };
+
+            FaltskytteShootOffEntry E(int id, int round, int hits, int figs) =>
+                new() { MemberId = id, ShootingClass = "A3", Round = round, Hits = hits, Figures = figs };
+            var entries = new[]
+            {
+                E(1,1,6,5), E(2,1,6,5), E(3,1,6,5), E(4,1,6,5),
+                E(1,2,6,5), E(2,2,6,5), E(3,2,6,5), E(4,2,6,5),
+                E(1,3,5,4), E(2,3,4,4), E(3,3,6,5), E(4,3,4,4),
+                E(2,4,6,5), E(4,4,4,3),
+            };
+
+            var tied = FaltskytteShootOffService.DetectTiedMedalGroups(sorted, "Normal", "Faltskytte");
+            FaltskytteShootOffService.ApplyShootOffOverride(sorted, tied, entries.ToLookup(e => e.MemberId), new NormalRoundComparer());
+            FaltskytteShootOffService.SyncClassGroupsWithShootOff(new[] { cg }, sorted, tied);
+
+            cg.Shooters.Select(s => s.Name).Should().Equal("Daniel", "Simon", "Mikael", "Fredrik", "Jan");
+        }
+
+        [Fact]
         public void ApplyShootOffOverride_NoEntries_StillTied()
         {
             var sorted = new List<FaltskytteShooterResult>

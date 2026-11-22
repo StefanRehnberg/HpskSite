@@ -264,16 +264,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // outsideOverride: ENBART Rätta-flödets "hur ser listan ut om…" (förhandsvisningen) — aldrig ett skrivande anrop.
             var outside = outsideOverride ?? _outOfCompetition.Load(competition, championshipRule);
             var placementsAssigned = championshipRule.OutOfCompetitionApplies;
-            if (placementsAssigned)
+            void AssignPlacements()
             {
-                foreach (var s in shooterResults)
-                    s.OutOfCompetition = outside.Contains(s.MemberId, s.ShootingClass);
                 foreach (var cg in classGroups)
                 {
                     var place = 0;
                     foreach (var s in cg.Shooters)
                         s.Placement = s.OutOfCompetition ? null : ++place;
                 }
+            }
+            if (placementsAssigned)
+            {
+                foreach (var s in shooterResults)
+                    s.OutOfCompetition = outside.Contains(s.MemberId, s.ShootingClass);
+                AssignPlacements();
             }
             // ── Mästerskapskategorier och särskjutning ───────────────────────────────
             //
@@ -336,27 +340,36 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                     FaltskytteShootOffService.ApplyShootOffOverride(
                         standing.Ordered, tied, entriesByMember, comparer);
+                    // Resultatlistan ritas ur klassgrupperna — låt dem följa särskjutningen (platserna sätts om efter loopen).
+                    FaltskytteShootOffService.SyncClassGroupsWithShootOff(classGroups, standing.Ordered, tied);
 
                     medalCategoryTies.Add(new FaltskytteMedalCategoryTies
                     {
                         CategoryName = standing.CategoryName,
                         Groups = tied
                     });
+                    if (placementsAssigned) AssignPlacements();
 
                     foreach (var g in tied)
                     {
                         if (!g.Resolved || g.Shooters.Count < 2) continue;
-                        var ordered = g.Shooters
+                        // I SLUTPLACERING (inte i den ordning de stod tiade) och med ALLA ronder: en skytts sista rond säger
+                        // ingenting om vem som vann, eftersom de som redan skilts åt slutar skjuta.
+                        var finalOrder = standing.Ordered
+                            .Skip(g.FirstRank - 1).Take(g.Shooters.Count)
+                            .Select(l => g.Shooters.FirstOrDefault(s => s.MemberId == l.MemberId
+                                && string.Equals(s.ShootingClass, l.ShootingClass, StringComparison.OrdinalIgnoreCase)))
+                            .Where(s => s != null)
+                            .Select(s => s!)
+                            .ToList();
+                        var ordered = finalOrder
                             .Where(s => s.Rounds != null && s.Rounds.Count > 0)
                             .ToList();
                         if (ordered.Count < 2) continue;
 
                         var medalNouns = FaltskytteShootOffService.MedalNounsForRange(g.FirstRank, g.LastRank);
                         var parts = ordered.Select(s =>
-                        {
-                            var lastRound = s.Rounds.OrderByDescending(r => r.Round).First();
-                            return $"{s.Name} {lastRound.Display}";
-                        });
+                            $"{s.Name} {string.Join(" → ", s.Rounds.OrderBy(r => r.Round).Select(r => r.Display))}");
                         var note = $"Särskjutning avgjorde {medalNouns} i {standing.CategoryName}: "
                                  + string.Join(" vs ", parts);
 
