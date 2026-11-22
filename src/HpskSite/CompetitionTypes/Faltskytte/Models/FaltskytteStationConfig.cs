@@ -38,6 +38,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
             var groupCode = ShootingClasses.GetWeaponClassCode(weaponClass);
             if (!string.IsNullOrEmpty(groupCode) && WeaponConfigs.TryGetValue(groupCode, out config))
                 return config;
+            // Magnum (M, M1–M9) får ALDRIG en annan klass konfiguration (omtaget 2026-11-22): tider, avstånd och figurer är
+            // andra, så en tyst reserv ger fel siffror utan att något syns. Saknas nyckeln M är svaret null.
+            if (groupCode == "M" || weaponClass == "M") return null;
             return WeaponConfigs.Values.FirstOrDefault();
         }
     }

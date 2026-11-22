@@ -83,6 +83,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>Omgång 3 (K9): versionen för <see cref="UpdateFaltskytteConfigurationRequest.ExpectedVersion"/>.</summary>
         public string Version => ModifiedDate.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
         public int StationCount { get; set; }
+        /// <summary>Vapengrupperna (nycklarna: A, B, C, R, M …) som konfigurationen har stationer för; visas som märken i väljarna.</summary>
+        public List<string> WeaponGroups { get; set; } = new();
         public List<CollaboratorView> Collaborators { get; set; } = new();
         public bool CanEdit { get; set; }
         public bool CanDelete { get; set; }

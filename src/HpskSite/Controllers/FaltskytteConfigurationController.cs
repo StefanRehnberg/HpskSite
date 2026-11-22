@@ -176,6 +176,27 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Passar konfigurationen tävlingens typ? (Magnum-omtaget 2026-11-22.) En Magnumfält-tävling kräver vapengrupp M, vanlig
+        /// fält kräver att det inte bara finns M. Svaret är meningar att visa; det spärrar ingenting.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("GetCurrentMemberIdAsync + CanViewAsync: bara den som får se konfigurationen")]
+        public async Task<IActionResult> CompatibilityCheck(int id, string? competitionType)
+        {
+            var viewerId = await _configService.GetCurrentMemberIdAsync();
+            if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+            var config = await _configService.GetByIdAsync(id);
+            if (config == null || !await _configService.CanViewAsync(config, viewerId))
+                return Json(new { success = false, message = "Konfigurationen hittades inte." });
+            return Json(new
+            {
+                success = true,
+                weaponGroups = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteConfigCompatibility.WeaponGroupsOf(config.JsonBlob),
+                problems = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteConfigCompatibility.Problems(config.JsonBlob, competitionType)
+            });
+        }
+
         /// <summary>Returns a single configuration, full view including JSON blob. Auth via CanViewAsync.</summary>
         [HttpGet]
         public async Task<IActionResult> Get(int id)

@@ -920,6 +920,7 @@ namespace HpskSite.Services
                 ReturnedDate = config.ReturnedDate,
                 FirstStationNumber = config.FirstStationNumber is > 0 ? config.FirstStationNumber.Value : 1,
                 StationCount = stationCount,
+                WeaponGroups = HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteConfigCompatibility.WeaponGroupsOf(config.JsonBlob).ToList(),
                 Collaborators = collaborators.Select(c => new CollaboratorView
                 {
                     MemberId = c.MemberId,

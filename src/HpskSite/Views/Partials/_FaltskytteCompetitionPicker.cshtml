@@ -96,7 +96,8 @@
         });
         sorted.forEach(function(c) {
             var prefix2 = c.approvalStatus === 'Approved' ? '✓ ' : (c.approvalStatus === 'PendingApproval' ? '⏳ ' : '');
-            var label = prefix2 + c.name + ' (' + c.stationCount + ' stationer, ' + c.ownerMemberName + ')';
+            var groupsText = (c.weaponGroups || []).map(function(g) { return g === 'M' ? 'Magnum' : g; }).join(' ');
+            var label = prefix2 + c.name + ' (' + c.stationCount + ' stationer' + (groupsText ? ', ' + groupsText : '') + ', ' + c.ownerMemberName + ')';
             sel.innerHTML += '<option value="' + c.id + '">' + label.replace(/"/g, '&quot;') + '</option>';
         });
         if (prev) sel.value = prev;
@@ -116,7 +117,14 @@
         var configId = parseInt(sel.value);
         var cfg = (window._faltPickerCache || []).find(function(c) { return c.id === configId; });
         if (!cfg) return;
-        if (!confirm('Kopiera konfigurationen "' + cfg.name + '" till tävlingen?\n\nTävlingens nuvarande stationsdata skrivs över. Senare ändringar i konfigurationen följer inte med.')) return;
+        // Passar konfigurationen tävlingens typ? (En Magnumfält-tävling kräver vapengrupp M.) Bara en varning i frågan, ingen spärr.
+        var compTypeEl = document.getElementById(prefix + 'competitionType') || document.getElementById(prefix + 'competitionTypeSelect');
+        var problemText = '';
+        try {
+            var chk = await (await fetch('/umbraco/surface/FaltskytteConfiguration/CompatibilityCheck?id=' + configId + '&competitionType=' + encodeURIComponent(compTypeEl ? compTypeEl.value : ''))).json();
+            if (chk && chk.success && chk.problems && chk.problems.length) problemText = '\n\nObs:\n- ' + chk.problems.join('\n- ');
+        } catch (e) { /* kontrollen är en hjälp, aldrig ett hinder */ }
+        if (!confirm('Kopiera konfigurationen "' + cfg.name + '" till tävlingen?\n\nTävlingens nuvarande stationsdata skrivs över. Senare ändringar i konfigurationen följer inte med.' + problemText)) return;
 
         try {
             var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + configId);
