@@ -342,6 +342,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         standing.Ordered, tied, entriesByMember, comparer);
                     // Resultatlistan ritas ur klassgrupperna — låt dem följa särskjutningen (platserna sätts om efter loopen).
                     FaltskytteShootOffService.SyncClassGroupsWithShootOff(classGroups, standing.Ordered, tied);
+                    // Platsen i kategorin för dem en särskjutning skilt åt — vapengruppsvyn i webbläsaren sorterar om på poäng och behöver den.
+                    foreach (var tg in tied.Where(t => t.RoundsCompleted > 0))
+                        for (var i = tg.FirstRank - 1; i < tg.FirstRank - 1 + tg.Shooters.Count && i < standing.Ordered.Count; i++)
+                            standing.Ordered[i].ShootOffRank = i + 1;
 
                     medalCategoryTies.Add(new FaltskytteMedalCategoryTies
                     {

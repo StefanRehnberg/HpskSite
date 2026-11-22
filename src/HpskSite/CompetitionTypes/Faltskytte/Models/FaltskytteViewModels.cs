@@ -452,6 +452,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         /// <summary>The next round the shooter must shoot. Null when resolved OR when they have
         /// already shot the current round but tied opponents have not yet (waiting state).</summary>
         public int? ShootOffNextRound { get; set; }
+
+        /// <summary>Platsen (1 = bäst) i mästerskapskategorin efter särskjutningen, bara för skyttar i en tiad medaljgrupp där en
+        /// särskjutning skjutits. Vapengruppsvyn sorterar om skyttarna på poäng i webbläsaren och läser den här platsen för att
+        /// inte köra över särskjutningens avgörande (KM fält 7557).</summary>
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public int? ShootOffRank { get; set; }
     }
 
     public class FaltskytteStationResult

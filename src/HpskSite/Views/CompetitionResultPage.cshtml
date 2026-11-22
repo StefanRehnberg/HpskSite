@@ -1316,9 +1316,13 @@
         }
 
         function faltFlattenByWeaponGroup(classGroups, isPoang, placementsAssigned) {
+            // En avgjord särskjutning går före målpoängen (tiebreaker): skyttar vars plats särskjutningen avgjort har en
+            // shootOffRank från servern (lägre = bättre). Utan den här nyckeln sorterades de om på målpoäng och listan
+            // visade fel plats (KM fält 7557). Skyttar utan särskjutning får -1e6 och hamnar efter.
+            const soKey = s => s.shootOffRank != null ? -s.shootOffRank : -1e6;
             const keys = s => isPoang
-                ? [s.totalPoints || 0, s.totalTiebreakerScore || 0, 0]
-                : [s.totalHits || 0, s.totalFigures || 0, s.totalTiebreakerScore || 0];
+                ? [s.totalPoints || 0, soKey(s), s.totalTiebreakerScore || 0, 0]
+                : [s.totalHits || 0, s.totalFigures || 0, soKey(s), s.totalTiebreakerScore || 0];
 
             const byCode = new Map();
             const notesByCode = new Map();
