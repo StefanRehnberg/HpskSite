@@ -91,6 +91,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
     public static class FaltPatrolEngine
     {
         public static readonly string[] Groups = { "C", "B", "A", "R" };
+        /// <summary>Magnum (M, klasserna M1–M9) är ingen blockgrupp i motorn (en magnumtävling har bara M-skyttar), men dess skjuttid läses ur konfigurationen och en M-skytt med tid i konfigurationen är inte "ogrupperad".</summary>
+        public const string MagnumGroup = "M";
         public const double Day2Offset = 1440;
         public const int MaxStarts = 1500;   // SM 2024 hade ca 1 200 starter över fyra dagar och en dag har som mest ca 400; planeringen görs en dag i taget
         static readonly double[] SoftWish = { 10, 30, 100 };
@@ -675,7 +677,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
                 if (!changed) break;
             }
             var result = new PlanResult { Id = id + "-gen", Patrols = dsx, Pre = pre };
-            result.Ungrouped = ents.Select(e => Tg(e.G)).Where(g => GroupIdx(g) < 0).Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
+            // "Ogrupperad" = utan skjuttid i konfigurationen (tidtas med 20 s). En grupp med egen tid på varje station (Magnum, M) är det inte.
+            bool HasOwnTime(string g) => p.St.Count > 0 && p.St.All(st => st.Sec != null && st.Sec.TryGetValue(g, out var sv) && sv > 0);
+            result.Ungrouped = ents.Select(e => Tg(e.G)).Where(g => GroupIdx(g) < 0 && !(g == MagnumGroup && HasOwnTime(g))).Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
             if (p.Waived != null) result.Waived = p.Waived.Where(wid => p.Jobs != null && p.Jobs.ContainsKey(wid) && p.Jobs[wid].Count > 0 && ents.Any(e => e.Id == wid)).OrderBy(x => x).ToList();
             result.Dns = dnsOut;
             var lockedKeys = lockK.Keys.Where(k => !dnsK.ContainsKey(k)).ToHashSet();

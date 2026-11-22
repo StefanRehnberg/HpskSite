@@ -52,6 +52,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
 
         /// <summary>Banans stationer ur tävlingens konfiguration: nummer, namn och skjuttid (sek) per vapengrupp. Särskjutningsstationer räknas inte; en grupp utan egen tid lånar en annan grupps tid.</summary>
+        /// <summary>Motorns fyra grupper plus Magnum (M): tiderna för M läses ur konfigurationen även om M inte är en av motorns blockgrupper.</summary>
+        static IEnumerable<string> WithMagnum(IEnumerable<string> groups) => groups.Concat(new[] { FaltPatrolEngine.MagnumGroup });
+
         public static List<(int Number, string? Name, Dictionary<string, double> Sec)> StationsFromConfig(string? json)
         {
             var result = new List<(int, string?, Dictionary<string, double>)>();
@@ -59,7 +62,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             FaltskytteCompetitionConfig cfg;
             try { cfg = FaltskytteConfigParser.Parse(json); } catch { return result; }
             var byGroup = new Dictionary<string, Dictionary<int, double>>(); var names = new Dictionary<int, string?>(); var nums = new SortedSet<int>();
-            foreach (var g in FaltPatrolEngine.Groups)
+            foreach (var g in WithMagnum(FaltPatrolEngine.Groups))
             {
                 var key = cfg.WeaponConfigs.ContainsKey(g) ? g : g == "A" && cfg.WeaponConfigs.ContainsKey("A_Opt") ? "A_Opt" : null;
                 if (key == null) continue;
@@ -71,10 +74,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             foreach (var n in nums)
             {
                 var own = new Dictionary<string, double>();
-                foreach (var g in FaltPatrolEngine.Groups) if (byGroup.TryGetValue(g, out var m) && m.TryGetValue(n, out var t)) own[g] = t;
+                foreach (var g in WithMagnum(FaltPatrolEngine.Groups)) if (byGroup.TryGetValue(g, out var m) && m.TryGetValue(n, out var t)) own[g] = t;
                 var any = own.Values.FirstOrDefault();
                 var sec = new Dictionary<string, double>();
-                foreach (var g in FaltPatrolEngine.Groups) sec[g] = own.TryGetValue(g, out var t) ? t : any;
+                foreach (var g in WithMagnum(FaltPatrolEngine.Groups))
+                {
+                    // Magnum (M) lånar ALDRIG en annan grupps tid: utan egen tid i konfigurationen finns ingen M-tid, och motorn tidtar den med 20 s och varnar.
+                    if (own.TryGetValue(g, out var t)) sec[g] = t;
+                    else if (g != FaltPatrolEngine.MagnumGroup) sec[g] = any;
+                }
                 result.Add((n, names.GetValueOrDefault(n), sec));
             }
             return result;
