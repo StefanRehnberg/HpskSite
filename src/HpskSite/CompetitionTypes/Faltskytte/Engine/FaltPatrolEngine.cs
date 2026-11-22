@@ -93,6 +93,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
         public static readonly string[] Groups = { "C", "B", "A", "R" };
         /// <summary>Magnum (M, klasserna M1–M9) är ingen blockgrupp i motorn (en magnumtävling har bara M-skyttar), men dess skjuttid läses ur konfigurationen och en M-skytt med tid i konfigurationen är inte "ogrupperad".</summary>
         public const string MagnumGroup = "M";
+        /// <summary>Magnumgrupp: "M" eller en enskild magnumklass (M1..M9). Magnum blandas aldrig med C/B/A/R i en tävling; klasserna hålls isär som standard.</summary>
+        public static bool IsMagnumGroup(string? g) => g == MagnumGroup || (g is { Length: 2 } && g[0] == 'M' && g[1] >= '1' && g[1] <= '9');
         public const double Day2Offset = 1440;
         public const int MaxStarts = 1500;   // SM 2024 hade ca 1 200 starter över fyra dagar och en dag har som mest ca 400; planeringen görs en dag i taget
         static readonly double[] SoftWish = { 10, 30, 100 };
@@ -246,7 +248,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             foreach (var q in patrols) foreach (var z in q.P) { var g = Tg(z.G); if (!present.Contains(g)) present.Add(g); }
             var known = blocks.SelectMany(b => b).ToHashSet();
             var unk = present.Where(g => !known.Contains(g)).ToArray();
-            if (unk.Length > 0) blocks.Add(unk);
+            // Magnumklasserna (M1..M9) hålls isär: ett block per klass i klassernas ordning. Att blanda dem är arrangörens aktiva val ("alla tillsammans" = ordningen "all").
+            if (order != "all")
+            {
+                var magnum = unk.Where(g => IsMagnumGroup(g) && g != MagnumGroup).OrderBy(g => g, StringComparer.Ordinal).ToArray();
+                unk = unk.Where(g => !magnum.Contains(g)).ToArray();
+                if (unk.Length > 0) blocks.Add(unk);
+                foreach (var g in magnum) blocks.Add(new[] { g });
+            }
+            else if (unk.Length > 0) blocks.Add(unk);
             // Blocken följer den valda ordningen mellan vapengrupperna: ett block står där dess först kommande grupp står, och inom ett block kommer grupperna i samma ordning.
             // ("C, B, A och R tillsammans" med ordningen C, A, B, R ger alltså C, sedan A och R tillsammans, sedan B.) Okända grupper ligger sist.
             var ord = OrderOf(p);
@@ -679,7 +689,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Engine
             var result = new PlanResult { Id = id + "-gen", Patrols = dsx, Pre = pre };
             // "Ogrupperad" = utan skjuttid i konfigurationen (tidtas med 20 s). En grupp med egen tid på varje station (Magnum, M) är det inte.
             bool HasOwnTime(string g) => p.St.Count > 0 && p.St.All(st => st.Sec != null && st.Sec.TryGetValue(g, out var sv) && sv > 0);
-            result.Ungrouped = ents.Select(e => Tg(e.G)).Where(g => GroupIdx(g) < 0 && !(g == MagnumGroup && HasOwnTime(g))).Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
+            result.Ungrouped = ents.Select(e => Tg(e.G)).Where(g => GroupIdx(g) < 0 && !(IsMagnumGroup(g) && HasOwnTime(g))).Distinct().OrderBy(g => g, StringComparer.Ordinal).ToList();
             if (p.Waived != null) result.Waived = p.Waived.Where(wid => p.Jobs != null && p.Jobs.ContainsKey(wid) && p.Jobs[wid].Count > 0 && ents.Any(e => e.Id == wid)).OrderBy(x => x).ToList();
             result.Dns = dnsOut;
             var lockedKeys = lockK.Keys.Where(k => !dnsK.ContainsKey(k)).ToHashSet();

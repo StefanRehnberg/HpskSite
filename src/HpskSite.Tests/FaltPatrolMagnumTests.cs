@@ -18,7 +18,7 @@ namespace HpskSite.Tests
         {
             Interval = 8, R = 84, N = 8, Size = 6, Open = 540, Close = 1380, Vila = 15, VilaW = 15, PauseBlock = 8, PauseExt = 30, NextFirst = true,
             Order = order, GroupOrder = groupOrder, Prio = 1, Improve = false,
-            St = Enumerable.Range(0, 8).Select(_ => new StationCfg { Sec = new Dictionary<string, double> { ["C"] = 12, ["B"] = 15, ["A"] = 21, ["R"] = 21, ["M"] = mSec } }).ToList(),
+            St = Enumerable.Range(0, 8).Select(_ => new StationCfg { Sec = new Dictionary<string, double> { ["C"] = 12, ["B"] = 15, ["A"] = 21, ["R"] = 21, ["M"] = mSec, ["M1"] = mSec, ["M2"] = mSec, ["M6"] = mSec } }).ToList(),
         };
 
         static List<EPatrol> Starts(params (string g, int n)[] groups)
@@ -96,6 +96,42 @@ namespace HpskSite.Tests
             var noTime = Params();
             foreach (var st in noTime.St) st.Sec!.Remove("M");
             Assert.Equal(new[] { "M" }, FaltPatrolEngine.Generate("m", Starts(("M", 6)), noTime).Ungrouped);
+        }
+
+        [Fact]
+        public void Magnumklasserna_halls_isar_som_standard_och_blandas_bara_pa_aktivt_val()
+        {
+            // Beslut 2026-11-22: M1, M2 och M6 är egna grupper i motorn. "sep" ger patruller med EN klass var; "all" (arrangörens val) blandar dem.
+            var input = Starts(("M1", 4), ("M2", 4), ("M6", 4));
+            var sep = FaltPatrolEngine.Generate("m", input, Params("sep"));
+            Assert.Equal(12, sep.Patrols.SelectMany(q => q.P).Count());
+            Assert.All(sep.Patrols, q => Assert.Single(q.P.Select(z => z.G).Distinct()));
+            Assert.True(sep.Patrols.Count >= 3, "en patrull per klass som minst");
+            Assert.Empty(sep.Ungrouped);
+
+            var all = FaltPatrolEngine.Generate("m", input, Params("all"));
+            Assert.Equal(12, all.Patrols.SelectMany(q => q.P).Count());
+            Assert.Contains(all.Patrols, q => q.P.Select(z => z.G).Distinct().Count() > 1);
+            Assert.True(all.Patrols.Count < sep.Patrols.Count, "blandat packas tätare än isär");
+        }
+
+        [Fact]
+        public void Magnumklasserna_far_sin_tid_ur_konfigurationens_M_eller_sin_egen_nyckel()
+        {
+            const string json = "{\"M\":{\"stations\":[{\"station\":1,\"shootingTimeSec\":40}]},\"M6\":{\"stations\":[{\"station\":1,\"shootingTimeSec\":70}]}}";
+            var st = HpskSite.CompetitionTypes.Faltskytte.Services.FaltPatrolAdapter.StationsFromConfig(json);
+            Assert.Equal(40, st[0].Sec["M3"]);   // ingen egen nyckel: konfigurationens M
+            Assert.Equal(70, st[0].Sec["M6"]);   // egen nyckel vinner
+            const string onlyC = "{\"C\":{\"stations\":[{\"station\":1,\"shootingTimeSec\":30}]}}";
+            Assert.False(HpskSite.CompetitionTypes.Faltskytte.Services.FaltPatrolAdapter.StationsFromConfig(onlyC)[0].Sec.ContainsKey("M3"));   // aldrig en lånad tid
+        }
+
+        [Fact]
+        public void En_magnumklass_utan_tid_i_konfigurationen_varnas_for_per_klass()
+        {
+            var p = Params();
+            foreach (var st in p.St) st.Sec!.Remove("M2");
+            Assert.Equal(new[] { "M2" }, FaltPatrolEngine.Generate("m", Starts(("M1", 4), ("M2", 4)), p).Ungrouped);
         }
 
         [Fact]

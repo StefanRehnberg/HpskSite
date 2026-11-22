@@ -48,12 +48,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public static string GroupOf(string cls)
         {
             var code = ShootingClasses.GetWeaponClassCode(cls);
+            // Magnum: varje klass (M1..M9) är en egen grupp i motorn, så att klasserna hålls isär som standard. Att blanda dem är arrangörens val (ordningen "all").
+            // Patrullens lagrade etikett är ändå "M" (se Label), så publicering, kortinmatning och konfigurationens nyckel är oförändrade.
+            if (code == FaltPatrolEngine.MagnumGroup && FaltPatrolEngine.IsMagnumGroup(ShootingClasses.ToCanonicalName(cls))) return ShootingClasses.ToCanonicalName(cls);
             return string.IsNullOrEmpty(code) ? (cls ?? "") : code;
         }
 
         /// <summary>Banans stationer ur tävlingens konfiguration: nummer, namn och skjuttid (sek) per vapengrupp. Särskjutningsstationer räknas inte; en grupp utan egen tid lånar en annan grupps tid.</summary>
         /// <summary>Motorns fyra grupper plus Magnum (M): tiderna för M läses ur konfigurationen även om M inte är en av motorns blockgrupper.</summary>
-        static IEnumerable<string> WithMagnum(IEnumerable<string> groups) => groups.Concat(new[] { FaltPatrolEngine.MagnumGroup });
+        static IEnumerable<string> WithMagnum(IEnumerable<string> groups) => groups.Concat(new[] { FaltPatrolEngine.MagnumGroup }).Concat(MagnumClasses);
+        static readonly string[] MagnumClasses = Enumerable.Range(1, 9).Select(i => "M" + i).ToArray();
 
         public static List<(int Number, string? Name, Dictionary<string, double> Sec)> StationsFromConfig(string? json)
         {
@@ -64,7 +68,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var byGroup = new Dictionary<string, Dictionary<int, double>>(); var names = new Dictionary<int, string?>(); var nums = new SortedSet<int>();
             foreach (var g in WithMagnum(FaltPatrolEngine.Groups))
             {
-                var key = cfg.WeaponConfigs.ContainsKey(g) ? g : g == "A" && cfg.WeaponConfigs.ContainsKey("A_Opt") ? "A_Opt" : null;
+                // M1..M9: klassens egen nyckel om den finns, annars konfigurationens "M" (en uppsättning för alla magnumklasser).
+                var key = cfg.WeaponConfigs.ContainsKey(g) ? g
+                        : g == "A" && cfg.WeaponConfigs.ContainsKey("A_Opt") ? "A_Opt"
+                        : FaltPatrolEngine.IsMagnumGroup(g) && g != FaltPatrolEngine.MagnumGroup && cfg.WeaponConfigs.ContainsKey(FaltPatrolEngine.MagnumGroup) ? FaltPatrolEngine.MagnumGroup : null;
                 if (key == null) continue;
                 var m = new Dictionary<int, double>();
                 foreach (var s in cfg.WeaponConfigs[key].Stations)
@@ -81,7 +88,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 {
                     // Magnum (M) lånar ALDRIG en annan grupps tid: utan egen tid i konfigurationen finns ingen M-tid, och motorn tidtar den med 20 s och varnar.
                     if (own.TryGetValue(g, out var t)) sec[g] = t;
-                    else if (g != FaltPatrolEngine.MagnumGroup) sec[g] = any;
+                    else if (!FaltPatrolEngine.IsMagnumGroup(g)) sec[g] = any;
                 }
                 result.Add((n, names.GetValueOrDefault(n), sec));
             }
@@ -160,7 +167,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         static Start Start0(string key) { var i = key.IndexOf('|'); return new Start(int.Parse(key[..i], System.Globalization.CultureInfo.InvariantCulture), key[(i + 1)..]); }
 
-        static string Label(IEnumerable<string> groups) => string.Join("+", groups.Distinct().OrderBy(g => Array.IndexOf(FaltPatrolEngine.Groups, g) is var i and >= 0 ? i : 99).ThenBy(g => g, StringComparer.Ordinal));
+        static string Label(IEnumerable<string> groups) => string.Join("+", groups.Select(g => FaltPatrolEngine.IsMagnumGroup(g) ? FaltPatrolEngine.MagnumGroup : g).Distinct().OrderBy(g => Array.IndexOf(FaltPatrolEngine.Groups, g) is var i and >= 0 ? i : 99).ThenBy(g => g, StringComparer.Ordinal));
 
         public static (PlanParams Params, List<EPatrol> Input, Dictionary<string, CompetitionRegistration> RegByKey) Build(
             IReadOnlyList<CompetitionRegistration> regs, IReadOnlyCollection<LockedPlacement> locked, PatrolConstraints constraints, ISet<int> reserves,
