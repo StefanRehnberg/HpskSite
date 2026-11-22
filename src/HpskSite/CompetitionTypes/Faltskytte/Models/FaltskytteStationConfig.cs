@@ -10,7 +10,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
     /// </summary>
     public class FaltskytteCompetitionConfig
     {
-        /// <summary>Keyed by weapon class: "A", "A_Opt", "B", "C", "R", "M1"-"M9".</summary>
+        /// <summary>
+        /// Keyed by WEAPON GROUP code: "A", "A_Opt", "B", "C", "R" and "M" (Magnum). ⚠️ Magnum is ONE key, "M", for every class
+        /// M1–M9 (not one key per class): <c>ShootingClasses.GetWeaponClassCode("M3")</c> is "M", and every lookup
+        /// (<see cref="GetForWeaponClass"/>, card entry's ResolveKey, the patrol group) goes through that code.
+        /// A per-class override (e.g. "M6") would be an exact-key hit in <see cref="GetForWeaponClass"/> without a migration,
+        /// but ResolveKey would first have to try the class id.
+        /// </summary>
         public Dictionary<string, FaltskytteWeaponClassConfig> WeaponConfigs { get; set; } = new();
 
         /// <summary>

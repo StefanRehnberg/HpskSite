@@ -146,6 +146,14 @@
                     <textarea class="form-control" id="fkHubNewDesc" rows="2" placeholder="Valfri kort beskrivning..."></textarea>
                 </div>
                 <div class="mb-2">
+                    <label class="form-label small fw-bold">Gren</label>
+                    <select class="form-select" id="fkHubNewDiscipline">
+                        <option value="Falt" selected>Fältskytte (vapengrupper A, B, C, R)</option>
+                        <option value="Magnum">Magnumfält (vapengrupp M, klass M1–M9)</option>
+                    </select>
+                    <div class="form-text small">Styr vilka vapengrupper konfigurationen börjar med. Du kan ändra det senare under "Välj vapenklasser".</div>
+                </div>
+                <div class="mb-2">
                     <label class="form-label small fw-bold">Projekt</label>
                     <select class="form-select" id="fkHubNewProject">
                         <option value="">Inget projekt (fristående)</option>
@@ -616,6 +624,7 @@ function fkHubOpenCreate() {
     document.getElementById('fkHubNewVis').value = 'Private';
     document.getElementById('fkHubNewSecretUntil').value = '';
     document.getElementById('fkHubNewProject').value = '';
+    document.getElementById('fkHubNewDiscipline').value = 'Falt';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fkHubCreateModal')).show();
 }
 
@@ -629,6 +638,8 @@ async function fkHubSubmitCreate() {
         visibility: document.getElementById('fkHubNewVis').value,
         secretUntil: document.getElementById('fkHubNewSecretUntil').value || null
     };
+    // Magnumfält börjar med vapengruppen M (nyckeln är M, inte M1–M9); vanlig fält utan blob får editorns A, B, C, R.
+    if (document.getElementById('fkHubNewDiscipline').value === 'Magnum') body.jsonBlob = JSON.stringify({ M: { stations: [] } });
     try {
         var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Create', {
             method: 'POST',

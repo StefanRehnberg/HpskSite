@@ -872,6 +872,18 @@ function fkEditorApplyWeaponClasses() {
     var picked = Array.from(document.querySelectorAll('#fkEditorWeaponClassChecks input[type=checkbox]:checked'))
                       .map(function(el) { return el.value; });
     if (picked.length === 0) { alert('Välj minst en vapenklass.'); return; }
+
+    // Att ta bort en vapengrupp som har stationer tar bort hela dess uppsättning ur konfigurationen — säg det först
+    // (Magnum-omtaget 2026-11-22; förut försvann nyckeln tyst).
+    var removedWithContent = faltCfgWeaponClasses.filter(function (k) {
+        if (picked.indexOf(k) >= 0) return false;
+        return ((faltCfgData[k] && faltCfgData[k].stations) || []).some(function (s) { return faltCfgStationHasContent(s); });
+    });
+    if (removedWithContent.length > 0 &&
+        !confirm('Vapengrupp ' + removedWithContent.map(function (k) { return k === 'M' ? 'M (Magnum)' : k; }).join(', ') +
+                 ' har stationer som tas bort ur konfigurationen när du tillämpar.\n\nVill du ta bort ' +
+                 (removedWithContent.length === 1 ? 'den' : 'dem') + '?')) return;
+
     bootstrap.Modal.getInstance(document.getElementById('fkEditorWeaponClassModal')).hide();
 
     // CRITICAL — simple-mode wipe guard:
@@ -898,6 +910,28 @@ function fkEditorApplyWeaponClasses() {
     Object.keys(blob).forEach(function(k) {
         if (k.startsWith('_')) return;
         if (picked.indexOf(k) < 0) delete blob[k];
+    });
+    // Länkade grupper får inte peka på borttagna klasser (en grupp med färre än två kvar upplöses).
+    if (Array.isArray(blob._linkedGroups)) {
+        blob._linkedGroups = blob._linkedGroups
+            .map(function (g) { return (g || []).filter(function (k) { return picked.indexOf(k) >= 0; }); })
+            .filter(function (g) { return g.length > 1; });
+    }
+    // En NY klass är en kopia av den gamla kanoniska klassens stationer, inklusive avstånd och skjuttid. Det blir fel när
+    // klasserna har olika tak och tider (M mot A/B/C/R): lägg avståndet inom den nya klassens tak och höj en skjuttid som
+    // hamnat under klassens SHB-minimum, annars föds varje kopierad station "under SHB-minimum" eller över taket.
+    // Görs på blobben FÖRE faltCfgOpen så att flikarna ritas med de rättade värdena.
+    added.forEach(function (newWc) {
+        var cls = blob[newWc];
+        ((cls && (cls.stations || cls.Stations)) || []).forEach(function (st) {
+            (st.targetGroups || []).forEach(function (tg) {
+                if (tg.distance == null) return;
+                var b = faltTargetGroupBounds(tg, newWc, st, faltCfgMorker);
+                if (b && tg.distance > b.max) tg.distance = b.max;
+            });
+            var sugg = faltSuggestShootingTime(st, newWc, faltCfgMorker);
+            if (sugg && (st.shootingTimeSec || 0) < sugg.totalSec) st.shootingTimeSec = sugg.totalSec;
+        });
     });
     faltCfgOpen(picked, blob);
     faltCfgMarkDirty(picked[0], 1); // surface a dirty indicator on station 1

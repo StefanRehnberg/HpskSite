@@ -56,6 +56,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <summary>SHB E.7.1.1: skjutavstånd över 180 meter är inte tillåtet (magnum).</summary>
         public const int MagnumMaxDistance = 180;
         public const string SupportHandAllowed = "Stödhand tillåten";
+        /// <summary>Vapenläget Hands-up (SHB E.6.3.1, E.10.5.1): ingen SHB-minimitid.</summary>
+        public const string HandsUp = "Hands-up";
 
         /// <summary>
         /// Tabelldata som JSON för webbläsaren (partialen <c>_FaltskytteShbRules.cshtml</c> → <c>FALT_SHB</c>).
@@ -135,6 +137,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public static int? MinimumShootingTime(Station s, string? weaponClass, bool morker, bool poangMode)
         {
             if (s.Groups.Count == 0) return null;
+            // Hands-up (SHB E.6.3.1, E.10.5.1) är "det enda undantaget från de allmänna reglerna om skjuttider och skjutavstånd":
+            // inget SHB-minimum att jämföra med. Speglas i konfiguratorns faltSuggestShootingTime (null).
+            if (s.WeaponStartPosition == HandsUp) return null;
             var maxTime = MaxTimePerShot[Bucket(weaponClass)];
             var eased = s.SupportHand == SupportHandAllowed;
             var stationMax = s.MaxShotsPerFigure > 0 ? s.MaxShotsPerFigure : 6;

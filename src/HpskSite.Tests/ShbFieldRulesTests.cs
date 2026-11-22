@@ -56,6 +56,20 @@ namespace HpskSite.Tests
             GroupMaxDistance(station.Groups[0], "A", station, morker: false).Should().Be(45);   // A: stödhand lyfter till grupp 4
         }
 
+        [Theory]
+        [InlineData("M")]
+        [InlineData("M1")]
+        [InlineData("A")]
+        [InlineData("C")]
+        public void HandsUp_HarIngetSHBMinimum(string wc)
+        {
+            // SHB E.10.5.1: Hands-up är "det enda undantaget från de allmänna reglerna om skjuttider och skjutavstånd".
+            MinimumShootingTime(One(5, 25, weapon: "Hands-up"), wc, morker: false, poangMode: false).Should().BeNull();
+            MinimumShootingTime(One(5, 25, weapon: "Hands-up"), wc, morker: true, poangMode: true).Should().BeNull();
+            // samma station med annat vapenläge har ett minimum
+            MinimumShootingTime(One(5, 25, weapon: "Riktning tillåten"), wc, false, false).Should().NotBeNull();
+        }
+
         [Fact]
         public void Skjuttid_Normal_SexSkottPaSammaFigur() =>
             // 40 m av 40 m max → 2,0 s/skott × 6 = 12 s

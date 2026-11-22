@@ -2191,7 +2191,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         .Where(r =>
                         {
                             var wg = ShootingClasses.GetWeaponClassCode(r.MemberClass);
-                            return selectedWcs.Contains(wg);
+                            // GetAvailableWeaponClasses ger klass-id (M1, M2 …) för MagnumFalt men gruppkod för övriga:
+                            // båda konventionerna ska träffa, annars blir svaret "Inga anmälningar" för en vald Magnumklass.
+                            var cid = ShootingClasses.GetById(r.MemberClass)?.Id ?? ShootingClasses.GetByName(r.MemberClass)?.Id;
+                            return selectedWcs.Contains(wg) || (cid != null && selectedWcs.Contains(cid));
                         })
                         .ToList();
                 }

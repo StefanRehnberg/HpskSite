@@ -326,6 +326,11 @@ function faltTargetGroupBounds(tg, wc, station, morker) {
     };
 }
 
+// Texten när det inte finns något förslag/någon svårighet: "gäller ej" för Hands-up (inget SHB-minimum, E.10.5.1), annars "—".
+function faltNoValueLabel(station) {
+    return station && station.weaponStartPosition === 'Hands-up' ? 'gäller ej' : '—';
+}
+
 // Computes SHB-suggested skjuttid for a station for one weapon class.
 // SHB fältskytte = max 6 skott per station, fördelas av skytten på målgrupper
 // och figurer.
@@ -355,6 +360,9 @@ function faltTargetGroupBounds(tg, wc, station, morker) {
 // figure in any målgrupp has a usable sizeGroup (suggestion not applicable).
 function faltSuggestShootingTime(station, wc, morker) {
     if (!station || !station.targetGroups || station.targetGroups.length === 0) return null;
+    // Hands-up (SHB E.6.3.1, E.10.5.1) är "det enda undantaget från de allmänna reglerna om skjuttider och skjutavstånd":
+    // inget SHB-minimum att föreslå eller mäta mot. Speglas i C# ShbFieldRules.MinimumShootingTime (null).
+    if (station.weaponStartPosition === 'Hands-up') return null;
     var bucket = faltShbBucket(wc);
     var maxTime = FALT_SHB.maxTimePerShot[bucket];
     var mode = faltCfgScoringMode();
@@ -1289,7 +1297,7 @@ function renderActiveTab() {
                         <div class="col-auto">
                             <label class="form-label small mb-0">Föreslaget</label>
                             <div class="d-flex gap-1 align-items-center" style="height:31px">
-                                <span class="badge bg-info text-dark" id="faltCfgSuggTime_${wc}_${st.station}">${(() => { var s = faltSuggestShootingTime(st, wc, faltCfgMorker); return s ? s.totalSec + ' sek' : '—'; })()}</span>
+                                <span class="badge bg-info text-dark" id="faltCfgSuggTime_${wc}_${st.station}">${(() => { var s = faltSuggestShootingTime(st, wc, faltCfgMorker); return s ? s.totalSec + ' sek' : faltNoValueLabel(st); })()}</span>
                                 <button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails('${wc}',${st.station})" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>
                                 <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_${wc}_${st.station}" onclick="faltCfgApplySuggestion('${wc}',${st.station})" title="Kopiera värdet till Skjuttid">Använd</button>
                             </div>
@@ -1297,7 +1305,7 @@ function renderActiveTab() {
                         <div class="col-auto">
                             <label class="form-label small mb-0">Svårighet</label>
                             <div class="d-flex gap-1 align-items-center" style="height:31px" title="100 % = exakt SHB-minimum. Lägre = enklare. Högre = under SHB-min.">
-                                <span class="badge bg-light text-dark border" id="faltCfgDifficulty_${wc}_${st.station}">${(() => { var p = faltDifficultyPercent(st, wc, faltCfgMorker); return p == null ? '—' : p + ' %'; })()}</span>
+                                <span class="badge bg-light text-dark border" id="faltCfgDifficulty_${wc}_${st.station}">${(() => { var p = faltDifficultyPercent(st, wc, faltCfgMorker); return p == null ? faltNoValueLabel(st) : p + ' %'; })()}</span>
                             </div>
                         </div>
                         <div class="col-auto">
@@ -1430,13 +1438,13 @@ function faltCfgRefreshSuggestion(stationNum) {
         if (!station) return;
         var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
         var el = document.getElementById('faltCfgSuggTime_' + wc + '_' + stationNum);
-        if (el) el.textContent = sugg ? (sugg.totalSec + ' sek') : '—';
+        if (el) el.textContent = sugg ? (sugg.totalSec + ' sek') : faltNoValueLabel(station);
         var applyBtn = document.getElementById('faltCfgSuggApply_' + wc + '_' + stationNum);
         if (applyBtn) applyBtn.disabled = !sugg;
         var diffEl = document.getElementById('faltCfgDifficulty_' + wc + '_' + stationNum);
         if (diffEl) {
             var p = faltDifficultyPercent(station, wc, faltCfgMorker);
-            diffEl.textContent = p == null ? '—' : p + ' %';
+            diffEl.textContent = p == null ? faltNoValueLabel(station) : p + ' %';
         }
     });
 }
@@ -2060,11 +2068,11 @@ function faltCfgRenderSimpleMode() {
                   '<td><input type="number" class="form-control form-control-sm" min="5" max="120" value="' + wst.shootingTimeSec + '" style="width:80px"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shootingTimeSec',parseInt(this.value)||30)\"></td>" +
                   '<td><div class="d-flex gap-1 align-items-center">' +
-                    '<span class="badge bg-info text-dark" id="faltCfgSuggTime_' + wc + '_' + st.station + '">' + (sugg ? sugg.totalSec + ' sek' : '—') + '</span>' +
+                    '<span class="badge bg-info text-dark" id="faltCfgSuggTime_' + wc + '_' + st.station + '">' + (sugg ? sugg.totalSec + ' sek' : faltNoValueLabel(wst)) + '</span>' +
                     '<button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails(\'' + wc + '\',' + st.station + ')" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>' +
                     '<button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_' + wc + '_' + st.station + '"' + (sugg ? '' : ' disabled') + ' onclick="faltCfgApplySuggestion(\'' + wc + '\',' + st.station + ')" title="Kopiera värdet till Skjuttid">Använd</button>' +
                   '</div></td>' +
-                  '<td title="100 % = exakt SHB-minimum. Lägre = enklare. Högre = under SHB-min."><span class="badge bg-light text-dark border" id="faltCfgDifficulty_' + wc + '_' + st.station + '">' + (diffPct == null ? '—' : diffPct + ' %') + '</span></td>' +
+                  '<td title="100 % = exakt SHB-minimum. Lägre = enklare. Högre = under SHB-min."><span class="badge bg-light text-dark border" id="faltCfgDifficulty_' + wc + '_' + st.station + '">' + (diffPct == null ? faltNoValueLabel(wst) : diffPct + ' %') + '</span></td>' +
                   '<td><select class="form-select form-select-sm"' +
                     " onchange=\"faltCfgUpdateStation('" + wc + "'," + st.station + ",'shooterStartPosition',this.value)\">" +
                     SHOOTER_POSITIONS.map(function (p) { return '<option' + (p === wst.shooterStartPosition ? ' selected' : '') + '>' + p + '</option>'; }).join('') +

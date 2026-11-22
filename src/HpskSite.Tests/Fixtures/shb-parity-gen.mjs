@@ -58,7 +58,7 @@ for (let i = 0; i < 400; i++) {
   const st = {
     shootingTimeSec: 20,
     supportHand: rnd(3) === 0 ? 'Stödhand tillåten' : 'Stödhand ej tillåten',
-    weaponStartPosition: rnd(2) === 0 ? '45 grader' : 'Hölster',
+    weaponStartPosition: ['45 grader', 'Hölster', 'Hands-up'][rnd(3)],
     minShotsPerFigure: rnd(3) === 0 ? 1 : 0,
     maxShotsPerFigure: [6, 4, 2, 3][rnd(4)],
     targetGroups: groups

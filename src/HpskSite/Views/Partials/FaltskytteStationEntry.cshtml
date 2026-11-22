@@ -377,6 +377,24 @@
         }
     };
 
+    // Konfigurationen för patrullens vapengrupp. En Magnumpatrull (M, M1, M1+M2 …) får ALDRIG en annan klass tider och
+    // figurer (Magnum-omtaget 2026-11-22): saknas nyckeln M ger det null, och tiduret säger det. Övriga grupper beter sig som förut
+    // (okänd etikett, t.ex. "A+R" → första konfigurationen).
+    function fseIsMagnumGroup(wc) {
+        var parts = String(wc || '').split('+').map(function (s) { return s.trim(); }).filter(Boolean);
+        return parts.length > 0 && parts.every(function (s) { return /^M\d*$/.test(s); });
+    }
+    function fseWcCfgFor(wc) {
+        var all = stationData.weaponClassStations || {};
+        if (all[wc]) return all[wc];
+        if (fseIsMagnumGroup(wc)) {
+            if (all['M']) return all['M'];
+            var hit = String(wc).split('+').map(function (s) { return s.trim(); }).find(function (s) { return all[s]; });
+            return hit ? all[hit] : null;
+        }
+        return Object.values(all)[0];
+    }
+
     window.fseSelectPatrol = function(patrolNum) {
         currentPatrol = (stationData.patrols || []).find(function(p) { return p.patrolNumber === patrolNum; });
         if (!currentPatrol) return;
@@ -415,7 +433,7 @@
         document.getElementById('fseRcPatrolLabel').textContent = 'Patrull ' + currentPatrol.patrolNumber + (currentPatrol.label ? ' — ' + currentPatrol.label : '');
 
         // Render Förutsättningar on roll call screen
-        var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
+        var wcCfg = fseWcCfgFor(currentPatrolWc);
         if (wcCfg) {
             var fpHtml = wcCfg.shootingTimeSec + 's \u00b7 ' + wcCfg.shooterStartPosition + ' \u00b7 ' + wcCfg.weaponStartPosition + ' \u00b7 ' + wcCfg.supportHand;
             if (scoringMode === 'Normal' && wcCfg.maxShotsPerFigure < 6) fpHtml += ' \u00b7 Max ' + wcCfg.maxShotsPerFigure + ' skott/fig';
@@ -589,7 +607,7 @@
             var data = await resp.json();
             if (data.success && data.result) {
                 var hitDist = data.result.hitDistribution ? JSON.parse(data.result.hitDistribution) : [];
-                var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
+                var wcCfg = fseWcCfgFor(currentPatrolWc);
 
                 // Build pmScores from the saved tiebreakerScore (distributed evenly for now, since we only store total)
                 var pmCount = 0;
@@ -628,7 +646,7 @@
     }
 
     function fseInitShooterState(memberId) {
-        var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
+        var wcCfg = fseWcCfgFor(currentPatrolWc);
         var totalTargets = 0, totalPm = 0;
         (wcCfg?.targetGroups || []).forEach(function(tg) {
             (tg.figures || []).forEach(function(fig) {
@@ -665,7 +683,7 @@
         saveBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>SPARA RESULTAT';
 
         // Station config for figure entry
-        var wcCfg = stationData.weaponClassStations?.[currentPatrolWc] || Object.values(stationData.weaponClassStations || {})[0];
+        var wcCfg = fseWcCfgFor(currentPatrolWc);
 
         // Build figure entry
         var figArea = document.getElementById('fseFigureArea');
@@ -1226,7 +1244,9 @@
         var shootSec = parseInt(wcCfg && (wcCfg.shootingTimeSec != null ? wcCfg.shootingTimeSec : wcCfg.ShootingTimeSec)) || 0;
         if (!wcCfg || shootSec <= 0) {
             card.style.display = '';
-            figsHost.innerHTML = '<div class="alert alert-warning small mb-0 mt-2">Inget skjuttid konfigurerat för vapenklass ' + (currentPatrolWc || '?') + '. Tiduret kan inte köras.</div>';
+            figsHost.innerHTML = (!wcCfg && fseIsMagnumGroup(currentPatrolWc))
+                ? '<div class="alert alert-warning small mb-0 mt-2">Stationens konfiguration saknar vapengrupp M (Magnum), så skjuttid och figurer för den här patrullen går inte att visa. Tiduret kan inte köras. Be banläggaren lägga till M under "Välj vapenklasser".</div>'
+                : '<div class="alert alert-warning small mb-0 mt-2">Inget skjuttid konfigurerat för vapenklass ' + (currentPatrolWc || '?') + '. Tiduret kan inte köras.</div>';
             document.getElementById('fseTimerStartBtn').disabled = true;
             return;
         }
