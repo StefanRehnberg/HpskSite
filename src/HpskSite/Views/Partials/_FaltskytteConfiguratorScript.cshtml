@@ -516,6 +516,32 @@ function faltSuggestShootingTime(station, wc, morker) {
     return { totalSec: sumSec, breakdown: lines };
 }
 
+// Hands-up har inget SHB-minimum (E.10.5.1), så faltSuggestShootingTime ger null och svårigheten "gäller ej".
+// Det SHB ger är ett vägledande EXEMPEL: två figurer intill varandra på 25 m, skjuttid 15 sekunder (sex skott).
+// Riktvärdet extrapolerar exemplet linjärt med avståndet, som skjuttidsdiagrammen gör: 15 s × (avstånd / 25 m).
+// Det är en vägledning att visa och kopiera, aldrig ett minimum: svårighet och bangranskning (C# MinimumShootingTime) rör det inte.
+var FALT_HANDSUP_EXAMPLE_DISTANCE = 25, FALT_HANDSUP_EXAMPLE_SEC = 15;
+function faltHandsUpGuide(station) {
+    if (!station || station.weaponStartPosition !== 'Hands-up') return null;
+    var groups = station.targetGroups || [];
+    var farthest = FALT_HANDSUP_EXAMPLE_DISTANCE;
+    var any = false;
+    groups.forEach(function (tg) { if (tg && tg.distance != null) { farthest = any ? Math.max(farthest, tg.distance) : tg.distance; any = true; } });
+    var scaled = Math.ceil(FALT_HANDSUP_EXAMPLE_SEC * farthest / FALT_HANDSUP_EXAMPLE_DISTANCE);
+    var lines = [{
+        label: 'Hands-up: SHB:s exempel ' + FALT_HANDSUP_EXAMPLE_SEC + ' s på ' + FALT_HANDSUP_EXAMPLE_DISTANCE + ' m, skalat till ' + farthest + ' m',
+        sec: scaled,
+        info: FALT_HANDSUP_EXAMPLE_SEC + ' × ' + farthest + ' / ' + FALT_HANDSUP_EXAMPLE_DISTANCE + ' = ' + (FALT_HANDSUP_EXAMPLE_SEC * farthest / FALT_HANDSUP_EXAMPLE_DISTANCE).toFixed(1).replace('.', ',') + ' s, avrundat uppåt' + (any ? '' : ' (inget avstånd valt: exemplets 25 m)')
+    }];
+    var total = scaled, omr = Math.max(0, groups.length - 1);
+    if (omr > 0) { total += omr * SHB_TILLAGG_OMRIKTNING; lines.push({ label: 'Omriktning mellan målgrupper (×' + omr + ')', sec: omr * SHB_TILLAGG_OMRIKTNING }); }
+    return { totalSec: total, breakdown: lines, guide: true };
+}
+// Det som visas och kan kopieras till Skjuttid: SHB-minimum, annars Hands-up-riktvärdet.
+function faltSuggestionFor(station, wc, morker) {
+    return faltSuggestShootingTime(station, wc, morker) || faltHandsUpGuide(station);
+}
+
 // Difficulty % per the experienced-Banläggare convention (Pokalen Excel):
 //   svårighet = round(100 × SHB-min-tid / vald-skjuttid)
 // 100 % = exactly at SHB minimum. <100 % = easier (more time than min).
@@ -1326,7 +1352,7 @@ function renderActiveTab() {
                         <div class="col-auto">
                             <label class="form-label small mb-0">Föreslaget</label>
                             <div class="d-flex gap-1 align-items-center" style="height:31px">
-                                <span class="badge bg-info text-dark" id="faltCfgSuggTime_${wc}_${st.station}">${(() => { var s = faltSuggestShootingTime(st, wc, faltCfgMorker); return s ? s.totalSec + ' sek' : faltNoValueLabel(st); })()}</span>
+                                <span class="badge bg-info text-dark" id="faltCfgSuggTime_${wc}_${st.station}">${(() => { var s = faltSuggestionFor(st, wc, faltCfgMorker); return s ? s.totalSec + ' sek' : faltNoValueLabel(st); })()}</span>
                                 <button type="button" class="btn btn-outline-info btn-sm py-0 px-1" onclick="faltCfgShowSuggestionDetails('${wc}',${st.station})" title="Visa uppdelning"><i class="bi bi-info-circle"></i></button>
                                 <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1" id="faltCfgSuggApply_${wc}_${st.station}" onclick="faltCfgApplySuggestion('${wc}',${st.station})" title="Kopiera värdet till Skjuttid">Använd</button>
                             </div>
@@ -1465,7 +1491,7 @@ function faltCfgRefreshSuggestion(stationNum) {
         var station = faltCfgData[wc] && faltCfgData[wc].stations
             ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
         if (!station) return;
-        var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
+        var sugg = faltSuggestionFor(station, wc, faltCfgMorker);
         var el = document.getElementById('faltCfgSuggTime_' + wc + '_' + stationNum);
         if (el) el.textContent = sugg ? (sugg.totalSec + ' sek') : faltNoValueLabel(station);
         var applyBtn = document.getElementById('faltCfgSuggApply_' + wc + '_' + stationNum);
@@ -1481,12 +1507,13 @@ function faltCfgRefreshSuggestion(stationNum) {
 function faltCfgShowSuggestionDetails(wc, stationNum) {
     var station = faltCfgData[wc] && faltCfgData[wc].stations
         ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
-    var sugg = station ? faltSuggestShootingTime(station, wc, faltCfgMorker) : null;
+    var sugg = station ? faltSuggestionFor(station, wc, faltCfgMorker) : null;
     var ctxEl = document.getElementById('faltCfgSuggDetailsContext');
     var bodyEl = document.getElementById('faltCfgSuggDetailsBody');
     var footEl = document.getElementById('faltCfgSuggDetailsFoot');
     if (!ctxEl || !bodyEl || !footEl) return;
     ctxEl.textContent = 'Station ' + stationNum + ' — vapenklass ' + wc + ' (diagram ' + faltShbBucket(wc) + ', max ' + FALT_SHB.maxTimePerShot[faltShbBucket(wc)] + ' sek/skott)';
+    if (sugg && sugg.guide) ctxEl.textContent = 'Station ' + stationNum + ' — Hands-up (riktvärde, inget SHB-minimum)';
     if (!sugg) {
         bodyEl.innerHTML = '<tr><td colspan="2" class="text-muted">Kalkyl saknas — ingen figur har en giltig storleksgrupp.</td></tr>';
         footEl.innerHTML = '';
@@ -1508,9 +1535,15 @@ function faltCfgShowSuggestionDetails(wc, stationNum) {
             }
             return primary;
         }).join('');
-        var foot = '<tr class="fw-bold"><td>Föreslaget skjuttid</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
-        // Svårighetsgrad — only meaningful when station has a vald skjuttid set.
-        if (station && station.shootingTimeSec) {
+        var foot = '<tr class="fw-bold"><td>' + (sugg.guide ? 'Riktvärde för skjuttid' : 'Föreslaget skjuttid') + '</td><td class="text-end">' + sugg.totalSec + ' sek</td></tr>';
+        if (sugg.guide) {
+            foot += '<tr class="text-muted small"><td colspan="2">SHB (E.10.5.1) ger ingen minimitid för Hands-up. Det är det enda undantaget från reglerna om skjuttider och skjutavstånd. '
+                + 'Riktvärdet är SHB:s vägledande exempel (två figurer intill varandra på 25 m, skjuttid 15 sekunder, max 5 träff per figur räknas) skalat linjärt med avståndet, '
+                + 'som skjuttidsdiagrammen. Det är en vägledning, inte ett krav. Avståndet ska vara mycket kortare än normalt och tiden jämförelsevis kort. '
+                + 'Någon svårighetsgrad räknas inte ut.</td></tr>';
+        }
+        // Svårighetsgrad — only meaningful when station has a vald skjuttid set (och ett SHB-minimum finns).
+        if (station && station.shootingTimeSec && !sugg.guide) {
             foot += '<tr class="text-muted small"><td>Vald skjuttid</td><td class="text-end">' + station.shootingTimeSec + ' sek</td></tr>';
             var pct = Math.round(100 * sugg.totalSec / station.shootingTimeSec);
             foot += '<tr class="fw-bold"><td>Svårighetsgrad</td><td class="text-end">' + pct + ' %</td></tr>';
@@ -1524,7 +1557,7 @@ function faltCfgApplySuggestion(wc, stationNum) {
     var station = faltCfgData[wc] && faltCfgData[wc].stations
         ? faltCfgData[wc].stations.find(function(s) { return s.station === stationNum; }) : null;
     if (!station) return;
-    var sugg = faltSuggestShootingTime(station, wc, faltCfgMorker);
+    var sugg = faltSuggestionFor(station, wc, faltCfgMorker);
     if (!sugg) return;
     faltCfgUpdateStation(wc, stationNum, 'shootingTimeSec', sugg.totalSec);
     renderActiveTab();
@@ -2089,7 +2122,7 @@ function faltCfgRenderSimpleMode() {
             var unlinkBtn = grp
                 ? ' <button class="btn btn-outline-warning btn-sm py-0 px-1 ms-1" onclick="faltCfgUnlinkInSimpleMode(\'' + wc + '\')" title="Avlänka"><i class="bi bi-x-circle"></i></button>'
                 : '';
-            var sugg = faltSuggestShootingTime(wst, wc, faltCfgMorker);
+            var sugg = faltSuggestionFor(wst, wc, faltCfgMorker);
             var diffPct = faltDifficultyPercent(wst, wc, faltCfgMorker);
             matrixRows +=
                 '<tr>' +
