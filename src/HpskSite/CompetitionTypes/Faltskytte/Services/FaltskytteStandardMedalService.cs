@@ -56,7 +56,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                 string groupKey;
 
-                if (splitGroupC && weaponGroup == "C")
+                if (weaponGroup == "M")
+                {
+                    // Magnumfält: standardmedaljen beräknas "vapengruppsvis" (SHB C.5.1.1.3), och vapengrupperna är M1–M9 — kvoterna
+                    // 1/9 och 1/3 räknas per magnumklass, aldrig över alla magnumskyttar (Stefan 2026-11-22).
+                    groupKey = ShootingClasses.Resolve(shooter.ShootingClass)?.Id ?? "M";
+                }
+                else if (splitGroupC && weaponGroup == "C")
                 {
                     // SM/LM: split C by championship classification
                     var classification = ExtractClassification(shooter.ShootingClass);

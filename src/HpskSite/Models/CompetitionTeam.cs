@@ -63,7 +63,7 @@ namespace HpskSite.Models
         private static readonly ClassCategory[] Veteran =
             { ClassCategory.VeteranYounger, ClassCategory.VeteranOlder };
 
-        private static readonly Dictionary<string, StandardTeamClassDef> StandardTeamClassMap = new()
+        private static readonly Dictionary<string, StandardTeamClassDef> StandardTeamClassMap = WithMagnum(new Dictionary<string, StandardTeamClassDef>()
         {
             ["A"] = new(Ids(WeaponClass.A, ClassCategory.Open)),
             ["A Opt"] = new(Ids(WeaponClass.A_Opt, ClassCategory.Open)),
@@ -73,12 +73,21 @@ namespace HpskSite.Models
             ["C Jun"] = new(Ids(WeaponClass.C, ClassCategory.Junior)), // class-literal-ok: team-class name, not a shooting class
             ["C Dam"] = new(Ids(WeaponClass.C, ClassCategory.Dam)),
             ["R"] = new(Ids(WeaponClass.R, ClassCategory.Open)),
-            ["M"] = new(ShootingClasses.ForWeapon(WeaponClass.M).Select(sc => sc.Id).ToArray()),
+            // Magnum: EN lagklass per magnumklass (SHB C.3.6.5.2: "vid SM i magnumfältskjutning, magnumprecision tävlas i vapengrupperna M1–M7",
+            // laget består av 3 skyttar; backlog P3.13, Stefan 2026-11-22). Förut EN poolad "M"-klass med M1–M9, som lät en M2-skytt och en
+            // M6-skytt bilda ett lag. M8 och M9 har inget SM men samma regler i övrigt, så de får också var sin lagklass.
+            // Härleds ur registret (en ny magnumklass får sin lagklass av sig själv).
             ["L Öppen"] = new(Ids(WeaponClass.L, ClassCategory.Open), AlsoEligibleClasses: Ids(WeaponClass.L, NonOpen)),
             ["L Vet"] = new(Ids(WeaponClass.L, Veteran)),
             ["L Jun"] = new(Ids(WeaponClass.L, ClassCategory.Junior)), // class-literal-ok: team-class name, not a shooting class
             ["L Dam"] = new(Ids(WeaponClass.L, ClassCategory.Dam)),
-        };
+        });
+
+        private static Dictionary<string, StandardTeamClassDef> WithMagnum(Dictionary<string, StandardTeamClassDef> map)
+        {
+            foreach (var sc in ShootingClasses.ForWeapon(WeaponClass.M)) map[sc.Id] = new(new[] { sc.Id });
+            return map;
+        }
 
         private record StandardTeamClassDef(string[] IndividualClasses, string[]? AlsoEligibleClasses = null)
         {

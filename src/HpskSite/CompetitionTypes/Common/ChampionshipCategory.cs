@@ -104,6 +104,13 @@ namespace HpskSite.CompetitionTypes.Common
             if (splitGroupC && cls.Weapon == WeaponClass.C && cls.Category != ClassCategory.Open)
                 return $"C {ShootingClasses.CategoryLabel(cls.Category)}";
 
+            // Magnum: mästerskapskategorierna är klasserna M1–M7 (SHB C.3.6.2.3 och C.3.6.5.2: "vid SM tävlas i vapengrupperna M1–M7"), en
+            // medaljuppsättning var (Stefan 2026-11-22; backlog P3.13). Samma knapp som C-delningen: väljer arrangören bort delningen
+            // (MedalGrouping.PerWeaponGroup) poolas Magnum som en grupp "M". ⚠️ Vapengrupps-AXELN (WeaponGroupFor, finalen, "vilka grupper
+            // avgör mästerskapet") förblir "M": den anropar med splitGroupC false.
+            if (splitGroupC && cls.Weapon == WeaponClass.M)
+                return cls.Id;
+
             return weapon;
         }
 
