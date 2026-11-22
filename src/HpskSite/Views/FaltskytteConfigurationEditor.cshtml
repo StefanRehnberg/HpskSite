@@ -855,14 +855,15 @@ async function fkEditorReloadMeta() {
 function fkEditorOpenWeaponClassPicker() {
     var allClasses = (window.HpskShootingClasses || []).map(function(sc) { return sc.weapon; });
     var unique = [...new Set(allClasses)].filter(function(w) { return w; });
-    // Group: A-family first, then R, B, C.
-    var ordered = ['A', 'A_Opt', 'A_M', 'A_P', 'A_G', 'R', 'B', 'C'].filter(function(w) { return unique.indexOf(w) >= 0; });
+    // Group: A-family first, then R, B, C, and Magnum (M) last. Magnum was missing here until 2026-11-22, so a
+    // Magnumfält station could not be configured at all (the SHB rules for M were already in the configurator).
+    var ordered = ['A', 'A_Opt', 'A_M', 'A_P', 'A_G', 'R', 'B', 'C', 'M'].filter(function(w) { return unique.indexOf(w) >= 0; });
     var currentSet = new Set(faltCfgWeaponClasses);
     var container = document.getElementById('fkEditorWeaponClassChecks');
     container.innerHTML = ordered.map(function(wc) {
         var checked = currentSet.has(wc) ? 'checked' : '';
         return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + wc + '" id="fkEditorWC_' + wc + '" ' + checked + '>' +
-               '<label class="form-check-label" for="fkEditorWC_' + wc + '">' + wc + '</label></div>';
+               '<label class="form-check-label" for="fkEditorWC_' + wc + '">' + (wc === 'M' ? 'M (Magnum)' : wc) + '</label></div>';
     }).join('');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fkEditorWeaponClassModal')).show();
 }
