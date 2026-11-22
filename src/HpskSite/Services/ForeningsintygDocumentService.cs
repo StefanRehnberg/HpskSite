@@ -387,7 +387,7 @@ namespace HpskSite.Services
             DateTime? medalDate = null;
             if (latest.Part2Source == Marken.PartSourceStandardMedal)
             {
-                var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year);
+                var awards = await _standardMedals.GetAwardsForMemberAsync(memberId, year, excludeClubLevel: true);   // samma underlag som märkesberäkningen (SHB C.5.1.1)
                 var falt = awards.FirstOrDefault(a =>
                     string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase));   // inte Magnumfält: se MarkenCandidateService
                 medalDate = falt?.CompetitionDate;

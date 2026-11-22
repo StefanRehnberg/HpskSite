@@ -40,7 +40,7 @@ namespace HpskSite.Services
             {
                 var series = (await _ledger.GetAllVerifiedSeriesAsync(memberId))
                     .Where(s => s.BadgeFamily == Family).ToList();
-                var medalYears = (await _standardMedals.GetAwardsForMemberAsync(memberId))
+                var medalYears = (await _standardMedals.GetAwardsForMemberAsync(memberId, excludeClubLevel: true))   // SHB C.5.1.1: föreningstävlingens medalj är ingen delkvalifikation
                     .Where(a => string.Equals(a.Discipline, StandardMedals.Faltskytte, StringComparison.OrdinalIgnoreCase))   // inte Magnumfält: se MarkenCandidateService
                     .Select(a => a.Year).ToHashSet();
                 var guldYears = (await _ledger.GetQualificationsForMemberAsync(memberId, Family))

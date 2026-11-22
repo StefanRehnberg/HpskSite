@@ -51,8 +51,13 @@ namespace HpskSite.Services
                 "WHERE TrainingScoreId = @0", trainingScoreId);
         }
 
+        /// <param name="excludeClubLevel">
+        /// SHB C.5.1.1: en standardmedalj från en FÖRENINGSTÄVLING gäller inte som delkvalifikation för märkesprov, riksmästarklass, SM eller guld.
+        /// Märkesunderlaget anropar därför med true; listor som visar alla medaljer (medlemmens egna) med false.
+        /// Bara en bekräftad kategori "Forening" utesluts; en medalj utan tävling eller utan bekräftad kategori räknas som förut.
+        /// </param>
         public async Task<List<StandardMedalAward>> GetAwardsForMemberAsync(
-            int memberId, int? year = null, bool includeRejected = false)
+            int memberId, int? year = null, bool includeRejected = false, bool excludeClubLevel = false)
         {
             using var db = _databaseFactory.CreateDatabase();
             var sql = new Sql("WHERE MemberId = @0", memberId);
@@ -60,6 +65,8 @@ namespace HpskSite.Services
                 sql.Append("AND [Year] = @0", year.Value);
             if (!includeRejected)
                 sql.Append("AND Status <> @0", StandardMedals.StatusRejected);
+            if (excludeClubLevel)   // competition-sql-ok: läser bara kategorin för redan utdelade medaljer, ingen publik visning
+                sql.Append("AND (CompetitionId IS NULL OR CompetitionId NOT IN (SELECT Id FROM Competition WHERE CompetitionLevel = @0))", HpskSite.CompetitionTypes.Common.CompetitionLevel.Forening);
             sql.Append("ORDER BY [Year] DESC, CompetitionDate DESC, Id DESC");
             return await db.FetchAsync<StandardMedalAward>(sql);
         }
