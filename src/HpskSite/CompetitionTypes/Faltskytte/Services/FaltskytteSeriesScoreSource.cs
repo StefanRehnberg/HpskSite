@@ -70,7 +70,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 var competition = _competitions.GetSaved(compId);
                 var config = FaltskytteConfigParser.Parse(competition?.StationConfig);
-                modeByCompetition[compId] = FaltskytteScoringMode.IsPoang(config, competition?.ScoringMode);
+                modeByCompetition[compId] = FaltskytteScoringMode.ResolveFor(competition?.CompetitionType, config, competition?.ScoringMode) == FaltskytteScoringMode.Poang;
 
                 var firstWcConfig = config.WeaponConfigs.Values.FirstOrDefault();
                 shootOffStations[compId] = firstWcConfig?.Stations

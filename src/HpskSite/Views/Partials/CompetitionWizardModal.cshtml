@@ -936,7 +936,9 @@ function filterClassSections() {
     document.querySelectorAll('.spring-weapon-cb:checked, .spring-age-cb:checked').forEach(cb => { cb.checked = false; });
 
     const allSections = ['A', 'B', 'C', 'R', 'L', 'M'];
-    const allowedSections = typeId === 'MagnumPrecision' ? ['M'] : allSections;
+    // Magnumfält = bara Magnumklasserna (M1–M9), som Magnumprecision (Stefan 2026-11-22). En blandad tävling stöds inte: konfigurationen
+    // har EN nyckel, M, och Magnums avstånd och tider kan inte delas med A/B/C/R på en fysisk station.
+    const allowedSections = (typeId === 'MagnumPrecision' || typeId === 'MagnumFalt') ? ['M'] : allSections;
 
     allSections.forEach(section => {
         const el = document.getElementById('classSection_' + section);
@@ -948,6 +950,11 @@ function filterClassSections() {
             el.querySelectorAll('.class-checkbox:checked').forEach(cb => { cb.checked = false; });
         }
     });
+
+    // Magnumfält: M1–M9 förvalda när inget klassval gjorts än (arrangören kan avmarkera de som inte används).
+    if (typeId === 'MagnumFalt' && !document.querySelector('.class-checkbox:checked')) {
+        document.querySelectorAll('#classSection_M .class-checkbox').forEach(cb => { cb.checked = true; });
+    }
 
     const stillChecked = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
     document.getElementById('wizard_shootingClassIds').value = stillChecked.join(',');

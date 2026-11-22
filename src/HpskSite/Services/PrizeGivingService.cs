@@ -337,9 +337,9 @@ namespace HpskSite.Services
             if (!isFalt) return null;
 
             var config = FaltskytteConfigParser.Parse(competition.StationConfig);
-            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
-            var usesPoints = model.CompetitionType == "MagnumFalt"
-                          || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
+            // Magnumfält räknas som Normal (träff först): FaltskytteScoringMode.ResolveFor är EN avgörare för alla läsare.
+            var scoringMode = FaltskytteScoringMode.ResolveFor(model.CompetitionType, config, competition.ScoringMode);
+            var usesPoints = string.Equals(scoringMode, FaltskytteScoringMode.Poang, StringComparison.OrdinalIgnoreCase);
 
             model.ScoreUnit = usesPoints ? "p" : "träff";
             // ⚠️ LAGKORTEN RÄKNAS LIVE, inte ur artefakten (CalculateTeamResultsAsync), så de

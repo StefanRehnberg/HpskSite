@@ -104,7 +104,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var competitionConfig = ParseCompetitionConfig(competition);
             // Tävlingstyp from the config first (the property is a stale-able mirror) —
             // this decides Normalfält "32/22" vs Poängfält "54 p" scoring below.
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
+            var scoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, competitionConfig, competition.ScoringMode);
             // For result display, use the first available weapon class config to determine station count.
             // Stations marked IsShootOffOnly are NOT counted — they don't contribute to the qualification
             // ranking and they're filtered out everywhere else (admin links, public station card).
@@ -224,7 +224,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             // Group by class (applying merge lookup) and rank
             var isPoang = scoringMode.Equals("Poang", StringComparison.OrdinalIgnoreCase);
-            var tieBreaker = new FaltskylteTieBreaker(isPoang);
+            var tieBreaker = new FaltskylteTieBreaker(isPoang, FaltskytteScoringMode.IsMagnumCompetition(competition.CompetitionType));
             var classGroups = shooterResults
                 .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                 .Select(g => new FaltskytteClassGroup

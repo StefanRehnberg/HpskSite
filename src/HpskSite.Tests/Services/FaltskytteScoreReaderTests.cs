@@ -55,16 +55,23 @@ namespace HpskSite.Tests.Services
             scoring.Variant.Should().Be(FaltskytteScoringMode.Poang);
         }
 
-        [Fact]
-        public void MagnumFalt_RaknarPoang_OavsettScoringMode()
+        [Theory]
+        [InlineData("Normal")]
+        [InlineData("Poang")]
+        [InlineData(null)]
+        public void MagnumFalt_RaknarTraffForst_OavsettScoringMode(string? mode)
         {
-            // Magnumfält räknar poäng även när konfigurationen säger "Normal" — vapnet avgör.
-            var scoring = new FaltskytteResultArtifactService.FaltskytteScoreReader("MagnumFalt", "Normal");
+            // Magnumfält räknas som Normal — träff, sedan träffade figurer, sedan poäng i poängmålen (SHB E.6.11, C.5.1.2.2; Stefans
+            // beslut 2026-11-22). Konfigurationens läge får inte flytta det: samma avgörare som listan, laget, prisutdelningen och
+            // särskjutningen (FaltskytteScoringMode.ResolveFor).
+            var scoring = new FaltskytteResultArtifactService.FaltskytteScoreReader("MagnumFalt", mode);
             var s = Shooter();
 
-            scoring.Primary(s).Should().Be(65);
-            scoring.PrimaryUnit.Should().Be("p");
-            scoring.Variant.Should().Be(FaltskytteScoringMode.Poang);
+            scoring.Primary(s).Should().Be(46);
+            scoring.PrimaryUnit.Should().Be("träff");
+            scoring.Secondary(s).Should().Be(19);
+            scoring.SecondaryUnit.Should().Be("fig");
+            scoring.Variant.Should().Be(FaltskytteScoringMode.Normal);
         }
 
         [Fact]

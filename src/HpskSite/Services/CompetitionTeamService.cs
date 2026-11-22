@@ -1526,8 +1526,7 @@ namespace HpskSite.Services
                     {
                         RowsByMember = frozenRows.ToLookup(r => r.MemberId),
                         StationsDescending = frozenRows.Select(r => r.StationNumber).Distinct().OrderByDescending(n => n).ToList(),
-                        UsesPoints = string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase)
-                                  || string.Equals(frozen.ScoringMode, "Poang", StringComparison.OrdinalIgnoreCase)
+                        UsesPoints = FaltskytteScoringMode.EffectiveFor(competitionType, frozen.ScoringMode) == FaltskytteScoringMode.Poang
                     };
                 }
 
@@ -1535,7 +1534,7 @@ namespace HpskSite.Services
                 // en spegel som bara synkas vid Anslut och kan vara inaktuell — läses den ensam
                 // scoras en poängfälttävling som normalfält, tyst.
                 var config = FaltskytteConfigParser.Parse(competition.StationConfig);
-                var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
+                var scoringMode = FaltskytteScoringMode.ResolveFor(competitionType, config, competition.ScoringMode);
 
                 // Särskjutningsstationer räknas ALDRIG in i lagresultatet. En särskjutning
                 // avgör en placering inom en omgång; att lägga den i totalen betalar en skytt
@@ -1555,8 +1554,7 @@ namespace HpskSite.Services
                 {
                     RowsByMember = rows.ToLookup(r => r.MemberId),
                     StationsDescending = rows.Select(r => r.StationNumber).Distinct().OrderByDescending(n => n).ToList(),
-                    UsesPoints = string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase)
-                              || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase)
+                    UsesPoints = string.Equals(scoringMode, FaltskytteScoringMode.Poang, StringComparison.OrdinalIgnoreCase)
                 };
             }
             catch (Exception ex)

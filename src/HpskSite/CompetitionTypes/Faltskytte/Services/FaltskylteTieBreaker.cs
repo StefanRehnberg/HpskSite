@@ -7,14 +7,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     ///
     /// Normal mode: hits DESC → figures DESC → poångmål DESC → last station hits DESC
     /// Poäng mode:  points DESC → poångmål DESC → last station points DESC
+    /// Magnumfält (Normal-läge, SHB E.6.11.2.1): hits → figures → poängmål → poäng på sista stationen, näst sista osv. →
+    ///              träff på sista stationen, näst sista osv. (Stefan 2026-11-22: träff först).
     /// </summary>
     public class FaltskylteTieBreaker : IComparer<FaltskytteShooterResult>
     {
         private readonly bool _isPoangMode;
+        private readonly bool _magnum;
 
-        public FaltskylteTieBreaker(bool isPoangMode)
+        public FaltskylteTieBreaker(bool isPoangMode, bool magnum = false)
         {
             _isPoangMode = isPoangMode;
+            _magnum = magnum && !isPoangMode;
         }
 
         public int Compare(FaltskytteShooterResult? x, FaltskytteShooterResult? y)
@@ -23,8 +27,35 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             if (_isPoangMode)
                 return ComparePoang(x, y);
-            else
-                return CompareNormal(x, y);
+            if (_magnum)
+                return CompareMagnum(x, y);
+            return CompareNormal(x, y);
+        }
+
+        private static int CompareMagnum(FaltskytteShooterResult x, FaltskytteShooterResult y)
+        {
+            var cmp = x.TotalHits.CompareTo(y.TotalHits);
+            if (cmp != 0) return cmp;
+            cmp = x.TotalFigures.CompareTo(y.TotalFigures);
+            if (cmp != 0) return cmp;
+            cmp = x.TotalTiebreakerScore.CompareTo(y.TotalTiebreakerScore);
+            if (cmp != 0) return cmp;
+
+            // 3. Poäng på sista stationen, näst sista osv.  4. Träff på sista stationen, näst sista osv.
+            var xs = x.Stations.OrderByDescending(s => s.StationNumber).ToList();
+            var ys = y.Stations.OrderByDescending(s => s.StationNumber).ToList();
+            var n = Math.Max(xs.Count, ys.Count);
+            for (var i = 0; i < n; i++)
+            {
+                cmp = (i < xs.Count ? xs[i].TiebreakerScore ?? 0 : 0).CompareTo(i < ys.Count ? ys[i].TiebreakerScore ?? 0 : 0);
+                if (cmp != 0) return cmp;
+            }
+            for (var i = 0; i < n; i++)
+            {
+                cmp = (i < xs.Count ? xs[i].Hits : 0).CompareTo(i < ys.Count ? ys[i].Hits : 0);
+                if (cmp != 0) return cmp;
+            }
+            return 0;
         }
 
         private static int CompareNormal(FaltskytteShooterResult x, FaltskytteShooterResult y)

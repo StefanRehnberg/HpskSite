@@ -76,7 +76,7 @@ namespace HpskSite.Controllers
                     // Config wins over the competition's mirrored property — see
                     // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
                     // page (StationPage's ?t= branch) in agreement about Max träff/fig.
-                    ScoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode),
+                    ScoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, config, competition.ScoringMode),
                     Stations = stationNumbers.Select(n =>
                     {
                         var byWc = new Dictionary<string, FaltskytteStationConfig>();

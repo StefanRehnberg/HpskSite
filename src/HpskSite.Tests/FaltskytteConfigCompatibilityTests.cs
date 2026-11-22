@@ -35,6 +35,17 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Magnumtavling_med_Poang_lage_varnas_for_det()
+        {
+            var p = FaltskytteConfigCompatibility.Problems("{\"M\":{\"stations\":[]},\"_scoringMode\":\"Poang\"}", "MagnumFalt");
+            p.Should().ContainSingle(x => x.Contains("träff först"));
+        }
+
+        [Fact]
+        public void Vanlig_falt_med_Poang_lage_ar_i_ordning() =>
+            FaltskytteConfigCompatibility.Problems("{\"A\":{\"stations\":[]},\"_scoringMode\":\"Poang\"}", "Faltskytte").Should().BeEmpty();
+
+        [Fact]
         public void Magnumtavling_med_bara_M_ar_i_ordning() =>
             FaltskytteConfigCompatibility.Problems(Mag, "MagnumFalt").Should().BeEmpty();
 

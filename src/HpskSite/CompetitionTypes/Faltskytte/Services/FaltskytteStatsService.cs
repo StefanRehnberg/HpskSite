@@ -118,7 +118,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var competitionConfig = FaltskytteConfigParser.Parse(competition.StationConfig);
                     // Config's own _scoringMode wins — the competition property is a mirror
                     // that only syncs at Anslut time. See FaltskytteScoringMode.
-                    var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
+                    var scoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, competitionConfig, competition.ScoringMode);
                     var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
                     var stationCount = firstWcConfig?.Stations.Count ?? 0;
 
@@ -190,7 +190,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                     // Rank inside class group with the official tiebreaker.
                     var isPoang = (frozen?.ScoringMode ?? scoringMode).Equals("Poang", StringComparison.OrdinalIgnoreCase);
-                    var tieBreaker = new FaltskylteTieBreaker(isPoang);
+                    var tieBreaker = new FaltskylteTieBreaker(isPoang, FaltskytteScoringMode.IsMagnumCompetition(competitionType));
                     var classGroups = shooters
                         .GroupBy(s => mergeLookup.GetValueOrDefault(s.ShootingClass, s.ShootingClass))
                         .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s, tieBreaker).ToList());

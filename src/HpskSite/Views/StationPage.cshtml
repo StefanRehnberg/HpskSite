@@ -90,7 +90,7 @@
                         // the property alone made this page show "Max träff/fig: 2" — a
                         // legacy stored default — on a Poängfält competition whose printed
                         // station card (correctly) omitted it.
-                        infoScoringMode = FaltskytteScoringMode.Resolve(cfg, infoNode.ScoringMode);
+                        infoScoringMode = FaltskytteScoringMode.ResolveFor(infoNode.CompetitionType, cfg, infoNode.ScoringMode);
                         infoTokenValid = true;
                     }
                 }

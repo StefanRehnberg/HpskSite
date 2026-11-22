@@ -1,3 +1,4 @@
+using HpskSite.CompetitionTypes.Faltskytte.Models;
 using Newtonsoft.Json.Linq;
 
 namespace HpskSite.CompetitionTypes.Faltskytte.Services
@@ -26,6 +27,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             catch { return Array.Empty<string>(); }
         }
 
+        /// <summary>Konfigurationens egen <c>_scoringMode</c> ("Normal"/"Poang"), eller null när den saknas eller blobben är trasig.</summary>
+        private static string? ScoringModeOf(string? jsonBlob)
+        {
+            if (string.IsNullOrWhiteSpace(jsonBlob)) return null;
+            try
+            {
+                var v = (JToken.Parse(jsonBlob) as JObject)?["_scoringMode"]?.ToString();
+                return string.Equals(v, FaltskytteScoringMode.Poang, StringComparison.OrdinalIgnoreCase) ? FaltskytteScoringMode.Poang
+                     : string.Equals(v, FaltskytteScoringMode.Normal, StringComparison.OrdinalIgnoreCase) ? FaltskytteScoringMode.Normal : null;
+            }
+            catch { return null; }
+        }
+
         public static bool IsMagnumCompetition(string? competitionType) =>
             string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase);
 
@@ -46,6 +60,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     problems.Add("Tävlingen är en Magnumfält-tävling, men konfigurationen saknar vapengrupp M (Magnum). Skjuttid och figurer för Magnumskyttarna kan då inte visas på banan. Öppna konfigurationen och lägg till M under \"Välj vapenklasser\".");
                 if (others.Count > 0)
                     problems.Add("Konfigurationen innehåller också " + string.Join(", ", others) + ", som inte används i en Magnumfält-tävling.");
+                if (ScoringModeOf(jsonBlob) == FaltskytteScoringMode.Poang)
+                    problems.Add("Konfigurationen är satt till Poängfält, men Magnumfält räknas alltid träff först (träff, träffade figurer, sedan poäng i poängmålen). Poängläget används inte för Magnum.");
             }
             else if (hasMagnum)
             {

@@ -71,7 +71,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 return result;
 
             var competitionConfig = FaltskytteResultsBuilder.ParseCompetitionConfig(competition);
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
+            var scoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, competitionConfig, competition.ScoringMode);
             var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
             var stationCount = firstWcConfig?.Stations.Count(s => !s.IsShootOffOnly) ?? 0;
             var shootOffOnlyStationNumbers = (firstWcConfig?.Stations

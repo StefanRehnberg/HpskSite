@@ -268,7 +268,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var config = ParseCompetitionConfig(competition);
             // Config's own _scoringMode wins over the competition's mirrored property,
             // which only syncs at Anslut time. See FaltskytteScoringMode.
-            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
+            var scoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, config, competition.ScoringMode);
             var maxReshoots = competition.MaxReshoots;
 
             var cardEntryOnly = FaltskytteCardEntryOnly.IsOn(_siteSettings, competitionId);
@@ -689,7 +689,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             // Build per-weapon-class station configs for this station number
             // Tävlingstyp from the config first (the property is a stale-able mirror).
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
+            var scoringMode = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, competitionConfig, competition.ScoringMode);
             var wcStations = new Dictionary<string, FaltskytteStationConfig>();
             foreach (var kvp in competitionConfig.WeaponConfigs)
             {

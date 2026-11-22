@@ -103,18 +103,53 @@ namespace HpskSite.Tests.Services
         [Fact]
         public void MagnumRoundComparer_FormatRound_PointsWithP()
         {
+            // utan träff att räkna ur (inga poängmålsrader) visas bara poängen
             new MagnumRoundComparer().FormatRound(new FaltskytteShootOffEntry { TiebreakerScore = 23 })
                 .Should().Be("23p");
         }
 
         [Fact]
-        public void MagnumRoundComparer_IgnoresHitsAndFigures()
+        public void MagnumRoundComparer_FormatRound_TraffOchPoang()
+        {
+            new MagnumRoundComparer().FormatRound(new FaltskytteShootOffEntry { PoangmalScores = "[5,4,0,3,5,2]", TiebreakerScore = 19 })
+                .Should().Be("5 träff, 19p");
+        }
+
+        [Fact]
+        public void MagnumRoundComparer_TraffForePoang()
+        {
+            // SHB E.6.11.3: särskiljningsreglerna gäller, alltså träff först. Fem träff med 19 poäng slår fyra träff med 22.
+            var c = new MagnumRoundComparer();
+            var moreHits = new FaltskytteShootOffEntry { PoangmalScores = "[5,4,0,3,5,2]", TiebreakerScore = 19 };
+            var morePoints = new FaltskytteShootOffEntry { PoangmalScores = "[5,5,5,0,0,7]", TiebreakerScore = 22 };
+            c.Compare(moreHits, morePoints).Should().BeLessThan(0);   // moreHits först
+            c.Compare(morePoints, moreHits).Should().BeGreaterThan(0);
+        }
+
+        [Fact]
+        public void MagnumRoundComparer_LikaTraffAvgorsAvPoang()
         {
             var c = new MagnumRoundComparer();
-            var a = new FaltskytteShootOffEntry { Hits = 10, Figures = 10, TiebreakerScore = 15 };
-            var b = new FaltskytteShootOffEntry { Hits = 0, Figures = 0, TiebreakerScore = 20 };
-            c.Compare(a, b).Should().BeGreaterThan(0); // b wins on points alone
+            var a = new FaltskytteShootOffEntry { PoangmalScores = "[5,4,3]", TiebreakerScore = 12 };
+            var b = new FaltskytteShootOffEntry { PoangmalScores = "[5,5,3]", TiebreakerScore = 13 };
+            c.Compare(b, a).Should().BeLessThan(0);
         }
+
+        [Fact]
+        public void MagnumRoundComparer_AnvanderHitsNarDeFinns()
+        {
+            var c = new MagnumRoundComparer();
+            var a = new FaltskytteShootOffEntry { Hits = 6, TiebreakerScore = 10 };
+            var b = new FaltskytteShootOffEntry { Hits = 4, TiebreakerScore = 30 };
+            c.Compare(a, b).Should().BeLessThan(0);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("inte json")]
+        public void MagnumRoundComparer_TrasigaPoangmalGerNullTraff(string? json) =>
+            MagnumRoundComparer.HitsOf(new FaltskytteShootOffEntry { PoangmalScores = json }).Should().BeNull();
 
         // ── Tied-medal detection ─────────────────────────────────────────
 
@@ -168,17 +203,41 @@ namespace HpskSite.Tests.Services
         }
 
         [Fact]
-        public void DetectTiedMedalGroups_MagnumUsesPoints()
+        public void DetectTiedMedalGroups_MagnumLikaArSammaTraffFigurerOchPoang()
         {
-            // Magnum looks at TotalPoints just like Poäng mode.
+            // Magnumfält räknas som Normal (träff först): "lika" = samma träff, träffade figurer och poäng (SHB E.6.11.2.2.1).
             var shooters = new List<FaltskytteShooterResult>
             {
-                new() { MemberId = 1, TotalPoints = 23 },
-                new() { MemberId = 2, TotalPoints = 23 },
-                new() { MemberId = 3, TotalPoints = 19 },
+                new() { MemberId = 1, TotalHits = 40, TotalFigures = 30, TotalTiebreakerScore = 23 },
+                new() { MemberId = 2, TotalHits = 40, TotalFigures = 30, TotalTiebreakerScore = 23 },
+                new() { MemberId = 3, TotalHits = 38, TotalFigures = 30, TotalTiebreakerScore = 23 },
             };
             var result = FaltskytteShootOffService.DetectTiedMedalGroups(shooters, "", "MagnumFalt");
             result.Should().HaveCount(1);
+            result[0].LastRank.Should().Be(2);
+        }
+
+        [Fact]
+        public void DetectTiedMedalGroups_MagnumSammaTraffMenOlikaPoangArInteLika()
+        {
+            var shooters = new List<FaltskytteShooterResult>
+            {
+                new() { MemberId = 1, TotalHits = 40, TotalFigures = 30, TotalTiebreakerScore = 25 },
+                new() { MemberId = 2, TotalHits = 40, TotalFigures = 30, TotalTiebreakerScore = 23 },
+            };
+            FaltskytteShootOffService.DetectTiedMedalGroups(shooters, "", "MagnumFalt").Should().BeEmpty();
+        }
+
+        [Fact]
+        public void DetectTiedMedalGroups_MagnumFoljerInteKonfigurationensPoangLage()
+        {
+            // En Magnum-konfiguration sparad som "Poang" ska ändå räknas träff först.
+            var shooters = new List<FaltskytteShooterResult>
+            {
+                new() { MemberId = 1, TotalHits = 40, TotalFigures = 30, TotalPoints = 99, TotalTiebreakerScore = 23 },
+                new() { MemberId = 2, TotalHits = 40, TotalFigures = 30, TotalPoints = 70, TotalTiebreakerScore = 23 },
+            };
+            FaltskytteShootOffService.DetectTiedMedalGroups(shooters, "Poang", "MagnumFalt").Should().HaveCount(1);
         }
 
         [Fact]

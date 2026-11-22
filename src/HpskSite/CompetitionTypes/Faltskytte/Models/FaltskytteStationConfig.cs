@@ -181,6 +181,24 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public static bool IsPoang(FaltskytteCompetitionConfig? config, string? competitionPropertyValue)
             => Resolve(config, competitionPropertyValue) == Poang;
 
+        /// <summary>Är tävlingen ett Magnumfält (tävlingstypen "MagnumFalt")?</summary>
+        public static bool IsMagnumCompetition(string? competitionType)
+            => string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// ⚠️ EN avgörare för vad en fälttävling räknar (Magnum-omtaget 2026-11-22, Stefans beslut "träff först"): Magnumfält räknas
+        /// ALLTID som <see cref="Normal"/> — träff, sedan träffade figurer, sedan poäng i poängmålen, sedan sista stationen (SHB E.6.11,
+        /// C.5.1.2.2). Poängmål är en andra nivå i Normal-läget, inte läget Poäng. Tidigare tvingade fyra ställen (artefakten, lagen,
+        /// prisutdelningen, lika-detekteringen) Magnum till "poäng" medan listan följde konfigurationen; en Magnumkonfiguration som sparats
+        /// som "Normal" gav då en lista och en prisutdelning som räknade olika. Alla läsare ska fråga HÄR.
+        /// </summary>
+        public static string ResolveFor(string? competitionType, FaltskytteCompetitionConfig? config, string? competitionPropertyValue)
+            => IsMagnumCompetition(competitionType) ? Normal : Resolve(config, competitionPropertyValue);
+
+        /// <summary>Samma avgörare för ett redan löst läge (t.ex. den frusna listans eller artefaktens <c>ScoringMode</c>).</summary>
+        public static string EffectiveFor(string? competitionType, string? resolvedMode)
+            => IsMagnumCompetition(competitionType) ? Normal : (Normalize(resolvedMode) ?? Normal);
+
         /// <summary>
         /// Maps a stored value to "Normal"/"Poang", or null when it says nothing.
         /// Tolerates the array shapes a dropdown property can come back as

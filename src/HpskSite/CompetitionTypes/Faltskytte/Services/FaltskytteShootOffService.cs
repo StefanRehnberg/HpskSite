@@ -134,21 +134,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             var result = new List<FaltskytteTiedMedalGroup>();
             if (sortedShooters == null || sortedShooters.Count < 2) return result;
 
-            // The "score" for tie detection depends on the variation.
-            int Score(FaltskytteShooterResult s)
-            {
-                if (string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase))
-                    return s.TotalPoints;
-                if (string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase))
-                    return s.TotalPoints;
-                return s.TotalHits;
-            }
+            // The "score" for tie detection depends on the variation. ⚠️ Magnumfält räknas som Normal (träff först, Stefan 2026-11-22):
+            // "lika" är samma träff, samma träffade figurer och samma poäng i poängmålen (SHB E.6.11.2.2.1) — inte bara samma poäng.
+            var magnum = FaltskytteScoringMode.IsMagnumCompetition(competitionType);
+            var poang = FaltskytteScoringMode.EffectiveFor(competitionType, scoringMode) == FaltskytteScoringMode.Poang;
+            int Score(FaltskytteShooterResult s) => poang ? s.TotalPoints : s.TotalHits;
+            (int, int, int) TieKey(FaltskytteShooterResult s) => magnum ? (s.TotalHits, s.TotalFigures, s.TotalTiebreakerScore) : (Score(s), 0, 0);
 
             int i = 0;
             while (i < sortedShooters.Count)
             {
                 int j = i + 1;
-                while (j < sortedShooters.Count && Score(sortedShooters[j]) == Score(sortedShooters[i]))
+                while (j < sortedShooters.Count && TieKey(sortedShooters[j]) == TieKey(sortedShooters[i]))
                     j++;
 
                 int groupSize = j - i;

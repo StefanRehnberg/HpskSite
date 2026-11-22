@@ -419,8 +419,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             public FaltskytteScoreReader(string? competitionType, string? scoringMode)
             {
-                _usesPoints = string.Equals(competitionType, "MagnumFalt", StringComparison.OrdinalIgnoreCase)
-                           || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
+                // Magnumfält räknas som Normal (träff först); se FaltskytteScoringMode.ResolveFor.
+                _usesPoints = FaltskytteScoringMode.EffectiveFor(competitionType, scoringMode) == FaltskytteScoringMode.Poang;
             }
 
             /// <summary>Träff (normalfält) eller poäng (poängfält/magnum).</summary>

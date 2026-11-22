@@ -231,7 +231,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
             var config = FaltskytteResultsBuilder.ParseCompetitionConfig(competition);
-            var scoring = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
+            var scoring = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, config, competition.ScoringMode);
 
             using var db = _dbFactory.CreateDatabase();
             var patrol = await db.FirstOrDefaultAsync<FaltskyttePatrol>("WHERE CompetitionId = @0 AND PatrolNumber = @1", competitionId, patrolNumber);
@@ -380,7 +380,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             var competition = _competitions.GetSaved(request.CompetitionId);
             if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
             var config = FaltskytteResultsBuilder.ParseCompetitionConfig(competition);
-            var scoring = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
+            var scoring = FaltskytteScoringMode.ResolveFor(competition.CompetitionType, config, competition.ScoringMode);
             var enteredBy = await GetCurrentMemberIdAsync();
             if (enteredBy <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
