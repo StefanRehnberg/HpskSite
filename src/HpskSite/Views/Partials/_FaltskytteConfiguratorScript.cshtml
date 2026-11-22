@@ -267,7 +267,11 @@ function faltStodhandEased(station) {
 // Clamped to the SHB table (group 1 at the top, 14 at the bottom — 15 is the
 // "ej grupperad" bucket with no row, and stepping into it would return null
 // and silently disable the slider).
-function faltLookupSizeGroup(sizeGroup, station, morker) {
+// ⚠️ Gäller INTE Magnum (Stefan 2026-11-22): D.10.6.1 är en regel för A/R/B/C, och Del E ger M eget tak
+// (E.7.1.1, valfri skjutställning). `wc` = vapenklassen; för M flyttas figurgruppen aldrig. Speglas i
+// C# ShbFieldRules.LookupSizeGroup (samma undantag).
+function faltLookupSizeGroup(sizeGroup, station, morker, wc) {
+    if (wc && faltIsMagnum(wc)) return sizeGroup;
     var dark = (morker === undefined) ? faltCfgMorker : !!morker;
     var step = (faltStodhandEased(station) ? -1 : 0) + (dark ? 1 : 0);
     if (step === 0) return sizeGroup;
@@ -280,6 +284,9 @@ function faltLookupSizeGroup(sizeGroup, station, morker) {
 function faltCfgBoundsNote(bounds) {
     if (!bounds) return '';
     var msg;
+    if (bounds.magnumSkipped) {
+        return '<div class="form-text small text-muted"><i class="bi bi-info-circle me-1"><\/i>Magnum har eget maxavstånd (SHB Del E, E.7.1.1) — stödhand och mörker flyttar det inte.<\/div>';
+    }
     if (bounds.eased && bounds.darkened) {
         msg = 'Stödhand och mörker tar ut varandra — maxavståndet är oförändrat (SHB D.10.6.1).';
     } else if (bounds.eased) {
@@ -305,15 +312,17 @@ function faltTargetGroupBounds(tg, wc, station, morker) {
         // Skip figures with no picked target or sizeGroup 0 (treated as "not set").
         var sg = figs[i].sizeGroup;
         if (sg == null || sg === 0) continue;
-        var m = faltFigureMaxDistance(faltLookupSizeGroup(sg, station, dark), wc);
+        var m = faltFigureMaxDistance(faltLookupSizeGroup(sg, station, dark, wc), wc);
         if (m != null) maxes.push(m);
     }
     if (maxes.length === 0) return null;
+    var magnum = faltIsMagnum(wc); // Magnum: inget stödhand-/mörkersteg i taket
     return {
         min: SLIDER_MIN_DISTANCE,
         max: Math.min.apply(null, maxes),
-        eased: faltStodhandEased(station),
-        darkened: dark
+        eased: !magnum && faltStodhandEased(station),
+        darkened: !magnum && dark,
+        magnumSkipped: magnum && (faltStodhandEased(station) || dark)
     };
 }
 
@@ -354,7 +363,7 @@ function faltSuggestShootingTime(station, wc, morker) {
 
     // Stödhand: see faltStodhandEased / faltLookupSizeGroup — the shared helpers
     // the distance slider reads too, so the time and the ceiling agree.
-    var stodhandEasing = faltStodhandEased(station);
+    var stodhandEasing = faltStodhandEased(station) && !faltIsMagnum(wc);
 
     // Per-figure entries collected during the målgrupp walk — used by the
     // Normal-mode greedy allocator and the Poäng min+easiest-extras allocator.
@@ -374,7 +383,7 @@ function faltSuggestShootingTime(station, wc, morker) {
             if (!f.sizeGroup) return;
             // Stödhand eases one group, mörker hardens one — shared helper, so
             // the per-shot time and the slider ceiling read the same table row.
-            var lookupGroup = faltLookupSizeGroup(f.sizeGroup, station, morker);
+            var lookupGroup = faltLookupSizeGroup(f.sizeGroup, station, morker, wc);
             var maxD = faltFigureMaxDistance(lookupGroup, wc);
             if (!maxD) return;
             anyApplicable = true;

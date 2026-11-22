@@ -35,6 +35,27 @@ namespace HpskSite.Tests
             LookupSizeGroup(1, true, false).Should().Be(1);   // taket
         }
 
+        [Theory]
+        [InlineData("M1")]
+        [InlineData("M")]
+        [InlineData("M3")]
+        public void Magnum_FlyttasInteAvStodhandEllerMorker(string wc)
+        {
+            LookupSizeGroup(5, true, false, wc).Should().Be(5);
+            LookupSizeGroup(5, false, true, wc).Should().Be(5);
+            LookupSizeGroup(5, true, true, wc).Should().Be(5);
+            // samma anrop för A flyttar fortfarande
+            LookupSizeGroup(5, true, false, "A").Should().Be(4);
+        }
+
+        [Fact]
+        public void Magnum_TaketHojsInteAvStodhand()
+        {
+            var station = new Station(30, "Stödhand tillåten", null, 0, 6, new[] { new TargetGroup(null, new[] { new Figure(5, 1) }) });
+            GroupMaxDistance(station.Groups[0], "M1", station, morker: false).Should().Be(100); // grupp 5, inte grupp 4 (110)
+            GroupMaxDistance(station.Groups[0], "A", station, morker: false).Should().Be(45);   // A: stödhand lyfter till grupp 4
+        }
+
         [Fact]
         public void Skjuttid_Normal_SexSkottPaSammaFigur() =>
             // 40 m av 40 m max → 2,0 s/skott × 6 = 12 s

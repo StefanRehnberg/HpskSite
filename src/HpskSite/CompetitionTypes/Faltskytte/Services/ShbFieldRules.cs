@@ -5,7 +5,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     ///
     /// <para><b>⚠️⚠️ Avståndstabellen har sedan fas 1a EN källa: <c>MaxDistances</c> här (webbläsaren får den som JSON).
     /// Resten är fortfarande EN SPEGEL AV KONFIGURATORNS JAVASCRIPT, och de två MÅSTE säga samma sak.</b>
-    /// Källan är <c>_FaltskytteConfiguratorScript.cshtml</c>: <c>faltLookupSizeGroup</c> (stödhand ett steg upp, mörker ett steg ner) och
+    /// Källan är <c>_FaltskytteConfiguratorScript.cshtml</c>: <c>faltLookupSizeGroup</c> (stödhand ett steg upp, mörker ett steg ner — inte för Magnum) och
     /// <c>faltSuggestShootingTime</c> (Normal: girig fördelning av 6 skott på de svåraste figurerna;
     /// Poäng: minst ett skott per figur, överskottet på de enklaste; tillägg för 45° vapenläge, omriktning
     /// och mörker ×1,30). Ändras en regel där måste den ändras här — annars säger granskarens checklista
@@ -98,9 +98,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <summary>
         /// Stödhand lättar ett steg (SHB D.10.6.1), mörker skärper ett steg; de tar ut varandra.
         /// Begränsat till tabellen (1–14).
+        /// ⚠️ Gäller inte Magnum (Stefan 2026-11-22): D.10.6.1 är en regel för A/R/B/C, och Del E ger M eget tak
+        /// (E.7.1.1, "valfri skjutställning"). För M flyttas figurgruppen aldrig, varken av stödhand eller mörker.
         /// </summary>
-        public static int LookupSizeGroup(int sizeGroup, bool supportHandAllowed, bool morker)
+        public static int LookupSizeGroup(int sizeGroup, bool supportHandAllowed, bool morker, string? weaponClass = null)
         {
+            if (IsMagnum(weaponClass)) return sizeGroup;
             var step = (supportHandAllowed ? -1 : 0) + (morker ? 1 : 0);
             return step == 0 ? sizeGroup : Math.Min(14, Math.Max(1, sizeGroup + step));
         }
@@ -118,7 +121,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             foreach (var f in g.Figures)
             {
                 if (f.SizeGroup is null or 0) continue;
-                var m = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker), weaponClass);
+                var m = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker, weaponClass), weaponClass);
                 if (m != null) max = max == null ? m : Math.Min(max.Value, m.Value);
             }
             if (max != null && IsMagnum(weaponClass)) max = Math.Min(max.Value, MagnumMaxDistance);
@@ -143,7 +146,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 foreach (var f in g.Figures)
                 {
                     if (f.SizeGroup is null or 0) continue;
-                    var maxD = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker), weaponClass);
+                    var maxD = MaxDistance(LookupSizeGroup(f.SizeGroup.Value, eased, morker, weaponClass), weaponClass);
                     if (maxD is null or 0) continue;
                     var d = g.Distance ?? groupMax ?? maxD.Value;
                     var targets = f.TargetsPerFigure > 0 ? f.TargetsPerFigure : 1;
