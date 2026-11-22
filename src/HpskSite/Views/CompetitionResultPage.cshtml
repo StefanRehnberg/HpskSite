@@ -1430,7 +1430,12 @@
                         ? `<th class="text-center fw-bold">Poäng</th>`
                         : `<th class="text-center fw-bold">Tot</th>`;
                     html += `<th class="text-center">Pm</th>`;
-                    if (classHasShootOff) for (let r = 1; r <= soRoundCols; r++) html += `<th class="text-center" title="Särskjutning, omgång ${r}">Sär ${r}</th>`;
+                    // EN kolumn "Sär" med ett rutnät av smala fasta platser (en per omgång) — kompakt även med många omgångar.
+                    const soGrid = `display:inline-grid;grid-template-columns:repeat(${soRoundCols},3.6em);justify-items:center;white-space:nowrap`;
+                    if (classHasShootOff) {
+                        const nums = Array.from({ length: soRoundCols }, (_, i) => `<span class="text-muted fw-normal small">${i + 1}</span>`).join('');
+                        html += `<th class="text-center" title="Särskjutning, omgång för omgång">Sär<div style="${soGrid}">${nums}</div></th>`;
+                    }
                     if (faltAwardingMedals) html += `<th class="text-center">Std</th>`;
                     html += `</tr></thead><tbody>`;
 
@@ -1462,10 +1467,12 @@
                         html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
                         if (classHasShootOff) {
                             const rounds = Array.isArray(shooter.shootOffRounds) ? shooter.shootOffRounds : [];
+                            let cells = '';
                             for (let r = 0; r < soRoundCols; r++)
-                                html += r < rounds.length
-                                    ? `<td class="text-center fw-bold" title="Omgång ${r + 1}">${rounds[r]}</td>`
-                                    : `<td class="text-center"></td>`;
+                                cells += r < rounds.length
+                                    ? `<span class="fw-bold" title="Omgång ${r + 1}">${rounds[r]}</span>`
+                                    : `<span></span>`;
+                            html += `<td class="text-center"><div style="${soGrid}">${cells}</div></td>`;
                         }
                         if (faltAwardingMedals) {
                             var stdM = shooter.standardMedal || '';
