@@ -38,63 +38,73 @@
                         <span class="badge bg-info text-dark ms-1" title="Patruller skapas automatiskt när skyttar anmäler sig"><i class="bi bi-arrow-repeat me-1"></i>Rullande start</span>
                     }
                 </div>
-                <div class="d-flex gap-2 flex-wrap">
-                    @* Generera/Skapa stay available even under rolling start so a stranded comp (patrols
-                       deleted) can be rebuilt — but under rolling start "Generera" is de-emphasised and
-                       guarded (rolling start auto-creates; regenerating is an "only if something is wrong"
-                       action). "Skapa patrull" (add one) is safe and stays normal. *@
-                    @if (isRollingStart)
-                    {
-                        <button class="btn btn-outline-warning btn-sm" onclick="faltGuardedGenerate()" title="Rullande start: patruller skapas automatiskt vid anmälan. Generera om bara om något är fel.">
-                            <i class="bi bi-plus-lg me-1"></i>Generera patruller
-                        </button>
-                    }
-                    else
-                    {
-                        <button class="btn btn-primary btn-sm" onclick="faltShowGenerateModal()">
-                            <i class="bi bi-plus-lg me-1"></i>Generera patruller
-                        </button>
-                    }
-                    <button class="btn btn-outline-primary btn-sm" onclick="faltCreatePatrol()">
-                        <i class="bi bi-plus-circle me-1"></i>Skapa patrull
+                <div class="dropdown" id="faltActions">
+                    <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
                     </button>
-                    @* Den avancerade vägen (Stefan 2026-10-30): en egen sida där man laborerar med vila, dagens slut, uppdelning, lås och jämför två förslag innan något sparas.
-                       "Generera patruller" ovan är den enkla vägen och räcker för en klubbtävling med en start per skytt. Visas för alla tävlingar (kräver ingen planering). *@
-                    @if (int.TryParse(competitionId, out var compIdForGenerator))
-                    {
-                        <a class="btn btn-outline-secondary btn-sm" href="/patrullgenerator/@compIdForGenerator" title="Avancerad: bygger om startlistan runt funktionärernas uppdrag, vila, önskemål och kamratkrav. Du ser förslaget och vem som flyttas innan något sparas, och kan ångra. För en enkel startlista räcker Generera patruller.">
-                            <i class="bi bi-sliders me-1"></i>Patrullgenerator (avancerad)
-                        </a>
-                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="TutorialHelper.open('tutorial-patrullgenerator')" title="Se instruktionsfilm om startlistan och patrullgeneratorn">
-                            <i class="bi bi-play-circle me-1"></i>Guide
-                        </button>
-                    }
-                    @* Starter's OPERATOR screen (send-off / hold / DNS at the line) — pad-optimised,
-                       staff-only. The public read-only wall is the "Visa patrullista" page. *@
-                    <a class="btn btn-success btn-sm" href="/startledare/@competitionId" target="_blank" title="Öppna startledarvyn — skicka iväg patruller, håll kvar, markera DNS">
-                        <i class="bi bi-megaphone me-1"></i>Startledarvy
-                    </a>
-                    <button class="btn btn-success btn-sm" onclick="faltPublish(true)" id="faltPublishBtn" style="display:none">
-                        <i class="bi bi-globe me-1"></i>Publicera
-                    </button>
-                    <button class="btn btn-outline-warning btn-sm" onclick="faltPublish(false)" id="faltUnpublishBtn" style="display:none">
-                        <i class="bi bi-eye-slash me-1"></i>Avpublicera
-                    </button>
-                    <button class="btn btn-outline-info btn-sm" onclick="faltPrintPatrolList()" id="faltPrintBtn" style="display:none">
-                        <i class="bi bi-printer me-1"></i>Skriv ut
-                    </button>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="faltRenumberPatrols()" id="faltRenumberBtn" style="display:none" title="Numrera om patruller löpande 1..N (stänger luckor och löser dubbletter)">
-                        <i class="bi bi-sort-numeric-down me-1"></i>Renumrera
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="faltDeleteAllPatrols()" id="faltDeleteAllBtn" style="display:none">
-                        <i class="bi bi-trash me-1"></i>Ta bort alla
-                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px">
+                        <li><h6 class="dropdown-header">Skapa</h6></li>
+                        @* Generera/Skapa stay available even under rolling start so a stranded comp (patrols
+                           deleted) can be rebuilt — but under rolling start "Generera" is guarded (rolling start auto-creates;
+                           regenerating is an "only if something is wrong" action). "Skapa patrull" (add one) is safe and stays normal. *@
+                        @if (isRollingStart)
+                        {
+                            <li><button class="dropdown-item" type="button" onclick="faltGuardedGenerate()" title="Rullande start: patruller skapas automatiskt vid anmälan. Generera om bara om något är fel."><i class="bi bi-plus-lg me-2"></i>Generera patruller</button></li>
+                        }
+                        else
+                        {
+                            <li><button class="dropdown-item" type="button" onclick="faltShowGenerateModal()"><i class="bi bi-plus-lg me-2"></i>Generera patruller</button></li>
+                        }
+                        <li><button class="dropdown-item" type="button" onclick="faltCreatePatrol()"><i class="bi bi-plus-circle me-2"></i>Skapa patrull</button></li>
+                        @* Den avancerade vägen (Stefan 2026-10-30): en egen sida där man laborerar med vila, dagens slut, uppdelning, lås och jämför två förslag innan något sparas.
+                           "Generera patruller" ovan är den enkla vägen och räcker för en klubbtävling med en start per skytt. Visas för alla tävlingar (kräver ingen planering). *@
+                        @if (int.TryParse(competitionId, out var compIdForGenerator))
+                        {
+                            <li><a class="dropdown-item" href="/patrullgenerator/@compIdForGenerator" title="Avancerad: bygger om startlistan runt funktionärernas uppdrag, vila, önskemål och kamratkrav. Du ser förslaget och vem som flyttas innan något sparas, och kan ångra. För en enkel startlista räcker Generera patruller."><i class="bi bi-sliders me-2"></i>Patrullgenerator (avancerad)</a></li>
+                        }
+                        @* Publicering: bara när det finns patruller (updatePublishUI). Publicera/Avpublicera byter plats som knapparna gjorde. *@
+                        <li id="faltPublishGroup" style="display:none">
+                            <hr class="dropdown-divider">
+                            <h6 class="dropdown-header">Publicering</h6>
+                            <ul class="list-unstyled mb-0">
+                                <li id="faltPublishBtn" style="display:none"><button class="dropdown-item" type="button" onclick="faltPublish(true)"><i class="bi bi-globe me-2"></i>Publicera</button></li>
+                                <li id="faltUnpublishBtn" style="display:none"><button class="dropdown-item" type="button" onclick="faltPublish(false)"><i class="bi bi-eye-slash me-2"></i>Avpublicera</button></li>
+                            </ul>
+                        </li>
+                        @* Skriv ut: anslaget med starttider (för tävlingar utan skärm) och skjutkorten (papperet patrullen bär med sig). Id:t faltPrintBtn styr hela gruppen. *@
+                        <li id="faltPrintBtn" style="display:none">
+                            <hr class="dropdown-divider">
+                            <h6 class="dropdown-header">Skriv ut</h6>
+                            <ul class="list-unstyled mb-0">
+                                <li><button class="dropdown-item" type="button" onclick="faltPrintPatrolList()" title="Hela listan med starttider, för anslag där alla kan se sin starttid"><i class="bi bi-printer me-2"></i>Patrullista för anslag</button></li>
+                                <li><button class="dropdown-item" type="button" onclick="faltShowCardsModal()" title="Papperskortet som varje patrull bär med sig och som stationernas funktionärer skriver resultatet på"><i class="bi bi-card-list me-2"></i>Skjutkort…</button></li>
+                            </ul>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header">Tävlingsdagen</h6></li>
+                        @* Starter's OPERATOR screen (send-off / hold / DNS at the line) — pad-optimised,
+                           staff-only. The public read-only wall is the "Visa patrullista" page. *@
+                        <li><a class="dropdown-item" href="/startledare/@competitionId" target="_blank" title="Öppna startledarvyn — skicka iväg patruller, håll kvar, markera DNS"><i class="bi bi-megaphone me-2"></i>Startledarvy <i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i></a></li>
+                        @if (int.TryParse(competitionId, out _))
+                        {
+                            <li><button class="dropdown-item" type="button" onclick="TutorialHelper.open('tutorial-patrullgenerator')" title="Se instruktionsfilm om startlistan och patrullgeneratorn"><i class="bi bi-play-circle me-2"></i>Instruktionsfilm</button></li>
+                        }
+                        @* Ändrar alla patruller: sist, efter en avdelare. Id:t faltRenumberBtn styr hela gruppen, faltDeleteAllBtn raden. *@
+                        <li id="faltRenumberBtn" style="display:none">
+                            <hr class="dropdown-divider">
+                            <ul class="list-unstyled mb-0">
+                                <li><button class="dropdown-item" type="button" onclick="faltRenumberPatrols()" title="Numrera om patruller löpande 1..N (stänger luckor och löser dubbletter)"><i class="bi bi-sort-numeric-down me-2"></i>Numrera om patruller</button></li>
+                                <li id="faltDeleteAllBtn"><button class="dropdown-item text-danger" type="button" onclick="faltDeleteAllPatrols()"><i class="bi bi-trash me-2"></i>Ta bort alla patruller</button></li>
+                            </ul>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>
         <div class="card-body">
             <!-- Bulk action bar (visible when shooters selected) -->
-            <div class="alert alert-info py-2 d-flex gap-2 align-items-center" id="faltBulkBar" style="display:none">
+            @* Ingen d-flex här: den har !important och skrev över display:none, så raden "0 markerade" låg alltid framme (och bredde sidan på telefon). Visas som flex av updateBulkBar. *@
+            <div class="alert alert-info py-2 gap-2 align-items-center flex-wrap" id="faltBulkBar" style="display:none">
                 <span id="faltBulkCount">0</span> markerade
                 <select class="form-select form-select-sm" id="faltBulkTarget" style="width:auto">
                     <option value="">Flytta till patrull...</option>
@@ -111,11 +121,11 @@
             <div id="faltPatrolsEmpty" class="text-center py-4">
                 @if (isRollingStart)
                 {
-                <p class="text-muted mb-0">Rullande start aktiverad — patruller skapas automatiskt vid anmälan. Du kan även generera eller skapa patruller manuellt här.</p>
+                <p class="text-muted mb-0">Rullande start aktiverad — patruller skapas automatiskt vid anmälan. Du kan även generera eller skapa patruller manuellt under <strong>Åtgärder</strong>.</p>
                 }
                 else
                 {
-                <p class="text-muted mb-0">Inga patruller skapade. Generera patruller eller skapa manuellt.</p>
+                <p class="text-muted mb-0">Inga patruller skapade. Välj <strong>Åtgärder → Generera patruller</strong>, eller skapa dem manuellt.</p>
                 }
             </div>
             <div id="faltPatrolsContainer" style="display:none">
@@ -237,6 +247,97 @@
             <div class="modal-footer">
                 <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button class="btn btn-primary" onclick="faltDoCreatePatrol()">Skapa</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Skjutkort: val av layout, papper och urval. Öppnar utskriften i en ny flik (/faltskytte/skjutkort/{id}). -->
+<div class="modal fade" id="faltCardsModal" tabindex="-1" style="z-index:1065">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-card-list me-2"></i>Skriv ut skjutkort</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Skjutkortet bär patrullen med sig, och stationernas funktionärer skriver resultatet på det. Resultatet matas sedan in under Kortinmatning. Skyttar med olika förutsättningar i samma patrull får varsitt kort.</p>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Vilka patruller</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="faltCardsWho" id="faltCardsWhoAll" value="all" checked>
+                        <label class="form-check-label" for="faltCardsWhoAll">Alla patruller (<span id="faltCardsAllCount">0</span>)</label>
+                    </div>
+                    <div class="form-check d-flex align-items-center gap-2">
+                        <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoWg" value="wg">
+                        <label class="form-check-label text-nowrap" for="faltCardsWhoWg">En vapengrupp</label>
+                        <select class="form-select form-select-sm w-auto" id="faltCardsWg" aria-label="Vapengrupp"></select>
+                    </div>
+                    <div class="form-check d-flex align-items-center gap-2 mt-1">
+                        <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoList" value="list">
+                        <label class="form-check-label text-nowrap" for="faltCardsWhoList">Välj patruller</label>
+                        <input type="text" class="form-control form-control-sm" id="faltCardsList" placeholder="till exempel 1-4, 7" autocomplete="off" data-1p-ignore="true" style="max-width:180px" aria-label="Patrullnummer">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Layout</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayFig" value="fig" checked>
+                        <label class="form-check-label" for="faltCardsLayFig">Rutor per figur</label>
+                        <div class="form-text mt-0">En ruta för varje figur och en ruta för träff/figurer. Behöver mest plats.</div>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayTot" value="tot">
+                        <label class="form-check-label" for="faltCardsLayTot">Bara träff/figurer</label>
+                        <div class="form-text mt-0">En ruta per station, till exempel 6/3.</div>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-6">
+                        <label class="form-label fw-bold">Papper</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperPortrait" value="portrait">
+                            <label class="form-check-label" for="faltCardsPaperPortrait">A4 stående</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperLandscape" value="landscape" checked>
+                            <label class="form-check-label" for="faltCardsPaperLandscape">A4 liggande</label>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label fw-bold">Kort per sida</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer1" value="1" checked>
+                            <label class="form-check-label" for="faltCardsPer1">1</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer2" value="2">
+                            <label class="form-check-label" for="faltCardsPer2">2</label>
+                        </div>
+                    </div>
+                </div>
+                <div id="faltCardsFit" class="alert alert-secondary py-2 small" role="status">Räknar ut rutornas storlek…</div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Innehåll</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="faltCardsSum">
+                        <label class="form-check-label" for="faltCardsSum">Summa-kolumn</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="faltCardsNotes" checked>
+                        <label class="form-check-label" for="faltCardsNotes">Anteckningsruta när platsen räcker</label>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <label class="form-check-label" for="faltCardsBlank">Extra blanka kort</label>
+                        <input type="number" class="form-control form-control-sm" id="faltCardsBlank" min="0" max="50" value="0" style="width:80px">
+                    </div>
+                </div>
+                <div class="small text-muted" id="faltCardsHint"></div>
+                <div class="text-danger small mt-2" id="faltCardsError" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button class="btn btn-primary" onclick="faltOpenCards()"><i class="bi bi-printer me-1"></i>Skriv ut</button>
             </div>
         </div>
     </div>
@@ -485,6 +586,9 @@
             pubBtn.style.display = allPatrols.length > 0 ? '' : 'none';
             unpubBtn.style.display = 'none';
         }
+        // Gruppen "Publicering" i Åtgärder-menyn syns bara när minst ett av valen gör det (annars en tom rubrik).
+        var pubGroup = document.getElementById('faltPublishGroup');
+        if (pubGroup) pubGroup.style.display = (pubBtn.style.display !== 'none' || unpubBtn.style.display !== 'none') ? '' : 'none';
     }
 
     // En patrulls vapengrupper som enskilda koder ("A+A_Opt" → A; A_Opt räknas som A). Etiketten räknas fram ur
@@ -635,7 +739,7 @@
         var bar = document.getElementById('faltBulkBar');
         var countEl = document.getElementById('faltBulkCount');
         if (checked.length > 0) {
-            bar.style.display = '';
+            bar.style.display = 'flex';
             countEl.textContent = checked.length;
         } else {
             bar.style.display = 'none';
@@ -1122,5 +1226,122 @@
         w.document.close();
         w.print();
     };
+
+    // ── Skjutkort ─────────────────────────────────────────────────────
+    // Papperskortet patrullen bär med sig. Utskriften är en serverrenderad sida (/faltskytte/skjutkort/{id}) som öppnas i en ny flik;
+    // dialogen här väljer bara urval, layout, papper och antal kort per sida. Rutornas bredd räknas på servern (samma räkning som
+    // utskriften), så varningen här kan inte säga något annat än det som skrivs ut.
+    var CARDS_KEY = 'hpsk_skjutkort_val';
+    var cardsFit = {};   // summa-kolumn (0/1) → svaret från /matt
+
+    function cardsVal(name) {
+        var el = document.querySelector('input[name="' + name + '"]:checked');
+        return el ? el.value : '';
+    }
+    function cardsFmt(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+    function cardsLoadSaved() {
+        try {
+            var raw = localStorage.getItem(CARDS_KEY);
+            if (!raw) return;
+            var v = JSON.parse(raw);
+            [['faltCardsLayout', v.layout], ['faltCardsPaper', v.paper], ['faltCardsPer', v.per]].forEach(function(p) {
+                var el = document.querySelector('input[name="' + p[0] + '"][value="' + p[1] + '"]');
+                if (el) el.checked = true;
+            });
+            if (typeof v.sum === 'boolean') document.getElementById('faltCardsSum').checked = v.sum;
+            if (typeof v.notes === 'boolean') document.getElementById('faltCardsNotes').checked = v.notes;
+        } catch (e) { /* inget sparat val: förvalen gäller */ }
+    }
+    function cardsSave() {
+        try {
+            localStorage.setItem(CARDS_KEY, JSON.stringify({
+                layout: cardsVal('faltCardsLayout'), paper: cardsVal('faltCardsPaper'), per: cardsVal('faltCardsPer'),
+                sum: document.getElementById('faltCardsSum').checked, notes: document.getElementById('faltCardsNotes').checked
+            }));
+        } catch (e) { /* webbläsaren får inte spara: valet börjar om nästa gång */ }
+    }
+    async function cardsFetchFit(sum) {
+        if (cardsFit[sum]) return cardsFit[sum];
+        try {
+            var r = await fetch('/faltskytte/skjutkort/' + compId + '/matt?sum=' + sum);
+            var d = await r.json();
+            if (d && d.success) cardsFit[sum] = d;
+            return d;
+        } catch (e) { return null; }
+    }
+    async function cardsRefreshFit() {
+        var box = document.getElementById('faltCardsFit');
+        var sum = document.getElementById('faltCardsSum').checked ? 1 : 0;
+        var layout = cardsVal('faltCardsLayout'), paper = cardsVal('faltCardsPaper'), per = parseInt(cardsVal('faltCardsPer'), 10) || 1;
+        document.getElementById('faltCardsHint').textContent = per === 2
+            ? 'Med två kort per sida hamnar patrull 1 och 2 på första bladet, 3 och 4 på nästa. Ett udda antal ger ett blad med en tom halva.'
+            : 'Ett kort per blad.';
+        var d = await cardsFetchFit(sum);
+        if (!d || !d.success) { box.className = 'alert alert-secondary py-2 small'; box.textContent = (d && d.message) || 'Kunde inte räkna ut rutornas storlek.'; return; }
+        if (!d.hasStations) { box.className = 'alert alert-warning py-2 small'; box.textContent = 'Tävlingen har ingen stationskonfiguration än, så korten blir utan stationer.'; return; }
+        var cur = d.formats.filter(function(f) { return f.paper === paper && f.perSheet === per; })[0];
+        if (!cur) return;
+        var e = cur[layout], what = layout === 'fig' ? 'Figurrutorna' : 'Träffrutorna';
+        var info = ' Banan har ' + d.stationCount + ' stationer och ' + d.figureCount + ' figurer.';
+        if (e.level === 'ok') {
+            box.className = 'alert alert-success py-2 small';
+            box.innerHTML = '<i class="bi bi-check-circle me-1"></i>' + what + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong> breda. Det går att skriva i.' + info;
+            return;
+        }
+        var better = d.formats.filter(function(f) { return f[layout].level === 'ok'; })
+            .map(function(f) { return f.label + ' (' + cardsFmt(f[layout].w) + ' mm)'; });
+        box.className = 'alert ' + (e.level === 'warn' ? 'alert-warning' : 'alert-danger') + ' py-2 small';
+        box.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' + what + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong> breda'
+            + (e.level === 'warn' ? ' (tight)' : ', vilket är för trångt för handskrift') + '.' + info + ' '
+            + (better.length ? 'Det går bättre på: ' + hpskEsc(better.join(', ')) + '.' : 'Det finns inget papper där det blir bra med den här banan.')
+            + (layout === 'fig' ? ' Eller välj Bara träff/figurer.' : '');
+    }
+
+    window.faltShowCardsModal = function() {
+        if (allPatrols.length === 0) return;
+        document.getElementById('faltCardsAllCount').textContent = allPatrols.length;
+        var seen = {}, opts = '';
+        allPatrols.forEach(function(p) {
+            var g = p.weaponGroup || '';
+            if (g && !seen[g]) { seen[g] = true; opts += '<option value="' + hpskEsc(g) + '">' + hpskEsc(window.formatWeaponGroups(g)) + '</option>'; }
+        });
+        document.getElementById('faltCardsWg').innerHTML = opts;
+        document.getElementById('faltCardsError').style.display = 'none';
+        cardsLoadSaved();
+        cardsRefreshFit();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCardsModal')).show();
+    };
+
+    window.faltOpenCards = function() {
+        var err = document.getElementById('faltCardsError');
+        err.style.display = 'none';
+        var who = cardsVal('faltCardsWho'), q = [];
+        if (who === 'list') {
+            var txt = (document.getElementById('faltCardsList').value || '').trim();
+            if (!/\d/.test(txt)) { err.textContent = 'Skriv patrullnummer, till exempel 1-4, 7.'; err.style.display = ''; return; }
+            q.push('patrols=' + encodeURIComponent(txt));
+        } else if (who === 'wg') {
+            var g = document.getElementById('faltCardsWg').value;
+            if (!g) { err.textContent = 'Det finns ingen vapengrupp att välja.'; err.style.display = ''; return; }
+            q.push('wg=' + encodeURIComponent(g));
+        }
+        var blank = Math.max(0, Math.min(50, parseInt(document.getElementById('faltCardsBlank').value, 10) || 0));
+        q.push('layout=' + cardsVal('faltCardsLayout'), 'paper=' + cardsVal('faltCardsPaper'), 'per=' + cardsVal('faltCardsPer'),
+            'sum=' + (document.getElementById('faltCardsSum').checked ? 1 : 0), 'notes=' + (document.getElementById('faltCardsNotes').checked ? 1 : 0),
+            'blank=' + blank, 'print=1');
+        cardsSave();
+        window.open('/faltskytte/skjutkort/' + compId + '?' + q.join('&'), '_blank');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCardsModal')).hide();
+    };
+
+    (function() {
+        var m = document.getElementById('faltCardsModal');
+        if (!m) return;
+        m.addEventListener('change', function(e) {
+            if (e.target.id === 'faltCardsWg') document.getElementById('faltCardsWhoWg').checked = true;
+            if (e.target.name !== 'faltCardsWho') cardsRefreshFit();
+        });
+        document.getElementById('faltCardsList').addEventListener('input', function() { document.getElementById('faltCardsWhoList').checked = true; });
+    })();
 })();
 </script>

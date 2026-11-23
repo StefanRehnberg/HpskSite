@@ -103,12 +103,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         public static string LockName(int competitionId, int patrolNumber) => $"falt-kort:{competitionId}:{patrolNumber}";
 
-        private static bool IsDns(FaltskyttePatrolMember m) => !string.IsNullOrEmpty(m.Status);
+        // internal: skjutkortens utskrift (ShootingCardBuilder) ska välja konfiguration och stationer på EXAKT samma sätt som kortinmatningen.
+        internal static bool IsDns(FaltskyttePatrolMember m) => !string.IsNullOrEmpty(m.Status);
 
         private static string VersionOf(FaltskytteResultEntry e) => e.LastModified.Ticks.ToString();
 
         /// <summary>Konfigurationsnyckeln (A, A_Opt, C, R …) för en skytt: klassens vapengrupp först, patrullens sedan.</summary>
-        private static string? ResolveKey(FaltskytteCompetitionConfig config, FaltskyttePatrol patrol, FaltskyttePatrolMember member)
+        internal static string? ResolveKey(FaltskytteCompetitionConfig config, FaltskyttePatrol patrol, FaltskyttePatrolMember member)
         {
             var byClass = ShootingClasses.GetWeaponClassCode(member.ShootingClass);
             if (!string.IsNullOrEmpty(byClass) && config.WeaponConfigs.ContainsKey(byClass)) return byClass;
@@ -116,7 +117,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             return null;
         }
 
-        private static List<FaltskytteStationConfig> ScoredStations(FaltskytteCompetitionConfig config, string key) =>
+        internal static List<FaltskytteStationConfig> ScoredStations(FaltskytteCompetitionConfig config, string key) =>
             config.WeaponConfigs[key].Stations.Where(s => !s.IsShootOffOnly).OrderBy(s => s.Station).ToList();
 
         private static object RowView(FaltskytteResultEntry e, Dictionary<int, string> names)
