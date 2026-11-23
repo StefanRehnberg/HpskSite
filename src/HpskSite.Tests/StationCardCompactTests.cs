@@ -27,23 +27,48 @@ public class StationCardCompactTests
     static string Render(StationPrintItem item, StationCardToolbar? toolbar = null)
         => StationCardRenderer.RenderDocument("t", null, StationCardRenderer.BuildBlocks(item, true, null), false, false, toolbar);
 
-    [Fact]
-    public void Full_visar_bilder_och_QR_pa_skilda_sidor()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bilder_tidslinje_och_bada_QR_finns_i_bada_lagen(bool compact)
     {
-        var html = Render(Item(false));
-        Assert.Contains("src=\"/g.jpg\"", html);
-        Assert.Contains("src=\"/f.jpg\"", html);
-        Assert.DoesNotContain("qr-row", html.Split("</style>")[1]);
-        Assert.DoesNotContain("station-block compact", html);
+        var body = Render(Item(compact)).Split("</style>")[1];
+        Assert.Contains("src=\"/g.jpg\"", body);
+        Assert.Contains("src=\"/f.jpg\"", body);
+        Assert.Contains("class=\"tl-bar\"", body);
+        Assert.Contains("left:0%;width:100%", body); // Fast: synlig hela skjuttiden (30 s)
+        Assert.Contains("alt=\"QR Förutsättningar\"", body);
+        Assert.Contains("alt=\"QR Resultat\"", body);
+        Assert.Contains("<div class=\"qr-cut\">", body); // Resultat-QR på egen sida
+        Assert.True(body.IndexOf("alt=\"QR Förutsättningar\"") < body.IndexOf("<div class=\"qr-cut\">"));
+        Assert.Equal(compact, body.Contains("station-block compact"));
     }
 
     [Fact]
-    public void Kompakt_utelamnar_bilder_men_behaller_karnan_och_QR_bredvid_varandra()
+    public void Resultat_QR_utelamnas_nar_den_inte_ar_satt_men_Forutsattnings_QR_star_kvar()
+    {
+        var item = Item(false);
+        item.Qr2Url = "";
+        var body = Render(item).Split("</style>")[1];
+        Assert.Contains("alt=\"QR Förutsättningar\"", body);
+        Assert.DoesNotContain("QR Resultat", body);
+    }
+
+    [Fact]
+    public void Framsvangande_figur_far_gront_falt_for_sitt_fonster()
+    {
+        var item = Item(false);
+        var fig = item.StationsByWeaponClass["C"].TargetGroups[0].Figures[0];
+        fig.Behavior = "Framsvängande"; fig.DelayBeforeShowSec = 3; fig.ShowTimeSec = 15;
+        var body = Render(item).Split("</style>")[1];
+        Assert.Contains("left:10%;width:50%", body); // 3–18 s av 30 s
+    }
+
+    [Fact]
+    public void Kompakt_behaller_karnan_och_QR_bredvid_varandra()
     {
         var html = Render(Item(true));
         var body = html.Split("</style>")[1];
-        Assert.DoesNotContain("src=\"/g.jpg\"", body);
-        Assert.DoesNotContain("src=\"/f.jpg\"", body);
         Assert.Contains("station-block compact", body);
         // Kärnan (SHB D.9.14): skjuttid, utgångsläge, målgrupp med beskrivning, figur med poängmarkering, båda QR-koderna.
         Assert.Contains("Skjuttid:", body);
@@ -77,7 +102,7 @@ public class StationCardCompactTests
     {
         Assert.DoesNotContain("card-toolbar\"", Render(Item(false)).Split("</style>")[1]);
         var html = Render(Item(false), new StationCardToolbar { Station = 3, WeaponClass = "C", Mode = StationPrintMode.Full, CanSetMode = true });
-        Assert.Contains("Kompakt (1 sida)", html);
+        Assert.Contains(">Kompakt</button>", html);
         Assert.Contains("setMode('Kompakt')", html);
         Assert.Contains(".card-toolbar { display: none !important; }", html); // i @media print
     }

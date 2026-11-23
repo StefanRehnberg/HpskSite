@@ -93,8 +93,8 @@ namespace HpskSite.Controllers
                             Compact = compactStations != null && compactStations.Contains(n),
                             // QR-1 mints its token + renders server-side; relative img src is fine.
                             Qr1Url = !withQr ? "" : $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={competitionId}&stationNumber={n}",
-                            // QR-2 encodes the absolute entry URL.
-                            Qr2Url = !withQr ? "" : $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}"
+                            // QR-2 (resultatregistrering) skrivs bara ut när skyttarna får fylla i resultat själva.
+                            Qr2Url = !withQr || !competition.FaltskytteSelfServiceResults ? "" :$"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}"
                         };
                     }).ToList()
                 };

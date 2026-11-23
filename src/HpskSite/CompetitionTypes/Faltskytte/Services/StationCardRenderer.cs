@@ -21,7 +21,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public bool ShowClassesInHeader { get; set; }
         public string Qr1Url { get; set; } = "";
         public string Qr2Url { get; set; } = "";
-        /// <summary>Kompakt (1 sida): inga bilder, tät sättning, QR-koderna bredvid varandra. Den obligatoriska kärnan står kvar.</summary>
+        /// <summary>Kompakt: tätare sättning och mindre bilder. Bilder, tidslinjer och QR-koder finns alltid, i båda lägena; båda ryms på en stående A4.</summary>
         public bool Compact { get; set; }
     }
 
@@ -238,31 +238,49 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ".magnum-note { margin: 6px 0 10px; padding: 6px 10px; border-left: 3px solid #999; background: #f5f5f5; font-size: 0.88em; line-height: 1.4; }\n" +
             ".magnum-note p { margin: 2px 0; }\n" +
             ".tg-img { text-align: center; margin: 10px 0; }\n" +
-            ".tg-img img { max-width: 80%; max-height: 200px; border-radius: 6px; }\n" +
-            ".fig { margin: 8px 0; padding: 8px; background: #fafafa; border-radius: 4px; display: flex; align-items: center; gap: 12px; }\n" +
-            ".fig img { height: 50px; border-radius: 4px; }\n" +
-            ".fig-info { flex: 1; }\n" +
-            ".pm-badge { background: #ffc107; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }\n" +
-            ".time-variants { margin: 2px 0 2px 20px; font-size: 0.9em; color: #444; }\n" +
-            ".qr-card { text-align: center; margin-top: 20px; page-break-inside: avoid; }\n" +
-            ".qr-cut { margin-top: 24px; page-break-before: always; border: 2px dashed #888; border-radius: 8px; padding: 16px; text-align: center; }\n" +
-            // Kompakt (fas 3b): en sida. Inga bilder, tät sättning, QR-koderna bredvid varandra på samma sida.
-            ".station-block.compact { page-break-after: always; font-size: 0.88em; }\n" +
+            ".tg-img img { max-width: 70%; max-height: 150px; border-radius: 6px; }\n" +
+            ".fig { margin: 6px 0; padding: 6px 8px; background: #fafafa; border-radius: 4px; display: flex; align-items: center; gap: 12px; }\n" +
+            ".fig img { height: 54px; max-width: 90px; object-fit: contain; border-radius: 4px; flex: none; }\n" +
+            ".fig-info { flex: 1; min-width: 0; }\n" +
+            ".pm-badge { background: #ffc107; color: #000; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n" +
+            // Tidslinjen (samma som sidan man når via QR-koden Förutsättningar): grönt = figuren syns.
+            ".tl { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.8em; color: #444; }\n" +
+            ".tl-lbl { flex: none; font-weight: 600; min-width: 2.2em; }\n" +
+            ".tl-bar { position: relative; flex: 1; height: 11px; background: #ddd; border: 1px solid #aaa; border-radius: 3px; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n" +
+            ".tl-bar > span { position: absolute; top: 0; bottom: 0; background: #198754; -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n" +
+            ".tl-end { flex: none; }\n" +
+            ".tl-legend { font-size: 0.8em; color: #555; margin: 4px 0 0; }\n" +
+            ".qr-row { display: flex; gap: 16px; align-items: stretch; margin-top: 14px; page-break-inside: avoid; }\n" +
+            ".qr-card { flex: 1; text-align: center; padding: 8px; border: 1px solid #bbb; border-radius: 8px; }\n" +
+            ".qr-card img { width: 130px; height: 130px; }\n" +
+            ".qr-cut { page-break-before: always; border: 2px dashed #888; border-radius: 8px; padding: 24px; text-align: center; margin-top: 24px; }\n" +
+            ".qr-cut img { width: 220px; height: 220px; }\n" +
+            ".qr-title { font-size: 0.95em; font-weight: bold; margin-bottom: 6px; }\n" +
+            ".qr-sub { font-size: 0.8em; color: #555; margin-top: 4px; }\n" +
+            // Kompakt: samma innehåll (bilder och tidslinjer kvar), tätare sättning och mindre bilder.
+            ".station-block.compact { font-size: 0.88em; }\n" +
             ".compact h1 { font-size: 1.35em; padding-bottom: 4px; border-bottom-width: 2px; }\n" +
             ".compact .rules { padding: 6px 10px; margin: 8px 0; }\n" +
             ".compact .tg { padding: 6px 10px; margin: 8px 0; border-width: 1px; }\n" +
             ".compact .tg h3 { margin: 0 0 4px; font-size: 1.05em; }\n" +
             ".compact .tg-desc { margin: 4px 0; font-size: 0.9em; line-height: 1.3; }\n" +
-            ".compact .fig { margin: 2px 0; padding: 2px 6px; }\n" +
-            ".compact .qr-row { display: flex; gap: 16px; align-items: stretch; margin-top: 10px; page-break-inside: avoid; }\n" +
-            ".compact .qr-row .qr-card, .compact .qr-row .qr-cut { flex: 1; margin: 0; page-break-before: auto; padding: 8px; }\n" +
-            ".compact .qr-row img { width: 110px !important; height: 110px !important; }\n" +
+            ".compact .tg-img { margin: 4px 0; }\n" +
+            ".compact .tg-img img { max-height: 60px; }\n" +
+            ".compact .fig { margin: 2px 0; padding: 2px 6px; gap: 8px; }\n" +
+            ".compact .fig img { height: 28px; max-width: 48px; }\n" +
+            ".compact .tl { margin-top: 2px; }\n" +
+            ".compact .qr-row { margin-top: 8px; gap: 10px; }\n" +
+            ".compact .qr-card { padding: 4px; }\n" +
+            ".compact .qr-card img { width: 90px; height: 90px; }\n" +
+            ".compact .qr-cut img { width: 220px; height: 220px; }\n" +
             ".card-toolbar { position: sticky; top: 0; z-index: 5; background: #fff; border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 0.95em; }\n" +
             ".card-toolbar button { font: inherit; padding: 4px 12px; border: 1px solid #666; border-radius: 4px; background: #fff; cursor: pointer; }\n" +
             ".card-toolbar button.on { background: #0d6efd; color: #fff; border-color: #0d6efd; }\n" +
             ".card-toolbar .pages { font-weight: 600; }\n" +
             ".card-toolbar .pages.over { color: #b02a37; }\n" +
-            "@media print { body { margin: 15mm; } .card-toolbar { display: none !important; } }\n";
+            // Stående A4: ett kort per sida.
+            "@page { size: A4 portrait; margin: 12mm; }\n" +
+            "@media print { body { margin: 0; max-width: none; } .card-toolbar { display: none !important; } }\n";
 
         const string Sep = " &nbsp;|&nbsp; ";
 
@@ -307,16 +325,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 return "<button type=\"button\" class=\"" + (on ? "on" : "") + "\"" + dis + " onclick=\"setMode('" + mode + "')\">" + label + "</button>";
             }
             sb.Append("<div class=\"card-toolbar\"><span><strong>Utskrift:</strong></span>")
-              .Append(Btn(StationPrintMode.Full, "Full")).Append(Btn(StationPrintMode.Kompakt, "Kompakt (1 sida)"))
+              .Append(Btn(StationPrintMode.Full, "Full")).Append(Btn(StationPrintMode.Kompakt, "Kompakt"))
               .Append("<span class=\"pages\" id=\"cardPages\"></span>")
               .Append("<button type=\"button\" onclick=\"window.print()\" style=\"margin-left:auto\">Skriv ut</button></div>\n");
             sb.Append("<script>\n")
               .Append("function setMode(m){ var o = window.opener; if (o && o.faltCfgPrintStationMode) { document.body.style.opacity = '0.5'; o.faltCfgPrintStationMode(")
               .Append(t.Station).Append(", '").Append(wc).Append("', m, window); } }\n")
-              .Append("function countPages(){ var H = 1009, n = 0; // A4 minus 15 mm marginal, i skärmpixlar\n")
-              .Append("  document.querySelectorAll('.station-block').forEach(function(b){ var cut = b.querySelector('.qr-cut'); var sep = cut && !b.classList.contains('compact');\n")
-              .Append("    var h = b.offsetHeight - (sep ? cut.offsetHeight + 24 : 0); n += Math.max(1, Math.ceil(h / H)) + (sep ? 1 : 0); });\n")
-              .Append("  var el = document.getElementById('cardPages'); if (!el) return; el.textContent = 'Ungefär ' + n + (n === 1 ? ' sida' : ' sidor'); el.className = 'pages' + (n > 1 && document.querySelector('.station-block.compact') ? ' over' : ''); }\n")
+              .Append("function countPages(){ var H = 1032, n = 0, blocks = document.querySelectorAll('.station-block'); // A4 minus 12 mm marginal, i skärmpixlar\n")
+              .Append("  var over = false; blocks.forEach(function(b){ var cut = b.querySelector('.qr-cut'); var h = b.offsetHeight - (cut ? cut.offsetHeight + 24 : 0);\n")
+              .Append("    var p = Math.max(1, Math.ceil(h / H)); if (p > 1) over = true; n += p + (cut ? 1 : 0); });\n")
+              .Append("  var el = document.getElementById('cardPages'); if (!el) return; el.textContent = 'Ungefär ' + n + (n === 1 ? ' sida' : ' sidor'); el.className = 'pages' + (over ? ' over' : ''); }\n")
               .Append("window.addEventListener('load', countPages);\n")
               .Append("</script>\n");
         }
@@ -359,13 +377,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 sb.Append("<div class=\"tg\">\n<h3>Målgrupp ").Append(letter).Append("</h3>\n");
                 if (!string.IsNullOrWhiteSpace(tg.Description))
                     sb.Append("<div class=\"tg-desc\">").Append(E(tg.Description).Replace("\n", "<br>")).Append("</div>\n");
-                if (!b.Compact && !string.IsNullOrWhiteSpace(tg.ImageUrl))
+                if (!string.IsNullOrWhiteSpace(tg.ImageUrl))
                     sb.Append("<div class=\"tg-img\"><img src=\"").Append(E(tg.ImageUrl)).Append("\" alt=\"Målgrupp ").Append(letter).Append("\"></div>\n");
                 for (var fIdx = 0; fIdx < tg.Figures.Count; fIdx++)
                 {
                     var fig = tg.Figures[fIdx];
                     sb.Append("<div class=\"fig\">");
-                    if (!b.Compact && !string.IsNullOrWhiteSpace(fig.ImageUrl)) sb.Append("<img src=\"").Append(E(fig.ImageUrl)).Append("\" alt=\"\">");
+                    if (!string.IsNullOrWhiteSpace(fig.ImageUrl)) sb.Append("<img src=\"").Append(E(fig.ImageUrl)).Append("\" alt=\"\">");
                     sb.Append("<div class=\"fig-info\"><strong>Figur ").Append(fig.FigureNumber).Append("</strong>");
                     if (fig.IsPoangmal) sb.Append(" <span class=\"pm-badge\">Poängräkning</span>");
 
@@ -398,23 +416,62 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     {
                         sb.Append(" — ").Append(E(BehaviorText(fig)));
                     }
+                    RenderTimeline(sb, b, tgIdx, fIdx);
                     sb.Append("</div></div>\n");
                 }
                 sb.Append("</div>\n");
             }
 
+            // QR-koderna: Förutsättningar (mobilsidan) alltid när den finns; Resultatregistrering bara när tävlingen
+            // tillåter skyttarna att själva fylla i resultat (Qr2Url är då satt, annars tom).
             if (!string.IsNullOrEmpty(b.Qr1Url))
             {
-                if (b.Compact) sb.Append("<div class=\"qr-row\">");
-                sb.Append("<div class=\"qr-card\"><img src=\"").Append(E(b.Qr1Url)).Append("\" alt=\"QR Förutsättningar\" style=\"width:150px;height:150px\">");
-                sb.Append("<div style=\"font-size:0.85em;color:#333;margin-top:4px;font-weight:bold\">Förutsättningar — skanna här</div></div>\n");
-                sb.Append("<div class=\"qr-cut\"><div style=\"font-size:1.1em;font-weight:bold;margin-bottom:8px\">Station ").Append(b.Station)
-                  .Append(" — Resultatregistrering</div><img src=\"").Append(E(b.Qr2Url)).Append("\" alt=\"QR Resultat\" style=\"width:150px;height:150px\">");
-                sb.Append("<div style=\"font-size:0.85em;color:#333;margin-top:4px\">Klipp ut och placera vid målgrupperna</div>");
-                sb.Append("<div style=\"font-size:0.8em;color:#666\">Kräver inloggning</div></div>\n");
-                if (b.Compact) sb.Append("</div>\n");
+                sb.Append("<div class=\"qr-row\"><div class=\"qr-card\"><img src=\"").Append(E(b.Qr1Url)).Append("\" alt=\"QR Förutsättningar\">");
+                sb.Append("<div class=\"qr-title\">Förutsättningar — skanna här</div>");
+                sb.Append("<div class=\"qr-sub\">Figurer och tidslinjer i mobilen</div></div></div>\n");
+            }
+            // Resultatregistrering: en egen sida att klippa ut och placera vid målgrupperna.
+            if (!string.IsNullOrEmpty(b.Qr2Url))
+            {
+                sb.Append("<div class=\"qr-cut\"><div class=\"qr-title\" style=\"font-size:1.3em\">Station ").Append(b.Station)
+                  .Append(" — Resultatregistrering</div><img src=\"").Append(E(b.Qr2Url)).Append("\" alt=\"QR Resultat\">");
+                sb.Append("<div class=\"qr-sub\">Klipp ut och placera vid målgrupperna</div>");
+                sb.Append("<div class=\"qr-sub\">Kräver inloggning</div></div>\n");
             }
             sb.Append("</div>\n");
+        }
+
+        /// <summary>
+        /// Figurens tidslinje(r): grönt = synlig under skjuttiden, samma fönster som QR-sidan (<see cref="ExposureWindows"/>).
+        /// Klasser som delar kort men skiljer i skjuttid eller fönster får en linje var, märkt med klasserna.
+        /// </summary>
+        static void RenderTimeline(StringBuilder sb, StationCardBlock b, int tgIdx, int fIdx)
+        {
+            var groups = new List<(string Sig, int Sec, List<int[]> Bands, List<string> Classes)>();
+            foreach (var c in b.Classes)
+            {
+                var st = b.ByClass[c];
+                var fig = st.TargetGroups.ElementAtOrDefault(tgIdx)?.Figures.ElementAtOrDefault(fIdx);
+                if (fig == null || st.ShootingTimeSec <= 0) continue;
+                var bands = ExposureWindows.For(fig, st.ShootingTimeSec);
+                var sig = st.ShootingTimeSec + ":" + string.Join(",", bands.Select(x => x[0] + "-" + x[1]));
+                var g = groups.FindIndex(x => x.Sig == sig);
+                if (g < 0) groups.Add((sig, st.ShootingTimeSec, bands, new List<string> { c })); else groups[g].Classes.Add(c);
+            }
+            foreach (var g in groups)
+            {
+                sb.Append("<div class=\"tl\">");
+                if (groups.Count > 1) sb.Append("<span class=\"tl-lbl\">").Append(E(string.Join(",", g.Classes))).Append("</span>");
+                sb.Append("<div class=\"tl-bar\">");
+                foreach (var band in g.Bands)
+                {
+                    var left = (double)band[0] / g.Sec * 100;
+                    var width = (double)(band[1] - band[0]) / g.Sec * 100;
+                    sb.Append("<span style=\"left:").Append(left.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))
+                      .Append("%;width:").Append(width.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append("%\"></span>");
+                }
+                sb.Append("</div><span class=\"tl-end\">").Append(g.Sec).Append(" s</span></div>");
+            }
         }
 
         sealed record Field(string Label, string Suffix, bool Descriptive, Func<FaltskytteStationConfig, string> Get);

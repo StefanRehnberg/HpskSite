@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<FaltskytteConfigurationController> _logger;
         private readonly HpskSite.Services.MemberDirectoryService _directory;
         private readonly HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService _printOptions;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public FaltskytteConfigurationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -38,9 +39,11 @@ namespace HpskSite.Controllers
             ClubService clubService,
             ILogger<FaltskytteConfigurationController> logger,
             HpskSite.Services.MemberDirectoryService directory,
-            HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService printOptions)
+            HpskSite.CompetitionTypes.Faltskytte.Services.StationPrintOptionService printOptions,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _printOptions = printOptions;
             _directory = directory;
             _configService = configService;
@@ -154,7 +157,9 @@ namespace HpskSite.Controllers
             {
                 var entryUrl = $"{Request.PublicBase()}/station?c={compId}&s={request.Station}";
                 item.Qr1Url = $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={compId}&stationNumber={request.Station}";
-                item.Qr2Url = $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}";
+                // QR-2 (resultatregistrering) bara när tävlingen tillåter självservice — samma regel som tävlingens utskrift.
+                if (_competitions.GetSaved(compId)?.FaltskytteSelfServiceResults == true)
+                    item.Qr2Url = $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}";
             }
 
             var blocks = HpskSite.CompetitionTypes.Faltskytte.Services.StationCardRenderer.BuildBlocks(item, meta.Strict, meta.CourseStations, request.WeaponClass);
