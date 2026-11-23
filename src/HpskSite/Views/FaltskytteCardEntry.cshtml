@@ -26,9 +26,15 @@
         .ke-pm { flex: 1 1 0; min-width: 0; width: 100%; padding-left: 2px; padding-right: 2px; border-style: dashed; }
         .ke-msg { font-size: 11.5px; min-height: 16px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; margin-top: 2px; }
         .ke-msg .btn { font-size: 11.5px; padding: 1px 6px; margin-top: 3px; white-space: normal; text-align: left; }
-        .ke-cell.ke-saved { border-color: var(--bs-success); }
-        .ke-cell.ke-dirty { border-color: var(--bs-warning); background: var(--bs-warning-bg-subtle); }
-        .ke-cell.ke-conflict { border-color: var(--bs-danger); background: var(--bs-danger-bg-subtle); }
+        .ke-cell.ke-saved, .ke-fig.ke-saved { border-color: var(--bs-success); }
+        .ke-cell.ke-dirty, .ke-fig.ke-dirty { border-color: var(--bs-warning); background: var(--bs-warning-bg-subtle); }
+        .ke-cell.ke-conflict, .ke-fig.ke-conflict { border-color: var(--bs-danger); background: var(--bs-danger-bg-subtle); }
+        /* Läget "En ruta per figur": en liten ruta per figur, en siffra var. */
+        .ke-figs { display: flex; gap: 3px; justify-content: center; }
+        .ke-fig { flex: 1 1 0; min-width: 0; max-width: 2.2rem; padding-left: 0; padding-right: 0; font-variant-numeric: tabular-nums; }
+        .ke-lockrow { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .ke-lockval { font-weight: 600; font-variant-numeric: tabular-nums; }
+        #keModes .btn { white-space: nowrap; }
         .ke-sum { font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .ke-rowstate { font-size: 12px; color: var(--bs-secondary-color); }
         .ke-scroll { overflow-x: auto; }
@@ -116,10 +122,15 @@
             <div id="keCardBanner"></div>
             <div class="card mb-3">
                 <div class="card-body">
-                    <div class="small text-muted mb-2">
-                        Tom ruta = ej inmatad · <strong>0/0</strong> = skjutit utan träff · på poängstationer finns även rutor för <strong>Poäng</strong> under träffarna ·
-                        Enter, Tab eller → = nästa ruta · ← = föregående · ↑ ↓ = annan skytt. Rutan sparas när du lämnar den.
+                    <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                        <span class="small text-muted">Mata in resultatet som:</span>
+                        <div class="btn-group btn-group-sm" id="keModes" role="group" aria-label="Inmatningssätt">
+                            <button type="button" class="btn btn-primary" data-mode="plus" aria-pressed="true" title="Träff per figur, till exempel 2+1+2"><i class="bi bi-plus-lg me-1"></i>2+1+2</button>
+                            <button type="button" class="btn btn-outline-primary" data-mode="slash" aria-pressed="false" title="Träff och träffade figurer, till exempel 5/3"><i class="bi bi-slash-lg me-1"></i>5/3</button>
+                            <button type="button" class="btn btn-outline-primary" data-mode="boxes" aria-pressed="false" title="En liten ruta per figur, en siffra i varje"><i class="bi bi-square me-1"></i>En ruta per figur</button>
+                        </div>
                     </div>
+                    <div class="small text-muted mb-2" id="keModeHint"></div>
                     <div class="ke-scroll"><table class="table table-sm align-middle ke-grid mb-0" id="keGrid"></table></div>
                 </div>
             </div>
@@ -169,6 +180,14 @@
             if (h > 0 && f === 0) return { error: 'Träffar utan träffad figur.' };
             if (h > f * maxPer) return { error: 'Högst ' + maxPer + ' träff per figur.' };
             return { mode: 'tot', hits: h, figs: f };
+        }
+        // Halvifyllt ("2+1+", "2++"): inget fel, bara ofullständigt. Är det redan fel (för stor siffra, för många) säger vi det direkt.
+        if (/^[\d+]+$/.test(t) && /(^\+|\+\+|\+$)/.test(t)) {
+            var segs = t.split('+');
+            if (segs.length > slots) return { error: 'Stationen har ' + slots + (slots === 1 ? ' figur' : ' figurer') + ', du skrev ' + segs.length + ' värden.' };
+            if (segs.some(function (x) { return x !== '' && parseInt(x, 10) > maxPer; })) return { error: 'Högst ' + maxPer + ' träff per figur.' };
+            if (segs.reduce(function (a, x) { return a + (x === '' ? 0 : parseInt(x, 10)); }, 0) > 6) return { error: 'Högst 6 träff per station.' };
+            return { error: 'Fyll i alla ' + slots + ' värden (0 om ingen träff).', soft: true, incomplete: true };
         }
         if ((m = /^(\d+(?:\+\d+)*)$/.exec(t))) return checkFig(m[1]);
         if ((m = /^(\d+)\/(\d+)$/.exec(t))) return checkTot(parseInt(m[1], 10), parseInt(m[2], 10));
@@ -311,7 +330,8 @@
         var sts = allStationNumbers();
         var h = '<thead><tr><th class="nm">Skytt</th>';
         sts.forEach(function (s) {
-            h += '<th class="st">Station ' + s.station + '<small class="text-muted">' + (s.name ? esc(s.name) + '<br>' : '') + s.slots + (s.slots === 1 ? ' figur' : ' figurer') + (s.poangmal ? ' + poäng' : '') + '</small></th>';
+            // I rutläget får kolumnen plats för sina rutor (en ruta ≈ 31 px med mellanrum); bredare utrymme delas proportionellt.
+            h += '<th class="st"' + (mode === 'boxes' ? ' style="width:' + (s.slots * 31 + 20) + 'px"' : '') + '>Station ' + s.station + '<small class="text-muted">' + (s.name ? esc(s.name) + '<br>' : '') + s.slots + (s.slots === 1 ? ' figur' : ' figurer') + (s.poangmal ? ' + poäng' : '') + '</small></th>';
         });
         h += '<th class="sm">Träffar</th><th class="rs">Läge</th></tr></thead><tbody>';
         card.shooters.forEach(function (sh, i) {
@@ -326,26 +346,134 @@
             sts.forEach(function (s) {
                 var c = cells[key(sh.memberId, s.station)];
                 if (!c) { h += '<td class="text-center text-muted">—</td>'; return; }
-                h += '<td><input type="text" class="form-control form-control-sm text-center ke-cell" autocomplete="off" inputmode="text" id="c_' + sh.memberId + '_' + s.station + '" data-m="' + sh.memberId + '" data-s="' + s.station + '" aria-label="' + esc(sh.name) + ' station ' + s.station + '" placeholder="2+1+2">';
-                if (c.pmN) {
-                    h += '<div class="ke-pmrow"><span class="ke-pmlab">Poäng</span>';
-                    for (var p = 0; p < c.pmN; p++) h += '<input type="text" class="form-control form-control-sm text-center ke-pm" autocomplete="off" inputmode="numeric" maxlength="2" id="p_' + sh.memberId + '_' + s.station + '_' + p + '" data-m="' + sh.memberId + '" data-s="' + s.station + '" data-p="' + p + '" aria-label="Poäng ' + (p + 1) + '">';
-                    h += '</div>';
-                }
-                h += '<div class="ke-msg" id="m_' + sh.memberId + '_' + s.station + '"></div></td>';
+                h += '<td id="td_' + sh.memberId + '_' + s.station + '" data-shape="' + shapeOf(c) + '">' + cellInner(c) + '</td>';
             });
             h += '<td class="ke-sum" id="sum_' + sh.memberId + '"></td><td class="ke-rowstate" id="rs_' + sh.memberId + '"></td></tr>';
         });
-        $('#keGrid').innerHTML = h + '</tbody>';
+        var g = $('#keGrid');
+        g.innerHTML = h + '</tbody>';
+        // Många figurer ger breda rutnät: hellre sidscroll i kortet än hoptryckta rutor.
+        var colTotal = sts.reduce(function (a, s) { return a + s.slots * 31 + 20; }, 0);
+        g.style.minWidth = mode === 'boxes' ? (168 + 64 + 92 + colTotal) + 'px' : '';
     }
 
-    function cellEls(c) { return { input: document.getElementById('c_' + c.mid + '_' + c.st), msg: document.getElementById('m_' + c.mid + '_' + c.st) }; }
+    // ───────── inmatningssätt ─────────
+    // plus/slash: en textruta per station (båda skrivsätten tolkas alltid, knappen styr bara förslaget och hjälptexten).
+    // boxes: en liten ruta per figur. Rutans värde är fortfarande strängen "2+1+2" i c.text, så sparning och validering är desamma.
+    var MODE_KEY = 'hpsk_kortinmatning_mode';
+    var mode = (function () { var v = lsGet(MODE_KEY); return v === 'slash' || v === 'boxes' ? v : 'plus'; })();
+    var PLACEHOLDER = { plus: '2+1+2', slash: '5/3', boxes: '' };
+
+    // ── Omräkning mellan inmatningssätten (bara VISNING: c.text, det som sparas, ändras aldrig av ett lägesbyte) ──
+    // Fördelning → träff/figurer är alltid säkert (en summering). Träff/figurer → fördelning görs bara när det finns
+    // EXAKT en möjlig fördelning (t.ex. 0/0 = 0+0+0, eller en enda figur); annars gissar vi aldrig, värdet visas som det är.
+    function forcedFigs(hits, figs, slots, maxPer) {
+        if (!(slots >= 1 && slots <= 8) || !(maxPer >= 0)) return null;
+        var found = null, count = 0, cur = [];
+        (function rec(i, left, nz) {
+            if (count > 1) return;
+            if (i === slots) { if (left === 0 && nz === figs) { count++; found = cur.slice(); } return; }
+            for (var v = 0; v <= maxPer && v <= left; v++) { cur[i] = v; rec(i + 1, left - v, nz + (v > 0 ? 1 : 0)); }
+        })(0, hits, 0);
+        return count === 1 ? found : null;
+    }
+    // Rutans värde som träff per figur ("2+1+2") när den är känd eller går att räkna ut, annars texten som den är.
+    function canonText(c) {
+        var t = (c.text || '').trim().replace(/\s*\/\s*/g, '/');
+        var m = /^(\d+)\/(\d+)$/.exec(t);
+        if (!m) return c.text || '';
+        var arr = forcedFigs(parseInt(m[1], 10), parseInt(m[2], 10), c.slots, c.maxPer);
+        return arr ? arr.join('+') : (c.text || '');
+    }
+    // "5/3" ur en komplett fördelning, annars texten som den är.
+    function totText(c) {
+        var p = parseCell(c.text, c.slots, c.maxPer);
+        return p.mode === 'fig' ? p.hits + '/' + p.figs : (c.text || '');
+    }
+    function displayText(c) { return mode === 'slash' ? totText(c) : mode === 'plus' ? canonText(c) : (c.text || ''); }
+
+    // Figurernas siffror, eller null när texten inte går att visa i rutor (t.ex. "5/3" med flera möjliga fördelningar).
+    function figsOf(c) {
+        var t = canonText(c);
+        var out = [], i;
+        if (t === '') { for (i = 0; i < c.slots; i++) out.push(''); return out; }
+        if (!/^[\d+]+$/.test(t)) return null;
+        out = t.split('+');
+        if (out.length > c.slots) return null;
+        while (out.length < c.slots) out.push('');
+        return out;
+    }
+    function shapeOf(c) { return mode === 'boxes' ? (figsOf(c) ? 'boxes' : 'lock') : 'text'; }
+
+    function cellInner(c) {
+        var sh = shooterOf(c.mid), nm = sh ? esc(sh.name) : '', id = c.mid + '_' + c.st, shape = shapeOf(c), h = '', f;
+        var data = ' data-m="' + c.mid + '" data-s="' + c.st + '"';
+        if (shape === 'boxes') {
+            h += '<div class="ke-figs" id="g_' + id + '" role="group" aria-label="' + nm + ' station ' + c.st + ', en siffra per figur">';
+            for (f = 0; f < c.slots; f++) h += '<input type="text" class="form-control form-control-sm text-center ke-fig" autocomplete="off" inputmode="numeric" id="f_' + id + '_' + f + '"' + data + ' data-f="' + f + '" aria-label="' + nm + ' station ' + c.st + ' figur ' + (f + 1) + '">';
+            h += '</div>';
+        } else if (shape === 'lock') {
+            h += '<div class="ke-lockrow"><span class="ke-lockval" id="k_' + id + '"></span><button type="button" class="btn btn-sm btn-outline-secondary py-0" data-act="rewrite"' + data + ' title="Fördelningen på figurerna är okänd. Skriv in den i rutor.">Skriv om i rutor</button></div>';
+        } else {
+            h += '<input type="text" class="form-control form-control-sm text-center ke-cell" autocomplete="off" inputmode="text" id="c_' + id + '"' + data + ' aria-label="' + nm + ' station ' + c.st + '" placeholder="' + PLACEHOLDER[mode] + '">';
+        }
+        if (c.pmN) {
+            h += '<div class="ke-pmrow"><span class="ke-pmlab">Poäng</span>';
+            for (var p = 0; p < c.pmN; p++) h += '<input type="text" class="form-control form-control-sm text-center ke-pm" autocomplete="off" inputmode="numeric" maxlength="2" id="p_' + id + '_' + p + '"' + data + ' data-p="' + p + '" aria-label="Poäng ' + (p + 1) + '">';
+            h += '</div>';
+        }
+        return h + '<div class="ke-msg" id="m_' + id + '"></div>';
+    }
+    // En ruta kan byta skepnad medan sidan är öppen (en annan person sparade 5/3 i en ruta som visas i rutor).
+    function ensureShape(c) {
+        var td = document.getElementById('td_' + c.mid + '_' + c.st); if (!td) return;
+        var want = shapeOf(c);
+        if (td.dataset.shape === want) return;
+        td.dataset.shape = want; td.innerHTML = cellInner(c);
+    }
+    function hintHtml() {
+        var lead = mode === 'boxes'
+            ? 'En siffra per ruta, markören hoppar vidare av sig själv. <strong>0</strong> = ingen träff på figuren, och en tom ruta är inte ifylld. Backsteg i en tom ruta går tillbaka. Stationen sparas när alla rutor är ifyllda.'
+            : mode === 'slash'
+                ? 'Skriv antal träff och antal träffade figurer, till exempel <strong>5/3</strong>. <strong>0/0</strong> = skjutit utan träff.'
+                : 'Skriv träffarna per figur, till exempel <strong>2+1+2</strong>. <strong>0+0+0</strong> = skjutit utan träff.';
+        lead += ' Byter du sätt räknas värdena om i visningen (2+1+2 blir 5/3); 5/3 blir bara 2+1+2 när fördelningen går att räkna ut säkert.';
+        return lead + ' · Tom ruta = ej inmatad · på poängstationer finns även rutor för <strong>Poäng</strong> under träffarna · Enter, Tab eller → = nästa ruta · ← = föregående · ↑ ↓ = annan skytt.' + (mode === 'boxes' ? '' : ' Rutan sparas när du lämnar den.');
+    }
+    function drawModes() {
+        document.querySelectorAll('#keModes button').forEach(function (b) {
+            var on = b.dataset.mode === mode;
+            b.className = 'btn ' + (on ? 'btn-primary' : 'btn-outline-primary');
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        $('#keModeHint').innerHTML = hintHtml();
+    }
+    $('#keModes').addEventListener('click', function (e) {
+        var b = e.target.closest('[data-mode]'); if (!b || b.dataset.mode === mode) return;
+        mode = b.dataset.mode; lsSet(MODE_KEY, mode); drawModes();
+        if (card) { drawGrid(); refreshAll(); }
+    });
+
+    function cellEls(c) {
+        var td = document.getElementById('td_' + c.mid + '_' + c.st);
+        return { td: td, input: document.getElementById('c_' + c.mid + '_' + c.st), boxes: td ? [].slice.call(td.querySelectorAll('.ke-fig')) : [], lock: document.getElementById('k_' + c.mid + '_' + c.st), msg: document.getElementById('m_' + c.mid + '_' + c.st) };
+    }
     function possessive(name) { var f = (name || '').split(' ')[0]; if (!f) return 'det redan sparade värdet'; return f + (/[sxz]$/i.test(f) ? '' : 's') + ' värde'; }
 
+    // Varje inmatningssätt tar bara sitt eget skrivsätt. Gäller det man skriver, inte ett redan sparat värde som visas.
+    function formError(c) {
+        if (mode === 'boxes') return null;
+        var t = (c.text || '').trim();
+        if (t === '' || c.text === c.serverText) return null;
+        if (mode === 'plus' && t.indexOf('/') > -1) return 'Skriv 2+1+2 här. För 5/3, välj 5/3-knappen.';
+        if (mode === 'slash' && t.indexOf('+') > -1) return 'Skriv 5/3 här. För 2+1+2, välj 2+1+2-knappen.';
+        return null;
+    }
     function validateCell(c) {
+        var fe = formError(c); if (fe) return { error: fe };
         var p = parseCell(c.text, c.slots, c.maxPer);
         var pmAny = c.pm.some(function (v) { return v !== ''; });
-        if (p.error) return { error: p.error };
+        if (p.error) return p;
         if (pmAny) {
             for (var i = 0; i < c.pm.length; i++) {
                 if (c.pm[i] !== '' && !(/^\d{1,2}$/.test(c.pm[i]) && parseInt(c.pm[i], 10) <= 50)) return { error: 'Poäng måste vara 0–50.' };
@@ -356,10 +484,21 @@
     }
 
     function paint(c) {
-        var e = cellEls(c); if (!e.input) return;
-        if (document.activeElement !== e.input) e.input.value = c.text;
+        ensureShape(c);
+        var e = cellEls(c); if (!e.td) return;
+        var shape = e.td.dataset.shape, inputs = [], invalid = false;
+        if (shape === 'text' && e.input) {
+            if (document.activeElement !== e.input) e.input.value = displayText(c);
+            inputs = [e.input];
+        } else if (shape === 'boxes') {
+            var figs = figsOf(c) || [];
+            e.boxes.forEach(function (b, i) { if (document.activeElement !== b) b.value = figs[i] == null ? '' : figs[i]; });
+            inputs = e.boxes;
+        } else if (e.lock) {
+            e.lock.textContent = c.text;
+        }
         c.pm.forEach(function (v, i) { var pe = document.getElementById('p_' + c.mid + '_' + c.st + '_' + i); if (pe && document.activeElement !== pe) pe.value = v; });
-        e.input.className = 'form-control form-control-sm text-center ke-cell' + (c.state === 'saved' ? ' ke-saved' : c.state === 'dirty' || c.state === 'saving' ? ' ke-dirty' : c.state === 'conflict' || c.state === 'error' ? ' ke-conflict' : '');
+        var stateCls = c.state === 'saved' ? ' ke-saved' : c.state === 'dirty' || c.state === 'saving' ? ' ke-dirty' : c.state === 'conflict' || c.state === 'error' ? ' ke-conflict' : '';
         var v = validateCell(c), msg = '';
         if (c.state === 'conflict') {
             var cur = c.current, whoRaw = cur && cur.enteredBy ? cur.enteredBy : '', who = whoRaw ? esc(whoRaw) : 'Någon annan';
@@ -373,7 +512,9 @@
             msg = '<span class="text-muted">' + esc(v.error) + '</span>';
         } else if (v.error) {
             msg = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + esc(v.error) + '</span>';
-            e.input.className += ' is-invalid';
+            invalid = true;
+        } else if (shape === 'boxes' && v.empty && c.state === 'dirty' && c.serverText && !figsOf({ text: c.serverText, slots: c.slots, maxPer: c.maxPer })) {
+            msg = '<span class="text-muted">Tidigare värde ' + esc(c.serverText) + ' gäller tills du fyllt i alla rutor.</span>';
         } else if (c.state === 'saving') {
             msg = '<span class="text-muted"><span class="spinner-border spinner-border-sm"></span> Sparar…</span>';
         } else if (c.state === 'saved') {
@@ -381,6 +522,9 @@
         } else if (c.state === 'dirty') {
             msg = '<span class="text-warning-emphasis"><i class="bi bi-circle-fill text-warning"></i> Ej sparad. ' + describe(v) + '</span>';
         }
+        inputs.forEach(function (inp) {
+            inp.className = 'form-control form-control-sm text-center ' + (inp.classList.contains('ke-fig') ? 'ke-fig' : 'ke-cell') + stateCls + (invalid ? ' is-invalid' : '');
+        });
         e.msg.innerHTML = msg;
     }
 
@@ -417,7 +561,7 @@
             var miss = [], pmMiss = [];
             sh.stations.forEach(function (st) {
                 var c = cells[key(sh.memberId, st.station)], v = validateCell(c);
-                if (v.empty) miss.push(st.station);
+                if (v.empty || v.incomplete) miss.push(st.station);
                 else if (st.poangmal && c.pm.some(function (x) { return x === ''; })) pmMiss.push(st.station);
             });
             if (miss.length) out.push('<b>' + esc(sh.name) + '</b>: saknar station ' + miss.join(', ') + '. Resultatlistan räknar en saknad station som 0 träff.');
@@ -517,10 +661,37 @@
     grid.addEventListener('input', function (e) {
         var t = e.target; if (!t.dataset || !t.dataset.m) return;
         var c = cells[key(+t.dataset.m, +t.dataset.s)]; if (!c) return;
-        if (t.dataset.p != null) c.pm[+t.dataset.p] = t.value.trim(); else c.text = t.value;
+        var advance = false;
+        if (t.dataset.f != null) {
+            // En ruta per figur: en siffra, sedan vidare. "+", mellanslag och "/" i en ifylld ruta = vidare (i en tom ignoreras de,
+            // så den som skriver 2+2+2 av gammal vana hamnar rätt: siffran hoppar redan vidare, plustecknet försvinner).
+            var f = figsOf(c); if (!f) return;
+            var i = +t.dataset.f, raw = t.value, prev = f[i], d = raw.replace(/\D/g, '').slice(-1);
+            if (/\D/.test(raw) && (d === '' || d === prev)) { t.value = prev; if (prev !== '' && /[+\s\/]/.test(raw)) move(t, 1); return; }
+            f[i] = d; t.value = d;
+            c.text = f.every(function (x) { return x === ''; }) ? '' : f.join('+');
+            advance = d !== '';
+        } else if (t.dataset.p != null) c.pm[+t.dataset.p] = t.value.trim();
+        else {
+            c.text = t.value;
+            // Rutan visar det sparade värdet omräknat (2+1+2 som 5/3). Skriver någon om exakt det som visas, tecken för tecken,
+            // är det ingen ändring — annars skulle en känd fördelning bytas mot en okänd av att man skrev om samma tal.
+            if (mode === 'slash' && c.serverText && c.text !== c.serverText) {
+                var sc = { text: c.serverText, slots: c.slots, maxPer: c.maxPer };
+                if (totText(sc) !== c.serverText && totText(sc) === t.value.trim()) c.text = c.serverText;
+            }
+        }
         if (c.state === 'saved' || c.state === 'empty' || c.state === 'error') c.state = 'dirty';
         if (c.text === c.serverText && JSON.stringify(c.pm) === JSON.stringify(c.serverPm) && c.state === 'dirty') c.state = c.version ? 'saved' : 'empty';
         paint(c); refreshRow(c.mid); saveDrafts(); drawWarns();
+        if (advance) {
+            var v = validateCell(c);
+            // Ogiltig siffra (för stor, för många träff): stanna kvar så den syns. Ofullständigt är inget fel: gå vidare.
+            if (!v.error || v.soft) {
+                if (!v.error && !v.empty && c.state === 'dirty') saveCells([c]);
+                move(t, 1);
+            }
+        }
     });
     grid.addEventListener('change', function (e) {
         var t = e.target; if (!t.dataset || !t.dataset.m) return;
@@ -531,9 +702,11 @@
     function move(x, d) { var a = inputsInOrder(), i = a.indexOf(x) + d; if (i >= 0 && i < a.length) { a[i].focus(); a[i].select(); } }
     grid.addEventListener('keydown', function (e) {
         var x = e.target; if (x.tagName !== 'INPUT') return;
+        var isFig = x.classList.contains('ke-fig');
         if (e.key === 'Enter') { e.preventDefault(); move(x, 1); }
-        else if (e.key === 'ArrowRight' && x.selectionStart === x.value.length) { e.preventDefault(); move(x, 1); }
-        else if (e.key === 'ArrowLeft' && x.selectionEnd === 0) { e.preventDefault(); move(x, -1); }
+        else if (e.key === 'Backspace' && isFig && x.value === '') { e.preventDefault(); move(x, -1); }
+        else if (e.key === 'ArrowRight' && (isFig || x.selectionStart === x.value.length)) { e.preventDefault(); move(x, 1); }
+        else if (e.key === 'ArrowLeft' && (isFig || x.selectionEnd === 0)) { e.preventDefault(); move(x, -1); }
         else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
             var rows = [].slice.call(grid.querySelectorAll('tr[data-sh]')), tr = x.closest('tr'), ri = rows.indexOf(tr) + (e.key === 'ArrowDown' ? 1 : -1);
@@ -546,6 +719,13 @@
     grid.addEventListener('click', function (e) {
         var b = e.target.closest('[data-act]'); if (!b) return;
         var c = cells[key(+b.dataset.m, +b.dataset.s)]; if (!c) return;
+        if (b.dataset.act === 'rewrite') {
+            // En rad skriven som 5/3 har ingen känd fördelning. Tömmer vi rutorna gäller det gamla värdet tills alla rutor är ifyllda.
+            c.text = ''; c.state = 'dirty';
+            paint(c); refreshRow(c.mid); saveDrafts(); drawWarns();
+            var first = document.getElementById('f_' + c.mid + '_' + c.st + '_0'); if (first) first.focus();
+            return;
+        }
         if (b.dataset.act === 'theirs') {
             var cur = c.current; c.text = rowToText(cur); c.pm = pmToStrings(cur, c.pmN); c.version = cur ? cur.version : null;
             c.serverText = c.text; c.serverPm = c.pm.slice(); c.state = cur ? 'saved' : 'empty'; c.current = null;
@@ -555,6 +735,7 @@
             saveCells([c]);
         }
     });
+    grid.addEventListener('focusin', function (e) { if (e.target.classList && e.target.classList.contains('ke-fig')) e.target.select(); });
     $('#keSaveAll').addEventListener('click', function () {
         var list = Object.keys(cells).map(function (k) { return cells[k]; }).filter(function (c) { return c.state === 'dirty' || c.state === 'error'; });
         var bad = Object.keys(cells).map(function (k) { return cells[k]; }).filter(function (c) { var v = validateCell(c); return v.error && !v.soft; });
@@ -579,6 +760,7 @@
         if (m) openPatrol(parseInt(m[1], 10)); else closePatrol();
     }
     window.addEventListener('hashchange', route);
+    drawModes();
     route();
 })();
 </script>
