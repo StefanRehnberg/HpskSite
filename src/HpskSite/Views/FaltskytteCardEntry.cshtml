@@ -419,7 +419,7 @@
         }
         if (c.pmN) {
             h += '<div class="ke-pmrow"><span class="ke-pmlab">Poäng</span>';
-            for (var p = 0; p < c.pmN; p++) h += '<input type="text" class="form-control form-control-sm text-center ke-pm" autocomplete="off" inputmode="numeric" maxlength="2" id="p_' + id + '_' + p + '"' + data + ' data-p="' + p + '" aria-label="Poäng ' + (p + 1) + '">';
+            for (var p = 0; p < c.pmN; p++) h += '<input type="text" class="form-control form-control-sm text-center ke-pm" autocomplete="off" inputmode="numeric" maxlength="2" id="p_' + id + '_' + p + '"' + data + ' data-p="' + p + '" aria-label="Poäng ' + (p + 1) + '" placeholder="P' + (p + 1) + '" title="Poäng P' + (p + 1) + ' (som på skjutkortet)">';
             h += '</div>';
         }
         return h + '<div class="ke-msg" id="m_' + id + '"></div>';
