@@ -9,6 +9,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public string Name { get; set; } = "";
         public string Club { get; set; } = "";
         public string ShootingClass { get; set; } = "";
+        /// <summary>Skyttens plats i patrullen (startlistans ordning, inklusive DNS). 0 = okänd.</summary>
+        public int Position { get; set; }
     }
 
     /// <summary>Ett skjutkort: en patrull (eller en del av en) med samma stationer för alla skyttar på kortet.</summary>
@@ -34,6 +36,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public int PerSheet { get; set; } = 1;
         public bool SumColumn { get; set; }
         public bool Notes { get; set; } = true;
+        /// <summary>Skyttblock/Skyttkort: poängrutorna på en egen rad (block) eller i egna kolumner (kort) i stället för vid figuren.</summary>
+        public bool PoangRow { get; set; }
+        /// <summary>Skyttblock/Skyttkort: tomma rader för namnen i stället för förtryckta.</summary>
+        public bool BlankNames { get; set; }
+        /// <summary>Skyttblock/Skyttkort: färg som komplement för att skilja rutsorterna åt. Svartvitt fungerar alltid utan.</summary>
+        public bool Color { get; set; }
+        /// <summary>Förhandsvisning i dialogen: bara första arket, ingen verktygsrad, ingen automatisk utskrift.</summary>
+        public bool Preview { get; set; }
         public bool AutoPrint { get; set; }
         public string? BackUrl { get; set; }
         /// <summary>Texter som visas överst på skärmen (aldrig i utskriften).</summary>
@@ -53,42 +63,41 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         public static string RenderDocument(IReadOnlyList<ShootingCardModel> cards, ShootingCardOptions o)
         {
-            var layout = ShootingCardLayout.NormalizeLayout(o.Layout);
-            var paper = ShootingCardLayout.NormalizePaper(o.Paper);
-            var per = ShootingCardLayout.NormalizePerSheet(o.PerSheet);
+            var impl = ShootingCardLayouts.Get(o.Layout) ?? ShootingCardLayouts.Default;
+            var layout = impl.Id;
+            // En layout med ett enda format har låst papper (Skyttblock, Skyttkort); de andra följer valet.
+            var locked = impl.Formats.Count == 1 ? impl.Formats[0] : null;
+            var paper = locked?.Paper ?? ShootingCardLayout.NormalizePaper(o.Paper);
+            var per = locked?.PerSheet ?? ShootingCardLayout.NormalizePerSheet(o.PerSheet);
             var (sw, sh) = ShootingCardLayout.SheetSize(paper);
             var rects = ShootingCardLayout.Cards(paper, per);
-            var sheets = ShootingCardLayout.Sheets(cards, per);
+            IReadOnlyList<IReadOnlyList<ShootingCardModel?>> sheets = ShootingCardLayout.Sheets(cards, per);
+            if (o.Preview) sheets = sheets.Take(1).ToList();
 
-            // Den trängsta kortet avgör varningen på skärmen.
-            ShootingCardFit? worst = null;
+            // Det trängsta kortet avgör varningen på skärmen.
+            ShootingCardFitReport? worst = null;
             foreach (var c in cards)
-            {
-                var m = ShootingCardLayout.Measure(layout, c.Stations, c.Shooters.Count, rects[0], o.SumColumn);
-                var f = ShootingCardLayout.Fit(layout, m.BoxW);
-                if (worst == null || f.BoxW < worst.BoxW) worst = f;
-            }
+                worst = ShootingCardFitReport.Worse(worst, impl.Fit(c.Stations, c.Shooters.Count, rects[0], o));
 
             var sb = new StringBuilder();
             sb.Append("<!DOCTYPE html>\n<html lang=\"sv\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n");
             sb.Append("<title>Skjutkort").Append(string.IsNullOrEmpty(o.CompetitionName) ? "" : " — " + E(o.CompetitionName)).Append("</title>\n<style>\n");
             sb.Append("@page{size:A4 ").Append(paper).Append(";margin:0}\n");
             sb.Append(Css);
+            sb.Append(impl.Css);
+            if (o.Preview) sb.Append(".bar,.notice{display:none!important}\nbody{background:transparent}\n.stage{padding:0}\n");
             sb.Append("</style>\n</head>\n<body>\n");
+            if (impl.UsesHatch) sb.Append(ShootingCardHtml.HatchDefs);
 
             // Skärmen: verktygsrad och varningar. Döljs helt vid utskrift.
             sb.Append("<div class=\"bar\">");
             if (!string.IsNullOrEmpty(o.BackUrl)) sb.Append("<a href=\"").Append(E(o.BackUrl)).Append("\">← Tillbaka</a>");
             sb.Append("<span><strong>").Append(cards.Count).Append(cards.Count == 1 ? " kort" : " kort").Append("</strong> på ").Append(sheets.Count)
               .Append(sheets.Count == 1 ? " sida" : " sidor").Append(" · ")
-              .Append(layout == ShootingCardLayout.Figures ? "Rutor per figur" : "Bara träff/figurer").Append(" · A4 ")
+              .Append(impl.BarLabel(o)).Append(" · A4 ")
               .Append(paper == ShootingCardLayout.Portrait ? "stående" : "liggande").Append(" · ").Append(per).Append(per == 1 ? " kort" : " kort").Append(" per sida</span>");
             if (worst != null)
-            {
-                var fit = ShootingCardLayout.Fit(layout, worst.BoxW);
-                sb.Append("<span class=\"chip ").Append(fit.Level).Append("\">").Append(layout == ShootingCardLayout.Figures ? "Figurruta " : "Träffruta ")
-                  .Append(F1(fit.BoxW)).Append(" mm · ").Append(fit.Level == "ok" ? "går att skriva i" : fit.Level == "warn" ? "tight" : "för trångt").Append("</span>");
-            }
+                sb.Append("<span class=\"chip ").Append(worst.Level).Append("\">").Append(worst.ChipText).Append("</span>");
             sb.Append("<button type=\"button\" onclick=\"window.print()\" class=\"go\">Skriv ut</button></div>\n");
             foreach (var n in o.Notices)
                 sb.Append("<div class=\"notice\">").Append(E(n)).Append("</div>\n");
@@ -101,7 +110,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 sb.Append("<div class=\"holder\" data-w=\"").Append(Num(sw)).Append("\" data-h=\"").Append(Num(sh)).Append("\"><div class=\"sheet\" style=\"width:")
                   .Append(Mm(sw)).Append(";height:").Append(Mm(sh)).Append("\">");
                 for (var i = 0; i < sheet.Count; i++)
-                    if (sheet[i] != null) RenderCard(sb, sheet[i]!, rects[i], layout, o);
+                    if (sheet[i] != null) impl.Render(sb, sheet[i]!, rects[i], o);
                 if (per == 2)
                     sb.Append(paper == ShootingCardLayout.Portrait
                         ? "<div class=\"cut h\"></div>"
@@ -115,12 +124,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 "function fit(){document.querySelectorAll('.holder').forEach(function(h){var s=h.firstElementChild,w=+h.dataset.w,hh=+h.dataset.h;\n" +
                 "var k=Math.min(1.1,(h.parentElement.clientWidth-32)/(w*px));s.style.transform='scale('+k+')';h.style.width=(w*px*k)+'px';h.style.height=(hh*px*k)+'px';});}\n" +
                 "window.addEventListener('resize',fit);fit();\n" +
-                (o.AutoPrint ? "window.addEventListener('load',function(){setTimeout(function(){window.print();},350);});\n" : "") +
+                (o.AutoPrint && !o.Preview ? "window.addEventListener('load',function(){setTimeout(function(){window.print();},350);});\n" : "") +
                 "})();\n</script>\n</body>\n</html>\n");
             return sb.ToString();
         }
 
-        static void RenderCard(StringBuilder sb, ShootingCardModel c, ShootingCardRect rect, string layout, ShootingCardOptions o)
+        internal static void RenderCard(StringBuilder sb, ShootingCardModel c, ShootingCardRect rect, string layout, ShootingCardOptions o)
         {
             var m = ShootingCardLayout.Measure(layout, c.Stations, c.Shooters.Count, rect, o.SumColumn);
             var fig = layout == ShootingCardLayout.Figures;

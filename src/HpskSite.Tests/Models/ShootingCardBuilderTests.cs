@@ -247,6 +247,51 @@ namespace HpskSite.Tests.Models
             Count(html, "class=\"row").Should().Be(12);
         }
 
+        // ── Poängmålens skjutplatser (Stefan 2026-11-24: P1, P2 …) ──────────────────────────────
+
+        static FaltskytteStationConfig TwoGroupStation() => new()
+        {
+            Station = 4,
+            TargetGroups = new List<FaltskytteTargetGroup>
+            {
+                // Målgrupp A: figur 1 (1 mål), figur 2 (3 mål, poängmål). Målgrupp B: figur 1 (poängmål), figur 2.
+                new() { Group = 1, Figures = new List<FaltskytteFigure> {
+                    new() { FigureNumber = 1 }, new() { FigureNumber = 2, TargetsPerFigure = 3, IsPoangmal = true } } },
+                new() { Group = 2, Figures = new List<FaltskytteFigure> {
+                    new() { FigureNumber = 1, IsPoangmal = true }, new() { FigureNumber = 2 } } }
+            }
+        };
+
+        [Fact]
+        public void Poangmal_sit_on_the_last_slot_of_their_figure_counted_flat_across_target_groups()
+        {
+            var s = ShootingCardStation.From(TwoGroupStation());
+            s.Figures.Should().Be(1 + 3 + 1 + 1);       // skjutplatser: 6
+            s.PoangmalCount.Should().Be(2);
+            s.PoangSlots.Should().Equal(4, 5);           // figur A2 slutar på plats 4, figur B1 är plats 5
+        }
+
+        [Fact]
+        public void Two_classes_with_poangmal_on_different_figures_share_a_card_only_when_the_layout_ignores_the_position()
+        {
+            var cfg = new FaltskytteCompetitionConfig();
+            cfg.WeaponConfigs["A"] = new FaltskytteWeaponClassConfig { Stations = new() { Station(1, 3, 1) } };            // poängmål på figur 1
+            cfg.WeaponConfigs["C"] = new FaltskytteWeaponClassConfig { Stations = new() { new FaltskytteStationConfig
+            {
+                Station = 1,
+                TargetGroups = new List<FaltskytteTargetGroup> { new() { Group = 1, Figures = new List<FaltskytteFigure> {
+                    new() { FigureNumber = 1 }, new() { FigureNumber = 2 }, new() { FigureNumber = 3, IsPoangmal = true } } } }   // poängmål på figur 3
+            } } };
+            var members = new[] { Member(1, 1, "Anna", "A2"), Member(1, 2, "Calle", "C2") };
+            var patrol = new[] { Patrol(1, 1, "A+C") };
+
+            ShootingCardBuilder.Build(cfg, patrol, members, All, 0, "fig").Cards.Should().HaveCount(1);   // dagens layouter
+            var split = ShootingCardBuilder.Build(cfg, patrol, members, All, 0, "card").Cards;              // Skyttblock/Skyttkort
+            split.Should().HaveCount(2);
+            split[0].Stations[0].PoangSlots.Should().Equal(1);
+            split[1].Stations[0].PoangSlots.Should().Equal(3);
+        }
+
         static int Count(string s, string needle) => (s.Length - s.Replace(needle, "").Length) / needle.Length;
         static string RowOf(string html)
         {

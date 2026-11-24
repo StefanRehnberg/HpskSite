@@ -44,19 +44,27 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             return set;
         }
 
-        public static async Task<ShootingCardBuildResult> BuildAsync(IUmbracoDatabase db, FaltskytteCompetitionConfig config, int competitionId, ShootingCardSelection sel, int blankCount)
+        public static async Task<ShootingCardBuildResult> BuildAsync(IUmbracoDatabase db, FaltskytteCompetitionConfig config, int competitionId, ShootingCardSelection sel, int blankCount, string layoutId = ShootingCardLayout.Figures, bool poangRow = false)
         {
             var patrols = await db.FetchAsync<FaltskyttePatrol>("WHERE CompetitionId = @0 ORDER BY PatrolNumber", competitionId);
             var ids = patrols.Select(p => p.Id).ToList();
             var members = ids.Any()
                 ? await db.FetchAsync<FaltskyttePatrolMember>($"WHERE PatrolId IN ({string.Join(",", ids)}) ORDER BY Position")
                 : new List<FaltskyttePatrolMember>();
-            return Build(config, patrols, members, sel, blankCount);
+            return Build(config, patrols, members, sel, blankCount, layoutId, poangRow);
         }
 
+        /// <param name="layoutId">
+        /// Layouten avgör hur många skyttar ett kort rymmer och hur de delas (<see cref="IShootingCardLayout.Split"/>), och om skyttar bara delar kort när även
+        /// poängmålens platser är lika (Skyttblock och Skyttkort ritar poängrutan vid en viss figur; dagens tabell-layouter visar bara antalet poängrutor).
+        /// Okänt id = dagens standardlayout.
+        /// </param>
+        /// <param name="poangRow">Poängrutorna på en egen rad: då spelar poängmålens plats ingen roll för kortet, bara antalet.</param>
         public static ShootingCardBuildResult Build(FaltskytteCompetitionConfig config, IReadOnlyList<FaltskyttePatrol> allPatrols,
-            IReadOnlyList<FaltskyttePatrolMember> members, ShootingCardSelection sel, int blankCount)
+            IReadOnlyList<FaltskyttePatrolMember> members, ShootingCardSelection sel, int blankCount, string layoutId = ShootingCardLayout.Figures, bool poangRow = false)
         {
+            var layout = ShootingCardLayouts.Get(layoutId) ?? ShootingCardLayouts.Default;
+            var poangByFigure = layout.PoangByFigure && !poangRow;
             var result = new ShootingCardBuildResult();
             IEnumerable<FaltskyttePatrol> chosen = allPatrols.OrderBy(p => p.PatrolNumber);
             if (sel.PatrolNumbers != null) chosen = chosen.Where(p => sel.PatrolNumbers.Contains(p.PatrolNumber));
@@ -76,9 +84,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 {
                     var key = FaltskytteCardEntryController.ResolveKey(config, p, m);
                     if (key == null) { withoutConfig.Add($"{m.MemberName} (patrull {p.PatrolNumber})"); continue; }
-                    var stations = FaltskytteCardEntryController.ScoredStations(config, key)
-                        .Select(s => new ShootingCardStation(s.Station, s.Name, s.TotalTargets, s.TotalPoangmal)).ToList();
-                    var sig = string.Join(";", stations.Select(s => $"{s.Number}:{s.Figures}:{s.PoangmalCount}"));
+                    var stations = FaltskytteCardEntryController.ScoredStations(config, key).Select(ShootingCardStation.From).ToList();
+                    var sig = string.Join(";", stations.Select(s => s.Signature(poangByFigure)));
                     var gi = groups.FindIndex(x => x.Sig == sig);
                     if (gi < 0) { groups.Add((sig, stations, new List<string>(), new List<ShootingCardShooter>())); gi = groups.Count - 1; }
                     var g = groups[gi];
@@ -87,7 +94,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     {
                         Name = m.MemberName,
                         Club = HpskSite.Helpers.ClubNameHelper.Shorten(m.ClubName),
-                        ShootingClass = ShootingClasses.DisplayName(m.ShootingClass)
+                        ShootingClass = ShootingClasses.DisplayName(m.ShootingClass),
+                        Position = m.Position
                     });
                 }
 
@@ -96,7 +104,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     var weaponText = groups.Count == 1 && !string.IsNullOrWhiteSpace(p.WeaponGroup)
                         ? ShootingClasses.WeaponGroupsText(p.WeaponGroup)
                         : ShootingClasses.WeaponGroupsText(string.Join("+", g.Keys));
-                    var sizes = ShootingCardLayout.SplitSizes(g.Shooters.Count);
+                    var sizes = layout.Split(g.Shooters.Count);
                     var at = 0;
                     for (var part = 0; part < sizes.Count; part++)
                     {
@@ -123,7 +131,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // Blanka kort: samma stationer som det mest krävande kortet; numret, tiden och namnen skrivs för hand.
             if (blankCount > 0)
             {
-                var stations = MostDemanding(result.Cards.Select(c => c.Stations)) ?? MostDemanding(AllConfigStations(config));
+                var stations = MostDemanding(result.Cards.Select(c => c.Stations), layout) ?? MostDemanding(AllConfigStations(config), layout);
                 if (stations == null) result.Notices.Add("Det finns ingen stationskonfiguration att göra blanka kort av.");
                 else
                     for (var i = 0; i < Math.Min(blankCount, 50); i++)
@@ -131,7 +139,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         {
                             IsBlank = true,
                             Stations = stations,
-                            Shooters = Enumerable.Range(0, ShootingCardLayout.MaxShootersPerCard).Select(_ => new ShootingCardShooter()).ToList()
+                            Shooters = Enumerable.Range(0, layout.Capacity).Select(_ => new ShootingCardShooter()).ToList()
                         });
             }
             return result;
@@ -140,14 +148,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         /// <summary>Alla stationsuppsättningar i tävlingens konfiguration, en per vapengrupp.</summary>
         public static List<List<ShootingCardStation>> AllConfigStations(FaltskytteCompetitionConfig config) =>
             config.WeaponConfigs.Keys
-                .Select(k => FaltskytteCardEntryController.ScoredStations(config, k)
-                    .Select(s => new ShootingCardStation(s.Station, s.Name, s.TotalTargets, s.TotalPoangmal)).ToList())
+                .Select(k => FaltskytteCardEntryController.ScoredStations(config, k).Select(ShootingCardStation.From).ToList())
                 .Where(l => l.Count > 0).ToList();
 
         /// <summary>Den uppsättning som tar mest plats på kortet (flest rutor), alltså den som blir trängst.</summary>
-        public static List<ShootingCardStation>? MostDemanding(IEnumerable<IEnumerable<ShootingCardStation>> sets) =>
-            sets.Select(s => s.ToList()).Where(l => l.Count > 0)
-                .OrderByDescending(l => l.Sum(s => ShootingCardLayout.StationUnits(ShootingCardLayout.Figures, s)) + l.Count * 0.001)
-                .FirstOrDefault();
+        public static List<ShootingCardStation>? MostDemanding(IEnumerable<IEnumerable<ShootingCardStation>> sets, IShootingCardLayout? layout = null)
+        {
+            layout ??= ShootingCardLayouts.Default;
+            return sets.Select(s => s.ToList()).Where(l => l.Count > 0).OrderByDescending(l => layout.Demand(l)).FirstOrDefault();
+        }
     }
 }

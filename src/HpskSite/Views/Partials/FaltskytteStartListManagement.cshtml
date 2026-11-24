@@ -254,7 +254,7 @@
 
 <!-- Skjutkort: val av layout, papper och urval. Öppnar utskriften i en ny flik (/faltskytte/skjutkort/{id}). -->
 <div class="modal fade" id="faltCardsModal" tabindex="-1" style="z-index:1065">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="bi bi-card-list me-2"></i>Skriv ut skjutkort</h5>
@@ -262,78 +262,130 @@
             </div>
             <div class="modal-body">
                 <p class="text-muted small">Skjutkortet bär patrullen med sig, och stationernas funktionärer skriver resultatet på det. Resultatet matas sedan in under Kortinmatning. Skyttar med olika förutsättningar i samma patrull får varsitt kort.</p>
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Vilka patruller</label>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="faltCardsWho" id="faltCardsWhoAll" value="all" checked>
-                        <label class="form-check-label" for="faltCardsWhoAll">Alla patruller (<span id="faltCardsAllCount">0</span>)</label>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Vilka patruller</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="faltCardsWho" id="faltCardsWhoAll" value="all" checked>
+                                <label class="form-check-label" for="faltCardsWhoAll">Alla patruller (<span id="faltCardsAllCount">0</span>)</label>
+                            </div>
+                            <div class="form-check d-flex align-items-center gap-2">
+                                <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoWg" value="wg">
+                                <label class="form-check-label text-nowrap" for="faltCardsWhoWg">En vapengrupp</label>
+                                <select class="form-select form-select-sm w-auto" id="faltCardsWg" aria-label="Vapengrupp"></select>
+                            </div>
+                            <div class="form-check d-flex align-items-center gap-2 mt-1">
+                                <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoList" value="list">
+                                <label class="form-check-label text-nowrap" for="faltCardsWhoList">Välj patruller</label>
+                                <input type="text" class="form-control form-control-sm" id="faltCardsList" placeholder="till exempel 1-4, 7" autocomplete="off" data-1p-ignore="true" style="max-width:180px" aria-label="Patrullnummer">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Hur ska kortet se ut?</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayBlk" value="blk" checked>
+                                <label class="form-check-label" for="faltCardsLayBlk">Fyra skyttar på ett blad</label>
+                                <div class="form-text mt-0">Skyttblock, som WinShooter: hela patrullen på ett A4 liggande, stationerna bredvid varandra.</div>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayCard" value="card">
+                                <label class="form-check-label" for="faltCardsLayCard">Ett kort per skytt</label>
+                                <div class="form-text mt-0">Skyttkort, A5 liggande, två per A4 stående som klipps isär. Stationerna är rader.</div>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayFig" value="fig">
+                                <label class="form-check-label" for="faltCardsLayFig">Ruta per figur</label>
+                                <div class="form-text mt-0">Hela patrullen på ett kort, en rad per skytt. Behöver mest plats.</div>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayTot" value="tot">
+                                <label class="form-check-label" for="faltCardsLayTot">En ruta per station</label>
+                                <div class="form-text mt-0">Bara träff/figurer, till exempel 6/3.</div>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="faltCardsNewBox">
+                            <div class="mb-2">
+                                <label class="form-label fw-bold mb-1">Poängrutan</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPoang" id="faltCardsPoangFig" value="fig" checked>
+                                    <label class="form-check-label" for="faltCardsPoangFig">Vid figuren</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPoang" id="faltCardsPoangRow" value="row">
+                                    <label class="form-check-label" for="faltCardsPoangRow">På en egen rad eller kolumn</label>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label fw-bold mb-1">Skyttarna</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsNames" id="faltCardsNamesPre" value="pre" checked>
+                                    <label class="form-check-label" for="faltCardsNamesPre">Förtryckta namn ur startlistan</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsNames" id="faltCardsNamesBlank" value="blank">
+                                    <label class="form-check-label" for="faltCardsNamesBlank">Tomma rader, skrivs för hand</label>
+                                </div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="faltCardsColor">
+                                <label class="form-check-label" for="faltCardsColor">Färg som hjälp att skilja rutorna åt</label>
+                                <div class="form-text mt-0">Svartvitt fungerar alltid. Snedstreckad ruta betyder skriv inte, ruta med fet P betyder skriv poäng.</div>
+                            </div>
+                        </div>
+                        <div class="row mb-3" id="faltCardsPaperBox">
+                            <div class="col-sm-6">
+                                <label class="form-label fw-bold">Papper</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperPortrait" value="portrait">
+                                    <label class="form-check-label" for="faltCardsPaperPortrait">A4 stående</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperLandscape" value="landscape" checked>
+                                    <label class="form-check-label" for="faltCardsPaperLandscape">A4 liggande</label>
+                                </div>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label fw-bold">Kort per sida</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer1" value="1" checked>
+                                    <label class="form-check-label" for="faltCardsPer1">1</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer2" value="2">
+                                    <label class="form-check-label" for="faltCardsPer2">2</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="faltCardsFit" class="alert alert-secondary py-2 small" role="status">Räknar ut rutornas storlek…</div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Innehåll</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="faltCardsSum">
+                                <label class="form-check-label" for="faltCardsSum" id="faltCardsSumLabel">Summa-kolumn</label>
+                            </div>
+                            <div class="form-check" id="faltCardsNotesBox">
+                                <input class="form-check-input" type="checkbox" id="faltCardsNotes" checked>
+                                <label class="form-check-label" for="faltCardsNotes">Anteckningsruta när platsen räcker</label>
+                            </div>
+                            <div class="d-flex align-items-center gap-2 mt-2">
+                                <label class="form-check-label" for="faltCardsBlank">Extra blanka kort</label>
+                                <input type="number" class="form-control form-control-sm" id="faltCardsBlank" min="0" max="50" value="0" style="width:80px">
+                            </div>
+                        </div>
+                        <div class="small text-muted" id="faltCardsHint"></div>
+                        <div class="text-danger small mt-2" id="faltCardsError" style="display:none"></div>
                     </div>
-                    <div class="form-check d-flex align-items-center gap-2">
-                        <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoWg" value="wg">
-                        <label class="form-check-label text-nowrap" for="faltCardsWhoWg">En vapengrupp</label>
-                        <select class="form-select form-select-sm w-auto" id="faltCardsWg" aria-label="Vapengrupp"></select>
-                    </div>
-                    <div class="form-check d-flex align-items-center gap-2 mt-1">
-                        <input class="form-check-input mt-0" type="radio" name="faltCardsWho" id="faltCardsWhoList" value="list">
-                        <label class="form-check-label text-nowrap" for="faltCardsWhoList">Välj patruller</label>
-                        <input type="text" class="form-control form-control-sm" id="faltCardsList" placeholder="till exempel 1-4, 7" autocomplete="off" data-1p-ignore="true" style="max-width:180px" aria-label="Patrullnummer">
+                    <div class="col-lg-6">
+                        <label class="form-label fw-bold">Förhandsvisning</label>
+                        <div class="border rounded bg-body-secondary p-2" id="faltCardsPreviewWrap">
+                            <iframe id="faltCardsPreview" title="Förhandsvisning av skjutkortet" class="w-100 border-0 bg-white d-none d-lg-block" style="height:440px" loading="lazy"></iframe>
+                            <div class="small text-muted d-lg-none">Förhandsvisningen öppnas i en egen flik på mindre skärmar.</div>
+                        </div>
+                        <div class="small text-muted mt-1" id="faltCardsPreviewCaption">Första sidan med första patrullen. Linjer och snedstreckning syns bäst på en provutskrift.</div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="faltOpenCardsPreview()"><i class="bi bi-box-arrow-up-right me-1"></i>Öppna förhandsvisningen i ny flik</button>
                     </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Layout</label>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayFig" value="fig" checked>
-                        <label class="form-check-label" for="faltCardsLayFig">Rutor per figur</label>
-                        <div class="form-text mt-0">En ruta för varje figur och en ruta för träff/figurer. Behöver mest plats.</div>
-                    </div>
-                    <div class="form-check mt-1">
-                        <input class="form-check-input" type="radio" name="faltCardsLayout" id="faltCardsLayTot" value="tot">
-                        <label class="form-check-label" for="faltCardsLayTot">Bara träff/figurer</label>
-                        <div class="form-text mt-0">En ruta per station, till exempel 6/3.</div>
-                    </div>
-                </div>
-                <div class="row mb-3">
-                    <div class="col-sm-6">
-                        <label class="form-label fw-bold">Papper</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperPortrait" value="portrait">
-                            <label class="form-check-label" for="faltCardsPaperPortrait">A4 stående</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="faltCardsPaper" id="faltCardsPaperLandscape" value="landscape" checked>
-                            <label class="form-check-label" for="faltCardsPaperLandscape">A4 liggande</label>
-                        </div>
-                    </div>
-                    <div class="col-sm-6">
-                        <label class="form-label fw-bold">Kort per sida</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer1" value="1" checked>
-                            <label class="form-check-label" for="faltCardsPer1">1</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="faltCardsPer" id="faltCardsPer2" value="2">
-                            <label class="form-check-label" for="faltCardsPer2">2</label>
-                        </div>
-                    </div>
-                </div>
-                <div id="faltCardsFit" class="alert alert-secondary py-2 small" role="status">Räknar ut rutornas storlek…</div>
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Innehåll</label>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="faltCardsSum">
-                        <label class="form-check-label" for="faltCardsSum">Summa-kolumn</label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="faltCardsNotes" checked>
-                        <label class="form-check-label" for="faltCardsNotes">Anteckningsruta när platsen räcker</label>
-                    </div>
-                    <div class="d-flex align-items-center gap-2 mt-2">
-                        <label class="form-check-label" for="faltCardsBlank">Extra blanka kort</label>
-                        <input type="number" class="form-control form-control-sm" id="faltCardsBlank" min="0" max="50" value="0" style="width:80px">
-                    </div>
-                </div>
-                <div class="small text-muted" id="faltCardsHint"></div>
-                <div class="text-danger small mt-2" id="faltCardsError" style="display:none"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -1232,69 +1284,144 @@
     // dialogen här väljer bara urval, layout, papper och antal kort per sida. Rutornas bredd räknas på servern (samma räkning som
     // utskriften), så varningen här kan inte säga något annat än det som skrivs ut.
     var CARDS_KEY = 'hpsk_skjutkort_val';
-    var cardsFit = {};   // summa-kolumn (0/1) → svaret från /matt
+    var cardsFit = {};   // "summa|poäng" → svaret från /matt
+    var cardsPreviewTimer = null, cardsLastSrc = '';
+    var CARDS_NEW = { blk: true, card: true };   // Skyttblock och Skyttkort: låsta papper, poängval, namnval, färg
 
     function cardsVal(name) {
         var el = document.querySelector('input[name="' + name + '"]:checked');
         return el ? el.value : '';
     }
     function cardsFmt(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+    function cardsIsNew() { return !!CARDS_NEW[cardsVal('faltCardsLayout')]; }
+    function cardsSetRadio(name, value) {
+        var el = document.querySelector('input[name="' + name + '"][value="' + value + '"]');
+        if (el && !el.disabled) el.checked = true;
+    }
+    function cardsReadSaved() {
+        try { var raw = localStorage.getItem(CARDS_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    }
+    // Sparat val: version 2 har layoutens id och papper per layout; ett äldre val (utan v) gäller bara Ruta per figur / En ruta per station.
     function cardsLoadSaved() {
         try {
-            var raw = localStorage.getItem(CARDS_KEY);
-            if (!raw) return;
-            var v = JSON.parse(raw);
-            [['faltCardsLayout', v.layout], ['faltCardsPaper', v.paper], ['faltCardsPer', v.per]].forEach(function(p) {
-                var el = document.querySelector('input[name="' + p[0] + '"][value="' + p[1] + '"]');
-                if (el) el.checked = true;
-            });
+            var v = cardsReadSaved();
+            if (!v) return;
+            var lay = v.layout;
+            if (v.v !== 2 && lay !== 'fig' && lay !== 'tot') lay = null;
+            if (lay) cardsSetRadio('faltCardsLayout', lay);
+            var per = (v.by && v.by[cardsVal('faltCardsLayout')]) || (v.v !== 2 ? v : null);
+            if (per) { cardsSetRadio('faltCardsPaper', per.paper); cardsSetRadio('faltCardsPer', per.per); }
+            if (v.poang) cardsSetRadio('faltCardsPoang', v.poang);
+            if (v.names) cardsSetRadio('faltCardsNames', v.names);
+            if (typeof v.color === 'boolean') document.getElementById('faltCardsColor').checked = v.color;
             if (typeof v.sum === 'boolean') document.getElementById('faltCardsSum').checked = v.sum;
             if (typeof v.notes === 'boolean') document.getElementById('faltCardsNotes').checked = v.notes;
         } catch (e) { /* inget sparat val: förvalen gäller */ }
     }
     function cardsSave() {
         try {
+            var old = cardsReadSaved(), by = (old && old.v === 2 && old.by) ? old.by : {};
+            by[cardsVal('faltCardsLayout')] = { paper: cardsVal('faltCardsPaper'), per: cardsVal('faltCardsPer') };
             localStorage.setItem(CARDS_KEY, JSON.stringify({
-                layout: cardsVal('faltCardsLayout'), paper: cardsVal('faltCardsPaper'), per: cardsVal('faltCardsPer'),
-                sum: document.getElementById('faltCardsSum').checked, notes: document.getElementById('faltCardsNotes').checked
+                v: 2, layout: cardsVal('faltCardsLayout'), by: by, poang: cardsVal('faltCardsPoang'), names: cardsVal('faltCardsNames'),
+                color: document.getElementById('faltCardsColor').checked, sum: document.getElementById('faltCardsSum').checked,
+                notes: document.getElementById('faltCardsNotes').checked
             }));
         } catch (e) { /* webbläsaren får inte spara: valet börjar om nästa gång */ }
     }
-    async function cardsFetchFit(sum) {
-        if (cardsFit[sum]) return cardsFit[sum];
+    function cardsApplyVisibility() {
+        var isNew = cardsIsNew();
+        document.getElementById('faltCardsNewBox').style.display = isNew ? '' : 'none';
+        document.getElementById('faltCardsPaperBox').style.display = isNew ? 'none' : '';
+        document.getElementById('faltCardsNotesBox').style.display = isNew ? 'none' : '';
+        document.getElementById('faltCardsSumLabel').textContent = isNew ? 'Summa träff/figurer (en extra rad eller kolumn)' : 'Summa-kolumn';
+    }
+    async function cardsFetchFit(sum, poang) {
+        var key = sum + '|' + poang;
+        if (cardsFit[key]) return cardsFit[key];
         try {
-            var r = await fetch('/faltskytte/skjutkort/' + compId + '/matt?sum=' + sum);
+            var r = await fetch('/faltskytte/skjutkort/' + compId + '/matt?sum=' + sum + '&poang=' + encodeURIComponent(poang));
             var d = await r.json();
-            if (d && d.success) cardsFit[sum] = d;
+            if (d && d.success) cardsFit[key] = d;
             return d;
         } catch (e) { return null; }
     }
     async function cardsRefreshFit() {
         var box = document.getElementById('faltCardsFit');
-        var sum = document.getElementById('faltCardsSum').checked ? 1 : 0;
+        var sum = document.getElementById('faltCardsSum').checked ? 1 : 0, poang = cardsVal('faltCardsPoang') || 'fig';
         var layout = cardsVal('faltCardsLayout'), paper = cardsVal('faltCardsPaper'), per = parseInt(cardsVal('faltCardsPer'), 10) || 1;
-        document.getElementById('faltCardsHint').textContent = per === 2
-            ? 'Med två kort per sida hamnar patrull 1 och 2 på första bladet, 3 och 4 på nästa. Ett udda antal ger ett blad med en tom halva.'
-            : 'Ett kort per blad.';
-        var d = await cardsFetchFit(sum);
+        var d = await cardsFetchFit(sum, poang);
         if (!d || !d.success) { box.className = 'alert alert-secondary py-2 small'; box.textContent = (d && d.message) || 'Kunde inte räkna ut rutornas storlek.'; return; }
         if (!d.hasStations) { box.className = 'alert alert-warning py-2 small'; box.textContent = 'Tävlingen har ingen stationskonfiguration än, så korten blir utan stationer.'; return; }
-        var cur = d.formats.filter(function(f) { return f.paper === paper && f.perSheet === per; })[0];
-        if (!cur) return;
-        var e = cur[layout], what = layout === 'fig' ? 'Figurrutorna' : 'Träffrutorna';
-        var info = ' Banan har ' + d.stationCount + ' stationer och ' + d.figureCount + ' figurer.';
-        if (e.level === 'ok') {
-            box.className = 'alert alert-success py-2 small';
-            box.innerHTML = '<i class="bi bi-check-circle me-1"></i>' + what + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong> breda. Det går att skriva i.' + info;
+        if (!d.layouts) {
+            // Äldre server utan de nya layouterna (halv uppladdning): visa bara de gamla.
+            ['faltCardsLayBlk', 'faltCardsLayCard'].forEach(function(id) { var el = document.getElementById(id); el.disabled = true; el.closest('.form-check').style.display = 'none'; });
+            if (CARDS_NEW[layout]) { cardsSetRadio('faltCardsLayout', 'fig'); cardsApplyVisibility(); }
             return;
         }
-        var better = d.formats.filter(function(f) { return f[layout].level === 'ok'; })
-            .map(function(f) { return f.label + ' (' + cardsFmt(f[layout].w) + ' mm)'; });
+        var l = d.layouts.filter(function(x) { return x.id === layout; })[0];
+        if (!l) return;
+        var e = l.formats.length === 1 ? l.formats[0] : (l.formats.filter(function(f) { return f.paper === paper && f.perSheet === per; })[0] || l.formats[0]);
+        var info = ' Banan har ' + d.stationCount + ' stationer och ' + d.figureCount + ' figurer.';
+        var paperText = l.formats.length === 1 ? ' Papper: ' + hpskEsc(e.label) + '.' : '';
+        if (e.level === 'ok') {
+            box.className = 'alert alert-success py-2 small';
+            box.innerHTML = '<i class="bi bi-check-circle me-1"></i>' + hpskEsc(e.limit) + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong>. Det går att skriva i.' + paperText + info;
+            return;
+        }
+        var better = [];
+        d.layouts.forEach(function(x) {
+            x.formats.forEach(function(f) { if (f.level === 'ok' && x.id !== layout && better.indexOf(x.name) < 0) better.push(x.name); });
+        });
+        if (l.formats.length > 1) l.formats.forEach(function(f) { if (f.level === 'ok' && f !== e) better.unshift(l.name + ', ' + f.label); });
         box.className = 'alert ' + (e.level === 'warn' ? 'alert-warning' : 'alert-danger') + ' py-2 small';
-        box.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' + what + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong> breda'
-            + (e.level === 'warn' ? ' (tight)' : ', vilket är för trångt för handskrift') + '.' + info + ' '
-            + (better.length ? 'Det går bättre på: ' + hpskEsc(better.join(', ')) + '.' : 'Det finns inget papper där det blir bra med den här banan.')
-            + (layout === 'fig' ? ' Eller välj Bara träff/figurer.' : '');
+        box.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' + hpskEsc(e.limit) + ' blir <strong>' + cardsFmt(e.w) + ' mm</strong>'
+            + (e.level === 'warn' ? ' (tight)' : ', vilket är för trångt för handskrift') + '.' + paperText + info + ' '
+            + (better.length ? 'Det går bättre med: ' + hpskEsc(better.join(', ')) + '.' : 'Det finns inget val där det blir bra med den här banan.');
+    }
+
+    // Frågesträngen för utskriften, och för förhandsvisningen (samma sida, bara första arket och första patrullen).
+    function cardsQuery(preview) {
+        var who = cardsVal('faltCardsWho'), q = [];
+        if (who === 'list') {
+            var txt = (document.getElementById('faltCardsList').value || '').trim();
+            if (!/\d/.test(txt)) return { error: 'Skriv patrullnummer, till exempel 1-4, 7.' };
+            q.push('patrols=' + encodeURIComponent(txt));
+        } else if (who === 'wg') {
+            var g = document.getElementById('faltCardsWg').value;
+            if (!g) return { error: 'Det finns ingen vapengrupp att välja.' };
+            q.push('wg=' + encodeURIComponent(g));
+        } else if (preview && allPatrols.length > 0) {
+            q.push('patrols=' + encodeURIComponent(allPatrols[0].patrolNumber));
+        }
+        var blank = preview ? 0 : Math.max(0, Math.min(50, parseInt(document.getElementById('faltCardsBlank').value, 10) || 0));
+        q.push('layout=' + cardsVal('faltCardsLayout'), 'paper=' + cardsVal('faltCardsPaper'), 'per=' + cardsVal('faltCardsPer'),
+            'sum=' + (document.getElementById('faltCardsSum').checked ? 1 : 0), 'notes=' + (document.getElementById('faltCardsNotes').checked ? 1 : 0),
+            'poang=' + (cardsVal('faltCardsPoang') || 'fig'), 'names=' + (cardsVal('faltCardsNames') || 'pre'),
+            'color=' + (document.getElementById('faltCardsColor').checked ? 1 : 0), 'blank=' + blank);
+        return { q: q };
+    }
+    function cardsRefreshPreview() {
+        clearTimeout(cardsPreviewTimer);
+        cardsPreviewTimer = setTimeout(function() {
+            var frame = document.getElementById('faltCardsPreview');
+            if (!frame || frame.offsetParent === null) return;   // dold på mindre skärmar: knappen öppnar förhandsvisningen i en flik
+            var r = cardsQuery(true);
+            if (r.error) return;
+            var src = '/faltskytte/skjutkort/' + compId + '?' + r.q.join('&') + '&preview=1';
+            if (src === cardsLastSrc) return;
+            cardsLastSrc = src;
+            frame.src = src;
+        }, 300);
+    }
+    function cardsRefreshAll() {
+        cardsApplyVisibility();
+        document.getElementById('faltCardsHint').textContent = !cardsIsNew() && parseInt(cardsVal('faltCardsPer'), 10) === 2
+            ? 'Med två kort per sida hamnar patrull 1 och 2 på första bladet, 3 och 4 på nästa. Ett udda antal ger ett blad med en tom halva.'
+            : (cardsVal('faltCardsLayout') === 'blk' ? 'Fyra skyttar per blad. En patrull med fler skyttar fortsätter på ett nytt blad.'
+                : (cardsVal('faltCardsLayout') === 'card' ? 'Ett kort per skytt, två kort per A4. Klipp längs den streckade linjen.' : 'Ett kort per blad.'));
+        cardsRefreshFit();
+        cardsRefreshPreview();
     }
 
     window.faltShowCardsModal = function() {
@@ -1308,30 +1435,28 @@
         document.getElementById('faltCardsWg').innerHTML = opts;
         document.getElementById('faltCardsError').style.display = 'none';
         cardsLoadSaved();
-        cardsRefreshFit();
+        cardsLastSrc = '';
+        cardsRefreshAll();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCardsModal')).show();
     };
 
     window.faltOpenCards = function() {
         var err = document.getElementById('faltCardsError');
         err.style.display = 'none';
-        var who = cardsVal('faltCardsWho'), q = [];
-        if (who === 'list') {
-            var txt = (document.getElementById('faltCardsList').value || '').trim();
-            if (!/\d/.test(txt)) { err.textContent = 'Skriv patrullnummer, till exempel 1-4, 7.'; err.style.display = ''; return; }
-            q.push('patrols=' + encodeURIComponent(txt));
-        } else if (who === 'wg') {
-            var g = document.getElementById('faltCardsWg').value;
-            if (!g) { err.textContent = 'Det finns ingen vapengrupp att välja.'; err.style.display = ''; return; }
-            q.push('wg=' + encodeURIComponent(g));
-        }
-        var blank = Math.max(0, Math.min(50, parseInt(document.getElementById('faltCardsBlank').value, 10) || 0));
-        q.push('layout=' + cardsVal('faltCardsLayout'), 'paper=' + cardsVal('faltCardsPaper'), 'per=' + cardsVal('faltCardsPer'),
-            'sum=' + (document.getElementById('faltCardsSum').checked ? 1 : 0), 'notes=' + (document.getElementById('faltCardsNotes').checked ? 1 : 0),
-            'blank=' + blank, 'print=1');
+        var r = cardsQuery(false);
+        if (r.error) { err.textContent = r.error; err.style.display = ''; return; }
         cardsSave();
-        window.open('/faltskytte/skjutkort/' + compId + '?' + q.join('&'), '_blank');
+        window.open('/faltskytte/skjutkort/' + compId + '?' + r.q.join('&') + '&print=1', '_blank');
         bootstrap.Modal.getOrCreateInstance(document.getElementById('faltCardsModal')).hide();
+    };
+
+    // Förhandsvisningen i en egen flik (på små skärmar, eller för full storlek): samma sida som utskriften, utan automatisk utskrift.
+    window.faltOpenCardsPreview = function() {
+        var err = document.getElementById('faltCardsError');
+        err.style.display = 'none';
+        var r = cardsQuery(true);
+        if (r.error) { err.textContent = r.error; err.style.display = ''; return; }
+        window.open('/faltskytte/skjutkort/' + compId + '?' + r.q.join('&'), '_blank');
     };
 
     (function() {
@@ -1339,9 +1464,13 @@
         if (!m) return;
         m.addEventListener('change', function(e) {
             if (e.target.id === 'faltCardsWg') document.getElementById('faltCardsWhoWg').checked = true;
-            if (e.target.name !== 'faltCardsWho') cardsRefreshFit();
+            if (e.target.name === 'faltCardsWho') { cardsRefreshPreview(); return; }
+            cardsRefreshAll();
         });
-        document.getElementById('faltCardsList').addEventListener('input', function() { document.getElementById('faltCardsWhoList').checked = true; });
+        document.getElementById('faltCardsList').addEventListener('input', function() {
+            document.getElementById('faltCardsWhoList').checked = true;
+            cardsRefreshPreview();
+        });
     })();
 })();
 </script>

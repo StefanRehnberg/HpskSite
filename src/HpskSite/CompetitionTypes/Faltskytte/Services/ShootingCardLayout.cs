@@ -1,7 +1,46 @@
 namespace HpskSite.CompetitionTypes.Faltskytte.Services
 {
-    /// <summary>En station på skjutkortet: nummer, antal figurer (scoring slots) och antal poängmål.</summary>
-    public record ShootingCardStation(int Number, string? Name, int Figures, int PoangmalCount);
+    /// <summary>
+    /// En station på skjutkortet: nummer, antal figurer (skjutplatser, "slots") och antal poängmål.
+    /// <see cref="PoangSlots"/> säger VILKA skjutplatser som hör till ett poängmål (Stefan 2026-11-24: poängrutan heter P1, P2 … i den
+    /// ordning poängmålen står, samma ordning som kortinmatningens <c>PoangmalScores</c>). Skjutplatserna räknas platt och 1-baserat över
+    /// stationens målgrupper i listordning, en figur med flera mål tar flera skjutplatser, och ett poängmål sitter på figurens SISTA skjutplats.
+    /// Tom lista = okänt (äldre anrop): då gäller bara antalet.
+    /// </summary>
+    public record ShootingCardStation(int Number, string? Name, int Figures, int PoangmalCount)
+    {
+        public IReadOnlyList<int> PoangSlots { get; init; } = Array.Empty<int>();
+
+        /// <summary>Poängmålens skjutplatser. Saknas de (äldre anrop) antas de sitta på de sista platserna.</summary>
+        public IReadOnlyList<int> EffectivePoangSlots =>
+            PoangSlots.Count == PoangmalCount ? PoangSlots
+            : Enumerable.Range(Math.Max(1, Figures - PoangmalCount + 1), Math.Min(PoangmalCount, Figures)).ToList();
+
+        /// <summary>Stationen ur konfigurationen: samma skjutplatsordning som kortinmatningen (<c>TotalTargets</c>).</summary>
+        public static ShootingCardStation From(HpskSite.CompetitionTypes.Faltskytte.Models.FaltskytteStationConfig s)
+        {
+            var slots = new List<int>();
+            var at = 0;
+            foreach (var g in s.TargetGroups)
+                foreach (var f in g.Figures)
+                {
+                    at += Math.Max(1, f.TargetsPerFigure);
+                    if (f.IsPoangmal) slots.Add(at);
+                }
+            return new ShootingCardStation(s.Station, s.Name, s.TotalTargets, s.TotalPoangmal) { PoangSlots = slots };
+        }
+
+        /// <summary>Samma stationer ska vara lika även när listan är en annan instans.</summary>
+        public virtual bool Equals(ShootingCardStation? other) =>
+            other != null && Number == other.Number && Name == other.Name && Figures == other.Figures && PoangmalCount == other.PoangmalCount
+            && PoangSlots.SequenceEqual(other.PoangSlots);
+
+        public override int GetHashCode() => HashCode.Combine(Number, Name, Figures, PoangmalCount, PoangSlots.Count);
+
+        /// <summary>Nyckeln som avgör vilka skyttar som delar kort. Med <paramref name="withSlots"/> skiljer även poängmålens plats.</summary>
+        public string Signature(bool withSlots) =>
+            withSlots ? $"{Number}:{Figures}:{string.Join(",", PoangSlots)}" : $"{Number}:{Figures}:{PoangmalCount}";
+    }
 
     /// <summary>Var ett kort ligger på arket, i mm.</summary>
     public record ShootingCardRect(double X, double Y, double W, double H);
@@ -42,8 +81,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public const double SumColumnW = 13;
         public const int MaxShootersPerCard = 12;
 
-        public static bool IsLayout(string? v) => v is Figures or Total;
-        public static string NormalizeLayout(string? v) => v == Total ? Total : Figures;
+        /// <summary>Skyttblock: fyra skyttar per A4 liggande, stationerna i en rad, tre rader figurrutor per station (WinShooter-stil).</summary>
+        public const string Block = "blk";
+        /// <summary>Skyttkort: ett kort per skytt, A5 liggande, två per A4 stående; stationerna är rader.</summary>
+        public const string Card = "card";
+
+        public static bool IsLayout(string? v) => v is Figures or Total or Block or Card;
+        public static string NormalizeLayout(string? v) => v is Total or Block or Card ? v : Figures;
         public static string NormalizePaper(string? v) => v == Portrait ? Portrait : Landscape;
         public static int NormalizePerSheet(int v) => v == 2 ? 2 : 1;
 
