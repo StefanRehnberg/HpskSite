@@ -143,7 +143,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     }
 
     /// <summary>
-    /// Skyttblock (A): ett block per skytt, fyra på ett A4 liggande, som WinShooters patrullkort. Stationerna står i en rad med tre rader
+    /// Skyttblock (A): ett block per skytt, fyra på ett A4 liggande. Stationerna står i en rad med tre rader
     /// figurrutor per station (kolumner = figurer / 3, uppåt avrundat). Poängrutan sitter vid figuren (en delad ruta) eller på en egen rad
     /// under stationen. Summa (träff/figurer per station) är ett tillval på en egen rad. Papperet är låst (Stefan 2026-11-24).
     /// </summary>
@@ -151,7 +151,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         public string Id => ShootingCardLayout.Block;
         public string Name => "Fyra skyttar på ett blad";
-        public string Description => "Skyttblock, som WinShooter: hela patrullen på ett A4 liggande, en rad per skytt med stationerna bredvid varandra.";
+        public string Description => "Skyttblock: hela patrullen på ett A4 liggande, en rad per skytt med stationerna bredvid varandra.";
         public IReadOnlyList<ShootingCardFormat> Formats { get; } = new[] { new ShootingCardFormat("l1", "A4 liggande, fyra skyttar", ShootingCardLayout.Landscape, 1) };
         public int Capacity => ShootingCardGeometry.BlockShooters;
         public bool PoangByFigure => true;

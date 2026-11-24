@@ -81,7 +81,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public const double SumColumnW = 13;
         public const int MaxShootersPerCard = 12;
 
-        /// <summary>Skyttblock: fyra skyttar per A4 liggande, stationerna i en rad, tre rader figurrutor per station (WinShooter-stil).</summary>
+        /// <summary>Skyttblock: fyra skyttar per A4 liggande, stationerna i en rad, tre rader figurrutor per station.</summary>
         public const string Block = "blk";
         /// <summary>Skyttkort: ett kort per skytt, A5 liggande, två per A4 stående; stationerna är rader.</summary>
         public const string Card = "card";
