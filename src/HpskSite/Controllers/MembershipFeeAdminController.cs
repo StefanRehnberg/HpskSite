@@ -323,7 +323,8 @@ namespace HpskSite.Controllers
             var mail = _emailService.PreviewMembershipFeeRequest(to, charge.MemberName ?? "medlem",
                 clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId),
                 IssuerBankgiro(charge.ClubId), charge.PaymentReference, IssuerHasSwish(charge.ClubId),
-                choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose);
+                choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose,
+                charge.Lines.Select(l => (l.Description, l.Amount)).ToList());
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
@@ -420,7 +421,8 @@ namespace HpskSite.Controllers
                     ok = await _emailService.SendMembershipFeeRequestAsync(
                         to!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
                         _replyContacts.ForClub(clubId), bg, charge.PaymentReference, hasSwish,
-                        choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose);
+                        choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose,
+                        charge.Lines.Select(l => (l.Description, l.Amount)).ToList());
                 }
                 catch (Exception ex)
                 {

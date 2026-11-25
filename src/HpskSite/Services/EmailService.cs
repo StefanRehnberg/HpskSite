@@ -2834,11 +2834,12 @@ namespace HpskSite.Services
             bool hasSwish = true,
             string? typeLabel = null,
             bool needsTypeChoice = false,
-            bool canChooseType = false)
+            bool canChooseType = false,
+            IReadOnlyList<(string Description, decimal Amount)>? lines = null)
         {
             // ⚠️ Returnerar om mejlet FAKTISKT skickades — ytan markerar avgiften som skickad bara då.
             var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish,
-                typeLabel, needsTypeChoice, canChooseType);
+                typeLabel, needsTypeChoice, canChooseType, lines);
             return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
@@ -2846,10 +2847,11 @@ namespace HpskSite.Services
         public RegionFeeMailPreview PreviewMembershipFeeRequest(
             string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo,
             string? bgNumber = null, string? reference = null, bool hasSwish = true,
-            string? typeLabel = null, bool needsTypeChoice = false, bool canChooseType = false)
+            string? typeLabel = null, bool needsTypeChoice = false, bool canChooseType = false,
+            IReadOnlyList<(string Description, decimal Amount)>? lines = null)
         {
             var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish,
-                typeLabel, needsTypeChoice, canChooseType);
+                typeLabel, needsTypeChoice, canChooseType, lines);
             var reply = ResolveReplyAddress(replyTo);
             return new RegionFeeMailPreview
             {
@@ -2868,7 +2870,8 @@ namespace HpskSite.Services
         /// </summary>
         private static (string Subject, string Body) BuildMembershipFeeRequestBody(
             string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference, bool hasSwish,
-            string? typeLabel, bool needsTypeChoice, bool canChooseType)
+            string? typeLabel, bool needsTypeChoice, bool canChooseType,
+            IReadOnlyList<(string Description, decimal Amount)>? lines = null)
         {
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
@@ -2889,7 +2892,15 @@ namespace HpskSite.Services
             }
             else
             {
-                amountBlock = $"<div class='amount'>{amountLabel}</div>"
+                // Avgiftens rader (grundavgift, tillägg, avdrag) när det finns fler än en — en ensam rad säger inget mer än beloppet.
+                var linesBlock = "";
+                if (lines is { Count: > 1 })
+                    linesBlock = "<table style='border-collapse:collapse;font-size:14px;margin:-8px 0 12px'>"
+                        + string.Concat(lines.Select(l =>
+                            $"<tr><td style='padding:2px 16px 2px 0'>{enc(l.Description)}</td>"
+                            + $"<td style='padding:2px 0;text-align:right;white-space:nowrap'>{Math.Round(l.Amount).ToString("N0", sv)} kr</td></tr>"))
+                        + "</table>";
+                amountBlock = $"<div class='amount'>{amountLabel}</div>" + linesBlock
                     + (string.IsNullOrWhiteSpace(typeLabel) ? "" :
                        $"<p style='margin-top:-8px'>Avgiften gäller medlemstypen <strong>{enc(typeLabel)}</strong>."
                        + (canChooseType ? $" Har din medlemstyp ändrats kan du <a href='{payUrl}'>byta medlemstyp på betalsidan</a>." : "")
