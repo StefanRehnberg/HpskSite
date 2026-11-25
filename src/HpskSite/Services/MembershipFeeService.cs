@@ -14,7 +14,15 @@ namespace HpskSite.Services
         public string? MembershipType { get; set; }
         public string? HouseholdId { get; set; }
         public bool HouseholdPrimary { get; set; }
+
+        /// <summary>Är klubben medlemmens huvudklubb? Unknown = medlemmen har ingen (saknad huvudklubb träffar varken "vi" eller "annan").</summary>
+        public PrimaryClubState HomeClub { get; set; } = PrimaryClubState.Unknown;
+
+        /// <summary>Klubbens tillval (<see cref="ClubFeeOption"/>) som kassören bockat i på medlemmen.</summary>
+        public IReadOnlyCollection<int> OptionIds { get; set; } = Array.Empty<int>();
     }
+
+    public enum PrimaryClubState { Unknown = 0, Ours = 1, Other = 2 }
 
     /// <summary>
     /// Membership-fee (medlemsavgift) data access — fee categories per club/year and
