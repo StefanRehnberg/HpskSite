@@ -10,8 +10,29 @@ namespace HpskSite.Tests
     {
         [Fact]
         public void Standardnycklarna_ar_dagens_lagrade_text()
-            => Assert.Equal(new[] { "Senior", "Pensionär", "Junior", "Familj", "Hedersmedlem", "Ständig", "Stödjande" },
+            => Assert.Equal(new[] { "Senior", "Pensionär", "Junior", "Veteran", "Familj", "Hedersmedlem", "Ständig", "Stödjande" },
                 MembershipTypeKeys.Standard);
+
+        [Fact]
+        public void Veteran_ar_standardtyp_och_Pensionar_ar_kvar()
+        {
+            Assert.Equal("Veteran", MembershipTypeKeys.StandardKey(" veteran "));
+            Assert.Equal("Pensionär", MembershipTypeKeys.StandardKey("pensionär"));
+        }
+
+        [Theory]
+        [InlineData("Familj", true)]
+        [InlineData("Hedersmedlem", true)]
+        [InlineData("Ständig", true)]
+        [InlineData("Stödjande", true)]
+        [InlineData("Senior", false)]
+        [InlineData("Veteran", false)]
+        [InlineData("Junior", false)]
+        [InlineData("Pensionär", false)]
+        [InlineData("x-abc", false)]
+        [InlineData(null, false)]
+        public void Typer_som_aldrig_aldersstyrs(string? type, bool expected)
+            => Assert.Equal(expected, MembershipTypeKeys.IsNeverAgeBased(type));
 
         [Theory]
         [InlineData("familj", "Familj")]
@@ -21,8 +42,8 @@ namespace HpskSite.Tests
             => Assert.Equal(key, MembershipTypeKeys.StandardKey(text));
 
         [Theory]
-        [InlineData("Veteran")]
-        [InlineData("Heder")]            // gammal kortform är okänd text, inte Hedersmedlem
+        [InlineData("Vet")]
+        [InlineData("Heder")]           // gammal kortform är okänd text, inte Hedersmedlem
         [InlineData("Ständig medlem")]
         [InlineData("Familjemedlem")]
         [InlineData("")]

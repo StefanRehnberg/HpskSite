@@ -11,7 +11,7 @@ namespace HpskSite.Tests
             => new() { Id = id, ClubId = 1, TypeKey = key, Name = name, IsActive = active };
 
         [Fact]
-        public void Utan_rader_ar_alla_sju_standardtyper_aktiva_med_standardnamn()
+        public void Utan_rader_ar_alla_standardtyper_aktiva_med_standardnamn()
         {
             var e = MembershipTypeNames.Effective(Array.Empty<ClubMembershipType>());
             Assert.Equal(MembershipTypeKeys.Standard, e.Select(x => x.Key).ToList());
@@ -35,14 +35,14 @@ namespace HpskSite.Tests
             var custom = e.Last();
             Assert.True(custom.IsCustom);
             Assert.Equal("x-abc", custom.Key);
-            Assert.Equal(8, e.Count);
+            Assert.Equal(9, e.Count);   // åtta standardtyper + den egna
         }
 
         [Fact]
         public void Okand_text_visas_som_den_ar_och_tom_ger_tomt()
         {
             var e = MembershipTypeNames.Effective(Array.Empty<ClubMembershipType>());
-            Assert.Equal("Veteran", MembershipTypeNames.LabelFor(e, " Veteran "));
+            Assert.Equal("Pensionist", MembershipTypeNames.LabelFor(e, " Pensionist "));
             Assert.Equal("", MembershipTypeNames.LabelFor(e, null));
         }
 
@@ -54,7 +54,8 @@ namespace HpskSite.Tests
             Assert.Null(MembershipTypeNames.ResolveKey(e, "Senior"));
             Assert.Equal("Junior", MembershipTypeNames.ResolveKey(e, "JUNIOR"));
             Assert.Null(MembershipTypeNames.ResolveKey(e, ""));
-            Assert.Null(MembershipTypeNames.ResolveKey(e, "Veteran"));
+            Assert.Equal("Veteran", MembershipTypeNames.ResolveKey(e, "veteran"));   // standardtyp sedan steg 3b
+            Assert.Null(MembershipTypeNames.ResolveKey(e, "Pensionist"));
         }
 
         [Fact]

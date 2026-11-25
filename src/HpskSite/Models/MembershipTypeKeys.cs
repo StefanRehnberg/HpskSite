@@ -14,6 +14,8 @@ namespace HpskSite.Models
         public const string Senior = "Senior";
         public const string Pensionar = "Pensionär";
         public const string Junior = "Junior";
+        /// <summary>Standardtyp sedan steg 3b (2026-11-25). Beter sig som Senior; ingen åldersgräns förrän klubben sätter en. Pensionär rörs inte.</summary>
+        public const string Veteran = "Veteran";
         public const string Familj = "Familj";
         public const string Hedersmedlem = "Hedersmedlem";
         public const string Standig = "Ständig";
@@ -22,11 +24,18 @@ namespace HpskSite.Models
         /// <summary>Prefix för klubbens egna extra typer (nyckeln genereras, härleds aldrig ur namnet).</summary>
         public const string CustomPrefix = "x-";
 
-        /// <summary>De sju standardnycklarna i fast visningsordning.</summary>
+        /// <summary>De åtta standardnycklarna i fast visningsordning.</summary>
         public static readonly IReadOnlyList<string> Standard = new[]
         {
-            Senior, Pensionar, Junior, Familj, Hedersmedlem, Standig, Stodjande
+            Senior, Pensionar, Junior, Veteran, Familj, Hedersmedlem, Standig, Stodjande
         };
+
+        /// <summary>
+        /// Typer som aldrig kan få en åldersgräns och som en åldersregel aldrig flyttar en medlem ifrån eller till:
+        /// Familj (hushållet), Hedersmedlem, Ständig (avgiftsfria) och Stödjande.
+        /// </summary>
+        public static bool IsNeverAgeBased(string? type)
+            => StandardKey(type) is Familj or Hedersmedlem or Standig or Stodjande;
 
         private static string? Trim(string? s) => s?.Trim();
 
