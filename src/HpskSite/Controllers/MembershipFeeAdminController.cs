@@ -359,6 +359,7 @@ namespace HpskSite.Controllers
             return Json(new
             {
                 success = true,
+                untyped = _feeSettings.CountUntyped(clubId),   // aktiva medlemmar utan typ: får ingen avgift
                 types = _feeSettings.GetTypesWithCounts(clubId).Select(x => new
                 {
                     key = x.Type.Key, name = x.Type.Name, isActive = x.Type.IsActive, isCustom = x.Type.IsCustom, members = x.Members
@@ -393,11 +394,11 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen och medlemmarna prövas mot klubben")]
-        public async Task<IActionResult> SetMembersType(int clubId, int year, string? toKey, string? fromKey, int[]? memberIds)
+        public async Task<IActionResult> SetMembersType(int clubId, int year, string? toKey, string? fromKey, int[]? memberIds, string? fromUntyped = null)
         {
             if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
-            var (changed, error) = _feeSettings.SetMembersType(clubId, toKey, memberIds, fromKey);
+            var (changed, error) = _feeSettings.SetMembersType(clubId, toKey, memberIds, fromKey, fromUntyped is "1" or "true" or "on");
             if (error is not null) return Json(new { success = false, message = error });
             _feeService.ClearUnsentClubCharges(clubId, year);
             return Json(new { success = true, data = new { changed } });
