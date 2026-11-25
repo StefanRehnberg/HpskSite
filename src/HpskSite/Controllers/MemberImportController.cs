@@ -34,6 +34,8 @@ namespace HpskSite.Controllers
         private readonly MemberMergeService _mergeService;
         private readonly ILogger<MemberImportController> _logger;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.MembershipTypeCatalog _typeCatalog;
+        private readonly HpskSite.Services.ClubFeeSettingsService _feeSettings;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -75,9 +77,13 @@ namespace HpskSite.Controllers
             MarkenLedgerService markenLedger,
             MemberMergeService mergeService,
             ILogger<MemberImportController> logger,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.MembershipTypeCatalog typeCatalog,
+            HpskSite.Services.ClubFeeSettingsService feeSettings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _typeCatalog = typeCatalog;
+            _feeSettings = feeSettings;
             _memberProperties = memberProperties;
             _memberService = memberService;
             _authService = authService;
@@ -485,8 +491,44 @@ namespace HpskSite.Controllers
                             : existingNotes + " | " + string.Join(" | ", noteAdditions);
                     }
 
+                    // (b0) Medlemstypen skrivs som NYCKEL, aldrig som rå text. Klubbens nuvarande namn gäller
+                    //      (gamla standardnamn är inte alias efter en omdöpning). Okänd text ger ingen tyst
+                    //      standardtyp: medlemmen importeras, typen lämnas som den var och raden rapporteras.
+                    if (values.TryGetValue("membershipType", out var typeText) && !string.IsNullOrWhiteSpace(typeText))
+                    {
+                        var typeKey = _typeCatalog.ResolveKey(clubId, typeText);
+                        if (typeKey is null)
+                        {
+                            values.Remove("membershipType");
+                            errors.Add($"Rad {rowIndex}: medlemstypen \"{typeText.Trim()}\" finns inte i klubbens lista – typen sattes inte. Lägg till typen eller döp om en befintlig och importera igen.");
+                        }
+                        else values["membershipType"] = typeKey;
+                    }
+
                     // (b) Club-scoped facts go on the per-club ClubMembership record, not the member.
                     UpsertClubMembership(member.Id, clubId, values);
+
+                    // (b2) "Aktiv i förbund" → tillval som klubben har (namn eller förbundets officiella namn).
+                    //      Läggs till; en import tar aldrig bort ett tillval kassören bockat i.
+                    if (values.TryGetValue("federations", out var fedText) && !string.IsNullOrWhiteSpace(fedText))
+                    {
+                        var options = _feeSettings.GetOptions(clubId, includeInactive: false);
+                        var wanted = new List<int>();
+                        foreach (var name in fedText.Split(new[] { ',', ';', '/', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            var opt = options.FirstOrDefault(o => string.Equals(o.Name, name, StringComparison.OrdinalIgnoreCase)
+                                                               || string.Equals(o.SystemKey, name, StringComparison.OrdinalIgnoreCase));
+                            if (opt is null)
+                                errors.Add($"Rad {rowIndex}: förbundet/tillvalet \"{name}\" finns inte bland klubbens tillval – det sattes inte som tillval (texten sparas ändå som anteckning om förbund).");
+                            else wanted.Add(opt.Id);
+                        }
+                        if (wanted.Count > 0)
+                        {
+                            var all = _feeSettings.GetMemberOptionIds(clubId, member.Id).Union(wanted).ToList();
+                            var optErr = _feeSettings.SetMemberOptions(clubId, member.Id, all);
+                            if (optErr is not null) errors.Add($"Rad {rowIndex}: tillval sattes inte – {optErr}");
+                        }
+                    }
 
                     // (c) Guldmärke → Märken ledger (Pistolskyttemärket Guld).
                     if (!string.IsNullOrWhiteSpace(guldmarkeNumber) && guldYear > 0)
