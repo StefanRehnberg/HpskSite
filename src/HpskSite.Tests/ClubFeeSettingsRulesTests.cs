@@ -24,6 +24,23 @@ namespace HpskSite.Tests
         [InlineData(null)] [InlineData("")] [InlineData("   ")]
         public void Namn_krävs(string? label) => Assert.NotNull(Part(label: label));
 
+        [Fact] public void Typnamn_unikt_utan_hansyn_till_skiftlage_och_accent()
+        {
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeName("pensionar", new[] { "Pensionär" }));
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeName("  SENIOR ", new[] { "Senior" }));
+            Assert.Null(ClubFeeSettingsRules.ValidateTypeName("Veteran", new[] { "Senior", "Pensionär" }));
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeName("", new string[0]));
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeName(new string('x', 51), new string[0]));
+        }
+
+        [Fact] public void Familj_kan_varken_doepas_om_eller_doljas()
+        {
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeEdit("Familj", "Hushåll", "Familj", true));
+            Assert.NotNull(ClubFeeSettingsRules.ValidateTypeEdit("Familj", "Familj", "Familj", false));
+            Assert.Null(ClubFeeSettingsRules.ValidateTypeEdit("Familj", "Familj", "Familj", true));
+            Assert.Null(ClubFeeSettingsRules.ValidateTypeEdit("Senior", "Veteran", "Senior", false));
+        }
+
         [Fact] public void Belopp_noll_avvisas() => Assert.NotNull(Part(amount: 0m));
         [Fact] public void Belopp_med_tre_decimaler_avvisas() => Assert.NotNull(Part(amount: 1.234m));
 

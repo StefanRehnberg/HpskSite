@@ -349,6 +349,60 @@ namespace HpskSite.Controllers
             return Json(new { success = true });
         }
 
+        // ── Medlemstyper (steg 3) ─────────────────────────────────────
+
+        [HttpGet]
+        public async Task<IActionResult> GetMemberTypes(int clubId)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            return Json(new
+            {
+                success = true,
+                types = _feeSettings.GetTypesWithCounts(clubId).Select(x => new
+                {
+                    key = x.Type.Key, name = x.Type.Name, isActive = x.Type.IsActive, isCustom = x.Type.IsCustom, members = x.Members
+                })
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen prövas mot klubbens egna typer")]
+        public async Task<IActionResult> SaveMemberType(int clubId, int year, string? key, string? name, string? isActive = "1")
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var (k, error) = _feeSettings.SaveType(clubId, key, name, isActive is "1" or "true" or "on");
+            if (error is not null) return Json(new { success = false, message = error });
+            _feeService.ClearUnsentClubCharges(clubId, year);
+            return Json(new { success = true, data = new { key = k } });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen prövas mot klubbens egna typer")]
+        public async Task<IActionResult> DeleteMemberType(int clubId, string? key)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var (deleted, error) = _feeSettings.DeleteType(clubId, key ?? "");
+            return deleted ? Json(new { success = true }) : Json(new { success = false, message = error });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen och medlemmarna prövas mot klubben")]
+        public async Task<IActionResult> SetMembersType(int clubId, int year, string? toKey, string? fromKey, int[]? memberIds)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var (changed, error) = _feeSettings.SetMembersType(clubId, toKey, memberIds, fromKey);
+            if (error is not null) return Json(new { success = false, message = error });
+            _feeService.ClearUnsentClubCharges(clubId, year);
+            return Json(new { success = true, data = new { changed } });
+        }
+
         // ── Charges ───────────────────────────────────────────────────
 
         [HttpPost]

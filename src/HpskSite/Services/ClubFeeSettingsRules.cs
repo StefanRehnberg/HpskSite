@@ -52,6 +52,32 @@ namespace HpskSite.Services
             return null;
         }
 
+        public const int MaxTypeName = 50;
+
+        private static string Fold(string s) => new string(s.Trim().Normalize(System.Text.NormalizationForm.FormD)
+            .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .Select(char.ToLowerInvariant).ToArray());
+
+        /// <summary>Klubbens namn på en medlemstyp: unikt per klubb (skiftläge och accenter ignoreras, som databasens CI_AI).</summary>
+        public static string? ValidateTypeName(string? name, IEnumerable<string> otherNames)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Ange medlemstypens namn.";
+            if (name.Trim().Length > MaxTypeName) return $"Namnet får vara högst {MaxTypeName} tecken.";
+            var f = Fold(name);
+            if (otherNames.Any(n => !string.IsNullOrWhiteSpace(n) && Fold(n) == f))
+                return "Det finns redan en medlemstyp med det namnet.";
+            return null;
+        }
+
+        /// <summary>Familj kan varken döpas om eller döljas (hushållet kopplas av klubben och hänger på nyckeln).</summary>
+        public static string? ValidateTypeEdit(string key, string? newName, string? currentName, bool isActive)
+        {
+            if (!MembershipTypeKeys.IsFamilj(key)) return null;
+            if (!string.Equals(newName?.Trim(), currentName?.Trim(), StringComparison.Ordinal)) return "Familj kan inte döpas om.";
+            if (!isActive) return "Familj kan inte döljas.";
+            return null;
+        }
+
         /// <summary>Urvalet av medlemstyper normaliserat till nycklarnas kanoniska stavning, utan dubbletter.</summary>
         public static List<string> NormalizeTypeKeys(IEnumerable<string>? keys, IReadOnlyCollection<string> validTypeKeys)
         {

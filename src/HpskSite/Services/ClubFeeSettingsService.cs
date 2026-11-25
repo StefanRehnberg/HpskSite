@@ -148,6 +148,123 @@ namespace HpskSite.Services
             return (true, null);
         }
 
+        // ── Medlemstyper ──────────────────────────────────────────────
+
+        /// <summary>Klubbens typer med antal aktiva medlemmar per typ (för listan och för "Flytta medlemmar").</summary>
+        public List<(MembershipTypeEntry Type, int Members)> GetTypesWithCounts(int clubId)
+        {
+            var types = _types.Types(clubId);
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var rows = scope.Database.Fetch<string>(
+                "SELECT MembershipType FROM ClubMembership WHERE ClubId = @0 AND MembershipStatus NOT IN (N'Utträdd', N'Avliden') AND MembershipType IS NOT NULL", clubId);
+            return types.Select(t => (t, rows.Count(r => MembershipTypeKeys.Same(r, t.Key)))).ToList();
+        }
+
+        /// <summary>
+        /// Byter namn på / döljer en typ (key finns) eller skapar en egen typ (key tom → ny nyckel x-…).
+        /// Familj kan varken döpas om eller döljas. Namnet är unikt per klubb.
+        /// </summary>
+        public (string? Key, string? Error) SaveType(int clubId, string? key, string? name, bool isActive)
+        {
+            var current = _types.Types(clubId);
+            var isNew = string.IsNullOrWhiteSpace(key);
+            MembershipTypeEntry? existing = null;
+            if (!isNew)
+            {
+                existing = current.FirstOrDefault(t => MembershipTypeKeys.Same(t.Key, key));
+                if (existing is null) return (null, "Medlemstypen hittades inte.");
+                var editError = ClubFeeSettingsRules.ValidateTypeEdit(existing.Key, name, existing.Name, isActive);
+                if (editError is not null) return (null, editError);
+            }
+            var nameError = ClubFeeSettingsRules.ValidateTypeName(name,
+                current.Where(t => existing is null || !MembershipTypeKeys.Same(t.Key, existing.Key)).Select(t => t.Name));
+            if (nameError is not null) return (null, nameError);
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: false);
+            var db = scope.Database;
+            ClubMembershipType? row = null;
+            if (existing is not null)
+                row = db.SingleOrDefault<ClubMembershipType>("SELECT * FROM ClubMembershipType WHERE ClubId = @0 AND TypeKey = @1", clubId, existing.Key);
+
+            if (row is null)
+            {
+                row = new ClubMembershipType
+                {
+                    ClubId = clubId,
+                    TypeKey = existing?.Key ?? MembershipTypeKeys.CustomPrefix + Guid.NewGuid().ToString("N")[..12],
+                    CreatedUtc = DateTime.UtcNow
+                };
+                row.Name = name!.Trim();
+                row.IsActive = isActive;
+                row.UpdatedUtc = DateTime.UtcNow;
+                db.Insert(row);
+            }
+            else
+            {
+                row.Name = name!.Trim();
+                row.IsActive = isActive;
+                row.UpdatedUtc = DateTime.UtcNow;
+                db.Update(row);
+            }
+            scope.Complete();
+            return (row.TypeKey, null);
+        }
+
+        /// <summary>Raderar en EGEN typ som ingen medlem och inget tillägg använder. Standardtyper kan bara döljas.</summary>
+        public (bool Deleted, string? Error) DeleteType(int clubId, string key)
+        {
+            if (!MembershipTypeKeys.IsCustom(key)) return (false, "Bara egna medlemstyper kan tas bort. Dölj en standardtyp i stället.");
+            using var scope = _scopeProvider.CreateScope(autoComplete: false);
+            var db = scope.Database;
+            var row = db.SingleOrDefault<ClubMembershipType>("SELECT * FROM ClubMembershipType WHERE ClubId = @0 AND TypeKey = @1", clubId, key);
+            if (row is null) return (false, "Medlemstypen hittades inte.");
+            var members = db.ExecuteScalar<int>("SELECT COUNT(*) FROM ClubMembership WHERE ClubId = @0 AND MembershipType = @1", clubId, row.TypeKey);
+            var parts = db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM MembershipFeePartType t JOIN MembershipFeePart p ON p.Id = t.PartId WHERE p.ClubId = @0 AND t.TypeKey = @1", clubId, row.TypeKey);
+            var rates = db.ExecuteScalar<int>("SELECT COUNT(*) FROM MembershipFeeCategory WHERE ClubId = @0 AND IssuerType = 0 AND MembershipType = @1", clubId, row.TypeKey);
+            if (members > 0 || parts > 0 || rates > 0)
+                return (false, $"Typen används av {members} medlemmar, {parts} tillägg/avdrag och {rates} avgifter. Flytta medlemmarna och dölj typen i stället.");
+            db.Execute("DELETE FROM ClubMembershipType WHERE Id = @0", row.Id);
+            scope.Complete();
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Sätter medlemstyp på valda aktiva medlemmar (massåtgärd), eller flyttar ALLA från en typ (fromKey) till en annan.
+        /// Familj är hushållets typ (kopplas av klubben) och kan varken sättas eller lämnas här.
+        /// </summary>
+        public (int Changed, string? Error) SetMembersType(int clubId, string? toKey, IEnumerable<int>? memberIds, string? fromKey)
+        {
+            var target = _types.Types(clubId).FirstOrDefault(t => MembershipTypeKeys.Same(t.Key, toKey));
+            if (target is null) return (0, "Okänd medlemstyp.");
+            if (!target.IsActive) return (0, "Medlemstypen är dold. Visa den först.");
+            if (MembershipTypeKeys.IsFamilj(target.Key)) return (0, "Familj sätts genom att koppla ihop hushållet, inte här.");
+            var ids = memberIds?.Distinct().ToList() ?? new List<int>();
+            if (string.IsNullOrWhiteSpace(fromKey) && ids.Count == 0) return (0, "Välj medlemmar eller en typ att flytta från.");
+            if (!string.IsNullOrWhiteSpace(fromKey) && MembershipTypeKeys.IsFamilj(fromKey)) return (0, "Familj kan inte flyttas här.");
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: false);
+            var db = scope.Database;
+            const string active = "MembershipStatus NOT IN (N'Utträdd', N'Avliden')";
+            int changed;
+            if (!string.IsNullOrWhiteSpace(fromKey))
+            {
+                var from = _types.Types(clubId).FirstOrDefault(t => MembershipTypeKeys.Same(t.Key, fromKey));
+                if (from is null) return (0, "Okänd medlemstyp att flytta från.");
+                changed = db.Execute($"UPDATE ClubMembership SET MembershipType = @0 WHERE ClubId = @1 AND {active} AND MembershipType = @2 AND MembershipType <> @3",
+                    target.Key, clubId, from.Key, MembershipTypeKeys.Familj);
+            }
+            else
+            {
+                changed = 0;
+                foreach (var chunk in ids.Chunk(500))
+                    changed += db.Execute($"UPDATE ClubMembership SET MembershipType = @0 WHERE ClubId = @1 AND {active} AND MemberId IN (@2) AND ISNULL(MembershipType, N'') <> @3",
+                        target.Key, clubId, chunk, MembershipTypeKeys.Familj);
+            }
+            scope.Complete();
+            return (changed, null);
+        }
+
         // ── Medlemmens tillval ────────────────────────────────────────
 
         public List<int> GetMemberOptionIds(int clubId, int memberId)
