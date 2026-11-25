@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAccessService _ledgerAccess;
         private readonly MembershipFeeAccess _feeAccess;
         private readonly ClubFeeInputService _feeInput;
+        private readonly ClubFeeSettingsService _feeSettings;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -62,6 +63,7 @@ namespace HpskSite.Controllers
             LedgerAccessService ledgerAccess,
             MembershipFeeAccess feeAccess,
             ClubFeeInputService feeInput,
+            ClubFeeSettingsService feeSettings,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _ledgerAccess = ledgerAccess;
             _feeAccess = feeAccess;
             _feeInput = feeInput;
+            _feeSettings = feeSettings;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -245,6 +248,104 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Kategorin hittades inte." });
             _feeService.DeleteCategory(id);
             _feeService.ClearUnsentClubCharges(clubId, y);
+            return Json(new { success = true });
+        }
+
+        // ── Tillägg/avdrag och tillval (steg 3) ───────────────────────
+
+        /// <summary>Klubbens tillägg/avdrag och tillval för året. Läsrätt räcker (styrelsen, revisorn).</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetFeeSettings(int clubId, int year)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var (parts, partTypes) = _feeService.GetParts(clubId, year);
+            return Json(new
+            {
+                success = true,
+                parts = parts.Select(p => new
+                {
+                    p.Id, p.Label, p.Amount, p.Condition, p.OptionId, p.SortOrder,
+                    typeKeys = partTypes[p.Id].ToList()   // tom lista = alla medlemstyper
+                }),
+                options = _feeSettings.GetOptions(clubId).Select(o => new { o.Id, o.Name, o.SystemKey, o.IsActive })
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); tillägget prövas mot klubben och året i anropet")]
+        public async Task<IActionResult> SaveFeePart(int clubId, int year, int id, string? label, decimal amount,
+            string? condition, int? optionId, string[]? typeKeys)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var (partId, error) = _feeSettings.SavePart(clubId, year, id, label, amount, condition, optionId, typeKeys);
+            if (error is not null) return Json(new { success = false, message = error });
+            // ⚠️ Oskickade avgifter följer inställningen (som för grundavgiften); skickade och betalda rörs aldrig.
+            _feeService.ClearUnsentClubCharges(clubId, year);
+            return Json(new { success = true, data = new { id = partId } });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); tillägget prövas mot klubben och året i anropet")]
+        public async Task<IActionResult> DeleteFeePart(int clubId, int year, int id)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (!_feeSettings.DeletePart(clubId, year, id))
+                return Json(new { success = false, message = "Tillägget hittades inte." });
+            _feeService.ClearUnsentClubCharges(clubId, year);
+            return Json(new { success = true });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); tillvalet prövas mot klubben i anropet")]
+        public async Task<IActionResult> SaveFeeOption(int clubId, int year, int id, string? name, string? systemKey, string? isActive = "1")
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var (optId, error) = _feeSettings.SaveOption(clubId, id, name, systemKey, isActive is "1" or "true" or "on");
+            if (error is not null) return Json(new { success = false, message = error });
+            _feeService.ClearUnsentClubCharges(clubId, year);
+            return Json(new { success = true, data = new { id = optId } });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); tillvalet prövas mot klubben i anropet")]
+        public async Task<IActionResult> DeleteFeeOption(int clubId, int year, int id)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var (deleted, error) = _feeSettings.DeleteOption(clubId, id);
+            if (!deleted) return Json(new { success = false, message = error });
+            return Json(new { success = true });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetMemberOptions(int clubId, int memberId)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            return Json(new { success = true, optionIds = _feeSettings.GetMemberOptionIds(clubId, memberId) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); medlemmen och tillvalen prövas mot klubben")]
+        public async Task<IActionResult> SetMemberOptions(int clubId, int year, int memberId, int[]? optionIds)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var error = _feeSettings.SetMemberOptions(clubId, memberId, optionIds ?? Array.Empty<int>());
+            if (error is not null) return Json(new { success = false, message = error });
+            _feeService.ClearUnsentClubCharges(clubId, year);
             return Json(new { success = true });
         }
 
