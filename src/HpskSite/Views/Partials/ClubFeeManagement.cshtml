@@ -47,6 +47,8 @@
                     <li><hr class="dropdown-divider"></li>
                     <li><h6 class="dropdown-header">Inställningar</h6></li>
                     <li><button class="dropdown-item" type="button" id="cfEditRates"><i class="bi bi-cash-coin me-2"></i><span>Avgift per medlemstyp</span></button></li>
+                    <li><button class="dropdown-item" type="button" id="cfEditParts"><i class="bi bi-plus-slash-minus me-2"></i><span>Tillägg och avdrag…</span></button></li>
+                    <li><button class="dropdown-item" type="button" id="cfEditOptions"><i class="bi bi-ui-checks me-2"></i><span>Tillval och förbund…</span></button></li>
                     <li><button class="dropdown-item" type="button" id="cfEditTypes"><i class="bi bi-people me-2"></i><span>Medlemstyper och åldersgränser…</span></button></li>
                     <li class="d-none" id="cfAgeItemLi"><button class="dropdown-item" type="button" id="cfAgeItem"><i class="bi bi-arrow-left-right me-2"></i><span>Åldersförslag…</span></button></li>
                 </ul>
@@ -83,6 +85,12 @@
     </div>
 
     <div id="cfListWrap" class="d-none">
+        <div class="d-none mb-2" id="cfFilterWrap">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <label class="small text-muted mb-0" for="cfFilter">Visa</label>
+                <select id="cfFilter" class="form-select form-select-sm" style="width:auto"></select>
+            </div>
+        </div>
         <div class="table-responsive">
             <table class="table align-middle mb-2">
                 <thead><tr>
@@ -171,6 +179,52 @@
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
                 <button type="button" class="btn btn-primary" id="cfAgeSave" disabled>Spara åldersgränser</button>
             </div>
+        </div>
+    </div>
+</div>
+
+@* Tillägg och avdrag: belopp med tecken som läggs på grundavgiften. Sparas direkt; formuläret är den lilla dialogen. *@
+<div class="modal fade" id="cfPartsModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfPartsTitle">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cfPartsTitle">Tillägg och avdrag</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Avgiften är grundavgiften för medlemstypen plus tillägg och minus avdrag, men aldrig under 0 kr.
+                    Ett tillägg gäller alla, eller bara dem som uppfyller ett villkor — till exempel att klubben är huvudklubb, eller att medlemmen har ett tillval.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2">
+                        <thead><tr><th>Namn</th><th class="text-end">Belopp</th><th class="d-none d-sm-table-cell">Gäller</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                        <tbody id="cfPartRows"></tbody>
+                    </table>
+                </div>
+                <div><button type="button" class="btn btn-sm btn-outline-secondary" id="cfNewPartBtn"><i class="bi bi-plus-lg me-1"></i>Nytt tillägg eller avdrag…</button></div>
+                <p class="text-muted small mt-3 mb-0">Avgifter som redan skickats ändras inte. Oskickade räknas om.</p>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="cfPartsError"></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
+        </div>
+    </div>
+</div>
+
+@* Tillval: klubbens egna val (förbund, sportskytte …) som medlemmar kan ha — många per medlem. *@
+<div class="modal fade" id="cfOptionsModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfOptionsTitle">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cfOptionsTitle">Tillval och förbund</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Ett tillval är något en medlem kan ha utöver grundmedlemskapet, till exempel ett förbund som klubben tar avgift för.
+                    Du sätter tillvalen på varje medlem (Åtgärder på raden) eller i importen, och kopplar sedan ett tillägg till tillvalet.</p>
+                <table class="table table-sm align-middle mb-2"><tbody id="cfOptionRows"></tbody></table>
+                <div><button type="button" class="btn btn-sm btn-outline-secondary" id="cfNewOptionBtn"><i class="bi bi-plus-lg me-1"></i>Nytt tillval…</button></div>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="cfOptionsError"></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
         </div>
     </div>
 </div>
@@ -282,6 +336,23 @@
 
     // ── Medlemstyper: nyckel + klubbens namn. Visa ALLTID namnet, aldrig nyckeln (en egen typ har nyckeln x-…). ──
     var types = [], untyped = 0, ageRules = { enabled: false, error: null };
+    // Tillägg/avdrag och tillval för året (GetFeeSettings).
+    var fs = { parts: [], options: [], federations: [] };
+    function optionOf(id) { return (fs.options || []).find(function (o) { return o.id === id; }); }
+    function signed(n) { return (n > 0 ? '+' : n < 0 ? '−' : '') + kr(Math.abs(n)); }
+    // Villkoret i klartext — samma ord som i dialogen.
+    function condText(p) {
+        if (p.condition === 'PrimaryClub') return 'Klubben är huvudklubb';
+        if (p.condition === 'NotPrimaryClub') return 'En annan klubb är huvudklubb';
+        if (p.condition === 'Option') { var o = optionOf(p.optionId); return 'Har tillvalet ' + (o ? o.name : '?'); }
+        return 'Alla';
+    }
+    function partScope(p) {
+        var c = condText(p), t = (p.typeKeys || []).map(typeName).join(', ');
+        return c + (t ? ' · ' + t : '');
+    }
+    function usesHomeClub() { return (fs.parts || []).some(function (p) { return p.condition === 'PrimaryClub' || p.condition === 'NotPrimaryClub'; }); }
+    var filterVal = 'all';
     var NEVER_AGE = { 'familj': 1, 'hedersmedlem': 1, 'ständig': 1, 'stödjande': 1 };
     function typeOf(key) { var k = (key || '').toLowerCase(); return types.find(function (t) { return (t.key || '').toLowerCase() === k; }); }
     function typeName(key) { if (!key) return ''; var t = typeOf(key); return t ? t.name : key; }
@@ -331,7 +402,8 @@
     }
     // Medlemstypen — och om MEDLEMMEN valt den själv. Kassören ska se det: ett förtroendesystem, inte ett osynligt.
     function typeCell(r, s) {
-        var t = esc(typeName(r.membershipType));
+        var t = esc(typeName(r.membershipType)) + homeBadge(r)
+              + (r.optionIds || []).map(function (id) { var o = optionOf(id); return o && o.isActive ? ' <span class="badge bg-light text-dark border">' + esc(o.name) + '</span>' : ''; }).join('');
         if (s.choose) return '<span class="text-muted">väljer själv</span>';
         if (s.c && s.c.memberChosenType)
             t += ' <span class="badge bg-light text-dark border" title="Medlemmen valde medlemstypen själv på betalsidan'
@@ -367,9 +439,53 @@
         } else if (r.kind === 'NoCategory') items.push(item('rates', id, 'Avgift per medlemstyp…'));
         // E-postadressen går att sätta för alla — en förälder som betalar juniorens avgift.
         if (!s.paid) items.push(item('email', id, 'E-post för avgiften…'));
+        if ((fs.options || []).some(function (o) { return o.isActive; })) items.push(item('options', id, 'Tillval…'));
         return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
              + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
              + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
+    }
+
+    // Uppdelningen under beloppet: "Grund 600 kr · Förbund +100 kr". En skickad eller betald avgift är fryst — då
+    // visas bara att förslaget blivit ett annat.
+    function breakdown(r, s) {
+        var frozen = !!s.c && (s.sent || s.paid || s.claimed);
+        if (frozen) {
+            if (r.proposedAmount > 0 && Math.abs(r.proposedAmount - s.amount) >= 0.005)
+                return '<div class="small text-muted fw-normal">Förslaget är nu ' + kr(r.proposedAmount) + '</div>';
+            return '';
+        }
+        var ls = r.lines || [];
+        if (ls.length < 2) return '';
+        return '<div class="small text-muted fw-normal">' + ls.map(function (l) {
+            return esc(l.text) + ' ' + (l.kind === 'fee-base' ? kr(l.amount) : signed(l.amount));
+        }).join(' · ') + '</div>';
+    }
+    // Brickorna för huvudklubben syns bara när något tillägg bryr sig om den.
+    function homeBadge(r) {
+        if (!usesHomeClub()) return '';
+        if (r.homeClub === 'Unknown') return ' <span class="badge bg-warning-subtle text-warning-emphasis border" title="Medlemmen har ingen huvudklubb, så villkor på huvudklubben träffar varken ”klubben är huvudklubb” eller ”annan klubb”.">Huvudklubb saknas</span>';
+        if (r.homeClub === 'Other') return ' <span class="badge bg-light text-dark border">Annan huvudklubb</span>';
+        return '';
+    }
+    function renderFilter() {
+        var opts = [['all', 'Alla medlemmar']];
+        if (usesHomeClub()) { opts.push(['home-unknown', 'Huvudklubb saknas']); opts.push(['home-other', 'Annan huvudklubb']); }
+        (fs.options || []).filter(function (o) { return o.isActive; }).forEach(function (o) { opts.push(['opt:' + o.id, 'Har tillvalet ' + o.name]); });
+        // Ingenting att filtrera på → ingen väljare.
+        var wrap = $('cfFilterWrap'), sel = $('cfFilter');
+        if (!wrap) return;
+        if (opts.length < 2) { filterVal = 'all'; show(wrap, false); return; }
+        if (!opts.some(function (o) { return o[0] === filterVal; })) filterVal = 'all';
+        sel.innerHTML = opts.map(function (o) { return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>'; }).join('');
+        sel.value = filterVal;
+        show(wrap, true);
+    }
+    function passesFilter(r) {
+        if (filterVal === 'all') return true;
+        if (filterVal === 'home-unknown') return r.homeClub === 'Unknown';
+        if (filterVal === 'home-other') return r.homeClub === 'Other';
+        if (filterVal.indexOf('opt:') === 0) return (r.optionIds || []).indexOf(parseInt(filterVal.slice(4), 10)) >= 0;
+        return true;
     }
 
     function render() {
@@ -384,6 +500,7 @@
         if ($('cfEditRates')) $('cfEditRates').querySelector('span').textContent = 'Avgift per medlemstyp ' + yr + '…';
 
         var rows = data.rows || [];
+        renderFilter();
         var html = '', total = 0, billed = 0, paidCount = 0, paidSum = 0, toSend = 0, noMail = 0, toRemind = 0;
         rows.forEach(function (r) {
             var s = stateOf(r);
@@ -391,8 +508,11 @@
             if (s.paid && s.billable) { paidCount++; paidSum += s.amount; }
             if ((s.billable || s.choose) && !s.paid && !s.sent) { if (r.hasEmail) toSend++; else noMail++; }
             if (s.billable && !s.paid && s.sent) toRemind++;
+            // Filtret påverkar bara vilka rader som visas — summor och utskick gäller alla.
+            if (!passesFilter(r)) return;
 
-            var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>');
+            var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>')
+                       + breakdown(r, s);
             html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + typeCell(r, s) + '</div></td>'
                   + '<td class="d-none d-sm-table-cell">' + typeCell(r, s) + '</td>'
                   + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
@@ -453,11 +573,14 @@
         var mine = ++loadSeq;
         var both = await Promise.all([
             fetch(F + 'GetOverview?clubId=' + CLUB_ID + '&year=' + year(), { cache: 'no-store' }).then(function (r) { return r.json(); }),
-            fetch(F + 'GetMemberTypes?clubId=' + CLUB_ID, { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; })
+            fetch(F + 'GetMemberTypes?clubId=' + CLUB_ID, { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; }),
+            fetch(F + 'GetFeeSettings?clubId=' + CLUB_ID + '&year=' + year(), { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return null; })
         ]);
-        var d = both[0], t = both[1];
+        var d = both[0], t = both[1], fsd = both[2];
         if (mine !== loadSeq) return;
         if (!d.success) { msg(false, d.message || 'Medlemsavgifterna gick inte att läsa.'); return; }
+        // Går tilläggen inte att läsa visas listan ändå (summan kommer från GetOverview) — men dialogerna säger det.
+        fs = (fsd && fsd.success) ? fsd : { parts: [], options: [], federations: [], failed: true };
         // Typerna är namnen på sidan. Går de inte att läsa visas nycklarna (standardtyperna är läsbara ändå) — aldrig en tom lista.
         if (t && t.success) { types = t.types || []; untyped = t.untyped || 0; ageRules = t.ageRules || { enabled: false, error: null }; }
         data = d;
@@ -528,6 +651,7 @@
         var row = rowOf(memberId), r, id;
 
         if (act === 'rates') { openRates(); return; }
+        if (act === 'options') { openMemberOptions(row); return; }
         if (act === 'email') {
             emailFor = memberId;
             $('cfEmailTitle').textContent = 'E-post för avgiften — ' + row.name;
@@ -816,6 +940,164 @@
         renderTypes();
         typesNote(true, steps.length ? 'Åldersgränserna är sparade.' : 'Åldersgränserna är borttagna.');
     });
+
+    // ── Tillägg/avdrag och tillval ──────────────────────────────────────────────────────
+    function gMenu(scope, id, items) {
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" '
+             + 'data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button><ul class="dropdown-menu dropdown-menu-end">'
+             + items.map(function (i) {
+                 return '<li><button type="button" class="dropdown-item' + (i[2] ? ' text-danger' : '') + '" data-cf-' + scope + '="' + i[0] + '" data-cf-gid="' + id + '">' + i[1] + '</button></li>';
+             }).join('') + '</ul></div>';
+    }
+    function settingsNote(el, text) { el.textContent = text || ''; show(el, !!text); }
+
+    function renderParts() {
+        var ps = fs.parts || [];
+        $('cfPartsTitle').textContent = 'Tillägg och avdrag ' + year();
+        $('cfPartRows').innerHTML = ps.map(function (p) {
+            return '<tr><td>' + esc(p.label) + '<div class="small text-muted d-sm-none">' + esc(partScope(p)) + '</div></td>'
+                 + '<td class="text-end cf-n ' + (p.amount < 0 ? 'text-success' : '') + '">' + signed(p.amount) + '</td>'
+                 + '<td class="small d-none d-sm-table-cell">' + esc(partScope(p)) + '</td>'
+                 + '<td class="text-end">' + gMenu('pact', p.id, [['edit', 'Ändra…'], ['delete', 'Ta bort…', true]]) + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" class="text-muted small">Inga tillägg eller avdrag ännu. Avgiften är grundavgiften.</td></tr>';
+        if (fs.failed) settingsNote($('cfPartsError'), 'Tilläggen kunde inte läsas just nu. Stäng och försök igen.');
+    }
+    function openParts() { settingsNote($('cfPartsError'), ''); renderParts(); showModal('cfPartsModal'); }
+    if ($('cfEditParts')) $('cfEditParts').addEventListener('click', openParts);
+
+    function partForm(p) {
+        var activeOpts = (fs.options || []).filter(function (o) { return o.isActive || (p && p.optionId === o.id); });
+        var sign = p && p.amount < 0 ? 'minus' : 'plus';
+        var cond = p ? p.condition : 'Always';
+        var chosen = p ? (p.typeKeys || []).map(function (k) { return k.toLowerCase(); }) : [];
+        return '<label class="form-label" for="cfPartLabel">Namn</label>'
+            + '<input id="cfPartLabel" class="form-control mb-3" maxlength="100" autocomplete="off" placeholder="till exempel Förbundsavgift" value="' + esc(p ? p.label : '') + '">'
+            + '<div class="row g-2 mb-3"><div class="col-6"><label class="form-label" for="cfPartSign">Är det ett</label>'
+            + '<select id="cfPartSign" class="form-select"><option value="plus"' + (sign === 'plus' ? ' selected' : '') + '>Tillägg</option>'
+            + '<option value="minus"' + (sign === 'minus' ? ' selected' : '') + '>Avdrag</option></select></div>'
+            + '<div class="col-6"><label class="form-label" for="cfPartAmount">Belopp, kr</label>'
+            + '<input id="cfPartAmount" type="number" min="0" step="1" class="form-control" autocomplete="off" value="' + (p ? Math.abs(p.amount) : '') + '"></div></div>'
+            + '<label class="form-label" for="cfPartCond">Gäller</label>'
+            + '<select id="cfPartCond" class="form-select mb-2">'
+            + [['Always', 'Alla medlemmar'], ['PrimaryClub', 'Medlemmar som har klubben som huvudklubb'], ['NotPrimaryClub', 'Medlemmar som har en annan klubb som huvudklubb']]
+                .concat(activeOpts.length ? [['Option', 'Medlemmar som har ett tillval']] : [])
+                .map(function (c) { return '<option value="' + c[0] + '"' + (cond === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('')
+            + '</select>'
+            + '<div id="cfPartOptWrap" class="mb-2' + (cond === 'Option' ? '' : ' d-none') + '"><label class="form-label small mb-0" for="cfPartOpt">Tillval</label>'
+            + '<select id="cfPartOpt" class="form-select">' + activeOpts.map(function (o) {
+                return '<option value="' + o.id + '"' + (p && p.optionId === o.id ? ' selected' : '') + '>' + esc(o.name) + '</option>'; }).join('') + '</select></div>'
+            + '<div class="small text-muted mb-3">Medlemmar utan huvudklubb träffas varken av ”klubben” eller ”annan klubb”.</div>'
+            + '<div class="form-label">Medlemstyper</div>'
+            + types.filter(function (t) { return t.isActive || chosen.indexOf((t.key || '').toLowerCase()) >= 0; }).map(function (t) {
+                return '<div class="form-check"><input class="form-check-input" type="checkbox" data-cf-parttype="' + esc(t.key) + '" id="cfPT_' + esc(t.key) + '"'
+                     + (chosen.indexOf((t.key || '').toLowerCase()) >= 0 ? ' checked' : '') + '><label class="form-check-label" for="cfPT_' + esc(t.key) + '">' + esc(t.name) + '</label></div>';
+            }).join('')
+            + '<div class="small text-muted mt-1">Ingen ibockad = alla medlemstyper.</div>';
+    }
+    function openPartForm(p) {
+        openSub({ title: p ? 'Ändra ' + p.label : 'Nytt tillägg eller avdrag', ok: p ? 'Spara' : 'Lägg till', from: 'cfPartsModal', body: partForm(p),
+            onOk: async function () {
+                var amt = parseFloat($('cfPartAmount').value);
+                if (isNaN(amt) || amt <= 0) return 'Fyll i ett belopp över 0 kr. Välj Avdrag om det ska dras av.';
+                var cond = $('cfPartCond').value;
+                var keys = Array.prototype.map.call($('cfSubBody').querySelectorAll('[data-cf-parttype]:checked'), function (b) { return b.getAttribute('data-cf-parttype'); });
+                var f = { clubId: CLUB_ID, year: year(), id: p ? p.id : 0, label: $('cfPartLabel').value,
+                          amount: $('cfPartSign').value === 'minus' ? -amt : amt, condition: cond, typeKeys: keys };
+                if (cond === 'Option') f.optionId = $('cfPartOpt').value;
+                var d = await form('SaveFeePart', f);
+                if (!d.success) return d.message || 'Kunde inte spara.';
+                await load(); renderParts();
+                return null;
+            } });
+        $('cfPartCond').addEventListener('change', function () { show($('cfPartOptWrap'), this.value === 'Option'); });
+    }
+    $('cfNewPartBtn').addEventListener('click', function () { openPartForm(null); });
+    $('cfPartRows').addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-cf-pact]'); if (!b) return;
+        var id = parseInt(b.getAttribute('data-cf-gid'), 10), p = (fs.parts || []).find(function (x) { return x.id === id; });
+        if (!p) return;
+        if (b.getAttribute('data-cf-pact') === 'edit') openPartForm(p);
+        else openSub({ title: 'Ta bort ' + p.label, ok: 'Ta bort', danger: true, from: 'cfPartsModal',
+            body: '<p class="mb-0">Ta bort ”' + esc(p.label) + '” (' + signed(p.amount) + ')? Oskickade avgifter räknas om utan det. Avgifter som redan skickats ändras inte.</p>',
+            onOk: async function () {
+                var d = await form('DeleteFeePart', { clubId: CLUB_ID, year: year(), id: p.id });
+                if (!d.success) return d.message || 'Kunde inte ta bort.';
+                await load(); renderParts();
+                return null;
+            } });
+    });
+
+    function renderOptions() {
+        $('cfOptionRows').innerHTML = (fs.options || []).map(function (o) {
+            var used = (fs.parts || []).filter(function (p) { return p.optionId === o.id; }).length;
+            return '<tr><td>' + esc(o.name) + (o.isActive ? '' : ' <span class="badge bg-light text-dark border">Dold</span>')
+                 + (o.systemKey ? ' <span class="badge bg-light text-dark border">Förbund</span>' : '')
+                 + (used ? '<div class="small text-muted">Används av ' + used + (used === 1 ? ' tillägg' : ' tillägg') + '</div>' : '') + '</td>'
+                 + '<td class="text-end">' + gMenu('oact', o.id, [['rename', 'Byt namn…'], [o.isActive ? 'hide' : 'show', o.isActive ? 'Dölj' : 'Visa'], ['delete', 'Ta bort…', true]]) + '</td></tr>';
+        }).join('') || '<tr><td class="text-muted small">Inga tillval ännu.</td></tr>';
+        if (fs.failed) settingsNote($('cfOptionsError'), 'Tillvalen kunde inte läsas just nu. Stäng och försök igen.');
+    }
+    function openOptions() { settingsNote($('cfOptionsError'), ''); renderOptions(); showModal('cfOptionsModal'); }
+    if ($('cfEditOptions')) $('cfEditOptions').addEventListener('click', openOptions);
+    async function saveOption(o, name, systemKey, active) {
+        var d = await form('SaveFeeOption', { clubId: CLUB_ID, year: year(), id: o ? o.id : 0, name: name, systemKey: systemKey || '', isActive: active ? '1' : '0' });
+        if (!d.success) return d.message || 'Tillvalet kunde inte sparas.';
+        await load(); renderOptions();
+        return null;
+    }
+    $('cfNewOptionBtn').addEventListener('click', function () {
+        var taken = (fs.options || []).map(function (o) { return (o.systemKey || o.name).toLowerCase(); });
+        var free = (fs.federations || []).filter(function (f) { return taken.indexOf(f.toLowerCase()) < 0; });
+        openSub({ title: 'Nytt tillval', ok: 'Lägg till', from: 'cfOptionsModal',
+            body: (free.length ? '<label class="form-label" for="cfOptFed">Förbund</label><select id="cfOptFed" class="form-select mb-3"><option value="">Annat tillval (skriv eget namn)</option>'
+                    + free.map(function (f) { return '<option>' + esc(f) + '</option>'; }).join('') + '</select>' : '')
+                + '<label class="form-label" for="cfOptName">Namn</label><input id="cfOptName" class="form-control" maxlength="100" autocomplete="off" placeholder="till exempel Sportskytte">'
+                + '<p class="text-muted small mt-2 mb-0">Du kan senare sätta tillvalet på medlemmar och koppla ett tillägg till det.</p>',
+            onOk: function () {
+                var fed = $('cfOptFed') ? $('cfOptFed').value : '';
+                var name = ($('cfOptName').value || '').trim() || fed;
+                return saveOption(null, name, fed && name === fed ? fed : '', true);
+            } });
+        if ($('cfOptFed')) $('cfOptFed').addEventListener('change', function () { if (this.value) $('cfOptName').value = this.value; });
+    });
+    $('cfOptionRows').addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-cf-oact]'); if (!b) return;
+        var id = parseInt(b.getAttribute('data-cf-gid'), 10), o = optionOf(id), act = b.getAttribute('data-cf-oact');
+        if (!o) return;
+        if (act === 'hide' || act === 'show') saveOption(o, o.name, o.systemKey, act === 'show').then(function (e) { settingsNote($('cfOptionsError'), e); });
+        else if (act === 'rename')
+            openSub({ title: 'Byt namn på ' + o.name, ok: 'Spara', from: 'cfOptionsModal',
+                body: '<label class="form-label" for="cfOptName">Namn</label><input id="cfOptName" class="form-control" maxlength="100" autocomplete="off" value="' + esc(o.name) + '">',
+                onOk: function () { return saveOption(o, $('cfOptName').value, o.systemKey, o.isActive); } });
+        else
+            openSub({ title: 'Ta bort ' + o.name, ok: 'Ta bort', danger: true, from: 'cfOptionsModal',
+                body: '<p class="mb-0">Ta bort tillvalet ' + esc(o.name) + '? Det går bara om ingen medlem har det och inget tillägg använder det. Annars kan du dölja det.</p>',
+                onOk: async function () {
+                    var d = await form('DeleteFeeOption', { clubId: CLUB_ID, year: year(), id: o.id });
+                    if (!d.success) return d.message || 'Tillvalet kunde inte tas bort.';
+                    await load(); renderOptions();
+                    return null;
+                } });
+    });
+
+    // Medlemmens egna tillval (radens Åtgärder). Dolda tillval medlemmen redan har visas så att de inte tappas tyst.
+    function openMemberOptions(row) {
+        var have = row.optionIds || [];
+        var list = (fs.options || []).filter(function (o) { return o.isActive || have.indexOf(o.id) >= 0; });
+        openSub({ title: 'Tillval — ' + row.name, ok: 'Spara',
+            body: list.map(function (o) {
+                return '<div class="form-check"><input class="form-check-input" type="checkbox" data-cf-memopt="' + o.id + '" id="cfMO_' + o.id + '"' + (have.indexOf(o.id) >= 0 ? ' checked' : '')
+                     + '><label class="form-check-label" for="cfMO_' + o.id + '">' + esc(o.name) + (o.isActive ? '' : ' (dold)') + '</label></div>';
+            }).join('') + '<p class="text-muted small mt-2 mb-0">Tillvalen styr vilka tillägg och avdrag medlemmen får. Skickade avgifter ändras inte.</p>',
+            onOk: async function () {
+                var ids = Array.prototype.map.call($('cfSubBody').querySelectorAll('[data-cf-memopt]:checked'), function (b) { return b.getAttribute('data-cf-memopt'); });
+                var d = await form('SetMemberOptions', { clubId: CLUB_ID, year: year(), memberId: row.memberId, optionIds: ids });
+                if (!d.success) return d.message || 'Tillvalen kunde inte sparas.';
+                await load();
+                return null;
+            } });
+    }
+    $('cfFilter').addEventListener('change', function () { filterVal = this.value; render(); });
 
     // ── Sätt typ på alla som saknar ─────────────────────────────────────────────────────
     if ($('cfSetUntyped')) $('cfSetUntyped').addEventListener('click', function () {

@@ -134,6 +134,11 @@ namespace HpskSite.Controllers
                     membershipType = m.MembershipType ?? "",
                     kind = (p?.Kind ?? ClubFeeKind.NoType).ToString(),
                     proposedAmount = p is null ? 0m : calcs.GetValueOrDefault(p.MemberId, FeeCalculation.None).Total,
+                    // Uppdelningen bakom summan (grund, tillägg, avdrag, justering) — samma beräkning som summan.
+                    lines = (p is null ? FeeCalculation.None : calcs.GetValueOrDefault(p.MemberId, FeeCalculation.None))
+                        .Lines.Select(l => new { kind = l.Kind, text = l.Description, amount = l.Amount }),
+                    homeClub = m.HomeClub.ToString(),   // Ours / Other / Unknown (huvudklubb saknas)
+                    optionIds = m.OptionIds.ToList(),
                     coveredBy = primaryName,
                     charge = c is null ? null : ClubChargeDto(c)
                 };
@@ -275,7 +280,10 @@ namespace HpskSite.Controllers
                     p.Id, p.Label, p.Amount, p.Condition, p.OptionId, p.SortOrder,
                     typeKeys = partTypes[p.Id].ToList()   // tom lista = alla medlemstyper
                 }),
-                options = _feeSettings.GetOptions(clubId).Select(o => new { o.Id, o.Name, o.SystemKey, o.IsActive })
+                options = _feeSettings.GetOptions(clubId).Select(o => new { o.Id, o.Name, o.SystemKey, o.IsActive }),
+                // Förslag när klubben lägger till ett förbund som tillval (officiella namnet = SystemKey).
+                federations = HpskSite.Models.ForeningsintygDocument.AllaForbund
+                    .Where(f => f != HpskSite.Models.ForeningsintygDocument.ForbundAnnat)
             });
         }
 
