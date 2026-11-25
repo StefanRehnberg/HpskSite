@@ -201,10 +201,11 @@ namespace HpskSite.Services
             var charge = scope.Database.SingleOrDefaultById<MembershipFeeCharge>(id);
             if (charge == null) return null;
 
+            // ⚠️ Raderna laddas för ALLA avgifter (klubbens också): beloppet är summan av dem, och betalsidan/mejlet visar dem.
+            charge.Lines = LoadLines(scope.Database, new[] { charge.Id })
+                .GetValueOrDefault(charge.Id) ?? new List<MembershipFeeChargeLine>();
             if (charge.IsRegionFee)
             {
-                charge.Lines = LoadLines(scope.Database, new[] { charge.Id })
-                    .GetValueOrDefault(charge.Id) ?? new List<MembershipFeeChargeLine>();
                 charge.PayerClubName = _clubService.GetClubNameById(charge.PayerClubId ?? 0);
             }
             else
@@ -221,6 +222,8 @@ namespace HpskSite.Services
                 "SELECT * FROM MembershipFeeCharge WHERE ClubId = @0 AND Year = @1 ORDER BY Id",
                 clubId, year);
             ResolveMemberInfo(charges);
+            var lines = LoadLines(scope.Database, charges.Select(c => c.Id));
+            foreach (var c in charges) c.Lines = lines.GetValueOrDefault(c.Id) ?? new List<MembershipFeeChargeLine>();
             return charges;
         }
 
@@ -230,7 +233,12 @@ namespace HpskSite.Services
             var charge = scope.Database.FirstOrDefault<MembershipFeeCharge>(
                 "SELECT * FROM MembershipFeeCharge WHERE MemberId = @0 AND ClubId = @1 AND Year = @2",
                 memberId, clubId, year);
-            if (charge != null) ResolveMemberInfo(new List<MembershipFeeCharge> { charge });
+            if (charge != null)
+            {
+                ResolveMemberInfo(new List<MembershipFeeCharge> { charge });
+                charge.Lines = LoadLines(scope.Database, new[] { charge.Id })
+                    .GetValueOrDefault(charge.Id) ?? new List<MembershipFeeChargeLine>();
+            }
             return charge;
         }
 
