@@ -64,6 +64,11 @@ namespace HpskSite.Services
             ("MemberCertificateIssue",       "MemberId"),
             ("MembershipFeeCharge",          "MemberId"),
             ("ClubMembershipOption",         "MemberId"),   // kassörens ikryssade tillval (unikt per medlem/klubb/tillval — sammanslagningen tar krockar rad för rad)
+            // Åldersreglerna (steg 3b): undantaget och loggen om typbyten är uppgifter om medlemmen. Båda har surrogat-Id (MoveRowByRow).
+            // Sammanslagningen flyttar undantaget till överlevaren (försiktigast: inget byts av sig självt); krockar går rad för rad.
+            // ByMemberId är aktören (kassören) och räknas inte.
+            ("ClubMemberAgeRuleOptOut",      "MemberId"),
+            ("ClubMembershipTypeChange",     "MemberId"),
 
             // ── Certifications ──
             ("MemberCertifications",         "MemberId"),

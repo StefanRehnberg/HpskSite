@@ -23,7 +23,9 @@ namespace HpskSite.Services
         }
 
         public static readonly string[] Tables =
-            { "ClubMembershipType", "ClubFeeOption", "ClubMembershipOption", "MembershipFeePart", "MembershipFeePartType" };
+            { "ClubMembershipType", "ClubFeeOption", "ClubMembershipOption", "MembershipFeePart", "MembershipFeePartType",
+              // Steg 3b: åldersgränser (create-membership-age-rules.sql)
+              "ClubMembershipTypeAge", "ClubMemberAgeRuleOptOut", "ClubMembershipTypeChange" };
 
         public static readonly (string Table, string Column)[] Columns =
             { ("MembershipFeeChargeLine", "PartId"), ("MembershipFeeChargeLine", "SubjectMemberId") };
@@ -58,7 +60,7 @@ namespace HpskSite.Services
                 else
                     _logger.LogCritical(
                         "MEDLEMSAVGIFTENS TABELLER ÄR TRASIGA: {Missing} saknas. Avgiftsraderna kan inte skrivas och klubbens "
-                        + "medlemstyper faller tillbaka på standardnamnen. Kör Migrations/create-membership-fee-parts.sql.", problem);
+                        + "medlemstyper faller tillbaka på standardnamnen. Kör Migrations/create-membership-fee-parts.sql och Migrations/create-membership-age-rules.sql.", problem);
             }
             catch (Exception ex)
             {
