@@ -99,6 +99,9 @@ namespace HpskSite.Controllers
             //    Listan ska se likadan ut före och efter utskicket — samma form som kretsavgiften.
             var members = ActiveFeeMembers(clubId);
             var proposal = ClubFeeProposal.Build(categories, members);
+            // ⚠️ Samma beräkning som skapandet (ClubFeeCalculator.ForProposal): listan visar summan inklusive tillägg/avdrag.
+            var (feeParts, feePartTypes) = _feeService.GetParts(clubId, year);
+            var calcs = ClubFeeCalculator.ForProposal(proposal, categories, members, feeParts, feePartTypes);
             var chargeByMember = charges.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
             var info = MemberInfo(members.Select(m => m.MemberId).Concat(charges.Select(c => c.MemberId)).Distinct());
             var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, clubId);
@@ -121,7 +124,7 @@ namespace HpskSite.Controllers
                     hasEmail = !string.IsNullOrWhiteSpace(feeEmails.GetValueOrDefault(m.MemberId) ?? mi.Email),
                     membershipType = m.MembershipType ?? "",
                     kind = (p?.Kind ?? ClubFeeKind.NoType).ToString(),
-                    proposedAmount = p?.Amount ?? 0m,
+                    proposedAmount = p is null ? 0m : calcs.GetValueOrDefault(p.MemberId, FeeCalculation.None).Total,
                     coveredBy = primaryName,
                     charge = c is null ? null : ClubChargeDto(c)
                 };

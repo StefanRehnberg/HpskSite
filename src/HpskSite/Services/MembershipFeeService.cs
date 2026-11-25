@@ -43,19 +43,73 @@ namespace HpskSite.Services
         private readonly Lazy<Ledger.LedgerMembershipFeeBridge> _ledgerBridge;
         private readonly ClubService _clubService;
         private readonly Hosting.DatabaseLock _dbLock;
+        private readonly ClubFeeInputService _feeInput;
 
         public MembershipFeeService(
             IScopeProvider scopeProvider,
             IMemberService memberService,
             Lazy<Ledger.LedgerMembershipFeeBridge> ledgerBridge,
             ClubService clubService,
-            Hosting.DatabaseLock dbLock)
+            Hosting.DatabaseLock dbLock,
+            ClubFeeInputService feeInput)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _ledgerBridge = ledgerBridge;
             _clubService = clubService;
             _dbLock = dbLock;
+            _feeInput = feeInput;
+        }
+
+        // ── Tillägg och avdrag ────────────────────────────────────────
+
+        /// <summary>Klubbens tillägg/avdrag för året med sina typfilter. Kastar när tabellerna saknas (se startkontrollen).</summary>
+        public (List<MembershipFeePart> Parts, ILookup<int, string> Types) GetParts(int clubId, int year)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return LoadParts(scope.Database, clubId, year);
+        }
+
+        private static (List<MembershipFeePart>, ILookup<int, string>) LoadParts(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int clubId, int year)
+        {
+            var parts = db.Fetch<MembershipFeePart>(
+                "SELECT * FROM MembershipFeePart WHERE ClubId = @0 AND Year = @1 ORDER BY SortOrder, Id", clubId, year);
+            var types = parts.Count == 0
+                ? Array.Empty<MembershipFeePartType>().ToList()
+                : db.Fetch<MembershipFeePartType>(
+                    $"SELECT * FROM MembershipFeePartType WHERE PartId IN ({string.Join(",", parts.Select(p => p.Id))})");
+            return (parts, types.ToLookup(t => t.PartId, t => t.TypeKey));
+        }
+
+        /// <summary>
+        /// ⚠️⚠️ EN skrivväg för en klubbavgifts belopp och rader (kretsavgiften har sin egen, EditRegionChargeLines).
+        /// Skriver kravet (Insert om Id = 0, annars Update) med Amount = radernas summa och byter ut alla rader.
+        /// Inget annat får sätta <c>Amount</c> på en klubbavgift — <c>ClubFeeSingleWritePathTests</c> fäller bygget.
+        /// </summary>
+        private static void ApplyCalculation(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            MembershipFeeCharge charge, FeeCalculation calc)
+        {
+            charge.Amount = calc.Total;
+            if (charge.Id == 0) db.Insert(charge); else db.Update(charge);
+
+            db.Execute("DELETE FROM MembershipFeeChargeLine WHERE ChargeId = @0", charge.Id);
+            for (var i = 0; i < calc.Lines.Count; i++)
+            {
+                var l = calc.Lines[i];
+                db.Insert(new MembershipFeeChargeLine
+                {
+                    ChargeId = charge.Id,
+                    SortOrder = i,
+                    Kind = l.Kind,
+                    Description = l.Description,
+                    Amount = l.Amount,
+                    PartId = l.PartId,
+                    SubjectMemberId = l.SubjectMemberId,
+                    CreatedUtc = DateTime.UtcNow,
+                    CreatedByMemberId = 0
+                });
+            }
         }
 
         // ── Categories ────────────────────────────────────────────────
@@ -234,7 +288,10 @@ namespace HpskSite.Services
             if (categories.Count == 0) return 0;
 
             // ⚠️ SAMMA förslag som listan visar (ClubFeeProposal) — skapandet får aldrig räkna själv.
-            var proposal = ClubFeeProposal.Build(categories, members);
+            var memberList = members.ToList();
+            var proposal = ClubFeeProposal.Build(categories, memberList);
+            var (parts, partTypes) = LoadParts(db, clubId, year);
+            var calcs = ClubFeeCalculator.ForProposal(proposal, categories, memberList, parts, partTypes);
 
             var existing = db.Fetch<MembershipFeeCharge>(
                     "SELECT * FROM MembershipFeeCharge WHERE ClubId = @0 AND Year = @1 AND IssuerType = 0", clubId, year)
@@ -244,7 +301,7 @@ namespace HpskSite.Services
                 .ToDictionary(g => g.Key, g => g.OrderBy(c => c.Id).First());
             var created = 0;
 
-            MembershipFeeCharge Insert(ClubFeeProposalRow p, decimal amount, int? coveredBy)
+            MembershipFeeCharge Insert(ClubFeeProposalRow p, FeeCalculation calc, int? coveredBy)
             {
                 var charge = new MembershipFeeCharge
                 {
@@ -252,12 +309,11 @@ namespace HpskSite.Services
                     ClubId = clubId,
                     Year = year,
                     CategoryId = p.CategoryId,
-                    Amount = amount,
                     PaymentStatus = "Pending",
                     HouseholdCoveredByChargeId = coveredBy,
                     CreatedDate = DateTime.UtcNow
                 };
-                db.Insert(charge);
+                ApplyCalculation(db, charge, calc);
                 existing[p.MemberId] = charge;
                 created++;
                 return charge;
@@ -267,13 +323,13 @@ namespace HpskSite.Services
             // ChooseType: avgiften finns (0 kr, ingen kategori) så att medlemmen kan få en länk och välja
             // sin medlemstyp på betalsidan — se MembershipFeeCharge.NeedsTypeChoice.
             foreach (var p in proposal.Values.Where(p => p.Kind is ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary or ClubFeeKind.ChooseType))
-                if (!existing.ContainsKey(p.MemberId)) Insert(p, p.Amount, null);
+                if (!existing.ContainsKey(p.MemberId)) Insert(p, calcs.GetValueOrDefault(p.MemberId, FeeCalculation.None), null);
 
             foreach (var p in proposal.Values.Where(p => p.Kind == ClubFeeKind.Covered))
             {
                 if (existing.ContainsKey(p.MemberId)) continue;
                 if (p.PrimaryMemberId is not int primary || !existing.TryGetValue(primary, out var primaryCharge)) continue;
-                Insert(p, 0m, primaryCharge.Id);
+                Insert(p, FeeCalculation.None, primaryCharge.Id);
             }
 
             scope.Complete();
@@ -371,10 +427,17 @@ namespace HpskSite.Services
 
             var row = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId)!;
             row.CategoryId = cat.Id;
-            row.Amount = cat.Amount;
             row.MemberChosenType = cat.MembershipType;
             row.MemberChosenAt = DateTime.UtcNow;
-            db.Update(row);
+
+            // Medlemmen står inte i ett hushåll här (GetTypeChoice låser det), så avgiften räknas på henne ensam —
+            // med den typ hon just valde, men med huvudklubb och tillval som klubben har dem.
+            var subject = _feeInput.ActiveFeeMembers(charge.ClubId).FirstOrDefault(m => m.MemberId == charge.MemberId)
+                          ?? new MemberFeeInput { MemberId = charge.MemberId };
+            subject.MembershipType = cat.MembershipType;
+            var (parts, partTypes) = LoadParts(db, charge.ClubId, charge.Year);
+            var label = string.IsNullOrWhiteSpace(cat.Label) ? cat.MembershipType : cat.Label;
+            ApplyCalculation(db, row, ClubFeeCalculator.Calculate(cat.Amount, label, new[] { subject }, false, parts, partTypes));
             return null;
         }
 

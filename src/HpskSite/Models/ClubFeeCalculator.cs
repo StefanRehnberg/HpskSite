@@ -42,6 +42,42 @@ namespace HpskSite.Models
             };
         }
 
+        /// <summary>
+        /// Avgiften per medlem för ett helt förslag — EN väg för listan och för skapandet, så de aldrig kan säga olika.
+        /// Bara Individual och HouseholdPrimary har en avgift; övriga (Covered, NoCategory, NoType, ChooseType) får
+        /// <see cref="FeeCalculation.None"/> (0 kr, inga rader).
+        /// </summary>
+        public static Dictionary<int, FeeCalculation> ForProposal(
+            IReadOnlyDictionary<int, ClubFeeProposalRow> proposal, IEnumerable<MembershipFeeCategory> categories,
+            IEnumerable<MemberFeeInput> members, IEnumerable<MembershipFeePart> parts, ILookup<int, string> partTypes)
+        {
+            var catById = categories.ToDictionary(c => c.Id);
+            var list = members.ToList();
+            var partList = parts.ToList();
+            var result = new Dictionary<int, FeeCalculation>();
+            foreach (var (memberId, row) in proposal)
+            {
+                if (row.Kind is not (ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary)
+                    || row.CategoryId is not int catId || !catById.TryGetValue(catId, out var cat))
+                {
+                    result[memberId] = FeeCalculation.None;
+                    continue;
+                }
+
+                var self = list.FirstOrDefault(m => m.MemberId == memberId);
+                List<MemberFeeInput> subjects;
+                if (row.Kind == ClubFeeKind.HouseholdPrimary && self is not null && !string.IsNullOrWhiteSpace(self.HouseholdId))
+                    subjects = list.Where(m => string.Equals((m.HouseholdId ?? "").Trim(), self.HouseholdId!.Trim(),
+                        StringComparison.OrdinalIgnoreCase)).ToList();
+                else
+                    subjects = self is null ? new() : new() { self };
+
+                var label = string.IsNullOrWhiteSpace(cat.Label) ? cat.MembershipType : cat.Label;
+                result[memberId] = Calculate(row.Amount, label, subjects, row.Kind == ClubFeeKind.HouseholdPrimary, partList, partTypes);
+            }
+            return result;
+        }
+
         /// <param name="baseAmount">Grundavgiften, eller null när medlemmen inte har någon.</param>
         /// <param name="baseLabel">Grundavgiftens text (kategorins etikett).</param>
         /// <param name="subjects">Den som betalar, eller för ett hushåll alla personer i det.</param>

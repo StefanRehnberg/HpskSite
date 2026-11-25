@@ -100,6 +100,34 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void ForProposal_ger_hushallets_huvudmedlem_summan_och_ovriga_noll()
+        {
+            var cats = new[]
+            {
+                new MembershipFeeCategory { Id = 1, MembershipType = "Senior", Label = "Senior", Amount = 600m },
+                new MembershipFeeCategory { Id = 4, MembershipType = "Familj", Label = "Familj", Amount = 900m },
+            };
+            var members = new List<MemberFeeInput>
+            {
+                P(10, "Senior", PrimaryClubState.Other),
+                P(20, "Familj", PrimaryClubState.Ours),
+                P(21, "Familj", PrimaryClubState.Other),
+                P(40, ""),
+            };
+            members[1].HouseholdId = "H1"; members[1].HouseholdPrimary = true; members[2].HouseholdId = "H1";
+            var parts = new[] { Part(1, "Annan huvudklubb", 100m, MembershipFeePartCondition.NotPrimaryClub) };
+
+            var proposal = ClubFeeProposal.Build(cats, members);
+            var calc = ClubFeeCalculator.ForProposal(proposal, cats, members, parts, NoTypes);
+
+            Assert.Equal(700m, calc[10].Total);                 // individ, annan huvudklubb
+            Assert.Equal(1000m, calc[20].Total);                // hushåll: 900 + 21:s tillägg
+            Assert.Equal(21, calc[20].Lines.Single(l => l.Kind == ClubFeeCalculator.PartKind).SubjectMemberId);
+            Assert.Equal(FeeCalculation.None, calc[21]);        // ingår
+            Assert.Equal(FeeCalculation.None, calc[40]);        // saknar typ
+        }
+
+        [Fact]
         public void Individ_far_ingen_SubjectMemberId()
         {
             var c = Calc(600m, new[] { P(1) }, new[] { Part(1, "X", 10m) });
