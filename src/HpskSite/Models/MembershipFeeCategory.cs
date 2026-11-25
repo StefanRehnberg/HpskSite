@@ -46,11 +46,6 @@ namespace HpskSite.Models
 
         /// <summary>Förvalet för en ny medlemstyp — se <see cref="MemberSelectable"/>.</summary>
         public static bool DefaultMemberSelectable(string? membershipType)
-        {
-            var t = (membershipType ?? "").Trim();
-            return !(t.StartsWith("Famil", StringComparison.OrdinalIgnoreCase)
-                  || t.StartsWith("Heder", StringComparison.OrdinalIgnoreCase)
-                  || t.StartsWith("Ständig", StringComparison.OrdinalIgnoreCase));
-        }
+            => MembershipTypeKeys.DefaultMemberSelectable(membershipType);
     }
 }

@@ -166,7 +166,7 @@ namespace HpskSite.Controllers
             // Primary: family membership holder (billed the Familj fee).
             primary.HouseholdId = householdId;
             primary.HouseholdPrimary = true;
-            primary.MembershipType = "Familj";
+            primary.MembershipType = MembershipTypeKeys.Familj;
             _membershipService.Save(primary);
 
             // Unlink members that were in the household but are no longer selected.
@@ -188,7 +188,7 @@ namespace HpskSite.Controllers
                          ?? new ClubMembership { MemberId = mid, ClubId = clubId, MembershipStatus = "Aktiv" };
                 fm.HouseholdId = householdId;
                 fm.HouseholdPrimary = false;
-                fm.MembershipType = "Familj";
+                fm.MembershipType = MembershipTypeKeys.Familj;
                 _membershipService.Save(fm);
             }
 
