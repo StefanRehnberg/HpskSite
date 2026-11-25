@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly ReplyContactResolver _replyContacts;
         private readonly LedgerAccessService _ledgerAccess;
+        private readonly MembershipFeeAccess _feeAccess;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -58,6 +59,7 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ReplyContactResolver replyContacts,
             LedgerAccessService ledgerAccess,
+            MembershipFeeAccess feeAccess,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -72,6 +74,7 @@ namespace HpskSite.Controllers
             _emailService = emailService;
             _replyContacts = replyContacts;
             _ledgerAccess = ledgerAccess;
+            _feeAccess = feeAccess;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -209,10 +212,11 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben): kassör, delegat, sajtadmin; styrelse och revisor läser bara")]
         public async Task<IActionResult> SaveCategory(int id, int clubId, int year,
             string membershipType, string label, decimal amount, string? memberSelectable = null)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             if (string.IsNullOrWhiteSpace(membershipType))
@@ -246,14 +250,18 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben) + kategorin tillhör klubben")]
         public async Task<IActionResult> DeleteCategory(int id, int clubId)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var year = _feeService.GetCategoryYear(id);
+            // ⚠️ Kategorin måste höra till klubben i anropet — annars raderar skrivrätten i klubb A klubb B:s taxa.
+            if (year is not int y || !_feeService.GetCategories(clubId, y).Any(c => c.Id == id))
+                return Json(new { success = false, message = "Kategorin hittades inte." });
             _feeService.DeleteCategory(id);
-            if (year is int y) _feeService.ClearUnsentClubCharges(clubId, y);
+            _feeService.ClearUnsentClubCharges(clubId, y);
             return Json(new { success = true });
         }
 
@@ -261,9 +269,10 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben)")]
         public async Task<IActionResult> GenerateCharges(int clubId, int year)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             // Bill from the per-club membership records (ClubMembership). Exclude members who
@@ -279,9 +288,10 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben)")]
         public async Task<IActionResult> EnsureClubCharge(int clubId, int year, int memberId)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var members = ActiveFeeMembers(clubId);
@@ -379,9 +389,10 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben)")]
         public async Task<IActionResult> SendPaymentRequests(int clubId, int year, string? mode = null, string? chargeIds = null)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var clubName = _clubService.GetClubNameById(clubId) ?? "Klubben";
@@ -898,7 +909,7 @@ namespace HpskSite.Controllers
         private async Task<bool> CanManageChargeAsync(MembershipFeeCharge charge)
             => charge.IsRegionFee
                 ? await AuthorizeRegionAsync(charge.RegionId ?? 0) is not null
-                : await _auth.IsClubAdminForClub(charge.ClubId);
+                : await _feeAccess.CanWriteAsync(charge.ClubId);
 
         /// <summary>
         /// Kretsnoden, om den inloggade är kretsadmin för den (sajtadmin ingår). <b>Koden läses ur
@@ -970,6 +981,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("Klubb: MembershipFeeAccess.CanWriteAsync(klubben); krets: AuthorizeRegionAsync (kretsadmin)")]
         public async Task<IActionResult> SetFeeEmail(int issuerType, int issuerId, int payerId, string? email)
         {
             email = (email ?? "").Trim();
@@ -988,7 +1000,7 @@ namespace HpskSite.Controllers
             }
             else
             {
-                if (!await _auth.IsClubAdminForClub(issuerId)) return Json(new { success = false, message = "Åtkomst nekad" });
+                if (!await _feeAccess.CanWriteAsync(issuerId)) return Json(new { success = false, message = "Åtkomst nekad" });
                 if (ActiveFeeMembers(issuerId).All(m => m.MemberId != payerId))
                     return Json(new { success = false, message = "Medlemmen finns inte i klubbens register." });
             }
