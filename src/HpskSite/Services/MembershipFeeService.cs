@@ -34,17 +34,20 @@ namespace HpskSite.Services
         /// </summary>
         private readonly Lazy<Ledger.LedgerMembershipFeeBridge> _ledgerBridge;
         private readonly ClubService _clubService;
+        private readonly Hosting.DatabaseLock _dbLock;
 
         public MembershipFeeService(
             IScopeProvider scopeProvider,
             IMemberService memberService,
             Lazy<Ledger.LedgerMembershipFeeBridge> ledgerBridge,
-            ClubService clubService)
+            ClubService clubService,
+            Hosting.DatabaseLock dbLock)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _ledgerBridge = ledgerBridge;
             _clubService = clubService;
+            _dbLock = dbLock;
         }
 
         // ── Categories ────────────────────────────────────────────────
@@ -207,7 +210,15 @@ namespace HpskSite.Services
         /// </summary>
         public int GenerateChargesForClub(int clubId, int year, IEnumerable<MemberFeeInput> members)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // ⚠️ Ett lås per (klubb, år): dubbelklick eller två kassörer samtidigt läste annars båda
+            //    "finns inte" och skapade varsin avgift. Namnet är ett kontrakt mellan instanserna.
+            using var lease = _dbLock.TryAcquire($"fee-generate:{clubId}:{year}", TimeSpan.FromSeconds(30));
+            if (lease is null)
+                throw new InvalidOperationException("Avgifterna skapas just nu av någon annan. Försök igen om en stund.");
+
+            // ⚠️ INGEN autoComplete: den committar även när något kastar mitt i skapandet och lämnar då
+            //    en halv generering. Allt eller inget — Complete() sist.
+            using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
 
             var categories = db.Fetch<MembershipFeeCategory>(
@@ -257,6 +268,7 @@ namespace HpskSite.Services
                 Insert(p, 0m, primaryCharge.Id);
             }
 
+            scope.Complete();
             return created;
         }
 

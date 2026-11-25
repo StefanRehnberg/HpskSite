@@ -127,6 +127,7 @@ namespace HpskSite.Composers
             // Kryssar ingenting — §5/§6 och vapenuppgifterna är styrelsens intygande.
             builder.Services.AddScoped<ForeningsintygDocumentService>();
             builder.Services.AddScoped<MembershipFeeService>();
+            builder.Services.AddScoped<ClubFeeInputService>();
             // Kretsavgiftens tävlingar: vilka som ingår, och varje klubbs starter i dem.
             builder.Services.AddScoped<RegionFeeCompetitionService>();
             // Hard-delete purge of a member's subject-owned rows across all custom DB tables.

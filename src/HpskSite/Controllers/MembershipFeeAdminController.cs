@@ -36,6 +36,7 @@ namespace HpskSite.Controllers
         private readonly ReplyContactResolver _replyContacts;
         private readonly LedgerAccessService _ledgerAccess;
         private readonly MembershipFeeAccess _feeAccess;
+        private readonly ClubFeeInputService _feeInput;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -60,6 +61,7 @@ namespace HpskSite.Controllers
             ReplyContactResolver replyContacts,
             LedgerAccessService ledgerAccess,
             MembershipFeeAccess feeAccess,
+            ClubFeeInputService feeInput,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -75,6 +77,7 @@ namespace HpskSite.Controllers
             _replyContacts = replyContacts;
             _ledgerAccess = ledgerAccess;
             _feeAccess = feeAccess;
+            _feeInput = feeInput;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -166,32 +169,9 @@ namespace HpskSite.Controllers
             memberChosenAt = SwedishTime.FromUtc(c.MemberChosenAt)?.ToString("yyyy-MM-dd")
         };
 
-        /// <summary>Klubbens aktiva medlemmar (utom utträdda och avlidna) som underlag för avgiften.</summary>
-        private List<MemberFeeInput> ActiveFeeMembers(int clubId)
-            => _clubMembershipService.GetForClubApprovedMembers(clubId)
-                .Where(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden")
-                .Select(cm => new MemberFeeInput
-                {
-                    MemberId = cm.MemberId,
-                    MembershipType = cm.MembershipType ?? "",
-                    HouseholdId = cm.HouseholdId ?? "",
-                    HouseholdPrimary = cm.HouseholdPrimary
-                })
-                .ToList();
-
-        /// <summary>Namn och e-post för många medlemmar i ETT uppslag (inte ett per rad).</summary>
-        private Dictionary<int, (string? Name, string? Email)> MemberInfo(IEnumerable<int> ids)
-        {
-            var list = ids.Where(i => i > 0).Distinct().ToArray();
-            var result = new Dictionary<int, (string? Name, string? Email)>();
-            if (list.Length == 0) return result;
-            foreach (var m in _memberService.GetAllMembers(list))
-            {
-                var name = $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
-                result[m.Id] = (string.IsNullOrEmpty(name) ? m.Name : name, m.Email);
-            }
-            return result;
-        }
+        // Indata till avgiften (aktiva medlemmar, namn, e-post) kommer från ClubFeeInputService — EN källa.
+        private List<MemberFeeInput> ActiveFeeMembers(int clubId) => _feeInput.ActiveFeeMembers(clubId);
+        private Dictionary<int, (string? Name, string? Email)> MemberInfo(IEnumerable<int> ids) => _feeInput.MemberInfo(ids);
 
         private static object ChargeDto(MembershipFeeCharge c) => new
         {
@@ -277,8 +257,15 @@ namespace HpskSite.Controllers
 
             // Bill from the per-club membership records (ClubMembership). Exclude members who
             // have left or are deceased; membership type drives which fee category applies.
-            var created = _feeService.GenerateChargesForClub(clubId, year, ActiveFeeMembers(clubId));
-            return Json(new { success = true, created });
+            try
+            {
+                var created = _feeService.GenerateChargesForClub(clubId, year, ActiveFeeMembers(clubId));
+                return Json(new { success = true, created });
+            }
+            catch (InvalidOperationException ex) // låset: någon annan skapar avgifterna just nu
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
         /// <summary>
@@ -311,7 +298,8 @@ namespace HpskSite.Controllers
             var household = string.IsNullOrWhiteSpace(me.HouseholdId)
                 ? new List<MemberFeeInput> { me }
                 : members.Where(m => string.Equals((m.HouseholdId ?? "").Trim(), me.HouseholdId!.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
-            _feeService.GenerateChargesForClub(clubId, year, household);
+            try { _feeService.GenerateChargesForClub(clubId, year, household); }
+            catch (InvalidOperationException ex) { return Json(new { success = false, message = ex.Message }); }
 
             var charge = _feeService.GetChargeForMemberYear(memberId, clubId, year);
             return Json(charge is null ? new { success = false, chargeId = (int?)null, message = (string?)"Avgiften kunde inte skapas." }
