@@ -425,6 +425,12 @@ namespace HpskSite.Services
                 var age = _ageLimits.AgeFor(charge.MemberId, charge.Year);
                 if (age is null) return choice;
 
+                // Medlemmens nuvarande typ gäller inte längre för åldern (hen har bytt åldersgrupp): säg det, så att valet inte ser
+                // ut som en slump. Servern ändrar ingenting här — det är förslagslistans och medlemmens eget val.
+                if (!string.IsNullOrWhiteSpace(choice.CurrentType) && !AgeTypeRules.IsAllowedForAge(choice.CurrentType, age, steps))
+                    choice.AgeNote = $"Medlemstypen {choice.CurrentLabel ?? choice.CurrentType} gäller för {AgeTypeRules.DescribeGroup(choice.CurrentType, steps)}. "
+                                   + "Du ligger inte längre i den åldersgruppen — välj den medlemstyp som gäller för dig nu.";
+
                 var kept = new List<MembershipFeeCategory>();
                 foreach (var o in choice.Options)
                 {
@@ -1122,6 +1128,8 @@ namespace HpskSite.Services
         public string? LockedReason { get; set; }
         public string? CurrentType { get; set; }
         public string? CurrentLabel { get; set; }
+        /// <summary>Orsakstexten när nuvarande typ inte längre gäller för medlemmens ålder (steg 3b). Null annars.</summary>
+        public string? AgeNote { get; set; }
         /// <summary>Typerna klubben markerat som valbara för året.</summary>
         public List<MembershipFeeCategory> Options { get; set; } = new();
 

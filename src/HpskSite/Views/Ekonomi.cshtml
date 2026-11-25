@@ -1293,7 +1293,7 @@
                     }
                     else
                     {
-                        @await Html.PartialAsync("ClubFeeManagement", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["clubId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanWrite })
+                        @await Html.PartialAsync("ClubFeeManagement", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["clubId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanWrite, ["clubUrl"] = Model.BackUrl })
                     }
                 </div>
             </section>

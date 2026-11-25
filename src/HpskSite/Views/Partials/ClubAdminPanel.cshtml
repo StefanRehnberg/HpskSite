@@ -1348,8 +1348,9 @@
                         <div class="row">
                             <div class="col-md-6"><div class="mb-3">
                                 <label class="form-label">Medlemstyp</label>
-                                <select class="form-select" name="membershipType">
-                                    <option value="">–</option><option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                <select class="form-select" name="membershipType" data-member-types="1">
+                                    @* Klubbens egna typer fylls av fillMemberTypeSelects() ur GetMemberTypes (namn + nyckel). *@
+                                    <option value="">–</option>
                                 </select>
                             </div></div>
                             <div class="col-md-6"><div class="mb-3">
@@ -1747,8 +1748,8 @@
                         <div class="row">
                             <div class="col-md-4"><div class="mb-3">
                                 <label class="form-label">Medlemstyp</label>
-                                <select class="form-select" id="editMembershipType">
-                                    <option value="">–</option><option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option><option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                                <select class="form-select" id="editMembershipType" data-member-types="1">
+                                    <option value="">–</option>
                                 </select>
                             </div></div>
                             <div class="col-md-4"><div class="mb-3">
@@ -5098,7 +5099,7 @@ function showAddClubMemberModal() {
     const addForm = document.getElementById('addClubMemberForm');
     addForm.reset();
     const typeSel = addForm.querySelector('select[name="membershipType"]');
-    if (typeSel) typeSel.value = 'Senior';
+    fillMemberTypeSelects().then(function () { if (typeSel) typeSel.value = 'Senior'; });
 }
 
 function saveClubMember() {
@@ -6985,7 +6986,36 @@ function ensureClubMemberOptions() {
         .catch(function () { _clubMemberOptions = []; return _clubMemberOptions; });
 }
 
-function setEditMembershipTypeSelect(sel, type) {
+// Klubbens medlemstyper (nyckel + klubbens namn) — EN källa, samma som avgiftsdialogen. Ett fel ger standardlistan,
+// så att formuläret aldrig blir tomt, men cachas inte så att nästa öppning försöker igen.
+var _memberTypesP = null;
+function loadMemberTypes() {
+    if (_memberTypesP) return _memberTypesP;
+    _memberTypesP = fetch('/umbraco/surface/MembershipFeeAdmin/GetMemberTypes?clubId=' + @clubId, { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.success && d.types) return d.types; _memberTypesP = null; return null; })
+        .catch(function () { _memberTypesP = null; return null; });
+    return _memberTypesP;
+}
+function fillMemberTypeSelects() {
+    return loadMemberTypes().then(function (types) {
+        if (!types) types = ['Senior', 'Veteran', 'Pensionär', 'Junior', 'Familj', 'Hedersmedlem', 'Ständig', 'Stödjande']
+            .map(function (n) { return { key: n, name: n, isActive: true }; });
+        Array.prototype.slice.call(document.querySelectorAll('select[data-member-types]')).forEach(function (sel) {
+            var cur = sel.value;
+            Array.prototype.slice.call(sel.querySelectorAll('option[data-type]')).forEach(function (o) { o.remove(); });
+            types.filter(function (t) { return t.isActive; }).forEach(function (t) {
+                var o = document.createElement('option');
+                o.value = t.key; o.textContent = t.name; o.setAttribute('data-type', '1');
+                sel.appendChild(o);
+            });
+            sel.value = cur;
+        });
+        return types;
+    });
+}
+
+function setEditMembershipTypeSelect(sel, type, types) {
     Array.prototype.slice.call(sel.querySelectorAll('option[data-extra]')).forEach(function (o) { o.remove(); });
     var v = (type || '').trim();
     if (!v) { sel.value = ''; return; }
@@ -6993,9 +7023,11 @@ function setEditMembershipTypeSelect(sel, type) {
         return o.value.toLowerCase() === v.toLowerCase();
     })[0];
     if (!match) {
+        // En dold typ finns inte bland alternativen men är inte "okänd": visa den med klubbens namn, så att den bevaras vid sparning.
+        var known = (types || []).filter(function (t) { return t.key.toLowerCase() === v.toLowerCase(); })[0];
         match = document.createElement('option');
         match.value = v;
-        match.textContent = v + ' (okänd)';
+        match.textContent = known ? known.name + ' (dold)' : v + ' (okänd)';
         match.setAttribute('data-extra', '1');
         sel.appendChild(match);
     }
@@ -7010,7 +7042,9 @@ function loadClubMembership(memberId) {
             // ⚠️ Ingen tyst standardtyp: en medlem utan typ står kvar på "–" (annars blev varje öppnad och
             // sparad medlem Senior av sig själv). Och en typ som inte finns som alternativ (importerad,
             // gammal stavning) läggs till som "(okänd)" — annars blev listan tom och sparningen skrev null.
-            setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType);
+            fillMemberTypeSelects().then(function (types) {
+                setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType, types);
+            });
             document.getElementById('editMembershipStatus').value = d.membershipStatus || 'Aktiv';
             document.getElementById('editMembershipMemberSince').value = d.memberSince || '';
             document.getElementById('editMembershipMemberUntil').value = d.memberUntil || '';

@@ -156,9 +156,13 @@
                     }
                     @* ⚠️ Ett BYTE, inte en rättelse: en medlem går från senior till veteran (Stefan 2026-09-23).
                        Visas så snart det finns en ANNAN valbar typ — även när den nuvarande inte själv är valbar. *@
+                    @if (!string.IsNullOrEmpty(Model.AgeNote))
+                    {
+                        <div class="warn">@Model.AgeNote</div>
+                    }
                     @if (Model.CanChooseType && Model.TypeOptions.Any(o => !o.Current))
                     {
-                        <details class="change-type" @(string.IsNullOrEmpty(Model.ChoiceError) ? "" : "open")>
+                        <details class="change-type" @(string.IsNullOrEmpty(Model.ChoiceError) && string.IsNullOrEmpty(Model.AgeNote) ? "" : "open")>
                             <summary>Har din medlemstyp ändrats? Byt medlemstyp</summary>
                             <form method="post" action="/medlemsavgift/@Model.Token/medlemstyp" class="types">
                                 @foreach (var o in Model.TypeOptions)

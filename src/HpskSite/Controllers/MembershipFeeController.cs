@@ -170,6 +170,7 @@ namespace HpskSite.Controllers
                 model.CanChooseType = choice.CanChoose;
                 model.TypeLockedReason = choice.LockedReason;
                 model.CurrentTypeLabel = choice.CurrentLabel;
+                model.AgeNote = choice.AgeNote;
                 model.MemberChoseType = !string.IsNullOrEmpty(charge.MemberChosenType);
                 model.TypeOptions = choice.Options
                     .Select(c => (c.MembershipType, string.IsNullOrWhiteSpace(c.Label) ? c.MembershipType : c.Label, c.Amount,
@@ -239,6 +240,8 @@ namespace HpskSite.Controllers
         public bool MemberChoseType { get; set; }
         public List<(string Type, string Label, decimal Amount, bool Current)> TypeOptions { get; set; } = new();
         public string? ChoiceError { get; set; }
+        /// <summary>Nuvarande typ gäller inte längre för åldern — orsaken, ovanför typvalet.</summary>
+        public string? AgeNote { get; set; }
         public bool ChoiceSaved { get; set; }
 
         public static MembershipFeePayModel Invalid() => new MembershipFeePayModel { Found = false };
