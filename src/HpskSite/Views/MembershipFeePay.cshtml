@@ -136,6 +136,17 @@
                 }
                 <div class="amount" id="belopp">@Kr(Model.Amount)</div>
 
+                @if (!Model.IsRegionFee && Model.Lines.Count > 1)
+                {
+                    <table class="bg" id="avgiftsrader" style="margin-top:-8px">
+                        @foreach (var line in Model.Lines)
+                        {
+                            <tr><td style="color:var(--ink)">@line.Description</td>
+                                <td style="text-align:right;white-space:nowrap">@Kr(line.Amount)</td></tr>
+                        }
+                    </table>
+                }
+
                 @if (!Model.IsRegionFee && !string.IsNullOrEmpty(Model.CurrentTypeLabel))
                 {
                     <p class="notice" style="margin-top:-12px">Medlemstyp: <strong>@Model.CurrentTypeLabel</strong>@(Model.MemberChoseType ? " (vald av dig)" : "")</p>
@@ -157,7 +168,7 @@
                                 }
                                 <button type="submit" class="btn" style="margin-top:12px">Spara medlemstypen</button>
                             </form>
-                            <p class="hint">Till exempel om du blivit veteran eller pensionär. Avgiften räknas om direkt, och klubben ser att du bytt medlemstyp själv.</p>
+                            <p class="hint">Välj den medlemstyp som gäller för dig nu. Avgiften räknas om direkt, och klubben ser att du bytt medlemstyp själv.</p>
                         </details>
                     }
                     else if (!string.IsNullOrEmpty(Model.TypeLockedReason) && !Model.PaymentClaimed)
