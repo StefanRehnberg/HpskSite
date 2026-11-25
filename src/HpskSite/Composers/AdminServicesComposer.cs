@@ -128,6 +128,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ForeningsintygDocumentService>();
             builder.Services.AddScoped<MembershipFeeService>();
             builder.Services.AddScoped<ClubFeeInputService>();
+            builder.Services.AddScoped<MembershipTypeCatalog>();
+            builder.Services.AddHostedService<MembershipFeeSchemaGuardHostedService>();
             // Kretsavgiftens tävlingar: vilka som ingår, och varje klubbs starter i dem.
             builder.Services.AddScoped<RegionFeeCompetitionService>();
             // Hard-delete purge of a member's subject-owned rows across all custom DB tables.
