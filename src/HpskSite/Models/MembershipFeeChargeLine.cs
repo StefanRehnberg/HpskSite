@@ -43,6 +43,12 @@ namespace HpskSite.Models
         public DateTime CreatedUtc { get; set; }
 
         public int CreatedByMemberId { get; set; }
+
+        /// <summary>Tillägget/avdraget (<see cref="MembershipFeePart"/>) raden kommer ur. Null för grundavgift. Ingen FK: en raderad del ändrar aldrig en skickad avgift.</summary>
+        public int? PartId { get; set; }
+
+        /// <summary>Personen i hushållet raden gäller (familjeavgiften prövas per person). Null = avgiftens egen medlem.</summary>
+        public int? SubjectMemberId { get; set; }
     }
 
     public static class MembershipFeeLineKind

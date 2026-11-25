@@ -23,6 +23,7 @@ namespace HpskSite.Services.Hosting
         {
             "CertificationRequests.CreatedAt", "CertificationRequests.RequestedAt", "CertificationRequests.ReviewedAt",
             "ClubMembership.CreatedDate",
+            "ClubMembershipType.CreatedUtc", "ClubMembershipType.UpdatedUtc",
             "CompetitionChampions.EnteredAt",
             "CompetitionChange.AtUtc",
             "CompetitionEventLink.LinkedUtc",

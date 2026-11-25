@@ -63,6 +63,7 @@ namespace HpskSite.Services
             ("MemberTutorialWatch",          "MemberId"),
             ("MemberCertificateIssue",       "MemberId"),
             ("MembershipFeeCharge",          "MemberId"),
+            ("ClubMembershipOption",         "MemberId"),   // kassörens ikryssade tillval (unikt per medlem/klubb/tillval — sammanslagningen tar krockar rad för rad)
 
             // ── Certifications ──
             ("MemberCertifications",         "MemberId"),
