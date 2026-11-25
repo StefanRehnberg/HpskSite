@@ -219,7 +219,10 @@ namespace HpskSite.Services
 
             var existing = db.Fetch<MembershipFeeCharge>(
                     "SELECT * FROM MembershipFeeCharge WHERE ClubId = @0 AND Year = @1 AND IssuerType = 0", clubId, year)
-                .ToDictionary(c => c.MemberId);
+                // ⚠️ Inget unikt index hindrar två klubbavgifter för samma medlem och år (det kommer i steg 2);
+                // ToDictionary kastade då och hela genereringen föll. Den första (lägsta id) gäller.
+                .GroupBy(c => c.MemberId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(c => c.Id).First());
             var created = 0;
 
             MembershipFeeCharge Insert(ClubFeeProposalRow p, decimal amount, int? coveredBy)

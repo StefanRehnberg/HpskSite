@@ -6985,13 +6985,32 @@ function ensureClubMemberOptions() {
         .catch(function () { _clubMemberOptions = []; return _clubMemberOptions; });
 }
 
+function setEditMembershipTypeSelect(sel, type) {
+    Array.prototype.slice.call(sel.querySelectorAll('option[data-extra]')).forEach(function (o) { o.remove(); });
+    var v = (type || '').trim();
+    if (!v) { sel.value = ''; return; }
+    var match = Array.prototype.slice.call(sel.options).filter(function (o) {
+        return o.value.toLowerCase() === v.toLowerCase();
+    })[0];
+    if (!match) {
+        match = document.createElement('option');
+        match.value = v;
+        match.textContent = v + ' (okänd)';
+        match.setAttribute('data-extra', '1');
+        sel.appendChild(match);
+    }
+    sel.value = match.value;
+}
+
 function loadClubMembership(memberId) {
     fetch('/umbraco/surface/ClubMembership/GetMembership?memberId=' + memberId + '&clubId=' + @clubId)
         .then(function (r) { return r.json(); })
         .then(function (resp) {
             var d = (resp && resp.success) ? resp.data : {};
-            // Default membership type = Senior when none set yet.
-            document.getElementById('editMembershipType').value = d.membershipType || 'Senior';
+            // ⚠️ Ingen tyst standardtyp: en medlem utan typ står kvar på "–" (annars blev varje öppnad och
+            // sparad medlem Senior av sig själv). Och en typ som inte finns som alternativ (importerad,
+            // gammal stavning) läggs till som "(okänd)" — annars blev listan tom och sparningen skrev null.
+            setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType);
             document.getElementById('editMembershipStatus').value = d.membershipStatus || 'Aktiv';
             document.getElementById('editMembershipMemberSince').value = d.memberSince || '';
             document.getElementById('editMembershipMemberUntil').value = d.memberUntil || '';

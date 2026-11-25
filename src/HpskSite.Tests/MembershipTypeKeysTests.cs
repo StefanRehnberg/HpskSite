@@ -60,6 +60,36 @@ namespace HpskSite.Tests
         private static string Src(string rel, [CallerFilePath] string thisFile = "") =>
             File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "..", "HpskSite", rel)));
 
+        [Theory]
+        [InlineData("Familj", null)]
+        [InlineData("familj", null)]
+        [InlineData("Senior", "Senior")]   // en annan typ rörs inte
+        [InlineData(null, null)]
+        public void Den_som_tas_ur_hushallet_tappar_Familj_men_inget_annat(string? before, string? after)
+        {
+            var m = new ClubMembership { MembershipType = before, HouseholdId = "h", HouseholdPrimary = true };
+            HpskSite.Controllers.ClubMembershipController.ReleaseFromHousehold(m);
+            Assert.Null(m.HouseholdId);
+            Assert.False(m.HouseholdPrimary);
+            Assert.Equal(after, m.MembershipType);
+        }
+
+        [Fact]
+        public void Varje_utlosning_ur_hushallet_gar_genom_ReleaseFromHousehold()
+        {
+            var src = Src(Path.Combine("Controllers", "ClubMembershipController.cs"));
+            Assert.Equal(3, Regex.Matches(src, @"ReleaseFromHousehold\(\w+\);").Count);
+            Assert.DoesNotMatch(new Regex(@"\.HouseholdPrimary = false;\s*\n\s*_membershipService\.Save"), src);
+        }
+
+        [Fact]
+        public void Medlemsredigeringen_tappar_inte_en_okand_typ_eller_satter_Senior_tyst()
+        {
+            var src = Src(Path.Combine("Views", "Partials", "ClubAdminPanel.cshtml"));
+            Assert.Contains("setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType)", src);
+            Assert.DoesNotContain("d.membershipType || 'Senior'", src);
+        }
+
         [Fact]
         public void Hushallsdialogen_skriver_Familj_via_konstanten()
         {

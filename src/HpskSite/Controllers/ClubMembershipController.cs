@@ -72,6 +72,10 @@ namespace HpskSite.Controllers
             var (member, existing, deny) = LoadMemberOfClub(memberId, clubId);
             if (member == null) return Json(new { success = false, message = deny });
 
+            // Kolumnen är NVARCHAR(50): längre text gav ett SQL-fel i stället för ett begripligt svar.
+            if ((membershipType ?? "").Trim().Length > 50)
+                return Json(new { success = false, message = "Medlemstypen får vara högst 50 tecken." });
+
             var m = existing ?? new ClubMembership { MemberId = memberId, ClubId = clubId };
 
             m.MembershipType = string.IsNullOrWhiteSpace(membershipType) ? null : membershipType.Trim();
@@ -151,12 +155,10 @@ namespace HpskSite.Controllers
                 if (householdId != null)
                     foreach (var existingMember in _membershipService.GetByHousehold(householdId, clubId))
                     {
-                        existingMember.HouseholdId = null;
-                        existingMember.HouseholdPrimary = false;
+                        ReleaseFromHousehold(existingMember);
                         _membershipService.Save(existingMember);
                     }
-                primary.HouseholdId = null;
-                primary.HouseholdPrimary = false;
+                ReleaseFromHousehold(primary);
                 _membershipService.Save(primary);
                 return Json(new { success = true, householdMemberCount = 0 });
             }
@@ -175,8 +177,7 @@ namespace HpskSite.Controllers
                 if (existingMember.MemberId == primaryMemberId) continue;
                 if (!selected.Contains(existingMember.MemberId))
                 {
-                    existingMember.HouseholdId = null;
-                    existingMember.HouseholdPrimary = false;
+                    ReleaseFromHousehold(existingMember);
                     _membershipService.Save(existingMember);
                 }
             }
@@ -193,6 +194,19 @@ namespace HpskSite.Controllers
             }
 
             return Json(new { success = true, householdMemberCount = selected.Count });
+        }
+
+        /// <summary>
+        /// Tar en medlem ur hushållet. ⚠️ Typen Familj sätts bara av hushållsdialogen och betyder "ingår i ett
+        /// hushåll" — den som lämnar hushållet får den inte kvar (förut faktureras hen familjeavgiften
+        /// individuellt). Typen blir tom, så medlemmen syns som "saknar typ" tills klubben sätter en;
+        /// ingen tyst standardtyp. En annan typ än Familj rörs inte.
+        /// </summary>
+        public static void ReleaseFromHousehold(ClubMembership m)
+        {
+            m.HouseholdId = null;
+            m.HouseholdPrimary = false;
+            if (MembershipTypeKeys.IsFamilj(m.MembershipType)) m.MembershipType = null;
         }
 
         /// <summary>
