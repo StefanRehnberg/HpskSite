@@ -426,6 +426,13 @@ namespace HpskSite.Services
             var cat = choice.Options.FirstOrDefault(c => string.Equals(c.MembershipType, (membershipType ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
             if (cat is null) return "Välj en av medlemstyperna i listan.";
 
+            // ⚠️⚠️ Läs medlemmen FÖRE scopet och skrivningen. ActiveFeeMembers öppnar en EGEN anslutning mot
+            // ClubMembership; körd efter UPDATE:n nedan väntar den på scopets ocommittade rad tills
+            // "Execution Timeout Expired" — och autoComplete committar ändå, så typen bytes men avgiften
+            // räknades aldrig om (hittat av medlemsavgift-steg25-verify.mjs 2026-11-25).
+            var subject = _feeInput.ActiveFeeMembers(charge.ClubId).FirstOrDefault(m => m.MemberId == charge.MemberId)
+                          ?? new MemberFeeInput { MemberId = charge.MemberId };
+
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             // ⚠️ Medlemstypen bor på KLUBBMEDLEMSKAPET för just den här klubben — aldrig på medlemmen.
@@ -440,8 +447,6 @@ namespace HpskSite.Services
 
             // Medlemmen står inte i ett hushåll här (GetTypeChoice låser det), så avgiften räknas på henne ensam —
             // med den typ hon just valde, men med huvudklubb och tillval som klubben har dem.
-            var subject = _feeInput.ActiveFeeMembers(charge.ClubId).FirstOrDefault(m => m.MemberId == charge.MemberId)
-                          ?? new MemberFeeInput { MemberId = charge.MemberId };
             subject.MembershipType = cat.MembershipType;
             var (parts, partTypes) = LoadParts(db, charge.ClubId, charge.Year);
             var label = string.IsNullOrWhiteSpace(cat.Label) ? cat.MembershipType : cat.Label;
