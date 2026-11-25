@@ -38,6 +38,8 @@ namespace HpskSite.Controllers
         private readonly MembershipFeeAccess _feeAccess;
         private readonly ClubFeeInputService _feeInput;
         private readonly ClubFeeSettingsService _feeSettings;
+        private readonly MembershipAgeLimits _ageLimits;
+        private readonly MembershipAgeProposalService _ageProposals;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -64,6 +66,8 @@ namespace HpskSite.Controllers
             MembershipFeeAccess feeAccess,
             ClubFeeInputService feeInput,
             ClubFeeSettingsService feeSettings,
+            MembershipAgeLimits ageLimits,
+            MembershipAgeProposalService ageProposals,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -81,6 +85,8 @@ namespace HpskSite.Controllers
             _feeAccess = feeAccess;
             _feeInput = feeInput;
             _feeSettings = feeSettings;
+            _ageLimits = ageLimits;
+            _ageProposals = ageProposals;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -356,15 +362,169 @@ namespace HpskSite.Controllers
         {
             if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            // Åldersgränserna (steg 3b). Ett läsfel sägs — "kunde inte läsa" är aldrig samma sak som "inga gränser".
+            List<AgeStep>? steps = null;
+            string? ageError = null;
+            try { steps = _ageLimits.Steps(clubId); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Åldersgränserna kunde inte läsas för klubb {ClubId}", clubId);
+                ageError = "Åldersgränserna kunde inte läsas.";
+            }
             return Json(new
             {
                 success = true,
                 untyped = _feeSettings.CountUntyped(clubId),   // aktiva medlemmar utan typ: får ingen avgift
+                ageRules = new { enabled = steps is { Count: > 0 }, error = ageError },
                 types = _feeSettings.GetTypesWithCounts(clubId).Select(x => new
                 {
-                    key = x.Type.Key, name = x.Type.Name, isActive = x.Type.IsActive, isCustom = x.Type.IsCustom, members = x.Members
+                    key = x.Type.Key, name = x.Type.Name, isActive = x.Type.IsActive, isCustom = x.Type.IsCustom, members = x.Members,
+                    // Undre åldersgräns ("Senior från 21"), null = ingen gräns. Gruppen som text: "21–59 år".
+                    fromAge = steps?.FirstOrDefault(s => MembershipTypeKeys.Same(s.Key, x.Type.Key))?.FromAge,
+                    ageGroup = steps is null ? null : AgeTypeRules.DescribeGroup(x.Type.Key, steps)
                 })
             });
+        }
+
+        // ── Åldersgränser per medlemstyp (steg 3b) ────────────────────
+
+        /// <summary>
+        /// Sparar HELA stegen: parallella listor typeKeys[i] ↔ fromAges[i]. Inga listor = regeln av. Typerna prövas mot klubbens egna.
+        /// Ändrar inga avgifter (bara förslagslistan och medlemmens val påverkas), så inga avgifter rensas här.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typerna prövas mot klubbens egna typer")]
+        public async Task<IActionResult> SaveAgeLimits(int clubId, string[]? typeKeys, int[]? fromAges)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            typeKeys ??= Array.Empty<string>();
+            fromAges ??= Array.Empty<int>();
+            if (typeKeys.Length != fromAges.Length)
+                return Json(new { success = false, message = "Varje åldersgräns måste höra till en medlemstyp." });
+
+            var steps = typeKeys.Select((k, i) => new AgeStep((k ?? "").Trim(), fromAges[i])).ToList();
+            try
+            {
+                var error = _ageLimits.SaveSteps(clubId, steps);
+                return error is null ? Json(new { success = true }) : Json(new { success = false, message = error });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Åldersgränserna kunde inte sparas för klubb {ClubId}", clubId);
+                return Json(new { success = false, message = "Åldersgränserna kunde inte sparas. Försök igen." });
+            }
+        }
+
+        /// <summary>
+        /// Förslagslistan: vilka medlemmar som bör byta (eller få) typ efter ålder, med avgiften före och efter. Sparas aldrig — räknas
+        /// om vid varje öppning. Läsrätt räcker (styrelsen och revisorn ser åldern i år, aldrig personnummer).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAgeProposals(int clubId, int year)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            try
+            {
+                var r = _ageProposals.GetProposals(clubId, year);
+                return Json(new
+                {
+                    success = true, year = r.Year, enabled = r.Enabled, canApply = r.CanApply,
+                    rows = r.Rows.Select(v => new
+                    {
+                        memberId = v.MemberId, name = v.Name, kind = v.Kind.ToString(),
+                        fromKey = v.FromKey ?? "", fromName = v.FromName, toKey = v.ToKey, toName = v.ToName,
+                        age = v.Age, birthStatus = v.BirthStatus.ToString(), reason = v.Reason,
+                        feeBefore = v.FeeBefore, feeAfter = v.FeeAfter, noCategory = v.NoCategory
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Förslagslistan kunde inte räknas för klubb {ClubId} {Year}", clubId, year);
+                return Json(new { success = false, message = "Förslagslistan kunde inte räknas fram. Försök igen." });
+            }
+        }
+
+        /// <summary>
+        /// Godkänner valda typbyten. items[] = "medlemsId:typen hen hade i listan" (tom efter kolon = ingen typ) — klienten skickar
+        /// ALDRIG målet; servern räknar om och behåller bara de par som fortfarande stämmer.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); varje medlem och typ prövas mot klubben, målet räknas på servern")]
+        public async Task<IActionResult> ApplyAgeProposals(int clubId, int year, string[]? items)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var parsed = AgeApprovalItem.Parse(items);
+            if (parsed.Count > 2000) return Json(new { success = false, message = "För många medlemmar på en gång." });
+            try
+            {
+                var r = _ageProposals.Apply(clubId, year, parsed, await GetCurrentMemberIdAsync());
+                if (r.Error is not null) return Json(new { success = false, message = r.Error });
+                return Json(new
+                {
+                    success = true, applied = r.Applied, chargesCleared = r.ChargesCleared,
+                    skipped = r.Skipped.Select(s => new { memberId = s.MemberId, reason = s.Reason })
+                });
+            }
+            catch (InvalidOperationException ex) // låset: någon annan skapar avgifterna just nu
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>Ångrar godkända byten för valda medlemmar och året (bara om typen fortfarande är den bytet gav).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); loggraderna prövas mot klubben och året")]
+        public async Task<IActionResult> UndoAgeProposals(int clubId, int year, int[]? memberIds)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            try
+            {
+                var r = _ageProposals.Undo(clubId, year, (memberIds ?? Array.Empty<int>()).Where(i => i > 0).Distinct().Take(2000).ToList());
+                return Json(new
+                {
+                    success = true, undone = r.Applied, chargesCleared = r.ChargesCleared,
+                    skipped = r.Skipped.Select(s => new { memberId = s.MemberId, reason = s.Reason })
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>"Behåll typen" (keep = "1") eller "Lås upp" (keep = "0"): undantag från åldersreglerna för en medlem.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); medlemmen prövas mot klubben")]
+        public async Task<IActionResult> SetAgeRuleOptOut(int clubId, int year, int memberId, string? keep = "1")
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var error = _ageProposals.SetOptOut(clubId, year, memberId, keep is "1" or "true" or "on", await GetCurrentMemberIdAsync());
+            return error is null ? Json(new { success = true }) : Json(new { success = false, message = error });
+        }
+
+        /// <summary>
+        /// Antal väntande åldersförslag för skicka-modalens gula varning (spärrar inte). Null när det inte gick att räkna — ett fel
+        /// får aldrig stoppa genereringen eller utskicket.
+        /// </summary>
+        private int? PendingAgeProposals(int clubId, int year)
+        {
+            if (year < MembershipAgeLimits.CurrentYear) return 0;
+            try { return _ageProposals.CountPending(clubId, year); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Väntande åldersförslag kunde inte räknas för klubb {ClubId} {Year}", clubId, year);
+                return null;
+            }
         }
 
         [HttpPost]
@@ -419,7 +579,7 @@ namespace HpskSite.Controllers
             try
             {
                 var created = _feeService.GenerateChargesForClub(clubId, year, ActiveFeeMembers(clubId));
-                return Json(new { success = true, created });
+                return Json(new { success = true, created, pendingAgeProposals = PendingAgeProposals(clubId, year) });
             }
             catch (InvalidOperationException ex) // låset: någon annan skapar avgifterna just nu
             {
@@ -461,8 +621,8 @@ namespace HpskSite.Controllers
             catch (InvalidOperationException ex) { return Json(new { success = false, message = ex.Message }); }
 
             var charge = _feeService.GetChargeForMemberYear(memberId, clubId, year);
-            return Json(charge is null ? new { success = false, chargeId = (int?)null, message = (string?)"Avgiften kunde inte skapas." }
-                                       : new { success = true, chargeId = (int?)charge.Id, message = (string?)null });
+            return Json(charge is null ? new { success = false, chargeId = (int?)null, message = (string?)"Avgiften kunde inte skapas.", pendingAgeProposals = (int?)null }
+                                       : new { success = true, chargeId = (int?)charge.Id, message = (string?)null, pendingAgeProposals = PendingAgeProposals(clubId, year) });
         }
 
         /// <summary>Medlemsavgiftsmejlet som det skulle skickas — samma byggväg som utskicket.</summary>
@@ -590,7 +750,7 @@ namespace HpskSite.Controllers
                 if (ok) _feeService.MarkRequestSent(charge.Id);
             }
 
-            return Json(new { success = true, sent = sent.Count, noEmail, failed });
+            return Json(new { success = true, sent = sent.Count, noEmail, failed, pendingAgeProposals = PendingAgeProposals(clubId, year) });
         }
 
         // ══ KRETSAVGIFTEN ═══════════════════════════════════════════════════════════════════

@@ -190,6 +190,10 @@ namespace HpskSite.Services
 
             using var scope = _scopeProvider.CreateScope(autoComplete: false);
             var db = scope.Database;
+            // En dold typ kan aldrig vara mål för en åldersgräns (steg 3b): ta bort gränsen först.
+            if (!isActive && existing is not null && existing.IsActive
+                && db.ExecuteScalar<int>("SELECT COUNT(*) FROM ClubMembershipTypeAge WHERE ClubId = @0 AND TypeKey = @1", clubId, existing.Key) > 0)
+                return (null, "Typen har en åldersgräns. Ta bort åldersgränsen innan du döljer typen.");
             ClubMembershipType? row = null;
             if (existing is not null)
                 row = db.SingleOrDefault<ClubMembershipType>("SELECT * FROM ClubMembershipType WHERE ClubId = @0 AND TypeKey = @1", clubId, existing.Key);
@@ -230,6 +234,9 @@ namespace HpskSite.Services
             var parts = db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM MembershipFeePartType t JOIN MembershipFeePart p ON p.Id = t.PartId WHERE p.ClubId = @0 AND t.TypeKey = @1", clubId, row.TypeKey);
             var rates = db.ExecuteScalar<int>("SELECT COUNT(*) FROM MembershipFeeCategory WHERE ClubId = @0 AND IssuerType = 0 AND MembershipType = @1", clubId, row.TypeKey);
+            var ages = db.ExecuteScalar<int>("SELECT COUNT(*) FROM ClubMembershipTypeAge WHERE ClubId = @0 AND TypeKey = @1", clubId, row.TypeKey);
+            if (ages > 0)
+                return (false, "Typen har en åldersgräns. Ta bort åldersgränsen först.");
             if (members > 0 || parts > 0 || rates > 0)
                 return (false, $"Typen används av {members} medlemmar, {parts} tillägg/avdrag och {rates} avgifter. Flytta medlemmarna och dölj typen i stället.");
             db.Execute("DELETE FROM ClubMembershipType WHERE Id = @0", row.Id);

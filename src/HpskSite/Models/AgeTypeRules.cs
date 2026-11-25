@@ -48,6 +48,14 @@ namespace HpskSite.Models
             return MembershipTypeKeys.Same(TypeFor(age.Value, steps), typeKey);
         }
 
+        /// <summary>Typens åldersgrupp som text: "0–20 år", "21–59 år", "60 år och äldre". Null när typen saknar gräns.</summary>
+        public static string? DescribeGroup(string? key, IReadOnlyList<AgeStep> steps)
+        {
+            var g = GroupOf(key, steps);
+            if (g is null) return null;
+            return g.Value.To is int to ? $"{g.Value.From}–{to - 1} år" : $"{g.Value.From} år och äldre";
+        }
+
         /// <summary>
         /// Prövar en hel stege innan den sparas (hela stegen sparas på en gång). Null = godkänt.
         /// Typer som aldrig åldersstyrs (Familj, Hedersmedlem, Ständig, Stödjande) får ingen gräns; gränserna är 0–120 och unika;
@@ -70,6 +78,29 @@ namespace HpskSite.Models
             if (steps.Min(s => s.FromAge) != 0)
                 return "Någon typ måste gälla från 0 år, annars får de yngsta medlemmarna ingen typ.";
             return null;
+        }
+    }
+
+    /// <summary>
+    /// En rad i kassörens godkännande: medlemmen och typen hen hade när listan visades (<see cref="ExpectedFrom"/>, tom = ingen typ).
+    /// Klienten skickar ALDRIG målet — servern räknar om och behåller bara de par som fortfarande stämmer.
+    /// </summary>
+    public sealed record AgeApprovalItem(int MemberId, string ExpectedFrom)
+    {
+        /// <summary>Tolkar "123:Senior" / "124:" (första kolon delar). Ogiltiga rader och dubbletter hoppas över; ordningen behålls.</summary>
+        public static List<AgeApprovalItem> Parse(IEnumerable<string?>? raw)
+        {
+            var result = new List<AgeApprovalItem>();
+            var seen = new HashSet<int>();
+            foreach (var s in raw ?? Array.Empty<string?>())
+            {
+                if (string.IsNullOrWhiteSpace(s)) continue;
+                var i = s.IndexOf(':');
+                var idText = i < 0 ? s : s[..i];
+                if (!int.TryParse(idText.Trim(), out var id) || id <= 0 || !seen.Add(id)) continue;
+                result.Add(new AgeApprovalItem(id, i < 0 ? "" : s[(i + 1)..].Trim()));
+            }
+            return result;
         }
     }
 

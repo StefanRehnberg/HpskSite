@@ -44,6 +44,8 @@ namespace HpskSite.Services
         private readonly ClubService _clubService;
         private readonly Hosting.DatabaseLock _dbLock;
         private readonly ClubFeeInputService _feeInput;
+        private readonly MembershipAgeLimits _ageLimits;
+        private readonly ILogger<MembershipFeeService> _logger;
 
         public MembershipFeeService(
             IScopeProvider scopeProvider,
@@ -51,7 +53,9 @@ namespace HpskSite.Services
             Lazy<Ledger.LedgerMembershipFeeBridge> ledgerBridge,
             ClubService clubService,
             Hosting.DatabaseLock dbLock,
-            ClubFeeInputService feeInput)
+            ClubFeeInputService feeInput,
+            MembershipAgeLimits ageLimits,
+            ILogger<MembershipFeeService> logger)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
@@ -59,6 +63,8 @@ namespace HpskSite.Services
             _clubService = clubService;
             _dbLock = dbLock;
             _feeInput = feeInput;
+            _ageLimits = ageLimits;
+            _logger = logger;
         }
 
         // ── Tillägg och avdrag ────────────────────────────────────────
@@ -369,6 +375,33 @@ namespace HpskSite.Services
             return covered + rest;
         }
 
+        /// <summary>
+        /// Som <see cref="ClearUnsentClubCharges"/> men bara för de angivna medlemmarna — efter ett godkänt typbyte ska just deras
+        /// oskickade avgifter räknas om, inte klubbens alla. Skickade, betalda och de medlemmen sagt sig ha betalat rörs aldrig
+        /// (de behåller sin typ och sitt belopp; bytet gäller först nästa avgift).
+        ///
+        /// <para>Betallänken är <c>Protect(chargeId)</c> (purpose <c>Membership.FeeCharge.v1</c>): en raderad oskickad avgift får ett
+        /// nytt id vid nästa skapande och en gammal länk dör. Det drabbar ingen i praktiken — en kopierad länk
+        /// (<c>GetPaymentLink</c>) och ett utskick markerar avgiften som skickad och den rensas då aldrig här. Hushållens
+        /// avgifter rörs inte (medlemmar i hushåll byter aldrig typ av ålder).</para>
+        /// </summary>
+        public int ClearUnsentClubChargesForMembers(int clubId, int year, IEnumerable<int> memberIds)
+        {
+            var ids = memberIds.Distinct().ToList();
+            if (ids.Count == 0) return 0;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var deleted = 0;
+            foreach (var chunk in ids.Chunk(500))
+                deleted += scope.Database.Execute(
+                    @"DELETE c FROM MembershipFeeCharge c WHERE c.IssuerType = 0 AND c.ClubId = @0 AND c.Year = @1
+                        AND c.MemberId IN (@2)
+                        AND c.RequestSentDate IS NULL AND c.PaymentStatus <> 'Paid' AND c.PaymentSentDate IS NULL
+                        AND c.HouseholdCoveredByChargeId IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM MembershipFeeCharge x WHERE x.HouseholdCoveredByChargeId = c.Id)",
+                    clubId, year, chunk);
+            return deleted;
+        }
+
         // ── Medlemmen väljer medlemstyp (Stefan 2026-09-23) ──────────────────────────────────
         //
         // ⚠️⚠️ ETT FÖRTROENDESYSTEM, INTE ETT OSYNLIGT. Medlemmen vet om hen är junior eller pensionär,
@@ -378,6 +411,46 @@ namespace HpskSite.Services
 
         /// <summary>Kan medlemmen välja medlemstyp för den här avgiften, och bland vilka?</summary>
         public MemberTypeChoice GetTypeChoice(MembershipFeeCharge charge)
+        {
+            var choice = GetTypeChoiceCore(charge);
+            if (charge.IsRegionFee || charge.HouseholdCoveredByChargeId.HasValue || choice.Options.Count == 0) return choice;
+
+            // ⚠️⚠️ Åldersgrinden (steg 3b, Stefans beslut): medlemmen får inte välja en typ utanför sin åldersgrupp. SERVERN är grinden
+            // (ChooseMembershipType går hit); vyn visar bara de tillåtna. Gäller bara när klubben har en stege OCH födelseåret är känt —
+            // annars som förut. Efter scopet ovan, eftersom åldern läses på en egen anslutning. Ett fel stänger valet (aldrig öppet).
+            try
+            {
+                var steps = _ageLimits.Steps(charge.ClubId);
+                if (steps.Count == 0) return choice;
+                var age = _ageLimits.AgeFor(charge.MemberId, charge.Year);
+                if (age is null) return choice;
+
+                var kept = new List<MembershipFeeCategory>();
+                foreach (var o in choice.Options)
+                {
+                    if (AgeTypeRules.IsAllowedForAge(o.MembershipType, age, steps)) { kept.Add(o); continue; }
+                    var label = string.IsNullOrWhiteSpace(o.Label) ? o.MembershipType : o.Label;
+                    choice.AgeExcludedReasons[o.MembershipType.Trim()] =
+                        $"Medlemstypen {label} gäller för {AgeTypeRules.DescribeGroup(o.MembershipType, steps)}. Välj en av de andra typerna.";
+                }
+                choice.Options = kept;
+                if (kept.Count == 0 && choice.CanChoose)
+                {
+                    choice.CanChoose = false;
+                    choice.LockedReason ??= "Ingen av klubbens valbara medlemstyper gäller för din ålder. Kontakta klubben.";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Åldersgränserna kunde inte läsas för klubb {ClubId}; medlemmens typval stängs.", charge.ClubId);
+                choice.Options = new List<MembershipFeeCategory>();
+                choice.CanChoose = false;
+                choice.LockedReason ??= "Medlemstypen kan inte väljas just nu. Försök igen om en stund eller kontakta klubben.";
+            }
+            return choice;
+        }
+
+        private MemberTypeChoice GetTypeChoiceCore(MembershipFeeCharge charge)
         {
             var choice = new MemberTypeChoice();
             if (charge.IsRegionFee || charge.HouseholdCoveredByChargeId.HasValue) return choice;
@@ -422,6 +495,8 @@ namespace HpskSite.Services
             if (charge is null || charge.IsRegionFee) return "Avgiften hittades inte.";
 
             var choice = GetTypeChoice(charge);
+            // En typ utanför åldersgruppen får ett begripligt svar, även när den inte längre finns bland alternativen.
+            if (choice.AgeExcludedReasons.TryGetValue((membershipType ?? "").Trim(), out var ageReason)) return ageReason;
             if (!choice.CanChoose) return choice.LockedReason ?? "Medlemstypen kan inte väljas här. Kontakta klubben.";
             var cat = choice.Options.FirstOrDefault(c => string.Equals(c.MembershipType, (membershipType ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
             if (cat is null) return "Välj en av medlemstyperna i listan.";
@@ -1049,6 +1124,12 @@ namespace HpskSite.Services
         public string? CurrentLabel { get; set; }
         /// <summary>Typerna klubben markerat som valbara för året.</summary>
         public List<MembershipFeeCategory> Options { get; set; } = new();
+
+        /// <summary>
+        /// Valbara typer som åldersgrinden tog bort, med skälet (nyckel → text). Serverns svar på ett försök att välja en av dem;
+        /// vyn visar dem aldrig.
+        /// </summary>
+        public Dictionary<string, string> AgeExcludedReasons { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class RegionFeeGenerateResult

@@ -130,6 +130,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ClubFeeInputService>();
             builder.Services.AddScoped<MembershipTypeCatalog>();
             builder.Services.AddScoped<ClubFeeSettingsService>();
+            builder.Services.AddScoped<MembershipAgeLimits>();           // steg 3b: åldersgränser per medlemstyp
+            builder.Services.AddScoped<MembershipAgeProposalService>();  // steg 3b: förslagslista, godkännande, behåll typen, ångra
             builder.Services.AddHostedService<MembershipFeeSchemaGuardHostedService>();
             // Kretsavgiftens tävlingar: vilka som ingår, och varje klubbs starter i dem.
             builder.Services.AddScoped<RegionFeeCompetitionService>();
