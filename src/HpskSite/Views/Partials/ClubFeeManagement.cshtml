@@ -78,6 +78,13 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" id="cfAgeRowBtn">Granska förslagen…</button>
         </div>
     </div>
+    @* Skickade och betalda avgifter är frysta. De som dagens regler skulle gjort till ett annat belopp visas här (samma jämförelse som servern räknar följderna med). *@
+    <div class="alert alert-info d-none" id="cfDiverge">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span id="cfDivergeText"></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="cfDivergeBtn">Visa dem</button>
+        </div>
+    </div>
 
     <div class="text-center py-4 d-none" id="cfNoRate">
         <p class="mb-3" id="cfNoRateText"></p>

@@ -180,6 +180,7 @@
     }
     function renderFilter() {
         var opts = [['all', 'Alla medlemmar']];
+        if ((data.rows || []).some(function (r) { return divergence(r) !== 0; })) opts.push(['diverge', 'Avviker från taxan']);
         if (usesHomeClub()) { opts.push(['home-unknown', 'Huvudklubb saknas']); opts.push(['home-other', 'Annan huvudklubb']); }
         (fs.options || []).filter(function (o) { return o.isActive; }).forEach(function (o) { opts.push(['opt:' + o.id, 'Är med i förbundet ' + o.name]); });
         // Ingenting att filtrera på → ingen väljare.
@@ -191,8 +192,17 @@
         sel.value = filterVal;
         show(wrap, true);
     }
+    // En skickad/betald avgift (fryst) vars belopp dagens regler skulle gjort annorlunda. Samma villkor som ClubFeeConsequences.Compute.
+    function divergence(r) {
+        var s = stateOf(r);
+        if (!s.c || s.covered || s.choose || !(s.sent || s.paid || s.claimed)) return 0;
+        if (!BILLABLE[r.kind]) return 0;
+        var d = r.proposedAmount - s.c.amount;
+        return Math.abs(d) < 0.005 ? 0 : d;
+    }
     function passesFilter(r) {
         if (filterVal === 'all') return true;
+        if (filterVal === 'diverge') return divergence(r) !== 0;
         if (filterVal === 'home-unknown') return r.homeClub === 'Unknown';
         if (filterVal === 'home-other') return r.homeClub === 'Other';
         if (filterVal.indexOf('opt:') === 0) return (r.optionIds || []).indexOf(parseInt(filterVal.slice(4), 10)) >= 0;
@@ -253,7 +263,22 @@
         }
 
         renderUntyped();
+        renderDiverge(rows);
     }
+
+    // Konsekvensraden: hur många frysta avgifter som avviker från dagens taxa, och med hur mycket.
+    function renderDiverge(rows) {
+        var wrap = $('cfDiverge'); if (!wrap) return;
+        var n = 0, sum = 0, paid = 0;
+        rows.forEach(function (r) { var d = divergence(r); if (d !== 0) { n++; sum += d; if (stateOf(r).paid) paid++; } });
+        show(wrap, n > 0);
+        if (!n) return;
+        $('cfDivergeText').textContent = (n === 1 ? '1 skickad eller betald avgift avviker' : n + ' skickade eller betalda avgifter avviker')
+            + ' från dagens taxa (' + signed(sum) + ' tillsammans'
+            + (paid ? ', varav ' + paid + ' betalda' : '') + '). De ändras inte av sig själva.';
+    }
+    var divBtn = $('cfDivergeBtn');
+    if (divBtn) divBtn.addEventListener('click', function () { filterVal = 'diverge'; render(); });
 
     // Gul varning: aktiva medlemmar utan typ får ingen avgift.
     function renderUntyped() {
