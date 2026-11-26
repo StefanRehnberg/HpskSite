@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly ClubRosterService _roster;
         private readonly MemberDirectoryService _directory;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.MembershipTypeCatalog _membershipTypes;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -53,10 +54,12 @@ namespace HpskSite.Controllers
             MemberActivityService activity,
             ClubRosterService roster,
             MemberDirectoryService directory,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.MembershipTypeCatalog membershipTypes)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberProperties = memberProperties;
+            _membershipTypes = membershipTypes;
             _activity = activity;
             _roster = roster;
             _directory = directory;
@@ -844,6 +847,9 @@ namespace HpskSite.Controllers
 
                 // Klubbregistret i EN fråga (skalplanen B3) — förut hela medlemsregistret (3,8 s vid 20 000).
                 var lastSeenAll = _activity.GetAll();
+                // Medlemstyp och medlemskapets status per medlem (en fråga): listan visar typen och filtrerar på "saknar typ".
+                var memberships = _clubMembershipService.GetForClub(clubId).GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.First());
+                var typeEntries = _membershipTypes.Types(clubId);
                 var members = _roster.Active(clubId)
                     .Select(m =>
                     {
@@ -861,6 +867,10 @@ namespace HpskSite.Controllers
                             shooterIdNumber = m.ShooterIdNumber,
                             profilePictureUrl = m.ProfilePictureUrl,
                             isApproved = m.IsApproved,
+                            membershipType = memberships.TryGetValue(m.MemberId, out var ms) ? (ms.MembershipType ?? "") : "",
+                            membershipTypeLabel = memberships.TryGetValue(m.MemberId, out var ms2) && !string.IsNullOrWhiteSpace(ms2.MembershipType)
+                                ? MembershipTypeNames.LabelFor(typeEntries, ms2.MembershipType) : "",
+                            membershipStatus = memberships.TryGetValue(m.MemberId, out var ms3) ? (ms3.MembershipStatus ?? "Aktiv") : "Aktiv",
                             lastActiveDisplay = FormatLastActive(lastActive),
                             lastActiveSortValue = lastActive.HasValue ? new DateTimeOffset(lastActive.Value).ToUnixTimeSeconds() : 0L,
                             lastMobileActiveDisplay = FormatLastActive(lastMobile),

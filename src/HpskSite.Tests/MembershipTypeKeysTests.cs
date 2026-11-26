@@ -106,9 +106,15 @@ namespace HpskSite.Tests
         [Fact]
         public void Medlemsredigeringen_tappar_inte_en_okand_typ_eller_satter_Senior_tyst()
         {
-            var src = Src(Path.Combine("Views", "Partials", "ClubAdminPanel.cshtml"));
-            Assert.Contains("setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType, types)", src);
-            Assert.DoesNotContain("d.membershipType || 'Senior'", src);
+            // Sedan 2026-11-26 sköter dialogen Medlemskap typen (Redigera medlem har den inte längre).
+            var js = Src(Path.Combine("wwwroot", "js", "member-membership.js"));
+            Assert.DoesNotContain("|| 'Senior'", js);
+            Assert.Contains("Ingen typ vald", js);
+            // En dold typ medlemmen har nu måste finnas kvar bland valen, annars skrev sparningen null.
+            var card = Src(Path.Combine("Controllers", "ClubMembershipController.Card.cs"));
+            Assert.Contains("(t.IsActive || MembershipTypeKeys.Same(t.Key, current))", card);
+            var panel = Src(Path.Combine("Views", "Partials", "ClubAdminPanel.cshtml"));
+            Assert.DoesNotContain("editMembershipType", panel);
         }
 
         [Fact]

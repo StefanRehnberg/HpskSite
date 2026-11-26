@@ -960,8 +960,13 @@ namespace HpskSite.Controllers
                     member.SetValue("personNumber", personNumber ?? "");
                     // ⚠️ Bara när fältet FAKTISKT skickades. Se parameterns kommentar.
                     if (memberSince != null) member.SetValue("memberSince", memberSince);
-                    member.SetValue("primaryClubId", primaryClubId);
-                    member.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
+                    // ⚠️ Klubbtillhörigheten ändras i dialogen Medlemskap (ClubMembership/SaveCard) sedan 2026-11-26. Redigera medlem
+                    // skickar inte längre fälten, och en utebliven parameter får ALDRIG tömma medlemmens klubbar.
+                    if (Request.Form.ContainsKey("primaryClubId") || Request.Form.ContainsKey("additionalClubIds"))
+                    {
+                        member.SetValue("primaryClubId", primaryClubId);
+                        member.SetValue("memberClubIds", string.Join(",", additionalClubIdList));
+                    }
                     // Only update shooter class if explicitly provided (prevents clearing on general profile updates)
                     if (!string.IsNullOrEmpty(precisionShooterClass))
                     {

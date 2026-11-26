@@ -567,6 +567,7 @@
         </div>
 
         @* Fas B4: klubbens träningar. Partialen skriver ut sin egen tab-pane (#clubTrainingsTab). *@
+        @await Html.PartialAsync("_MemberMembershipDialog")
         @await Html.PartialAsync("ClubAdminTrainings")
         @* Flytt av klubbens gamla träningshändelser (2026-10-07). Bara modaler + skript; korten
            (#ctmEventsNotice, #ctmCard, #ctmRailCount) står där de syns. *@
@@ -1742,74 +1743,9 @@
                         <i class="bi bi-exclamation-triangle me-1"></i>Personnummer ofullständigt – komplettera för att kunna skriva föreningsintyg. (Medlemmen fyller i personuppgifter på Min sida.)
                     </div>
 
-                    <details class="mb-2 mt-2" open>
-                        <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Klubbmedlemskap</summary>
-                        <p class="text-muted small">Klubbspecifika uppgifter för <em>denna klubb</em>. Personuppgifter (namn, kontakt, målsman) hanterar medlemmen själv på Min sida.</p>
-                        <div class="row">
-                            <div class="col-md-4"><div class="mb-3">
-                                <label class="form-label">Medlemstyp</label>
-                                <select class="form-select" id="editMembershipType" data-member-types="1">
-                                    <option value="">–</option>
-                                </select>
-                            </div></div>
-                            <div class="col-md-4"><div class="mb-3">
-                                <label class="form-label">Medlemsstatus</label>
-                                <select class="form-select" id="editMembershipStatus">
-                                    <option value="Aktiv">Aktiv</option><option>Vilande</option><option>Utträdd</option><option>Avliden</option>
-                                </select>
-                            </div></div>
-                            <div class="col-md-4"><div class="mb-3">
-                                <label class="form-label">Medlem sedan</label>
-                                <input type="text" class="form-control" id="editMembershipMemberSince" placeholder="ÅÅÅÅ-MM-DD">
-                            </div></div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6"><div class="mb-3">
-                                <label class="form-label">Utträdesdatum</label>
-                                <input type="text" class="form-control" id="editMembershipMemberUntil" placeholder="ÅÅÅÅ-MM-DD">
-                            </div></div>
-                            <div class="col-md-6"><div class="mb-3">
-                                <label class="form-label">Anledning till utträde</label>
-                                <input type="text" class="form-control" id="editMembershipEndReason">
-                            </div></div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6"><div class="mb-3">
-                                <label class="form-label">Godkänd kontroll belastningsreg. (datum)</label>
-                                <input type="text" class="form-control" id="editMembershipBgDate" placeholder="ÅÅÅÅ-MM-DD">
-                                <div class="form-check mt-1">
-                                    <input class="form-check-input" type="checkbox" id="editMembershipBgApproved">
-                                    <label class="form-check-label" for="editMembershipBgApproved">Godkänd</label>
-                                </div>
-                            </div></div>
-                            <div class="col-md-6"><div class="mb-3">
-                                <label class="form-label">Aktiv i förbund</label>
-                                <input type="text" class="form-control" id="editMembershipFederations" placeholder="SPSF, SvSF">
-                                <div class="form-check mt-1">
-                                    <input class="form-check-input" type="checkbox" id="editMembershipInMap">
-                                    <label class="form-check-label" for="editMembershipInMap">Finns i MAP</label>
-                                </div>
-                            </div></div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Anteckningar (klubbintern)</label>
-                            <textarea class="form-control" id="editMembershipNotes" rows="2"></textarea>
-                        </div>
-
-                        <!-- Familjemedlemskap (familjeavgift) -->
-                        <div class="border rounded p-2 mb-2 bg-light-subtle">
-                            <label class="form-label fw-semibold mb-1"><i class="bi bi-people me-1"></i>Familjemedlemskap</label>
-                            <div id="editFamilyCoveredBlock" class="alert alert-info py-2 px-2 small mb-0" style="display:none;">
-                                Ingår i familjemedlemskap – huvudmedlem: <strong id="editFamilyMainName"></strong>.
-                                Familjeavgiften betalas av huvudmedlemmen.
-                            </div>
-                            <div id="editFamilyPrimaryBlock">
-                                <p class="text-muted small mb-1">Välj övriga familjemedlemmar – denna medlem blir <strong>huvudmedlem</strong> och betalar familjeavgiften. Valda medlemmar sätts automatiskt till medlemstyp <em>Familj</em>.</p>
-                                <select id="editFamilyMembers" class="form-select" multiple size="5"></select>
-                                <div class="form-text">Håll in Ctrl/Cmd för att välja flera. Töm valet för att upplösa familjen.</div>
-                            </div>
-                        </div>
-                    </details>
+                    <div class="alert alert-primary py-2 px-3 small mb-3" id="editMemberMembershipHint">
+                        <i class="bi bi-info-circle me-1"></i>Medlemstyp, om medlemskapet är aktivt, förbund, familj och klubbar ändrar du under <strong>Åtgärder → Medlemskap</strong> i listan.
+                    </div>
 
                     <details class="mb-2">
                         <summary class="fw-bold text-primary mb-3" style="cursor:pointer;">Nycklar &amp; passerkoder</summary>
@@ -1834,36 +1770,6 @@
                         annat arbete med eget syfte. Lägg dem inte tillbaka, och lägg inte heller en
                         genväg hit — modalen ska inte antyda att arbetet börjar här.
                     *@
-
-                    <!-- Primary Club -->
-                    <div class="row">
-                        <div class="col-md-12">
-                            <div class="mb-3">
-                                <label for="editMemberPrimaryClub" class="form-label">Primär klubb</label>
-                                <select class="form-control" id="editMemberPrimaryClub" name="primaryClubId">
-                                    <option value="">-- Ingen primär klubb --</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Additional Clubs -->
-                    <div class="mb-3">
-                        <label for="editMemberAdditionalClubsDropdown" class="form-label">Ytterligare klubbar</label>
-                        <div class="dropdown">
-                            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start"
-                                    type="button" id="editMemberAdditionalClubsDropdown"
-                                    data-bs-toggle="dropdown"
-                                    aria-expanded="false">
-                                <span id="editMemberSelectedClubsText">Välj klubbar</span>
-                            </button>
-                            <div class="dropdown-menu w-100 p-3" id="editMemberAdditionalClubsDropdownMenu"
-                                 style="max-height: 300px; overflow-y: auto;">
-                                <!-- Checkboxes will be rendered here -->
-                            </div>
-                        </div>
-                        <div class="form-text" id="editMemberSelectedClubsCount">Inga ytterligare klubbar valda</div>
-                    </div>
 
                     <!-- Member Groups (site admins only) -->
                     <div class="mb-3" id="editMemberGroupsSection" style="display: none;">
@@ -1944,9 +1850,6 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-warning" id="editMemberEndMembershipBtn" onclick="endClubMembership()">
-                    <i class="bi bi-box-arrow-right me-1"></i>Avsluta medlemskap
-                </button>
                 <button type="button" class="btn btn-danger" id="editMemberDeleteBtn" onclick="deleteEditMember()" style="display: none;">
                     <i class="bi bi-trash"></i> Radera permanent
                 </button>
@@ -4259,7 +4162,7 @@ function showCreateEventModal() {
     toggleEventDateRequired();
     updateEventUrlPreview();
     // form.reset() nollstaller inputs men koer inte visa/dolj-logiken, sa gruppen maste stangas
-    // explicit — annars star forra handelsens anmalningsblock oppet pa en tom blankett.
+    // explicit — annars star forra handelsens anmalningsblock oppet pa en tom blankett.
     hpskEventRegClear('clubEvent');
     hpskEventCompLoad('clubEvent', 0);
     // Läget sätts FÖRE .show() och läses av shown.bs.modal-lyssnaren — samma dialog bär
@@ -4893,6 +4796,8 @@ function deleteClubCompetition(competitionId, competitionName) {
 // copy in the browser, so neither costs a round trip.
 let clubMembersData = [];
 let clubMemberSort = { key: 'name', dir: 1 };
+// Filter ovanför listan (som "Visa genomförda" i Träningar): all | untyped | dormant
+let clubMemberFilter = 'all';
 
 // Load Club Members
 function loadClubMembers() {
@@ -4971,12 +4876,23 @@ function displayClubMembers(members) {
 // timestamp from the server, so "5 min sedan" sorts before "3 dagar sedan").
 const CLUB_MEMBER_COLUMNS = [
     { key: 'name',   label: 'Namn',    sort: m => `${m.firstName || ''} ${m.lastName || ''}`.trim().toLowerCase() },
+    { key: 'type',   label: 'Medlemstyp', thClass: 'd-none d-md-table-cell', sort: m => (m.membershipTypeLabel || '').toLowerCase() },
     { key: 'email',  label: 'E-post',  sort: m => (m.email || '').toLowerCase() },
     { key: 'phone',  label: 'Telefon', sort: m => (m.phoneNumber || '').toLowerCase() },
     { key: 'web',    label: 'Webb',    thClass: 'text-nowrap', sort: m => m.lastActiveSortValue || 0 },
     { key: 'app',    label: 'App',     thClass: 'text-nowrap', sort: m => m.lastMobileActiveSortValue || 0 },
     { key: 'status', label: 'Status',  sort: m => (m.isApproved ? 1 : 0) }
 ];
+
+function setClubMemberFilter(key) {
+    clubMemberFilter = clubMemberFilter === key ? 'all' : key;
+    renderClubMembers();
+}
+
+// Dialogen Medlemskap (delad med Ekonomi → Medlemsavgifter). Efter sparning laddas listan om.
+function openMemberMembership(memberId) {
+    window.hpskMembership.open({ clubId: clubId, memberId: memberId, onSaved: function () { loadClubMembers(); } });
+}
 
 function sortClubMembers(key) {
     if (clubMemberSort.key === key) {
@@ -5003,9 +4919,13 @@ function renderClubMembers() {
 
     const searchBox = document.getElementById('clubMemberSearch');
     const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
-    const rows = needle
+    const bySearch = needle
         ? clubMembersData.filter(m => matchesClubMemberSearch(m, needle))
         : clubMembersData.slice();
+    const untypedCount = clubMembersData.filter(m => !m.membershipType).length;
+    const dormantCount = clubMembersData.filter(m => m.membershipStatus === 'Vilande').length;
+    const rows = bySearch.filter(m => clubMemberFilter === 'untyped' ? !m.membershipType
+        : clubMemberFilter === 'dormant' ? m.membershipStatus === 'Vilande' : true);
 
     const countLabel = document.getElementById('clubMemberCount');
     if (countLabel) {
@@ -5030,7 +4950,14 @@ function renderClubMembers() {
         return (va - vb) * clubMemberSort.dir;
     });
 
-    let html = '<div class="table-responsive"><table class="table table-striped">';
+    // Filter och antal ovanför listan. Knapparna är markerade när de gäller (aria-pressed), inte bara färgade.
+    const chip = (key, label, n) => `<button type="button" class="btn btn-sm ${clubMemberFilter === key ? 'btn-primary' : 'btn-outline-secondary'}" aria-pressed="${clubMemberFilter === key}" onclick="setClubMemberFilter('${key}')">${label} (${n})</button>`;
+    let html = '<div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="clubMemberFilters">'
+        + chip('all', 'Alla', clubMembersData.length)
+        + chip('untyped', 'Saknar medlemstyp', untypedCount)
+        + (dormantCount ? chip('dormant', 'Vilande', dormantCount) : '')
+        + `<span class="text-muted small ms-1">Visar ${rows.length} av ${clubMembersData.length}</span></div>`;
+    html += '<div class="table-responsive"><table class="table table-striped">';
     html += '<thead><tr>';
     CLUB_MEMBER_COLUMNS.forEach(col => {
         const active = col.key === clubMemberSort.key;
@@ -5052,9 +4979,14 @@ function renderClubMembers() {
 
     rows.forEach(member => {
         const fullName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || 'Okänt namn';
-        const statusBadge = member.isApproved
-            ? '<span class="badge bg-success">Godkänd</span>'
-            : '<span class="badge bg-warning text-dark">Väntande</span>';
+        const statusBadge = !member.isApproved
+            ? '<span class="badge bg-warning text-dark">Väntande</span>'
+            : member.membershipStatus === 'Vilande'
+                ? '<span class="badge bg-secondary">Vilande</span>'
+                : '<span class="badge bg-success">Godkänd</span>';
+        const typeText = member.membershipTypeLabel
+            ? escapeHtml(member.membershipTypeLabel)
+            : '<span class="badge bg-warning-subtle text-warning-emphasis border">Saknar typ</span>';
 
         const webDisplay = member.lastActiveDisplay || 'Aldrig';
         const webClass = webDisplay === 'Aldrig' ? 'text-muted' : '';
@@ -5066,21 +4998,26 @@ function renderClubMembers() {
                 <td>
                     <div class="member-name-cell">
                         ${renderMemberAvatar(member)}
-                        <strong>${escapeHtml(fullName)}</strong>
+                        <span><strong>${escapeHtml(fullName)}</strong><span class="d-md-none d-block small">${typeText}</span></span>
                     </div>
                 </td>
+                <td class="d-none d-md-table-cell">${typeText}</td>
                 <td>${escapeHtml(member.email || '-')}</td>
                 <td>${escapeHtml(member.phoneNumber || '-')}</td>
                 <td class="${webClass} text-nowrap small">${escapeHtml(webDisplay)}</td>
                 <td class="${mobileClass} text-nowrap small">${escapeHtml(mobileDisplay)}</td>
                 <td>${statusBadge}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editClubMember(${member.id})" title="Redigera">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="showSecurityModal(${member.id})" title="Säkerhet (lås upp, lösenord, inbjudan)">
-                        <i class="bi bi-shield-lock"></i>
-                    </button>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                                data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">Åtgärder</button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button type="button" class="dropdown-item" onclick="openMemberMembership(${member.id})">Medlemskap…</button></li>
+                            <li><button type="button" class="dropdown-item" onclick="editClubMember(${member.id})">Ändra personuppgifter…</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button type="button" class="dropdown-item" onclick="showSecurityModal(${member.id})">Lösenord, lås upp och inbjudan…</button></li>
+                        </ul>
+                    </div>
                 </td>
             </tr>
         `;
@@ -5375,17 +5312,11 @@ function populateEditMemberForm(member) {
     // Per-club membership (ClubMembership) + nycklar. Föreningsintyg och aktivitet laddas INTE
     // härifrån längre — de bor på fliken Aktivitet & Intyg och laddas när en medlem väljs där.
     window._editMemberId = member.id;
-    if (typeof loadClubMembership === 'function') loadClubMembership(member.id);
+    // Medlemstyp, status, förbund, familj och klubbar bor i dialogen Medlemskap (member-membership.js) sedan 2026-11-26.
     if (typeof loadMemberKeys === 'function') loadMemberKeys(member.id);
 
     // Profile picture
     updateEditMemberProfilePicture(member.profilePictureUrl, member.firstName, member.lastName);
-
-    // Primary club dropdown
-    renderEditMemberPrimaryClub(member.primaryClubId);
-
-    // Additional clubs
-    renderEditMemberAdditionalClubs(member.additionalClubIds || []);
 
     // Preserve ClubAdmin_* and RegionalAdmin_* groups - these are filtered from the UI
     // but must be preserved when saving to prevent accidental removal of admin rights
@@ -5724,15 +5655,11 @@ async function saveEditClubMember() {
     // markupen), och `SaveMember` skriver egenskapen bara när fältet faktiskt kommer med.
     // Skickade vi tom sträng här skulle varje sparning NOLLSTÄLLA det gamla värdet — alltså
     // tappa den enda uppgift som finns för medlemmar utan klubbmedlemskap med datum.
-    formData.append('primaryClubId', document.getElementById('editMemberPrimaryClub').value);
+    // ⚠️ primaryClubId och additionalClubIds SKICKAS INTE: klubbarna ändras i dialogen Medlemskap, och SaveMember
+    // rör dem bara när fälten kommer med (en utebliven parameter får aldrig tömma medlemmens klubbar).
     formData.append('isApproved', document.getElementById('editMemberIsApproved').checked);
     // Note: person-level expansion fields (birthDate, guardians, etc.) are edited by the
-    // member on Min sida. Club-membership fields are saved separately via saveClubMembership().
-
-    // Additional clubs
-    const additionalClubs = Array.from(document.querySelectorAll('input[name="editMemberAdditionalClubs"]:checked'))
-        .map(cb => cb.value);
-    formData.append('additionalClubIds', additionalClubs.join(','));
+    // member on Min sida. Typ, status och tillhörighet sparas av dialogen Medlemskap (ClubMembership/SaveCard).
 
     // Member groups - include checked groups from UI
     const selectedGroups = Array.from(document.querySelectorAll('input[name="editMemberGroups"]:checked'))
@@ -5761,17 +5688,6 @@ async function saveEditClubMember() {
         const result = await response.json();
 
         if (result.success) {
-            // Also persist the per-club membership fields + family linking (same Save button).
-            try {
-                const memResult = await saveClubMembership();
-                if (memResult && memResult.success === false) {
-                    alert('Personuppgifter sparade, men klubbmedlemskap kunde inte sparas: ' + (memResult.message || ''));
-                }
-                await saveClubHousehold();
-            } catch (e) {
-                console.error('Membership save error:', e);
-                alert('Personuppgifter sparade, men klubbmedlemskap kunde inte sparas.');
-            }
             bootstrap.Modal.getInstance(document.getElementById('editClubMemberModal')).hide();
             loadClubMembers();
             alert('Medlem sparad!');
@@ -5854,29 +5770,7 @@ if (membersTab) {
 }
 
 // Initialize Flatpickr for Member Since date field (Swedish locale, date only)
-let editMemberSincePicker = null;
 
-function initEditMemberDatePicker() {
-    if (editMemberSincePicker) {
-        editMemberSincePicker.destroy();
-    }
-    // ⚠️ VÄLJAREN FLYTTAD till klubbmedlemskapets "Medlem sedan". Den satt på det borttagna
-    // medlemsfältet; klubbfältet — det som föreningsintyget faktiskt läser — var ett vanligt
-    // textfält utan väljare, tvärtemot husregeln att datum alltid går via flatpickr.
-    //
-    // `maxDate: 'today'` är rätt här: man kan inte ha varit medlem sedan ett framtida datum.
-    editMemberSincePicker = flatpickr('#editMembershipMemberSince', {
-        locale: 'sv',
-        dateFormat: 'Y-m-d',
-        allowInput: true,
-        maxDate: 'today'
-    });
-}
-
-// Initialize date picker when modal is shown
-document.getElementById('editClubMemberModal').addEventListener('shown.bs.modal', function () {
-    initEditMemberDatePicker();
-});
 
 // Personnummer validation
 function validateSwedishPersonnummer(value) {
@@ -6933,32 +6827,6 @@ document.addEventListener('DOMContentLoaded', loadDpaGate);
 </style>
 
 <script>
-// Club admin's "remove from club": sets this club's membership to Utträdd (person + data kept).
-async function endClubMembership() {
-    var memberId = window._editMemberId;
-    if (!memberId) return;
-    if (!confirm('Avsluta medlemskapet i klubben?\n\nMedlemmen sätts som "Utträdd" och försvinner från aktiva listor. Personen, inloggningen och all data finns kvar (och ev. medlemskap i andra klubbar) — det går att återaktivera senare.')) return;
-    var fd = new FormData();
-    fd.append('__RequestVerificationToken', meToken());
-    fd.append('memberId', memberId);
-    fd.append('clubId', @clubId);
-    try {
-        var r = await fetch('/umbraco/surface/ClubMembership/EndMembership', { method: 'POST', body: fd });
-        var d = await r.json();
-        if (d.success) {
-            var statusSel = document.getElementById('editMembershipStatus');
-            if (statusSel) statusSel.value = 'Utträdd';
-            if (d.memberUntil) { var mu = document.getElementById('editMembershipMemberUntil'); if (mu) mu.value = d.memberUntil; }
-            if (typeof loadClubMembers === 'function') loadClubMembers();
-            alert('Medlemskapet i klubben har avslutats.');
-        } else {
-            alert('Fel: ' + (d.message || 'Kunde inte avsluta medlemskap'));
-        }
-    } catch (e) {
-        alert('Kunde inte avsluta medlemskap: ' + e.message);
-    }
-}
-
 // ---- Member keys + föreningsintyg (member-database expansion) ----
 function meToken() {
     var el = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -7013,107 +6881,6 @@ function fillMemberTypeSelects() {
         });
         return types;
     });
-}
-
-function setEditMembershipTypeSelect(sel, type, types) {
-    Array.prototype.slice.call(sel.querySelectorAll('option[data-extra]')).forEach(function (o) { o.remove(); });
-    var v = (type || '').trim();
-    if (!v) { sel.value = ''; return; }
-    var match = Array.prototype.slice.call(sel.options).filter(function (o) {
-        return o.value.toLowerCase() === v.toLowerCase();
-    })[0];
-    if (!match) {
-        // En dold typ finns inte bland alternativen men är inte "okänd": visa den med klubbens namn, så att den bevaras vid sparning.
-        var known = (types || []).filter(function (t) { return t.key.toLowerCase() === v.toLowerCase(); })[0];
-        match = document.createElement('option');
-        match.value = v;
-        match.textContent = known ? known.name + ' (dold)' : v + ' (okänd)';
-        match.setAttribute('data-extra', '1');
-        sel.appendChild(match);
-    }
-    sel.value = match.value;
-}
-
-function loadClubMembership(memberId) {
-    fetch('/umbraco/surface/ClubMembership/GetMembership?memberId=' + memberId + '&clubId=' + @clubId)
-        .then(function (r) { return r.json(); })
-        .then(function (resp) {
-            var d = (resp && resp.success) ? resp.data : {};
-            // ⚠️ Ingen tyst standardtyp: en medlem utan typ står kvar på "–" (annars blev varje öppnad och
-            // sparad medlem Senior av sig själv). Och en typ som inte finns som alternativ (importerad,
-            // gammal stavning) läggs till som "(okänd)" — annars blev listan tom och sparningen skrev null.
-            fillMemberTypeSelects().then(function (types) {
-                setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType, types);
-            });
-            document.getElementById('editMembershipStatus').value = d.membershipStatus || 'Aktiv';
-            document.getElementById('editMembershipMemberSince').value = d.memberSince || '';
-            document.getElementById('editMembershipMemberUntil').value = d.memberUntil || '';
-            document.getElementById('editMembershipEndReason').value = d.endReason || '';
-            document.getElementById('editMembershipBgDate').value = d.backgroundCheckDate || '';
-            document.getElementById('editMembershipBgApproved').checked = !!d.backgroundCheckApproved;
-            document.getElementById('editMembershipFederations').value = d.federations || '';
-            document.getElementById('editMembershipInMap').checked = !!d.registeredInMap;
-            document.getElementById('editMembershipNotes').value = d.memberNotes || '';
-            renderFamilyBlock(memberId, d);
-        });
-}
-
-function renderFamilyBlock(memberId, d) {
-    var coveredBlock = document.getElementById('editFamilyCoveredBlock');
-    var primaryBlock = document.getElementById('editFamilyPrimaryBlock');
-    // A covered (non-primary) family member: show read-only note, hide the picker.
-    if (d.inHousehold && !d.isHouseholdPrimary && d.householdMainMemberId) {
-        document.getElementById('editFamilyMainName').textContent = d.householdMainMemberName || 'okänd';
-        coveredBlock.style.display = '';
-        primaryBlock.style.display = 'none';
-        return;
-    }
-    coveredBlock.style.display = 'none';
-    primaryBlock.style.display = '';
-    var selectedIds = (d.householdMemberIds || []).map(Number);
-    ensureClubMemberOptions().then(function (opts) {
-        var sel = document.getElementById('editFamilyMembers');
-        sel.innerHTML = opts
-            .filter(function (o) { return o.id !== memberId; })
-            .map(function (o) {
-                var chosen = selectedIds.indexOf(o.id) !== -1 ? ' selected' : '';
-                return '<option value="' + o.id + '"' + chosen + '>' + meEsc(o.name) + '</option>';
-            }).join('');
-    });
-}
-
-// Saves the membership scalar fields; returns the fetch promise. Called by the main modal Save.
-function saveClubMembership() {
-    var fd = new FormData();
-    fd.append('__RequestVerificationToken', meToken());
-    fd.append('memberId', window._editMemberId);
-    fd.append('clubId', @clubId);
-    fd.append('membershipType', document.getElementById('editMembershipType').value);
-    fd.append('membershipStatus', document.getElementById('editMembershipStatus').value);
-    fd.append('memberSince', document.getElementById('editMembershipMemberSince').value);
-    fd.append('memberUntil', document.getElementById('editMembershipMemberUntil').value);
-    fd.append('endReason', document.getElementById('editMembershipEndReason').value);
-    fd.append('backgroundCheckApproved', document.getElementById('editMembershipBgApproved').checked);
-    fd.append('backgroundCheckDate', document.getElementById('editMembershipBgDate').value);
-    fd.append('registeredInMap', document.getElementById('editMembershipInMap').checked);
-    fd.append('federations', document.getElementById('editMembershipFederations').value);
-    fd.append('memberNotes', document.getElementById('editMembershipNotes').value);
-    return fetch('/umbraco/surface/ClubMembership/SaveMembership', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); });
-}
-
-// Applies the family multi-select (this member becomes Huvudmedlem). Skipped for covered members.
-function saveClubHousehold() {
-    var primaryBlock = document.getElementById('editFamilyPrimaryBlock');
-    if (!primaryBlock || primaryBlock.style.display === 'none') return Promise.resolve({ success: true });
-    var sel = document.getElementById('editFamilyMembers');
-    var fd = new FormData();
-    fd.append('__RequestVerificationToken', meToken());
-    fd.append('primaryMemberId', window._editMemberId);
-    fd.append('clubId', @clubId);
-    Array.from(sel.selectedOptions).forEach(function (o) { fd.append('memberIds', o.value); });
-    return fetch('/umbraco/surface/ClubMembership/SetHousehold', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); });
 }
 
 function loadMemberKeys(memberId) {

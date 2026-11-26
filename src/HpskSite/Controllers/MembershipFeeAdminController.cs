@@ -36,6 +36,7 @@ namespace HpskSite.Controllers
         private readonly ReplyContactResolver _replyContacts;
         private readonly LedgerAccessService _ledgerAccess;
         private readonly MembershipFeeAccess _feeAccess;
+        private readonly MembershipAccess _memberAccess;
         private readonly ClubFeeInputService _feeInput;
         private readonly ClubFeeSettingsService _feeSettings;
         private readonly MembershipAgeLimits _ageLimits;
@@ -64,6 +65,7 @@ namespace HpskSite.Controllers
             ReplyContactResolver replyContacts,
             LedgerAccessService ledgerAccess,
             MembershipFeeAccess feeAccess,
+            MembershipAccess memberAccess,
             ClubFeeInputService feeInput,
             ClubFeeSettingsService feeSettings,
             MembershipAgeLimits ageLimits,
@@ -83,6 +85,7 @@ namespace HpskSite.Controllers
             _replyContacts = replyContacts;
             _ledgerAccess = ledgerAccess;
             _feeAccess = feeAccess;
+            _memberAccess = memberAccess;
             _feeInput = feeInput;
             _feeSettings = feeSettings;
             _ageLimits = ageLimits;
@@ -345,17 +348,17 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMemberOptions(int clubId, int memberId)
         {
-            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead && !await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             return Json(new { success = true, optionIds = _feeSettings.GetMemberOptionIds(clubId, memberId) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); medlemmen och tillvalen prövas mot klubben")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; medlemmen och tillvalen prövas mot klubben")]
         public async Task<IActionResult> SetMemberOptions(int clubId, int year, int memberId, int[]? optionIds)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var error = _feeSettings.SetMemberOptions(clubId, memberId, optionIds ?? Array.Empty<int>());
             if (error is not null) return Json(new { success = false, message = error });
@@ -368,7 +371,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMemberTypes(int clubId)
         {
-            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead && !await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             // Åldersgränserna (steg 3b). Ett läsfel sägs — "kunde inte läsa" är aldrig samma sak som "inga gränser".
             List<AgeStep>? steps = null;
@@ -402,10 +405,10 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typerna prövas mot klubbens egna typer")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; typerna prövas mot klubbens egna typer")]
         public async Task<IActionResult> SaveAgeLimits(int clubId, string[]? typeKeys, int[]? fromAges)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             typeKeys ??= Array.Empty<string>();
             fromAges ??= Array.Empty<int>();
@@ -432,7 +435,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAgeProposals(int clubId, int year)
         {
-            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+            var canReadFees = (await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead;
+            if (!canReadFees && !await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             try
             {
@@ -445,7 +449,7 @@ namespace HpskSite.Controllers
                         memberId = v.MemberId, name = v.Name, kind = v.Kind.ToString(),
                         fromKey = v.FromKey ?? "", fromName = v.FromName, toKey = v.ToKey, toName = v.ToName,
                         age = v.Age, birthStatus = v.BirthStatus.ToString(), reason = v.Reason,
-                        feeBefore = v.FeeBefore, feeAfter = v.FeeAfter, noCategory = v.NoCategory
+                        feeBefore = canReadFees ? v.FeeBefore : null, feeAfter = canReadFees ? v.FeeAfter : null, noCategory = v.NoCategory
                     })
                 });
             }
@@ -462,10 +466,10 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); varje medlem och typ prövas mot klubben, målet räknas på servern")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; varje medlem och typ prövas mot klubben, målet räknas på servern")]
         public async Task<IActionResult> ApplyAgeProposals(int clubId, int year, string[]? items)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var parsed = AgeApprovalItem.Parse(items);
             if (parsed.Count > 2000) return Json(new { success = false, message = "För många medlemmar på en gång." });
@@ -488,10 +492,10 @@ namespace HpskSite.Controllers
         /// <summary>Ångrar godkända byten för valda medlemmar och året (bara om typen fortfarande är den bytet gav).</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); loggraderna prövas mot klubben och året")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; loggraderna prövas mot klubben och året")]
         public async Task<IActionResult> UndoAgeProposals(int clubId, int year, int[]? memberIds)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             try
             {
@@ -511,10 +515,10 @@ namespace HpskSite.Controllers
         /// <summary>"Behåll typen" (keep = "1") eller "Lås upp" (keep = "0"): undantag från åldersreglerna för en medlem.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); medlemmen prövas mot klubben")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; medlemmen prövas mot klubben")]
         public async Task<IActionResult> SetAgeRuleOptOut(int clubId, int year, int memberId, string? keep = "1")
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var error = _ageProposals.SetOptOut(clubId, year, memberId, keep is "1" or "true" or "on", await GetCurrentMemberIdAsync());
             return error is null ? Json(new { success = true }) : Json(new { success = false, message = error });
@@ -537,10 +541,10 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen prövas mot klubbens egna typer")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; typen prövas mot klubbens egna typer")]
         public async Task<IActionResult> SaveMemberType(int clubId, int year, string? key, string? name, string? isActive = "1")
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var (k, error) = _feeSettings.SaveType(clubId, key, name, isActive is "1" or "true" or "on");
             if (error is not null) return Json(new { success = false, message = error });
@@ -550,10 +554,10 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen prövas mot klubbens egna typer")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; typen prövas mot klubbens egna typer")]
         public async Task<IActionResult> DeleteMemberType(int clubId, string? key)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var (deleted, error) = _feeSettings.DeleteType(clubId, key ?? "");
             return deleted ? Json(new { success = true }) : Json(new { success = false, message = error });
@@ -561,10 +565,10 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); typen och medlemmarna prövas mot klubben")]
+        [HpskSite.Services.Security.InCodeAuth("MembershipAccess.CanManageMemberAsync(klubben): klubbadmin eller kassör, för typ, ålder och förbund; typen och medlemmarna prövas mot klubben")]
         public async Task<IActionResult> SetMembersType(int clubId, int year, string? toKey, string? fromKey, int[]? memberIds, string? fromUntyped = null)
         {
-            if (!await _feeAccess.CanWriteAsync(clubId))
+            if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var (changed, error) = _feeSettings.SetMembersType(clubId, toKey, memberIds, fromKey, fromUntyped is "1" or "true" or "on");
             if (error is not null) return Json(new { success = false, message = error });

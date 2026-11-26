@@ -1,0 +1,31 @@
+@* Dialogen "Medlemskap": EN yta för en medlems typ, status och tillhörighet (förbund, familj, klubbar).
+   Delad av Medlemmar (klubbadmin) och Ekonomi → Medlemsavgifter (kassören). Öppnas med
+   window.hpskMembership.open({ clubId, memberId, year?, onSaved? }). Allt innehåll ritas av member-membership.js
+   ur ClubMembership/GetCard; sparas med ClubMembership/SaveCard. Lägg partialen EN gång per sida. *@
+@if (ViewData["hmDialogIncluded"] == null)
+{
+    ViewData["hmDialogIncluded"] = true;
+    <link rel="stylesheet" href="~/css/member-membership.css" asp-append-version="true" />
+    <div class="modal fade" id="hmModal" tabindex="-1" aria-hidden="true" aria-labelledby="hmTitle">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down hm-dialog">
+            <div class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title" id="hmTitle">Medlemskap</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body" id="hmBody"></div>
+                <div class="modal-footer hm-footer" id="hmFooter">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="hmCancel">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="hmSave" disabled>Spara</button>
+                </div>
+                <div class="modal-footer hm-footer hm-confirm" id="hmConfirm" hidden>
+                    <div class="alert alert-warning w-100 mb-2" id="hmConfirmText" role="alert"></div>
+                    <button type="button" class="btn btn-outline-secondary" id="hmConfirmNo">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="hmConfirmYes">Ändra ändå</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="~/js/member-membership.js" asp-append-version="true"></script>
+}

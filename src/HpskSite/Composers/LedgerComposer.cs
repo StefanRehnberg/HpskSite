@@ -35,6 +35,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerBudgetService>();
             builder.Services.AddScoped<LedgerAccessService>();
             builder.Services.AddScoped<MembershipFeeAccess>();
+            builder.Services.AddScoped<HpskSite.Services.MembershipAccess>();
             builder.Services.AddScoped<LedgerChartService>();
             builder.Services.AddScoped<LedgerManualPostingService>();
             builder.Services.AddScoped<LedgerOpeningBalanceService>();

@@ -21,12 +21,20 @@ namespace HpskSite.Controllers
     /// Club-scoped: a club admin edits the membership for THEIR club only. Person-level
     /// facts are edited by the member at Min sida (MemberController). See MEMBER_DATABASE.md.
     /// </summary>
-    public class ClubMembershipController : SurfaceController
+    public partial class ClubMembershipController : SurfaceController
     {
         private readonly ClubMembershipService _membershipService;
         private readonly AdminAuthorizationService _authService;
         private readonly IMemberService _memberService;
         private readonly ILogger<ClubMembershipController> _logger;
+        private readonly MembershipAccess _access;
+        private readonly HpskSite.Services.Ledger.MembershipFeeAccess _feeAccess;
+        private readonly ClubFeeSettingsService _feeSettings;
+        private readonly MembershipTypeCatalog _types;
+        private readonly MembershipAgeLimits _ageLimits;
+        private readonly ClubService _clubService;
+        private readonly ClubRosterService _roster;
+        private readonly MembershipFeeService _feeService;
 
         public ClubMembershipController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -38,13 +46,29 @@ namespace HpskSite.Controllers
             ClubMembershipService membershipService,
             AdminAuthorizationService authService,
             IMemberService memberService,
-            ILogger<ClubMembershipController> logger)
+            ILogger<ClubMembershipController> logger,
+            MembershipAccess access,
+            HpskSite.Services.Ledger.MembershipFeeAccess feeAccess,
+            ClubFeeSettingsService feeSettings,
+            MembershipTypeCatalog types,
+            MembershipAgeLimits ageLimits,
+            ClubService clubService,
+            ClubRosterService roster,
+            MembershipFeeService feeService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _membershipService = membershipService;
             _authService = authService;
             _memberService = memberService;
             _logger = logger;
+            _access = access;
+            _feeAccess = feeAccess;
+            _feeSettings = feeSettings;
+            _types = types;
+            _ageLimits = ageLimits;
+            _clubService = clubService;
+            _roster = roster;
+            _feeService = feeService;
         }
 
         [HttpGet]
@@ -143,7 +167,14 @@ namespace HpskSite.Controllers
                 if (member == null) return Json(new { success = false, message = deny });
             }
 
-            var primary = _membershipService.Get(primaryMemberId, clubId)
+            var count = ApplyHousehold(_membershipService, primaryMemberId, clubId, selected);
+            return Json(new { success = true, householdMemberCount = count });
+        }
+
+        /// <summary>Hushållet i klubben: huvudmedlemmen och de som ingår. EN skrivväg (SetHousehold och Medlemskap-dialogen). Prövningen av att alla hör till klubben görs av anroparen.</summary>
+        public static int ApplyHousehold(ClubMembershipService svc, int primaryMemberId, int clubId, IReadOnlyList<int> selected)
+        {
+            var primary = svc.Get(primaryMemberId, clubId)
                           ?? new ClubMembership { MemberId = primaryMemberId, ClubId = clubId, MembershipStatus = "Aktiv" };
 
             // Determine the household id (existing, or a fresh GUID when forming a new household).
@@ -153,14 +184,14 @@ namespace HpskSite.Controllers
             {
                 // Dissolve: unlink everyone currently in this household, clear the primary.
                 if (householdId != null)
-                    foreach (var existingMember in _membershipService.GetByHousehold(householdId, clubId))
+                    foreach (var existingMember in svc.GetByHousehold(householdId, clubId))
                     {
                         ReleaseFromHousehold(existingMember);
-                        _membershipService.Save(existingMember);
+                        svc.Save(existingMember);
                     }
                 ReleaseFromHousehold(primary);
-                _membershipService.Save(primary);
-                return Json(new { success = true, householdMemberCount = 0 });
+                svc.Save(primary);
+                return 0;
             }
 
             if (householdId == null) householdId = Guid.NewGuid().ToString();
@@ -169,31 +200,31 @@ namespace HpskSite.Controllers
             primary.HouseholdId = householdId;
             primary.HouseholdPrimary = true;
             primary.MembershipType = MembershipTypeKeys.Familj;
-            _membershipService.Save(primary);
+            svc.Save(primary);
 
             // Unlink members that were in the household but are no longer selected.
-            foreach (var existingMember in _membershipService.GetByHousehold(householdId, clubId))
+            foreach (var existingMember in svc.GetByHousehold(householdId, clubId))
             {
                 if (existingMember.MemberId == primaryMemberId) continue;
                 if (!selected.Contains(existingMember.MemberId))
                 {
                     ReleaseFromHousehold(existingMember);
-                    _membershipService.Save(existingMember);
+                    svc.Save(existingMember);
                 }
             }
 
             // Link (or refresh) each selected member as a covered family member.
             foreach (var mid in selected)
             {
-                var fm = _membershipService.Get(mid, clubId)
+                var fm = svc.Get(mid, clubId)
                          ?? new ClubMembership { MemberId = mid, ClubId = clubId, MembershipStatus = "Aktiv" };
                 fm.HouseholdId = householdId;
                 fm.HouseholdPrimary = false;
                 fm.MembershipType = MembershipTypeKeys.Familj;
-                _membershipService.Save(fm);
+                svc.Save(fm);
             }
 
-            return Json(new { success = true, householdMemberCount = selected.Count });
+            return selected.Count;
         }
 
         /// <summary>
