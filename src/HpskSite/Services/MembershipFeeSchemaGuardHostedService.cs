@@ -25,7 +25,9 @@ namespace HpskSite.Services
         public static readonly string[] Tables =
             { "ClubMembershipType", "ClubFeeOption", "ClubMembershipOption", "MembershipFeePart", "MembershipFeePartType",
               // Steg 3b: åldersgränser (create-membership-age-rules.sql)
-              "ClubMembershipTypeAge", "ClubMemberAgeRuleOptOut", "ClubMembershipTypeChange" };
+              "ClubMembershipTypeAge", "ClubMemberAgeRuleOptOut", "ClubMembershipTypeChange",
+              // Andringsloggen for installningarna (create-club-fee-change-log.sql)
+              "ClubFeeChangeLog" };
 
         public static readonly (string Table, string Column)[] Columns =
             { ("MembershipFeeChargeLine", "PartId"), ("MembershipFeeChargeLine", "SubjectMemberId") };

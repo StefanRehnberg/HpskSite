@@ -41,6 +41,7 @@ namespace HpskSite.Controllers
         private readonly ClubFeeSettingsService _feeSettings;
         private readonly MembershipAgeLimits _ageLimits;
         private readonly MembershipAgeProposalService _ageProposals;
+        private readonly ClubFeeChangeLogService _feeLog;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -70,6 +71,7 @@ namespace HpskSite.Controllers
             ClubFeeSettingsService feeSettings,
             MembershipAgeLimits ageLimits,
             MembershipAgeProposalService ageProposals,
+            ClubFeeChangeLogService feeLog,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -90,6 +92,7 @@ namespace HpskSite.Controllers
             _feeSettings = feeSettings;
             _ageLimits = ageLimits;
             _ageProposals = ageProposals;
+            _feeLog = feeLog;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -232,20 +235,75 @@ namespace HpskSite.Controllers
             }
             else selectable = memberSelectable is "1" or "true" or "on";
 
+            // ⚠️ ÅRET HÖR TILL RADEN, inte till anropet (K10): en befintlig rad ändras i sitt eget år och rensningen gäller det året.
+            //    Raden ska dessutom tillhöra klubben i anropet — annars sa tjänsten tyst "success" för en annan klubbs kategori.
+            if (id > 0)
+            {
+                var rowYear = _feeService.GetCategoryYear(id);
+                if (rowYear is not int ry || !_feeService.GetCategories(clubId, ry).Any(c => c.Id == id))
+                    return Json(new { success = false, message = "Avgiften hittades inte." });
+                year = ry;
+            }
+            // ⚠️ En avgift per typ och år (K7). Det unika indexet tas i prod efter en dubblettkontroll; servern säger det först.
+            var typeTrim = membershipType.Trim();
+            var typeName = _feeSettings.GetTypesWithCounts(clubId).Select(t => t.Type).FirstOrDefault(t => MembershipTypeKeys.Same(t.Key, typeTrim))?.Name ?? typeTrim;
+            var yearCats = _feeService.GetCategories(clubId, year);
+            if (yearCats.Any(c => c.Id != id && string.Equals((c.MembershipType ?? "").Trim(), typeTrim, StringComparison.OrdinalIgnoreCase)))
+                return Json(new { success = false, message = $"{typeName} har redan en avgift {year}. Ändra den i stället." });
+            var beforeAmount = id > 0 ? yearCats.FirstOrDefault(c => c.Id == id)?.Amount : null;
+
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+
             var cat = new MembershipFeeCategory
             {
                 Id = id,
                 ClubId = clubId,
                 Year = year,
-                MembershipType = membershipType.Trim(),
-                Label = string.IsNullOrWhiteSpace(label) ? membershipType.Trim() : label.Trim(),
+                MembershipType = typeTrim,
+                Label = string.IsNullOrWhiteSpace(label) ? typeTrim : label.Trim(),
                 Amount = amount,
                 MemberSelectable = selectable
             };
             _feeService.SaveCategory(cat);
             // ⚠️ Oskickade avgifter följer inställningen — ingen medlem har fått dem än.
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true, data = new { cat.Id } });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, year, ClubFeeChangeEntity.Category, typeTrim, ClubFeeChangeAction.Saved,
+                beforeAmount is null ? $"Ny grundavgift {typeName} {year}: {amount:0.##} kr"
+                    : $"Grundavgift {typeName} {year}: {beforeAmount:0.##} → {amount:0.##} kr");
+            return Json(new { success = true, data = new { cat.Id }, consequences = await ConsequencesAsync(clubId, year, cleared) });
+        }
+
+        // Ändringsloggen (K4): vem, när, vad, och på vilken grund (kassör, delegat, admin utan kassör, sajtadmin, klubbadmin).
+        private async Task LogAsync(int clubId, int? year, string entity, string? key, string action, string detail)
+        {
+            var access = await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId);
+            var basis = access.Basis != LedgerAccessBasis.None ? access.Basis.ToString() : "ClubAdmin";
+            _feeLog.Record(clubId, year, entity, key, action, detail, await GetCurrentMemberIdAsync(), basis);
+        }
+
+        // Följderna av en inställningsändring, ur samma kalkyl som listan (ClubFeeConsequences). Belopp bara för den som får skriva avgifter.
+        private const string SettingsBusy = "Avgifterna skickas eller skapas just nu. Försök igen om en stund.";
+
+        private async Task<object> ConsequencesAsync(int clubId, int year, int cleared)
+        {
+            try
+            {
+                var categories = _feeService.GetCategories(clubId, year);
+                var members = ActiveFeeMembers(clubId);
+                var proposal = ClubFeeProposal.Build(categories, members);
+                var (parts, partTypes) = _feeService.GetParts(clubId, year);
+                var calcs = ClubFeeCalculator.ForProposal(proposal, categories, members, parts, partTypes);
+                var c = ClubFeeConsequences.Compute(cleared, _feeService.GetChargesForClubYear(clubId, year), proposal, calcs);
+                var canSeeAmounts = await _feeAccess.CanWriteAsync(clubId);
+                return new { year, unsentCleared = c.UnsentCleared, sentDiverging = (int?)c.SentDiverging, paidDiverging = (int?)c.PaidDiverging,
+                             divergingSum = canSeeAmounts ? (decimal?)c.DivergingSum : null };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Följderna av en inställningsändring kunde inte räknas för klubb {ClubId} {Year}", clubId, year);
+                return new { year, unsentCleared = cleared, sentDiverging = (int?)null, paidDiverging = (int?)null, divergingSum = (decimal?)null };
+            }
         }
 
         [HttpPost]
@@ -260,9 +318,14 @@ namespace HpskSite.Controllers
             // ⚠️ Kategorin måste höra till klubben i anropet — annars raderar skrivrätten i klubb A klubb B:s taxa.
             if (year is not int y || !_feeService.GetCategories(clubId, y).Any(c => c.Id == id))
                 return Json(new { success = false, message = "Kategorin hittades inte." });
+            using var lease = _feeService.TryLockSettings(clubId, y);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+            var gone = _feeService.GetCategories(clubId, y).FirstOrDefault(c => c.Id == id);
             _feeService.DeleteCategory(id);
-            _feeService.ClearUnsentClubCharges(clubId, y);
-            return Json(new { success = true });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, y);
+            await LogAsync(clubId, y, ClubFeeChangeEntity.Category, gone?.MembershipType, ClubFeeChangeAction.Deleted,
+                $"Grundavgift {gone?.MembershipType} {y} borttagen ({gone?.Amount:0.##} kr)");
+            return Json(new { success = true, consequences = await ConsequencesAsync(clubId, y, cleared) });
         }
 
         // ── Tillägg/avdrag och tillval (steg 3) ───────────────────────
@@ -299,11 +362,18 @@ namespace HpskSite.Controllers
             if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+            var (partsBefore, _) = _feeService.GetParts(clubId, year);
+            var partBefore = id > 0 ? partsBefore.FirstOrDefault(p => p.Id == id) : null;
             var (partId, error) = _feeSettings.SavePart(clubId, year, id, label, amount, condition, optionId, typeKeys);
             if (error is not null) return Json(new { success = false, message = error });
             // ⚠️ Oskickade avgifter följer inställningen (som för grundavgiften); skickade och betalda rörs aldrig.
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true, data = new { id = partId } });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, year, ClubFeeChangeEntity.Part, partId.ToString(), ClubFeeChangeAction.Saved,
+                partBefore is null ? $"Nytt tillägg/avdrag {label?.Trim()} {year}: {amount:+0.##;−0.##} kr ({condition})"
+                    : $"Tillägg/avdrag {partBefore.Label} {year}: {partBefore.Amount:+0.##;−0.##} → {amount:+0.##;−0.##} kr ({condition})");
+            return Json(new { success = true, data = new { id = partId }, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         [HttpPost]
@@ -313,10 +383,16 @@ namespace HpskSite.Controllers
         {
             if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+            var goneParts = _feeService.GetParts(clubId, year).Parts;
+            var gonePart = goneParts.FirstOrDefault(p => p.Id == id);
             if (!_feeSettings.DeletePart(clubId, year, id))
                 return Json(new { success = false, message = "Tillägget hittades inte." });
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, year, ClubFeeChangeEntity.Part, id.ToString(), ClubFeeChangeAction.Deleted,
+                $"Tillägg/avdrag {gonePart?.Label} {year} borttaget ({gonePart?.Amount:+0.##;−0.##} kr)");
+            return Json(new { success = true, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         [HttpPost]
@@ -327,10 +403,15 @@ namespace HpskSite.Controllers
             if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            var (optId, error) = _feeSettings.SaveOption(clubId, id, name, systemKey, isActive is "1" or "true" or "on");
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+            var active = isActive is "1" or "true" or "on";
+            var (optId, error) = _feeSettings.SaveOption(clubId, id, name, systemKey, active);
             if (error is not null) return Json(new { success = false, message = error });
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true, data = new { id = optId } });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, null, ClubFeeChangeEntity.Option, optId.ToString(), ClubFeeChangeAction.Saved,
+                $"{(id > 0 ? "Förbund" : "Nytt förbund")} {name?.Trim()}{(active ? "" : " (dolt)")}");
+            return Json(new { success = true, data = new { id = optId }, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         [HttpPost]
@@ -340,8 +421,10 @@ namespace HpskSite.Controllers
         {
             if (!await _feeAccess.CanWriteAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            var optName = _feeSettings.GetOptions(clubId, includeInactive: true).FirstOrDefault(o => o.Id == id)?.Name;
             var (deleted, error) = _feeSettings.DeleteOption(clubId, id);
             if (!deleted) return Json(new { success = false, message = error });
+            await LogAsync(clubId, null, ClubFeeChangeEntity.Option, id.ToString(), ClubFeeChangeAction.Deleted, $"Förbund {optName} borttaget");
             return Json(new { success = true });
         }
 
@@ -360,10 +443,14 @@ namespace HpskSite.Controllers
         {
             if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
             var error = _feeSettings.SetMemberOptions(clubId, memberId, optionIds ?? Array.Empty<int>());
             if (error is not null) return Json(new { success = false, message = error });
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, null, ClubFeeChangeEntity.MemberOption, memberId.ToString(), ClubFeeChangeAction.Saved,
+                $"Förbund för medlem {memberId}: {(optionIds is { Length: > 0 } ? string.Join(", ", optionIds) : "inga")}");
+            return Json(new { success = true, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         // ── Medlemstyper (steg 3) ─────────────────────────────────────
@@ -546,10 +633,15 @@ namespace HpskSite.Controllers
         {
             if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
-            var (k, error) = _feeSettings.SaveType(clubId, key, name, isActive is "1" or "true" or "on");
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+            var typeActive = isActive is "1" or "true" or "on";
+            var (k, error) = _feeSettings.SaveType(clubId, key, name, typeActive);
             if (error is not null) return Json(new { success = false, message = error });
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true, data = new { key = k } });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, null, ClubFeeChangeEntity.Type, k, ClubFeeChangeAction.Saved,
+                $"Medlemstyp {name?.Trim()}{(typeActive ? "" : " (dold)")}");
+            return Json(new { success = true, data = new { key = k }, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         [HttpPost]
@@ -570,10 +662,14 @@ namespace HpskSite.Controllers
         {
             if (!await _memberAccess.CanManageMemberAsync(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
             var (changed, error) = _feeSettings.SetMembersType(clubId, toKey, memberIds, fromKey, fromUntyped is "1" or "true" or "on");
             if (error is not null) return Json(new { success = false, message = error });
-            _feeService.ClearUnsentClubCharges(clubId, year);
-            return Json(new { success = true, data = new { changed } });
+            var cleared = _feeService.ClearUnsentClubCharges(clubId, year);
+            await LogAsync(clubId, null, ClubFeeChangeEntity.MembersType, toKey, ClubFeeChangeAction.Saved,
+                $"{changed} medlemmar fick typen {toKey}{(string.IsNullOrWhiteSpace(fromKey) ? "" : " (från " + fromKey + ")")}");
+            return Json(new { success = true, data = new { changed }, consequences = await ConsequencesAsync(clubId, year, cleared) });
         }
 
         // ── Charges ───────────────────────────────────────────────────
@@ -716,6 +812,11 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var clubName = _clubService.GetClubNameById(clubId) ?? "Klubben";
+            // ⚠️ Låset hålls under hela utskicket: en inställningsändring mitt i loopen rensade avgifter som mejlen redan pekade på
+            //    (döda betallänkar, gamla belopp). Ändringen får vänta eller säga att utskick pågår (expertgruppen 2026-11-26, K2).
+            using var sendLease = _feeService.TryLockSettings(clubId, year);
+            if (sendLease is null)
+                return Json(new { success = false, message = "Avgifterna skickas eller skapas just nu av någon annan. Försök igen om en stund." });
             // ⚠️ Samma tre urval som kretsavgiften: chargeIds = bara de, "unsent" = de som inte gått
             //    ut, "reminder" = de som gått ut men inte betalats. Inget = alla obetalda.
             var only = (chargeIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)

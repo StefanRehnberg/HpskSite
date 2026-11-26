@@ -20,9 +20,15 @@ namespace HpskSite.Services
         }
 
         public async Task<bool> CanManageMemberAsync(int clubId)
-            => clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _fee.CanWriteAsync(clubId));
+        {
+            if (clubId <= 0) return false;
+            // ⚠️ Revisorn FÖRST, som i ekonomins egen upplösning: en revisor som också är klubbadmin får aldrig ändra typ, ålder
+            //    eller förbund — det rensar oskickade avgifter och ändrar belopp i det hen granskar (expertgruppen 2026-11-26, K1).
+            if (await _fee.IsAuditorAsync(clubId)) return false;
+            return Decide(await _auth.IsClubAdminForClub(clubId), await _fee.CanWriteAsync(clubId));
+        }
 
-        /// <summary>Beslutet som ren funktion — testas utan Umbraco.</summary>
-        public static bool Decide(bool isClubAdmin, bool isTreasurer) => isClubAdmin || isTreasurer;
+        /// <summary>Beslutet som ren funktion — testas utan Umbraco. Revisorn skriver aldrig, vilken annan roll hen än har.</summary>
+        public static bool Decide(bool isClubAdmin, bool isTreasurer, bool isAuditor = false) => !isAuditor && (isClubAdmin || isTreasurer);
     }
 }

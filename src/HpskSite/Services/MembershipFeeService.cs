@@ -290,6 +290,14 @@ namespace HpskSite.Services
         /// 0 kr "covered" charge referencing the primary's charge via HouseholdCoveredByChargeId,
         /// so they show as included rather than owing a separate fee.
         /// </summary>
+        /// <summary>
+        /// ⚠️ Samma lås som skapandet och utskicket (<c>fee-generate:{klubb}:{år}</c>) för varje ändring av taxa, tillägg, förbund eller typer
+        /// som rensar oskickade avgifter. Utan det kunde en sparning under pågående utskick lämna döda betallänkar och gamla belopp
+        /// (expertgruppen 2026-11-26, K2). Null = någon skickar eller skapar avgifter just nu.
+        /// </summary>
+        public Hosting.DatabaseLock.Lease? TryLockSettings(int clubId, int year)
+            => _dbLock.TryAcquire($"fee-generate:{clubId}:{year}", TimeSpan.FromSeconds(10));
+
         public int GenerateChargesForClub(int clubId, int year, IEnumerable<MemberFeeInput> members)
         {
             // ⚠️ Ett lås per (klubb, år): dubbelklick eller två kassörer samtidigt läste annars båda

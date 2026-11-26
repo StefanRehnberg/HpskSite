@@ -22,6 +22,10 @@ namespace HpskSite.Services.Ledger
         public async Task<bool> CanWriteAsync(int clubId)
             => clubId > 0 && Decide((await _ledger.ResolveAsync(DocumentOwnerType.Club, clubId)).Access);
 
+        /// <summary>Är den inloggade klubbens revisor (vald eller inbjuden)? Revisorn prövas först i <c>ResolveAsync</c> och skriver aldrig.</summary>
+        public async Task<bool> IsAuditorAsync(int clubId)
+            => clubId > 0 && (await _ledger.ResolveAsync(DocumentOwnerType.Club, clubId)).IsAuditor;
+
         /// <summary>Själva beslutet som ren funktion — testas utan Umbraco.</summary>
         public static bool Decide(LedgerAccess access) => access == LedgerAccess.Write;
     }

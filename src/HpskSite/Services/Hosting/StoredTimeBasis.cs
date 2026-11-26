@@ -27,6 +27,7 @@ namespace HpskSite.Services.Hosting
             "ClubMembershipTypeAge.CreatedUtc", "ClubMembershipTypeAge.UpdatedUtc",
             "ClubMemberAgeRuleOptOut.CreatedUtc",
             "ClubMembershipTypeChange.ChangedUtc",
+            "ClubFeeChangeLog.ChangedUtc",
             "CompetitionChampions.EnteredAt",
             "CompetitionChange.AtUtc",
             "CompetitionEventLink.LinkedUtc",

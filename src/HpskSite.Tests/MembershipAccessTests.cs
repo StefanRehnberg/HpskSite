@@ -19,6 +19,25 @@ namespace HpskSite.Tests
         public void Klubbadmin_eller_kassor_far_hantera_medlemskapet(bool admin, bool treasurer, bool expected)
             => Assert.Equal(expected, MembershipAccess.Decide(admin, treasurer));
 
+        [Theory]
+        [InlineData(true, false, true)]    // revisor som också är klubbadmin
+        [InlineData(false, true, true)]    // revisor som också är kassör i registret (av misstag)
+        [InlineData(true, true, true)]
+        [InlineData(false, false, true)]
+        public void Revisorn_far_aldrig_hantera_medlemskapet_vilken_annan_roll_hen_an_har(bool admin, bool treasurer, bool auditor)
+            => Assert.False(MembershipAccess.Decide(admin, treasurer, auditor));
+
+        [Fact]
+        public void Controllern_prover_revisorn_forst()
+        {
+            var src = Src(Path.Combine("Services", "MembershipAccess.cs"));
+            var i = src.IndexOf("CanManageMemberAsync(int clubId)", StringComparison.Ordinal);
+            Assert.True(i >= 0);
+            var body = src.Substring(i, Math.Min(700, src.Length - i));
+            Assert.True(body.IndexOf("IsAuditorAsync", StringComparison.Ordinal) < body.IndexOf("IsClubAdminForClub", StringComparison.Ordinal),
+                "Revisorsspärren måste ligga före administratörsprövningen.");
+        }
+
         private static string Src(string rel, [CallerFilePath] string thisFile = "") =>
             File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "..", "HpskSite", rel)));
 

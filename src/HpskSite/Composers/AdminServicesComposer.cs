@@ -130,6 +130,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ClubFeeInputService>();
             builder.Services.AddScoped<MembershipTypeCatalog>();
             builder.Services.AddScoped<ClubFeeSettingsService>();
+            builder.Services.AddScoped<ClubFeeChangeLogService>();
             builder.Services.AddScoped<MembershipAgeLimits>();           // steg 3b: åldersgränser per medlemstyp
             builder.Services.AddScoped<MembershipAgeProposalService>();  // steg 3b: förslagslista, godkännande, behåll typen, ångra
             builder.Services.AddHostedService<MembershipFeeSchemaGuardHostedService>();
