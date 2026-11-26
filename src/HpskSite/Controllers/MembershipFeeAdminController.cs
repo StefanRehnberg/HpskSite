@@ -353,6 +353,55 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Exempelräkningen: vad skulle en person (eller en familj) betala enligt årets regler? Skriver ingenting.
+        /// Personerna kommer som parallella listor: <c>type</c>, <c>home</c> (ours|other|tom), <c>options</c> ("7,8").
+        /// Samma väg som listan och skapandet (<see cref="ClubFeePreview"/>). Läsrätt räcker; belopp ser bara den som får läsa.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("LedgerAccess.CanRead(klubben); skriver inget, räknar på syntetiska personer")]
+        public async Task<IActionResult> PreviewFee(int clubId, int year, string[]? type, string[]? home, string[]? options)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var types = type ?? Array.Empty<string>();
+            if (types.Length == 0 || types.Length > 12)
+                return Json(new { success = false, message = "Ange mellan 1 och 12 personer." });
+
+            var people = new List<MemberFeeInput>();
+            for (var i = 0; i < types.Length; i++)
+            {
+                var ids = new List<int>();
+                var raw = options is not null && i < options.Length ? options[i] : null;
+                foreach (var s in (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (int.TryParse(s, out var id) && id > 0) ids.Add(id);
+                var h = home is not null && i < home.Length ? home[i] : null;
+                people.Add(new MemberFeeInput
+                {
+                    MembershipType = types[i],
+                    HomeClub = h switch
+                    {
+                        "ours" => PrimaryClubState.Ours,
+                        "other" => PrimaryClubState.Other,
+                        _ => PrimaryClubState.Unknown
+                    },
+                    OptionIds = ids
+                });
+            }
+
+            var categories = _feeService.GetCategories(clubId, year);
+            var (parts, partTypes) = _feeService.GetParts(clubId, year);
+            var result = ClubFeePreview.Compute(categories.ToList(), parts.ToList(), partTypes, people);
+            return Json(new
+            {
+                success = true,
+                kind = result.Kind.ToString(),
+                total = result.Calculation.Total,
+                lines = result.Calculation.Lines.Select(l => new { l.Kind, l.Description, l.Amount, l.PartId })
+            });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); tillägget prövas mot klubben och året i anropet")]
