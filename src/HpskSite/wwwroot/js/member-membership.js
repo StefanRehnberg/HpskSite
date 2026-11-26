@@ -144,7 +144,7 @@
     function proposalLines(p) {
         if (!p || !p.lines || p.lines.length < 2 || (p.kind !== 'Individual' && p.kind !== 'HouseholdPrimary')) return '';
         return '<ul class="hm-hint mb-0 mt-1 ps-3">' + p.lines.map(function (l) {
-            return '<li>' + esc(l.text) + ': ' + esc(kr(l.amount)) + '</li>';
+            return '<li>' + esc(l.text) + ': ' + esc(kr(l.amount)) + (l.why ? ' <span class="opacity-75">(' + esc(l.why) + ')</span>' : '') + '</li>';
         }).join('') + '</ul>';
     }
 

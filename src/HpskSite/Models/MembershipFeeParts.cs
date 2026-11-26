@@ -83,12 +83,13 @@ namespace HpskSite.Models
 
         /// <summary>
         /// Texten på avgiftsraden och i mejlet. Ett tillägg som gäller ett tillval får tillvalets namn med
-        /// ("Förbundsavgift – Sportskytte"), annars säger flera rader samma sak. Heter etiketten redan så lämnas den.
+        /// ("Förbundsavgift – Sportskytte"), annars säger flera rader samma sak. Nämner etiketten redan förbundet ("Svartkrut" för "Svenska Svartkruts SkytteFederationen", eller tvärtom) lämnas den.
         /// </summary>
         [Ignore]
         public string DisplayLabel =>
             Condition == MembershipFeePartCondition.Option && !string.IsNullOrWhiteSpace(OptionName)
             && Label.IndexOf(OptionName, StringComparison.OrdinalIgnoreCase) < 0
+            && OptionName.IndexOf(Label, StringComparison.OrdinalIgnoreCase) < 0
                 ? $"{Label} – {OptionName}"
                 : Label;
     }

@@ -63,6 +63,15 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Kort_etikett_som_ingar_i_tillvalets_langa_namn_upprepas_inte()
+        {
+            var a = Part(1, "Svartkrut", 200m, MembershipFeePartCondition.Option, option: 7); a.OptionName = "Svenska Svartkruts SkytteFederationen";
+            var b = Part(2, "Skyttesportförbundet", 300m, MembershipFeePartCondition.Option, option: 8); b.OptionName = "Svenska Skyttesportförbundet";
+            var c = Calc(600m, new[] { P(1, options: new[] { 7, 8 }) }, new[] { a, b });
+            Assert.Equal(new[] { "Senior", "Svartkrut", "Skyttesportförbundet" }, c.Lines.Select(l => l.Description).ToArray());
+        }
+
+        [Fact]
         public void Saknad_huvudklubb_traffar_varken_vi_eller_annan()
         {
             var parts = new[]

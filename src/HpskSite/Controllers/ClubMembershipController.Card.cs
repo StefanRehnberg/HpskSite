@@ -139,7 +139,8 @@ namespace HpskSite.Controllers
             // Förslaget när ingen avgift finns än: SAMMA regel och beräkning som Ekonomis lista (ClubFeeProposal + ClubFeeCalculator).
             // ⚠️ Bara för den som får läsa avgifter — belopp och rader lämnas aldrig till klubbadmin.
             object? proposal = null;
-            if (canSeeFees && chargeState == "none")
+            // Också för en oskickad avgift (den följer förslaget tills den skickas), så raderna och skälen syns i dialogen.
+            if (canSeeFees && (chargeState == "none" || chargeState == "unsent"))
             {
                 try
                 {
@@ -157,7 +158,12 @@ namespace HpskSite.Controllers
                             kind = pr.Kind.ToString(),
                             amount = calc.Total,
                             coveredBy = primaryName,
-                            lines = calc.Lines.Select(l => new { kind = l.Kind, text = l.Description, amount = l.Amount })
+                            // why = skälet till ett tillägg/avdrag, så att "Förbundsavgift +300 kr" går att förstå utan att öppna inställningarna.
+                            lines = calc.Lines.Select(l => new
+                            {
+                                kind = l.Kind, text = l.Description, amount = l.Amount,
+                                why = l.PartId is int pid ? PartReason(feeParts.FirstOrDefault(p => p.Id == pid)) : null
+                            })
                         };
                     }
                 }
@@ -350,6 +356,18 @@ namespace HpskSite.Controllers
                 var saved = done.Count == 0 ? "Inget hann sparas." : $"Det hann sparas: {string.Join(", ", done)}.";
                 return Json(new { success = false, message = $"{who} sparades inte helt. {saved} Öppna dialogen igen och försök på nytt." });
             }
+        }
+
+        private static string? PartReason(MembershipFeePart? p)
+        {
+            if (p == null) return null;
+            return p.Condition switch
+            {
+                MembershipFeePartCondition.PrimaryClub => "klubben är huvudklubb",
+                MembershipFeePartCondition.NotPrimaryClub => "en annan klubb är huvudklubb",
+                MembershipFeePartCondition.Option => string.IsNullOrWhiteSpace(p.OptionName) ? "har tillvalet" : "är med i " + p.OptionName,
+                _ => "gäller alla"
+            };
         }
 
         private List<AgeStep> SafeSteps(int clubId)
