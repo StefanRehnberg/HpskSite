@@ -127,10 +127,31 @@
             + '<div class="hm-field"><label for="hm_notes">Anteckningar (syns bara för klubben)</label><textarea id="hm_notes" class="form-control" rows="2" maxlength="4000">' + esc(c.notes || '') + '</textarea></div></details>';
     }
 
+    function kr(n) { return (Math.round(n * 100) / 100).toString().replace('.', ',') + ' kr'; }
+
+    // Förslaget (ingen avgift skapad än): samma tal som Medlemsavgifter visar. Beloppet ändras inte av ett osparat val i dialogen.
+    function proposalText(p) {
+        if (!p) return 'ingen avgift skapad än';
+        switch (p.kind) {
+            case 'Individual': case 'HouseholdPrimary': return 'förslag ' + kr(p.amount) + ', ännu inte skapad';
+            case 'Covered': return 'ingår i familjeavgiften' + (p.coveredBy ? ' som ' + p.coveredBy + ' betalar' : '');
+            case 'NoCategory': return 'klubben har ingen avgift för medlemstypen i år';
+            case 'ChooseType': return 'medlemmen väljer typ själv på betalsidan';
+            default: return 'ingen avgift skapad än, medlemmen saknar medlemstyp';
+        }
+    }
+
+    function proposalLines(p) {
+        if (!p || !p.lines || p.lines.length < 2 || (p.kind !== 'Individual' && p.kind !== 'HouseholdPrimary')) return '';
+        return '<ul class="hm-hint mb-0 mt-1 ps-3">' + p.lines.map(function (l) {
+            return '<li>' + esc(l.text) + ': ' + esc(kr(l.amount)) + '</li>';
+        }).join('') + '</ul>';
+    }
+
     function feeNote(d) {
         if (d.canSeeFees) {
-            var t = d.charge && d.charge.text ? d.charge.text : 'ingen avgift skapad än';
-            return '<div class="hm-fee">Avgift ' + d.year + ': ' + esc(t) + '.' + (onEkonomi() ? '' : ' <a href="/ekonomi?type=0&id=' + d.clubId + '&vy=arsavgift">Öppna Medlemsavgifter</a>') + '</div>';
+            var t = d.charge && d.charge.text ? d.charge.text : proposalText(d.charge && d.charge.proposal);
+            return '<div class="hm-fee">Avgift ' + d.year + ': ' + esc(t) + '.' + proposalLines(d.charge && d.charge.proposal) + (onEkonomi() ? '' : ' <a href="/ekonomi?type=0&id=' + d.clubId + '&vy=arsavgift">Öppna Medlemsavgifter</a>') + '</div>';
         }
         return '<p class="hm-hint mb-0">När du sparar ser kassören ändringen under Medlemsavgifter.</p>';
     }

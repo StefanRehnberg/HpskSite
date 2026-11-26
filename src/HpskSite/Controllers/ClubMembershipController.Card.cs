@@ -136,6 +136,34 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Avgiften kunde inte läsas för medlem {MemberId} i klubb {ClubId}", memberId, clubId); }
 
+            // Förslaget när ingen avgift finns än: SAMMA regel och beräkning som Ekonomis lista (ClubFeeProposal + ClubFeeCalculator).
+            // ⚠️ Bara för den som får läsa avgifter — belopp och rader lämnas aldrig till klubbadmin.
+            object? proposal = null;
+            if (canSeeFees && chargeState == "none")
+            {
+                try
+                {
+                    var categories = _feeService.GetCategories(clubId, feeYear);
+                    var feeMembers = _feeInput.ActiveFeeMembers(clubId);
+                    var rows = ClubFeeProposal.Build(categories, feeMembers);
+                    if (rows.TryGetValue(memberId, out var pr))
+                    {
+                        var (feeParts, feePartTypes) = _feeService.GetParts(clubId, feeYear);
+                        var calcs = ClubFeeCalculator.ForProposal(rows, categories, feeMembers, feeParts, feePartTypes);
+                        var calc = calcs.GetValueOrDefault(memberId, FeeCalculation.None);
+                        string? primaryName = pr.PrimaryMemberId is int pm ? MemberName(pm) : null;
+                        proposal = new
+                        {
+                            kind = pr.Kind.ToString(),
+                            amount = calc.Total,
+                            coveredBy = primaryName,
+                            lines = calc.Lines.Select(l => new { kind = l.Kind, text = l.Description, amount = l.Amount })
+                        };
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Avgiftsförslaget kunde inte räknas för medlem {MemberId} i klubb {ClubId}", memberId, clubId); }
+            }
+
             return Json(new
             {
                 success = true,
@@ -161,7 +189,7 @@ namespace HpskSite.Controllers
                     backgroundCheckDate = Fmt(row?.BackgroundCheckDate),
                     registeredInMap = row?.RegisteredInMap ?? false,
                     memberNotes = row?.MemberNotes ?? "",
-                    charge = new { state = chargeState, text = chargeText }
+                    charge = new { state = chargeState, text = chargeText, proposal }
                 }
             });
         }

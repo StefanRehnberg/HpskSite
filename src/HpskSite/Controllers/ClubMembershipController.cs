@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly ClubRosterService _roster;
         private readonly MembershipFeeService _feeService;
+        private readonly ClubFeeInputService _feeInput;
 
         public ClubMembershipController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -54,7 +55,8 @@ namespace HpskSite.Controllers
             MembershipAgeLimits ageLimits,
             ClubService clubService,
             ClubRosterService roster,
-            MembershipFeeService feeService)
+            MembershipFeeService feeService,
+            ClubFeeInputService feeInput)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _membershipService = membershipService;
@@ -69,6 +71,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _roster = roster;
             _feeService = feeService;
+            _feeInput = feeInput;
         }
 
         [HttpGet]
