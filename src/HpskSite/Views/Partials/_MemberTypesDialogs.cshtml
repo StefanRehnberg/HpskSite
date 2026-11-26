@@ -1,0 +1,80 @@
+@* Medlemstyper och åldersgränser, Åldersförslag och bekräftelsedialogen. Delad av Medlemmar (klubbadmin och kassör)
+   och Ekonomi → Medlemsavgifter. Ritas och styrs av member-types.js (window.hpskMemberTypes). Lägg partialen EN gång per sida. *@
+@if (ViewData["mtDialogsIncluded"] == null)
+{
+    ViewData["mtDialogsIncluded"] = true;
+    <div id="mtRoot">
+        @Html.AntiForgeryToken()
+
+        @* Typerna sparas direkt; åldersgränserna sparas som HELA stegen med knappen. *@
+        <div class="modal fade" id="mtTypesModal" tabindex="-1" aria-hidden="true" aria-labelledby="mtTypesTitle">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="mtTypesTitle">Medlemstyper och åldersgränser</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-muted small">Fyll i <strong>från ålder</strong> för typer som hör till en ålder. Då föreslår vi byten när någon byter åldersgrupp,
+                            och klubben godkänner listan. På betalsidan kan medlemmen bara välja typer för sin ålder.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead><tr><th>Medlemstyp</th><th class="text-end d-none d-sm-table-cell">Medlemmar</th><th>Från ålder</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                                <tbody id="mtTypeRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="mb-3"><button type="button" class="btn btn-sm btn-outline-secondary" id="mtNewTypeBtn"><i class="bi bi-plus-lg me-1"></i>Ny medlemstyp…</button></div>
+                        <div class="fw-semibold small" id="mtAgeSummary"></div>
+                        <div class="small text-muted mt-1 d-none" id="mtAgeSuggest">
+                            <span>Förslag efter SHB: Junior till 20 år, Senior från 21, Veteran från 60. Klubben bestämmer själv.</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="mtAgeFill">Fyll i förslaget</button>
+                        </div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="mtTypesError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                        <button type="button" class="btn btn-primary" id="mtAgeSave" disabled>Spara åldersgränser</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* Förslagslistan: vilka medlemmar som bör byta medlemstyp efter ålder. Sparas aldrig; godkänns som en lista. *@
+        <div class="modal fade" id="mtAgeModal" tabindex="-1" aria-hidden="true" aria-labelledby="mtAgeTitle">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="mtAgeTitle">Åldersförslag</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body" id="mtAgeBody"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                        <button type="button" class="btn btn-primary" id="mtAgeApply" disabled>Godkänn valda</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* EN liten dialog för bekräftelser och namnfrågor (ingen window.confirm — den har rapporterats som att sidan "frös"). *@
+        <div class="modal fade" id="mtSubModal" tabindex="-1" aria-hidden="true" aria-labelledby="mtSubTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="mtSubTitle"></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="mtSubBody"></div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="mtSubError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="mtSubOk">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="~/js/member-types.js" asp-append-version="true"></script>
+}

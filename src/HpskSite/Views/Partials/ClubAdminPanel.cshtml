@@ -494,6 +494,21 @@
                                 <i class="bi bi-person-plus-fill me-2 text-success"></i>Lägg till klubbmedlem
                             </button>
                         </li>
+                        <li>
+                            <button class="dropdown-item" type="button" onclick="openMemberTypes()">
+                                <i class="bi bi-people me-2 text-secondary"></i>Medlemstyper och åldersgränser…
+                            </button>
+                        </li>
+                        <li class="d-none" id="memberAgeItemLi">
+                            <button class="dropdown-item" type="button" onclick="openMemberAgeProposals()" id="memberAgeItem">
+                                <i class="bi bi-arrow-left-right me-2 text-secondary"></i><span>Åldersförslag…</span>
+                            </button>
+                        </li>
+                        <li class="d-none" id="memberUntypedItemLi">
+                            <button class="dropdown-item" type="button" onclick="openMemberSetUntyped()" id="memberUntypedItem">
+                                <i class="bi bi-tag me-2 text-secondary"></i><span>Sätt typ på alla…</span>
+                            </button>
+                        </li>
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Kommunikation</h6></li>
                         <li>
@@ -568,6 +583,7 @@
 
         @* Fas B4: klubbens träningar. Partialen skriver ut sin egen tab-pane (#clubTrainingsTab). *@
         @await Html.PartialAsync("_MemberMembershipDialog")
+        @await Html.PartialAsync("_MemberTypesDialogs")
         @await Html.PartialAsync("ClubAdminTrainings")
         @* Flytt av klubbens gamla träningshändelser (2026-10-07). Bara modaler + skript; korten
            (#ctmEventsNotice, #ctmCard, #ctmRailCount) står där de syns. *@
@@ -4809,6 +4825,7 @@ function loadClubMembers() {
         .then(data => {
             if (data.success) {
                 displayClubMembers(data.data || []);
+                refreshMemberTypesMenu().catch(() => { });
             } else {
                 container.innerHTML = '<div class="alert alert-warning">Kunde inte ladda medlemmar.</div>';
             }
@@ -4892,6 +4909,34 @@ function setClubMemberFilter(key) {
 // Dialogen Medlemskap (delad med Ekonomi → Medlemsavgifter). Efter sparning laddas listan om.
 function openMemberMembership(memberId) {
     window.hpskMembership.open({ clubId: clubId, memberId: memberId, onSaved: function () { loadClubMembers(); } });
+}
+
+// Medlemstyper, åldersgränser, Åldersförslag och "Sätt typ på alla" (delad komponent member-types.js, samma som Ekonomi).
+// Klubbadmin får allt utom beloppen; belopp i förslagslistan visas bara för den som får läsa avgifter (servern avgör).
+function memberTypesOpts() {
+    return {
+        clubId: clubId, canSeeFees: false, readOnly: false,
+        onChanged: function () { loadClubMembers(); }
+    };
+}
+function openMemberTypes() { window.hpskMemberTypes.openTypes(memberTypesOpts()); }
+function openMemberAgeProposals() { window.hpskMemberTypes.openAge(memberTypesOpts()); }
+function openMemberSetUntyped() { window.hpskMemberTypes.openSetUntyped(memberTypesOpts()); }
+// Antalet i menyraderna. Går det inte att räkna visas raderna inte.
+let memberTypesSeq = 0;
+async function refreshMemberTypesMenu() {
+    const mine = ++memberTypesSeq;
+    const s = await window.hpskMemberTypes.summary(memberTypesOpts());
+    if (mine !== memberTypesSeq) return;
+    const age = document.getElementById('memberAgeItemLi'), un = document.getElementById('memberUntypedItemLi');
+    if (age) {
+        age.classList.toggle('d-none', !s.ageEnabled);
+        age.querySelector('span').textContent = 'Åldersförslag' + (s.ageProposals ? ' (' + s.ageProposals + ')' : '') + '…';
+    }
+    if (un) {
+        un.classList.toggle('d-none', !(s.untyped > 0));
+        un.querySelector('span').textContent = 'Sätt typ på alla (' + s.untyped + ')…';
+    }
 }
 
 function sortClubMembers(key) {
