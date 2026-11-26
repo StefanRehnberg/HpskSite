@@ -157,9 +157,8 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small">Medlemstyperna är klubbens egna. Ange <strong>från ålder</strong> för de typer som hör till en ålder,
-                    så föreslår vi byten när medlemmar byter åldersgrupp — kassören godkänner en lista, inget byts av sig självt.
-                    Medlemmen kan inte heller välja en typ utanför sin åldersgrupp på betalsidan.</p>
+                <p class="text-muted small">Fyll i <strong>från ålder</strong> för typer som hör till en ålder. Då föreslår vi byten när någon byter åldersgrupp,
+                    och kassören godkänner listan. På betalsidan kan medlemmen bara välja typer för sin ålder.</p>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle mb-2">
                         <thead><tr><th>Medlemstyp</th><th class="text-end d-none d-sm-table-cell">Medlemmar</th><th>Från ålder</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
@@ -169,8 +168,7 @@
                 <div class="mb-3"><button type="button" class="btn btn-sm btn-outline-secondary" id="cfNewTypeBtn"><i class="bi bi-plus-lg me-1"></i>Ny medlemstyp…</button></div>
                 <div class="fw-semibold small" id="cfAgeSummary"></div>
                 <div class="small text-muted mt-1 d-none" id="cfAgeSuggest">
-                    <span>Förslag efter SHB: junior till och med det år man fyller 20 (Senior från 21) och veteran från 60.
-                        SHB gäller tävlingsklass, inte avgift — klubben bestämmer själv.</span>
+                    <span>Förslag efter SHB: Junior till 20 år, Senior från 21, Veteran från 60. Klubben bestämmer själv.</span>
                     <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="cfAgeFill">Fyll i förslaget</button>
                 </div>
                 <div class="alert alert-danger d-none mt-3 mb-0" id="cfTypesError"></div>
@@ -864,7 +862,7 @@
     function nameField(value) {
         return '<label class="form-label" for="cfTypeNameInput">Namn</label>'
              + '<input id="cfTypeNameInput" class="form-control" maxlength="50" autocomplete="off" value="' + esc(value || '') + '">'
-             + '<p class="text-muted small mt-2 mb-0">Namnet visas överallt: i listan, på betalsidan och i mejlen.</p>';
+             + '<p class="text-muted small mt-2 mb-0">Namnet visas i listan, på betalsidan och i mejlen.</p>';
     }
     async function saveType(key, name, active) {
         var d = await form('SaveMemberType', { clubId: CLUB_ID, year: year(), key: key, name: name, isActive: active ? '1' : '0' });
@@ -895,10 +893,10 @@
         } else if (act === 'hide') {
             var others = types.filter(function (x) { return x.isActive && x.key !== t.key && !/^familj$/i.test(x.key); });
             var move = t.members > 0
-                ? '<p class="mb-2">' + t.members + (t.members === 1 ? ' medlem har' : ' medlemmar har') + ' typen ' + esc(t.name) + '. Flytta dem till en annan typ innan den döljs, annars står de kvar på en dold typ.</p>'
+                ? '<p class="mb-2">' + t.members + (t.members === 1 ? ' medlem har' : ' medlemmar har') + ' typen ' + esc(t.name) + '. Flytta dem till en annan typ, annars står de kvar på en dold typ.</p>'
                   + '<label class="form-label" for="cfMoveTo">Flytta medlemmarna till</label><select id="cfMoveTo" class="form-select">'
                   + '<option value="">Flytta inte</option>' + others.map(function (x) { return '<option value="' + esc(x.key) + '">' + esc(x.name) + '</option>'; }).join('') + '</select>'
-                : '<p class="mb-0">Typen ' + esc(t.name) + ' har inga medlemmar. En dold typ kan inte väljas men kan visas igen.</p>';
+                : '<p class="mb-0">Typen ' + esc(t.name) + ' har inga medlemmar. Den kan visas igen senare.</p>';
             openSub({ title: 'Dölj ' + t.name, ok: 'Dölj', from: 'cfTypesModal', body: move,
                 onOk: async function () {
                     var to = $('cfMoveTo') ? $('cfMoveTo').value : '';
@@ -910,7 +908,7 @@
                 } });
         } else if (act === 'delete') {
             openSub({ title: 'Ta bort ' + t.name, ok: 'Ta bort', danger: true, from: 'cfTypesModal',
-                body: '<p class="mb-0">Ta bort den egna medlemstypen ' + esc(t.name) + '? Det går bara om ingen medlem, avgift eller åldersgräns använder den.</p>',
+                body: '<p class="mb-0">Ta bort medlemstypen ' + esc(t.name) + '? Det går bara när ingen medlem, avgift eller åldersgräns använder den.</p>',
                 onOk: async function () {
                     var d = await form('DeleteMemberType', { clubId: CLUB_ID, key: t.key });
                     if (!d.success) return d.message || 'Typen kunde inte tas bort.';
