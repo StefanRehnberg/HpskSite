@@ -869,7 +869,6 @@
         $('cfOptionRows').innerHTML = (fs.options || []).map(function (o) {
             var used = (fs.parts || []).filter(function (p) { return p.optionId === o.id; }).length;
             return '<tr><td>' + esc(o.name) + (o.isActive ? '' : ' <span class="badge bg-light text-dark border">Dold</span>')
-                 + (o.systemKey ? ' <span class="badge bg-light text-dark border">Förbund</span>' : '')
                  + (used ? '<div class="small text-muted">Används av ' + used + (used === 1 ? ' tillägg' : ' tillägg') + '</div>' : '') + '</td>'
                  + '<td class="text-end">' + gMenu('oact', o.id, [['rename', 'Byt namn…'], [o.isActive ? 'hide' : 'show', o.isActive ? 'Dölj' : 'Visa'], ['delete', 'Ta bort…', true]]) + '</td></tr>';
         }).join('') || '<tr><td class="text-muted small">Inga tillval ännu.</td></tr>';
