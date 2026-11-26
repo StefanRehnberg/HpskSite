@@ -58,7 +58,7 @@ namespace HpskSite.Services.Security
                             key, http.Request.Method, http.Request.Path, http.Request.Headers.Referer.ToString(), reason, cookieNames,
                             http.Request.Headers.ContainsKey("RequestVerificationToken"),
                             http.Request.Cookies.Keys.Any(k => k.Contains("Identity.Application", StringComparison.Ordinal)),
-                            http.Request.IsHttps, http.Request.Scheme);
+                            http.Request.IsHttps, http.Request.Scheme); // scaleout-ok: diagnostiklogg, ingen adress byggs
                 }
             }
             catch (Exception ex)

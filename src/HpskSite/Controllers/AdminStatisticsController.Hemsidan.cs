@@ -15,6 +15,7 @@ namespace HpskSite.Controllers
         private const string HemsidanCacheKey = "admin_hemsidan_stats";
 
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsCurrentUserAdminAsync: sajtadmin")]
         public async Task<IActionResult> GetHemsidanStats(bool force = false)
         {
             if (!await _authService.IsCurrentUserAdminAsync())

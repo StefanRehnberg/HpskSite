@@ -185,14 +185,11 @@ ClubAdminController.SendAdminRoleWelcomeEmail
 ClubController.ApproveMember
 ClubController.CopyClubEvent
 ClubController.CreateClubEvent
-ClubController.CreateClubNews
 ClubController.CreateRegionEvent
 ClubController.DeclineMember
 ClubController.DeleteClubEvent
-ClubController.DeleteClubNews
 ClubController.DeleteRegionEvent
 ClubController.EditClubEvent
-ClubController.EditClubNews
 ClubController.EditEventDetails
 ClubController.EditRegionEvent
 ClubController.GetClubEvents

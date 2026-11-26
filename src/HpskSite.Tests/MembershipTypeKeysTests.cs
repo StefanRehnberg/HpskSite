@@ -107,7 +107,7 @@ namespace HpskSite.Tests
         public void Medlemsredigeringen_tappar_inte_en_okand_typ_eller_satter_Senior_tyst()
         {
             var src = Src(Path.Combine("Views", "Partials", "ClubAdminPanel.cshtml"));
-            Assert.Contains("setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType)", src);
+            Assert.Contains("setEditMembershipTypeSelect(document.getElementById('editMembershipType'), d.membershipType, types)", src);
             Assert.DoesNotContain("d.membershipType || 'Senior'", src);
         }
 

@@ -80,6 +80,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsStaff(tävlingen): tävlingens funktionärer")]
         public async Task<IActionResult> SetStationEntryLock([FromBody] LockRequest request)
         {
             if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Saknar parametrar." });
@@ -161,6 +162,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         // ── Status: alla patruller ───────────────────────────────────
 
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsStaff(tävlingen): tävlingens funktionärer")]
         public async Task<IActionResult> Status(int competitionId)
         {
             if (!await IsStaff(competitionId)) return Json(new { success = false, message = "Du har inte behörighet." });
@@ -226,6 +228,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         // ── Kortet: en patrull ───────────────────────────────────────
 
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("IsStaff(tävlingen): tävlingens funktionärer")]
         public async Task<IActionResult> Card(int competitionId, int patrolNumber)
         {
             if (!await IsStaff(competitionId)) return Json(new { success = false, message = "Du har inte behörighet." });
@@ -369,6 +372,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("IsStaff(tävlingen): tävlingens funktionärer")]
         public async Task<IActionResult> SaveCard([FromBody] SaveCardRequest request)
         {
             if (request == null || request.CompetitionId <= 0 || request.PatrolNumber <= 0 || request.Rows == null)

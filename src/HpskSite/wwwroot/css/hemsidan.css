@@ -210,7 +210,7 @@ td .hs-imgcheck { width: 1.25rem; height: 1.25rem; cursor: pointer; }
 #hemsidan-app .hs-ap-sw.on { border-color: var(--bs-body-color); }
 #hemsidan-app .hs-ap-sw .sw { width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.2); }
 
-/* Ikonbiblioteket (Välj ikon för sidan): ligger i en dialog utanför #hemsidan-app, så reglerna är inte avgränsade. */
+/* Ikonbiblioteket (VÃ¤lj ikon fÃ¶r sidan): ligger i en dialog utanfÃ¶r #hemsidan-app, sÃ¥ reglerna Ã¤r inte avgrÃ¤nsade. */
 .hs-iconrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr)); gap: .4rem; }
 .hs-iconbtn { display: flex; align-items: center; justify-content: center; min-height: 3rem; font-size: 1.4rem; line-height: 1; border: 1px solid var(--bs-border-color, #dee2e6); border-radius: .5rem; background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #212529); cursor: pointer; }
 .hs-iconbtn:hover { background: var(--bs-secondary-bg, #e9ecef); }

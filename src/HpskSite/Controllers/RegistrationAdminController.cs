@@ -719,6 +719,7 @@ namespace HpskSite.Controllers
         /// avgift, väntande först. Samma behörighet som övriga anmälningar — arrangören, inte skytten.
         /// </summary>
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("CanManageRegistrationsAsync(tävlingen): arrangören")]
         public async Task<IActionResult> GetWithdrawals(int competitionId)
         {
             try
@@ -759,6 +760,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Arrangören markerar en återbetalning som gjord — eller ångrar markeringen. Pengarna rörs inte här.</summary>
         [HttpPost]
+        [HpskSite.Services.Security.InCodeAuth("CanManageRegistrationsAsync(tävlingen): arrangören")]
         public async Task<IActionResult> SetWithdrawalRefunded([FromBody] SetWithdrawalRefundedRequest request)
         {
             try

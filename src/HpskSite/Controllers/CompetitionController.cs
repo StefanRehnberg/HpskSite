@@ -2465,6 +2465,7 @@ namespace HpskSite.Controllers
         /// Bara den inloggade skyttens EGNA anmälningar; ett id från klienten används aldrig för att peka ut en annan skytt.
         /// </summary>
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("inloggad medlem: bara skyttens egna anmälningar")]
         public async Task<IActionResult> GetMyWithdrawalInfo(int competitionId)
         {
             try
@@ -2518,6 +2519,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("inloggad medlem: bara skyttens egna anmälningar")]
         public async Task<IActionResult> WithdrawFromCompetition([FromBody] WithdrawFromCompetitionRequest request)
         {
             try

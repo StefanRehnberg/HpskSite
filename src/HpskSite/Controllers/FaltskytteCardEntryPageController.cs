@@ -39,6 +39,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet("")]
+        [HpskSite.Services.Security.InCodeAuth("inloggad medlem (annars omdirigering till inloggning); CanEnter = HasCompetitionStaffAccessAsync")]
         public async Task<IActionResult> Index(int competitionId)
         {
             var competition = _competitions.GetSaved(competitionId);

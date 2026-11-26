@@ -89,6 +89,7 @@ namespace HpskSite.Controllers
         /// <c>/foreningsintyg/{id}</c>, som kräver inloggning och prövar åtkomsten.</para>
         /// </summary>
         [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("inloggad medlem: bara egna intyg")]
         public async Task<IActionResult> GetMyIntyg()
         {
             var current = await GetCurrentMemberDataAsync();

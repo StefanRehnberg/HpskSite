@@ -41,6 +41,7 @@ namespace HpskSite.Services.SitePages
             "page-delete" => "raderade",
             "page-slug" => "bytte adress på",
             "page-visibility" => "ändrade vem som ser",
+            "page-icon" => "ändrade ikonen på",
             "children-visibility" => "gav undersidorna samma nivå som",
             "page-move" => "flyttade",
             "page-order" => "ändrade ordningen på",
