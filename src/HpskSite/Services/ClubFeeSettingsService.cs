@@ -133,6 +133,8 @@ namespace HpskSite.Services
         /// Raderar ett tillval som ingen använder. Används det av en medlem eller ett tillägg får kassören veta det
         /// (och kan i stället dölja tillvalet) — ett tillägg som tyst tappar sitt villkor skulle ändra beloppen.
         /// </summary>
+        private sealed class OptionUser { public string? Name { get; set; } public string? Status { get; set; } }
+
         public (bool Deleted, string? Error) DeleteOption(int clubId, int id)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: false);
@@ -142,7 +144,26 @@ namespace HpskSite.Services
             var members = db.ExecuteScalar<int>("SELECT COUNT(*) FROM ClubMembershipOption WHERE OptionId = @0", id);
             var parts = db.ExecuteScalar<int>("SELECT COUNT(*) FROM MembershipFeePart WHERE OptionId = @0", id);
             if (members > 0 || parts > 0)
-                return (false, $"Tillvalet används av {members} medlemmar och {parts} tillägg/avdrag. Dölj det i stället, eller ta bort kopplingarna först.");
+            {
+                // Säg VEM och VILKA — "2 medlemmar" som ingen hittar i listan går inte att åtgärda. Utträdda medlemmar står kvar i
+                // tabellen och syns inte i listan, så de märks.
+                var who = db.Fetch<OptionUser>(
+                    @"SELECT n.text AS Name, cm.MembershipStatus AS Status FROM ClubMembershipOption o
+                      LEFT JOIN umbracoNode n ON n.id = o.MemberId
+                      LEFT JOIN ClubMembership cm ON cm.ClubId = @1 AND cm.MemberId = o.MemberId
+                      WHERE o.OptionId = @0 ORDER BY n.text", id, clubId);
+                string Label(OptionUser w) =>
+                    (string.IsNullOrWhiteSpace(w.Name) ? "okänd medlem" : w.Name) + (w.Status is "Utträdd" or "Avliden" ? " (har slutat)" : "");
+                var shown = who.Take(6).Select(Label).ToList();
+                var labels = db.Fetch<string>("SELECT Label FROM MembershipFeePart WHERE OptionId = @0 AND ClubId = @1 ORDER BY Year DESC, Id", id, clubId);
+                var sb = new System.Text.StringBuilder("Tillvalet kan inte tas bort än.");
+                if (members > 0)
+                    sb.Append($" Det är valt för {(members == 1 ? "1 medlem" : members + " medlemmar")}: {string.Join(", ", shown)}{(who.Count > shown.Count ? $" och {who.Count - shown.Count} till" : "")}. Ta bort det under Åtgärder → Medlemskap på raden.");
+                if (parts > 0)
+                    sb.Append($" Det är villkor för {(parts == 1 ? "1 tillägg/avdrag" : parts + " tillägg/avdrag")}: {string.Join(", ", labels.Distinct().Take(6))}. Ändra villkoret under Tillägg och avdrag.");
+                sb.Append(" Eller dölj tillvalet i stället.");
+                return (false, sb.ToString());
+            }
             db.Execute("DELETE FROM ClubFeeOption WHERE Id = @0", id);
             scope.Complete();
             return (true, null);

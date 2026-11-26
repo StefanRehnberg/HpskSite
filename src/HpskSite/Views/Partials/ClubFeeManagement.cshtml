@@ -475,7 +475,10 @@
             var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>')
                        + breakdown(r, s);
             var nameFlags = noEmailBadge(r);
+            // Förbunden medlemmen är med i, som vanlig text under namnet (inte brickor). Syns även när tillvalet saknar pris.
+            var fed = (r.optionIds || []).map(function (id) { var o = optionOf(id); return o ? o.name + (o.isActive ? '' : ' (dolt)') : ''; }).filter(Boolean);
             html += '<tr class="cf-main"><td>' + esc(r.name) + (nameFlags ? '<div class="small">' + nameFlags + '</div>' : '')
+                  + (fed.length ? '<div class="small text-muted">Förbund: ' + esc(fed.join(', ')) + '</div>' : '')
                   + '<div class="small text-muted d-sm-none">' + typeCell(r, s) + '</div></td>'
                   + '<td class="d-none d-sm-table-cell">' + typeCell(r, s) + '</td>'
                   + '<td class="text-end cf-n cf-amt">' + amount + '</td>'
