@@ -219,6 +219,21 @@ namespace HpskSite.Controllers
                 plan.MatchedByPnr, plan.MatchedByEmail, plan.MatchedInFile, plan.MatchedOutsideClub,
                 plan.NameClashes, suspicious);
 
+            // Typtexter i filen som klubben inte har (samma namnregel som Commit): de sätter ingen typ.
+            // Räknas ur alla rader, inte bara de 500 som visas.
+            var unknownTypes = new List<object>();
+            var typeColumns = mapping.Where(kv => string.Equals((kv.Value ?? "").Trim(), "membershipType", StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList();
+            if (typeColumns.Count > 0)
+            {
+                var texts = rows.Select(r => CollapseRow(r, mapping))
+                                .Select(v => v.TryGetValue("membershipType", out var t) ? t.Trim() : "")
+                                .Where(t => t.Length > 0).ToList();
+                unknownTypes = texts.Where(t => _typeCatalog.ResolveKey(clubId, t) is null)
+                                    .GroupBy(t => t, StringComparer.OrdinalIgnoreCase)
+                                    .OrderByDescending(g => g.Count())
+                                    .Select(g => (object)new { text = g.Key, count = g.Count() }).ToList();
+            }
+
             // Cap the per-row detail — the counts above are always complete.
             const int detailCap = 500;
 
@@ -238,6 +253,7 @@ namespace HpskSite.Controllers
                 clubMemberCount,
                 pnrMapped,
                 suspicious,
+                unknownTypes,
                 truncated = plan.Rows.Count > detailCap,
                 rows = plan.Rows.Take(detailCap).Select(r => new
                 {

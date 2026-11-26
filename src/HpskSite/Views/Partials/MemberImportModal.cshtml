@@ -514,6 +514,15 @@
                 d.cleanedEmails + '</strong> e-postcell' + (d.cleanedEmails === 1 ? '' : 'er') +
                 ' hade extra tecken runt adressen och städas före matchningen. Se kolumnen "I filen" nedan.</div>';
         }
+        if (d.unknownTypes && d.unknownTypes.length > 0) {
+            var utTotal = d.unknownTypes.reduce(function (n, u) { return n + u.count; }, 0);
+            warnings +=
+                '<div class="alert alert-warning small" id="mi_unknownTypes"><i class="bi bi-tag me-1"></i><strong>' +
+                utTotal + '</strong> rad' + (utTotal === 1 ? '' : 'er') + ' har en medlemstyp som klubben inte har: ' +
+                d.unknownTypes.map(function (u) { return '<strong>' + miEscape(u.text) + '</strong> (' + u.count + ')'; }).join(', ') +
+                '. Personerna importeras, men typen sätts inte. Lägg till typen eller döp om en befintlig under ' +
+                'Medlemstyper och importera igen, eller sätt typen efteråt.</div>';
+        }
         if (d.nameClashes > 0) {
             warnings +=
                 '<div class="alert alert-warning small"><i class="bi bi-people me-1"></i><strong>' +
