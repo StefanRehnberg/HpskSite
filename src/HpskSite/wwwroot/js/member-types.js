@@ -85,10 +85,18 @@
 
     // ── Medlemstyper och åldersgränser ──────────────────────────────────────────────────
     function savedAge(t) { return t.fromAge == null ? '' : String(t.fromAge); }
+    // Typtabellen ritas på upp till två ställen: dialogen (id-prefix "mt") och den inbäddade ytan (prefix "mtE", mountTypes).
+    // Samma tillstånd (types, ageEdit) och samma ritning; bara id:na skiljer, så de två kan aldrig krocka.
+    var SET_PREFIXES = ['mt', 'mtE'];
+    function eachSet(fn) { SET_PREFIXES.forEach(function (p) { if ($(p + 'TypeRows')) fn(p, p === 'mtE'); }); }
+    var EMBED_O = null;
     function typesNote(ok, text) {
-        var el = $('mtTypesError');
-        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-danger') + ' mt-3 mb-0' + (text ? '' : ' d-none');
-        el.textContent = text || '';
+        eachSet(function (p) {
+            var el = $(p + 'TypesError');
+            if (!el) return;
+            el.className = 'alert ' + (ok ? 'alert-success' : 'alert-danger') + ' mt-3 mb-0' + (text ? '' : ' d-none');
+            el.textContent = text || '';
+        });
     }
     function editedSteps() {
         var out = [];
@@ -105,7 +113,10 @@
         return types.some(function (t) { return !neverAge(t.key) && ((ageEdit[t.key] || '').trim()) !== savedAge(t); });
     }
     function renderAgeSummary() {
-        var steps = editedSteps(), el = $('mtAgeSummary');
+        eachSet(function (p) { renderAgeSummaryIn(p); });
+    }
+    function renderAgeSummaryIn(p) {
+        var steps = editedSteps(), el = $(p + 'AgeSummary');
         if (!steps.length) {
             el.className = 'small text-muted';
             el.textContent = 'Ingen åldersgräns är satt. Då görs inga åldersförslag, och medlemmen väljer fritt på betalsidan.';
@@ -117,11 +128,12 @@
             }).join(' · ')
             + (steps[0].from > 0 ? '<div class="text-danger fw-normal">Den yngsta gruppen måste börja på 0 år.</div>' : '');
         }
-        $('mtAgeSave').disabled = !ageDirty();
-        show($('mtAgeSuggest'), !ageRules.enabled && !steps.length);
+        $(p + 'AgeSave').disabled = !ageDirty() || !!(O && O.readOnly);
+        show($(p + 'AgeSuggest'), !ageRules.enabled && !steps.length && !(O && O.readOnly));
     }
     function typeMenu(t) {
         var key = esc(t.key), its = [];
+        if (O && O.readOnly) return '';
         if (!/^familj$/i.test(t.key)) {
             its.push('<li><button type="button" class="dropdown-item" data-mt-tact="rename" data-mt-tkey="' + key + '">Byt namn…</button></li>');
             its.push('<li><button type="button" class="dropdown-item" data-mt-tact="' + (t.isActive ? 'hide' : 'unhide') + '" data-mt-tkey="' + key + '">'
@@ -129,21 +141,26 @@
         }
         if (t.isCustom) its.push('<li><button type="button" class="dropdown-item text-danger" data-mt-tact="delete" data-mt-tkey="' + key + '">Ta bort…</button></li>');
         if (!its.length) return '';
-        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" '
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle px-2" data-bs-toggle="dropdown" '
              + 'data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button><ul class="dropdown-menu dropdown-menu-end">' + its.join('') + '</ul></div>';
     }
     function renderTypes() {
-        $('mtTypeRows').innerHTML = types.map(function (t) {
+        var html = typeRowsHtml();
+        eachSet(function (p) { $(p + 'TypeRows').innerHTML = html; });
+        renderAgeSummary();
+    }
+    function typeRowsHtml() {
+        return types.map(function (t) {
             var never = neverAge(t.key);
             var nameCell = esc(t.name) + (t.isActive ? '' : ' <span class="badge bg-light text-dark border">Dold</span>')
                 + (!t.isCustom && t.name !== t.key ? '<div class="small text-muted">Standardtyp: ' + esc(t.key) + '</div>' : '')
                 + '<div class="small text-muted d-sm-none">' + (t.members || 0) + (t.members === 1 ? ' medlem' : ' medlemmar') + '</div>';
             var from = (never || !t.isActive) ? '<span class="text-muted small">—</span>'
-                : '<input type="number" min="0" max="120" step="1" class="form-control form-control-sm" style="width:5.5rem" autocomplete="off" '
-                + 'data-mt-from="' + esc(t.key) + '" aria-label="Från ålder, ' + esc(t.name) + '" value="' + esc(ageEdit[t.key] || '') + '">';
+                : '<input type="number" min="0" max="120" step="1" class="form-control form-control-sm px-1" style="width:3.5rem" autocomplete="off" '
+                + 'data-mt-from="' + esc(t.key) + '" aria-label="Från ålder, ' + esc(t.name) + '" value="' + esc(ageEdit[t.key] || '') + '"'
+                + (O && O.readOnly ? ' disabled' : '') + '>';
             return '<tr><td>' + nameCell + '</td><td class="text-end d-none d-sm-table-cell">' + (t.members || 0) + '</td><td>' + from + '</td><td class="text-end">' + typeMenu(t) + '</td></tr>';
         }).join('') || '<tr><td colspan="4" class="text-muted small">Inga medlemstyper.</td></tr>';
-        renderAgeSummary();
     }
     async function openTypes(o, from) {
         O = o;
@@ -311,6 +328,81 @@
         b.textContent = n ? 'Godkänn valda (' + n + ')' : 'Godkänn valda';
     }
 
+    // Kopplar typtabellens knappar och rader (dialogen eller den inbäddade ytan). p = id-prefix.
+    function wireTypesUi(p, embedded) {
+        var fromId = embedded ? null : 'mtTypesModal';
+        function use() { if (embedded && EMBED_O) O = EMBED_O; }
+        $(p + 'NewTypeBtn').addEventListener('click', function () { use();
+            openSub({ title: 'Ny medlemstyp', ok: 'Lägg till', from: fromId, body: nameField(''),
+                      onOk: function () { return saveType('', $('mtTypeNameInput').value, true); } });
+        });
+        $(p + 'TypeRows').addEventListener('input', function (ev) { use();
+            var inp = ev.target.closest('[data-mt-from]'); if (!inp) return;
+            ageEdit[inp.getAttribute('data-mt-from')] = inp.value;
+            renderAgeSummary();
+        });
+        $(p + 'TypeRows').addEventListener('click', function (ev) { use();
+            var b = ev.target.closest('[data-mt-tact]'); if (!b) return;
+            var key = b.getAttribute('data-mt-tkey'), act = b.getAttribute('data-mt-tact'), t = typeOf(key);
+            if (!t) return;
+            typesNote(false, '');
+            if (act === 'rename') {
+                openSub({ title: 'Byt namn på ' + t.name, ok: 'Spara', from: fromId, body: nameField(t.name),
+                          onOk: function () { return saveType(t.key, $('mtTypeNameInput').value, t.isActive); } });
+            } else if (act === 'unhide') {
+                saveType(t.key, t.name, true).then(function (err) { if (err) typesNote(false, err); });
+            } else if (act === 'hide') {
+                var others = types.filter(function (x) { return x.isActive && x.key !== t.key && !/^familj$/i.test(x.key); });
+                var move = t.members > 0
+                    ? '<p class="mb-2">' + t.members + (t.members === 1 ? ' medlem har' : ' medlemmar har') + ' typen ' + esc(t.name) + '. Flytta dem till en annan typ, annars står de kvar på en dold typ.</p>'
+                      + '<label class="form-label" for="mtMoveTo">Flytta medlemmarna till</label><select id="mtMoveTo" class="form-select">'
+                      + '<option value="">Flytta inte</option>' + others.map(function (x) { return '<option value="' + esc(x.key) + '">' + esc(x.name) + '</option>'; }).join('') + '</select>'
+                    : '<p class="mb-0">Typen ' + esc(t.name) + ' har inga medlemmar. Den kan visas igen senare.</p>';
+                openSub({ title: 'Dölj ' + t.name, ok: 'Dölj', from: fromId, body: move,
+                    onOk: async function () {
+                        var to = $('mtMoveTo') ? $('mtMoveTo').value : '';
+                        if (to) {
+                            var m = await form('SetMembersType', { clubId: O.clubId, year: year(), toKey: to, fromKey: t.key });
+                            if (!m.success) return m.message || 'Medlemmarna kunde inte flyttas.';
+                        }
+                        return await saveType(t.key, t.name, false);
+                    } });
+            } else if (act === 'delete') {
+                openSub({ title: 'Ta bort ' + t.name, ok: 'Ta bort', danger: true, from: fromId,
+                    body: '<p class="mb-0">Ta bort medlemstypen ' + esc(t.name) + '? Det går bara när ingen medlem, avgift eller åldersgräns använder den.</p>',
+                    onOk: async function () {
+                        var d = await form('DeleteMemberType', { clubId: O.clubId, key: t.key });
+                        if (!d.success) return d.message || 'Typen kunde inte tas bort.';
+                        await reloadTypes();
+                        return null;
+                    } });
+            }
+        });
+        $(p + 'AgeFill').addEventListener('click', function () { use();
+            // Förslag, inte sanning: SHB:s åldrar gäller tävlingsklass. Fylls bara i i fälten — sparas med knappen.
+            var found = [['Junior', 0], ['Senior', 21], ['Veteran', 60]].filter(function (c) { var t = typeOf(c[0]); return t && t.isActive; });
+            if (!found.length) { typesNote(false, 'Klubben har varken Junior, Senior eller Veteran bland sina aktiva typer.'); return; }
+            types.forEach(function (t) { if (!neverAge(t.key)) ageEdit[t.key] = ''; });
+            found.forEach(function (c) { ageEdit[typeOf(c[0]).key] = String(c[1]); });
+            ageEdit[typeOf(found[0][0]).key] = '0'; // den yngsta gruppen börjar alltid på 0
+            typesNote(false, '');
+            renderTypes();
+        });
+        $(p + 'AgeSave').addEventListener('click', async function () { use();
+            var steps = editedSteps(), btn = this;
+            btn.disabled = true;
+            var d = await form('SaveAgeLimits', { clubId: O.clubId, typeKeys: steps.map(function (s) { return s.key; }),
+                                                  fromAges: steps.map(function (s) { return String(s.from); }) });
+            if (!d.success) { typesNote(false, d.message || 'Åldersgränserna kunde inte sparas.'); btn.disabled = false; return; }
+            await loadTypes();
+            ageEdit = {}; types.forEach(function (t) { ageEdit[t.key] = savedAge(t); });
+            renderTypes();
+            changed();
+            typesNote(true, steps.length ? 'Åldersgränserna är sparade.' : 'Åldersgränserna är borttagna.');
+        });
+
+    }
+
     // ── Kopplingar (en gång, när dialogerna finns på sidan) ────────────────────────────
     function wire() {
         if (!$('mtTypesModal') || $('mtTypesModal').getAttribute('data-wired')) return;
@@ -333,75 +425,7 @@
             if (c.after) c.after(); else if (c.back) bootstrap.Modal.getOrCreateInstance($(c.back)).show();
         });
 
-        $('mtNewTypeBtn').addEventListener('click', function () {
-            openSub({ title: 'Ny medlemstyp', ok: 'Lägg till', from: 'mtTypesModal', body: nameField(''),
-                      onOk: function () { return saveType('', $('mtTypeNameInput').value, true); } });
-        });
-        $('mtTypeRows').addEventListener('input', function (ev) {
-            var inp = ev.target.closest('[data-mt-from]'); if (!inp) return;
-            ageEdit[inp.getAttribute('data-mt-from')] = inp.value;
-            renderAgeSummary();
-        });
-        $('mtTypeRows').addEventListener('click', function (ev) {
-            var b = ev.target.closest('[data-mt-tact]'); if (!b) return;
-            var key = b.getAttribute('data-mt-tkey'), act = b.getAttribute('data-mt-tact'), t = typeOf(key);
-            if (!t) return;
-            typesNote(false, '');
-            if (act === 'rename') {
-                openSub({ title: 'Byt namn på ' + t.name, ok: 'Spara', from: 'mtTypesModal', body: nameField(t.name),
-                          onOk: function () { return saveType(t.key, $('mtTypeNameInput').value, t.isActive); } });
-            } else if (act === 'unhide') {
-                saveType(t.key, t.name, true).then(function (err) { if (err) typesNote(false, err); });
-            } else if (act === 'hide') {
-                var others = types.filter(function (x) { return x.isActive && x.key !== t.key && !/^familj$/i.test(x.key); });
-                var move = t.members > 0
-                    ? '<p class="mb-2">' + t.members + (t.members === 1 ? ' medlem har' : ' medlemmar har') + ' typen ' + esc(t.name) + '. Flytta dem till en annan typ, annars står de kvar på en dold typ.</p>'
-                      + '<label class="form-label" for="mtMoveTo">Flytta medlemmarna till</label><select id="mtMoveTo" class="form-select">'
-                      + '<option value="">Flytta inte</option>' + others.map(function (x) { return '<option value="' + esc(x.key) + '">' + esc(x.name) + '</option>'; }).join('') + '</select>'
-                    : '<p class="mb-0">Typen ' + esc(t.name) + ' har inga medlemmar. Den kan visas igen senare.</p>';
-                openSub({ title: 'Dölj ' + t.name, ok: 'Dölj', from: 'mtTypesModal', body: move,
-                    onOk: async function () {
-                        var to = $('mtMoveTo') ? $('mtMoveTo').value : '';
-                        if (to) {
-                            var m = await form('SetMembersType', { clubId: O.clubId, year: year(), toKey: to, fromKey: t.key });
-                            if (!m.success) return m.message || 'Medlemmarna kunde inte flyttas.';
-                        }
-                        return await saveType(t.key, t.name, false);
-                    } });
-            } else if (act === 'delete') {
-                openSub({ title: 'Ta bort ' + t.name, ok: 'Ta bort', danger: true, from: 'mtTypesModal',
-                    body: '<p class="mb-0">Ta bort medlemstypen ' + esc(t.name) + '? Det går bara när ingen medlem, avgift eller åldersgräns använder den.</p>',
-                    onOk: async function () {
-                        var d = await form('DeleteMemberType', { clubId: O.clubId, key: t.key });
-                        if (!d.success) return d.message || 'Typen kunde inte tas bort.';
-                        await reloadTypes();
-                        return null;
-                    } });
-            }
-        });
-        $('mtAgeFill').addEventListener('click', function () {
-            // Förslag, inte sanning: SHB:s åldrar gäller tävlingsklass. Fylls bara i i fälten — sparas med knappen.
-            var found = [['Junior', 0], ['Senior', 21], ['Veteran', 60]].filter(function (c) { var t = typeOf(c[0]); return t && t.isActive; });
-            if (!found.length) { typesNote(false, 'Klubben har varken Junior, Senior eller Veteran bland sina aktiva typer.'); return; }
-            types.forEach(function (t) { if (!neverAge(t.key)) ageEdit[t.key] = ''; });
-            found.forEach(function (c) { ageEdit[typeOf(c[0]).key] = String(c[1]); });
-            ageEdit[typeOf(found[0][0]).key] = '0'; // den yngsta gruppen börjar alltid på 0
-            typesNote(false, '');
-            renderTypes();
-        });
-        $('mtAgeSave').addEventListener('click', async function () {
-            var steps = editedSteps(), btn = this;
-            btn.disabled = true;
-            var d = await form('SaveAgeLimits', { clubId: O.clubId, typeKeys: steps.map(function (s) { return s.key; }),
-                                                  fromAges: steps.map(function (s) { return String(s.from); }) });
-            if (!d.success) { typesNote(false, d.message || 'Åldersgränserna kunde inte sparas.'); btn.disabled = false; return; }
-            await loadTypes();
-            ageEdit = {}; types.forEach(function (t) { ageEdit[t.key] = savedAge(t); });
-            renderTypes();
-            changed();
-            typesNote(true, steps.length ? 'Åldersgränserna är sparade.' : 'Åldersgränserna är borttagna.');
-        });
-
+        wireTypesUi('mt', false);
         $('mtAgeModal').addEventListener('change', function (ev) { if (ev.target.closest('[data-mt-age-sel]')) updateApply(); });
         $('mtAgeModal').addEventListener('click', async function (ev) {
             var t;
@@ -438,7 +462,37 @@
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
+    // ── Inbäddad typtabell (Ekonomi → Medlemstyper och förbund) ─────────────────────────
+    // Ritar typtabellen, åldersgränserna och "Ny medlemstyp" direkt i root, med id-prefixet "mtE" så att
+    // dialogens id:n (prefix "mt") aldrig krockar. Namn- och bekräftelsefrågorna går fortfarande genom den delade
+    // mtSubModal (utan "tillbaka till föregående dialog"). Anropa en gång; ett andra anrop läser bara om.
+    async function mountTypes(root, o) {
+        EMBED_O = o; O = o;
+        if (!root.getAttribute('data-mt-mounted')) {
+            root.setAttribute('data-mt-mounted', '1');
+            root.innerHTML =
+                '<div class="table-responsive"><table class="table table-sm align-middle mb-2" style="font-size:.9rem">'
+                + '<thead><tr><th>Medlemstyp</th><th class="text-end d-none d-sm-table-cell">Medlemmar</th><th>Från ålder</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>'
+                + '<tbody id="mtETypeRows"></tbody></table></div>'
+                + '<div class="mb-3' + (o.readOnly ? ' d-none' : '') + '"><button type="button" class="btn btn-sm btn-outline-secondary" id="mtENewTypeBtn"><i class="bi bi-plus-lg me-1"></i>Ny medlemstyp…</button></div>'
+                + '<div class="fw-semibold small" id="mtEAgeSummary"></div>'
+                + '<div class="small text-muted d-none mt-1" id="mtEAgeSuggest">'
+                + '<span>Förslag efter SHB: Junior till 20 år, Senior från 21, Veteran från 60. Klubben bestämmer själv.</span>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="mtEAgeFill">Fyll i förslaget</button></div>'
+                + '<div class="d-flex justify-content-end mt-3' + (o.readOnly ? ' d-none' : '') + '"><button type="button" class="btn btn-primary" id="mtEAgeSave" disabled>Spara åldersgränser</button></div>'
+                + '<div class="alert alert-danger d-none mt-3 mb-0" id="mtETypesError"></div>';
+            wireTypesUi('mtE', true);
+        }
+        await loadTypes();
+        ageEdit = {};
+        types.forEach(function (t) { ageEdit[t.key] = savedAge(t); });
+        typesNote(false, '');
+        renderTypes();
+        return { newType: function () { var b = $('mtENewTypeBtn'); if (b) b.click(); }, reload: function () { EMBED_O = o; O = o; return reloadTypes(); } };
+    }
+
     window.hpskMemberTypes = {
+        mountTypes: function (root, o) { wire(); return mountTypes(root, o); },
         openTypes: function (o, from) { wire(); return openTypes(o, from); },
         openAge: function (o) { wire(); return openAge(o); },
         openSetUntyped: function (o) { wire(); return openSetUntyped(o); },

@@ -454,17 +454,20 @@
             return { clubId: CLUB_ID, year: YEAR, canSeeFees: false, readOnly: READONLY, clubUrl: '',
                      onChanged: function () { load(); refreshList(); }, onMessage: function (t) { note(true, t); } };
         }
-        function openTypes() { window.hpskMemberTypes.openTypes(mtOpts()); }
+        // Typtabellen ritas av den delade komponenten direkt på sidan (mountTypes), inte i en dialog.
+        var typesMount = null, mounting = false;
+        function mountTypeTable() {
+            if (typesMount || mounting) return;
+            mounting = true;
+            window.hpskMemberTypes.mountTypes($('ftTypesMount'), mtOpts()).then(function (m) { typesMount = m; mounting = false; }, function () { mounting = false; });
+        }
+        function openTypes() { if (typesMount) typesMount.newType(); }
 
         function render() {
             var active = types.filter(function (t) { return t.isActive; });
             $('ftTypesStatus').textContent = plural(types.length, 'typ', 'typer')
                 + (ageRules.enabled ? ' · ' + types.filter(function (t) { return t.ageGroup; }).map(function (t) { return t.name + ' ' + t.ageGroup; }).join(' · ') : '');
-            $('ftTypeRows').innerHTML = types.map(function (t) {
-                return '<tr><td>' + esc(t.name) + (t.isActive ? '' : ' <span class="badge bg-light text-dark border">Dold</span>') + '</td>'
-                    + '<td class="text-end">' + (t.fromAge == null ? '–' : t.fromAge) + '</td><td class="text-end">' + (t.members || 0) + '</td>'
-                    + '<td class="text-end">' + (READONLY ? '' : '<button type="button" class="btn btn-sm btn-outline-secondary" data-ft-type="1">Ändra…</button>') + '</td></tr>';
-            }).join('') || '<tr><td colspan="4" class="text-muted small">Inga medlemstyper.</td></tr>';
+            mountTypeTable();
             var bits = [];
             if (untyped > 0) bits.push(plural(untyped, 'medlem saknar', 'medlemmar saknar') + ' medlemstyp → <a href="#" data-view="arsavgift">Medlemsavgifter</a>');
             $('ftTypesNote').innerHTML = bits.join(' · ');
@@ -524,7 +527,6 @@
         }
         if ($('ftNewFed')) $('ftNewFed').addEventListener('click', newFed);
         if ($('ftNewType')) $('ftNewType').addEventListener('click', openTypes);
-        $('ftTypeRows').addEventListener('click', function (ev) { if (ev.target.closest('[data-ft-type]')) openTypes(); });
         // Länken är ritad av skriptet efter att Ekonomi bundit rälsen: den klickar på rälsposten.
         $('ftTypesNote').addEventListener('click', function (ev) {
             var a = ev.target.closest('[data-view]'); if (!a) return;
