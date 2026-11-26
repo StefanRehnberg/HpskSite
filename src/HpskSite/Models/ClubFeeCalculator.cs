@@ -94,7 +94,7 @@ namespace HpskSite.Models
                 {
                     var keys = partTypes[part.Id].ToHashSet(StringComparer.OrdinalIgnoreCase);
                     if (!Applies(part, keys, person)) continue;
-                    lines.Add(new FeeLineDraft(PartKind, part.Label, part.Amount, part.Id, isHousehold ? person.MemberId : null));
+                    lines.Add(new FeeLineDraft(PartKind, part.DisplayLabel, part.Amount, part.Id, isHousehold ? person.MemberId : null));
                 }
 
             var sum = lines.Sum(l => l.Amount);

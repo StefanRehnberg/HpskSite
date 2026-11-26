@@ -22,6 +22,9 @@
     #cfRoot td, #cfRoot th { vertical-align: middle; }
     #cfRoot .cf-total td { border-top: 2px solid var(--bs-border-color); font-weight: 600; }
     #cfRoot .cf-n { white-space: nowrap; }
+    #cfRoot .cf-amt { min-width: 15rem; }
+    #cfRoot .cf-bd { white-space: normal; }
+    @@media (max-width: 575.98px) { #cfRoot .cf-amt { min-width: 0; } }
     @@media (max-width: 575.98px) { #cfRoot tr.cf-main td { border-bottom: 0; padding-bottom: 0; } }
 </style>
 
@@ -96,13 +99,17 @@
                 <select id="cfFilter" class="form-select form-select-sm" style="width:auto"></select>
             </div>
         </div>
+        <div class="small text-muted mb-2" id="cfTypeLegend">Medlemstypens färg visar huvudklubben:
+            <span class="badge bg-primary-subtle text-primary-emphasis border">vår klubb</span>
+            <span class="badge bg-warning-subtle text-warning-emphasis border">en annan klubb</span>
+            <span class="badge bg-danger-subtle text-danger-emphasis border">ingen huvudklubb</span>
+        </div>
         <div class="table-responsive">
-            <table class="table align-middle mb-2">
-                <thead><tr>
+            <table class="table table-hover align-middle mb-2">
+                <thead class="table-light"><tr>
                     <th>Medlem</th>
                     <th class="d-none d-sm-table-cell">Medlemstyp</th>
-                    <th class="d-none d-md-table-cell">E-post</th>
-                    <th class="text-end">Att betala</th>
+                    <th class="text-end cf-amt">Att betala</th>
                     <th class="d-none d-sm-table-cell">Status</th>
                     <th class="text-end d-none d-sm-table-cell"><span class="visually-hidden">Åtgärder</span></th>
                 </tr></thead>
@@ -351,19 +358,25 @@
         return badge('bg-secondary', 'Inte skickad');
     }
     // Medlemstypen — och om MEDLEMMEN valt den själv. Kassören ska se det: ett förtroendesystem, inte ett osynligt.
+    // Kolumnen visar bara typen. Förbund och tillägg står under beloppet (Att betala).
+    // Typen är en bricka vars färg visar huvudklubben (förklaras av raden ovanför tabellen).
+    var HOME = {
+        Ours:    { cls: 'bg-primary-subtle text-primary-emphasis border', tip: 'Klubben är medlemmens huvudklubb' },
+        Other:   { cls: 'bg-warning-subtle text-warning-emphasis border', tip: 'En annan klubb är medlemmens huvudklubb' },
+        Unknown: { cls: 'bg-danger-subtle text-danger-emphasis border', tip: 'Medlemmen har ingen huvudklubb' }
+    };
     function typeCell(r, s) {
-        var t = esc(typeName(r.membershipType)) + homeBadge(r)
-              + (r.optionIds || []).map(function (id) { var o = optionOf(id); return o && o.isActive ? ' <span class="badge bg-light text-dark border">' + esc(o.name) + '</span>' : ''; }).join('');
+        var h = HOME[r.homeClub] || HOME.Unknown;
+        var t = '<span class="badge ' + h.cls + '" title="' + h.tip + '">' + esc(typeName(r.membershipType)) + '</span>';
         if (s.choose) return '<span class="text-muted">väljer själv</span>';
         if (s.c && s.c.memberChosenType)
             t += ' <span class="badge bg-light text-dark border" title="Medlemmen valde medlemstypen själv på betalsidan'
                + (s.c.memberChosenAt ? ' ' + day(s.c.memberChosenAt) : '') + '">vald av medlemmen</span>';
         return t;
     }
-    // Vart avgiften mejlas. Saknas adress står det i listan — inte i en text under den.
-    function emailCell(r) {
-        if (!r.hasEmail) return '<span class="badge bg-danger-subtle text-danger-emphasis border">Ingen e-post</span>';
-        return '<span class="small">' + esc(r.email) + '</span>';
+    // Adressen visas inte som kolumn (den finns under Åtgärder → E-post för avgiften…), men saknas den syns det på raden.
+    function noEmailBadge(r) {
+        return r.hasEmail ? '' : '<span class="badge bg-danger-subtle text-danger-emphasis border">Ingen e-post</span>';
     }
 
     function item(act, id, text, extra) {
@@ -406,21 +419,14 @@
         var frozen = !!s.c && (s.sent || s.paid || s.claimed);
         if (frozen) {
             if (r.proposedAmount > 0 && Math.abs(r.proposedAmount - s.amount) >= 0.005)
-                return '<div class="small text-muted fw-normal">Förslaget är nu ' + kr(r.proposedAmount) + '</div>';
+                return '<div class="small text-muted fw-normal cf-bd">Förslaget är nu ' + kr(r.proposedAmount) + '</div>';
             return '';
         }
         var ls = r.lines || [];
         if (ls.length < 2) return '';
-        return '<div class="small text-muted fw-normal">' + ls.map(function (l) {
+        return '<div class="small text-muted fw-normal cf-bd">' + ls.map(function (l) {
             return esc(l.text) + ' ' + (l.kind === 'fee-base' ? kr(l.amount) : signed(l.amount));
         }).join(' · ') + '</div>';
-    }
-    // Brickorna för huvudklubben syns bara när något tillägg bryr sig om den.
-    function homeBadge(r) {
-        if (!usesHomeClub()) return '';
-        if (r.homeClub === 'Unknown') return ' <span class="badge bg-warning-subtle text-warning-emphasis border" title="Medlemmen har ingen huvudklubb, så villkor på huvudklubben träffar varken ”klubben är huvudklubb” eller ”annan klubb”.">Huvudklubb saknas</span>';
-        if (r.homeClub === 'Other') return ' <span class="badge bg-light text-dark border">Annan huvudklubb</span>';
-        return '';
     }
     function renderFilter() {
         var opts = [['all', 'Alla medlemmar']];
@@ -468,16 +474,17 @@
 
             var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>')
                        + breakdown(r, s);
-            html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + typeCell(r, s) + '</div></td>'
+            var nameFlags = noEmailBadge(r);
+            html += '<tr class="cf-main"><td>' + esc(r.name) + (nameFlags ? '<div class="small">' + nameFlags + '</div>' : '')
+                  + '<div class="small text-muted d-sm-none">' + typeCell(r, s) + '</div></td>'
                   + '<td class="d-none d-sm-table-cell">' + typeCell(r, s) + '</td>'
-                  + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
-                  + '<td class="text-end cf-n">' + amount + '</td>'
+                  + '<td class="text-end cf-n cf-amt">' + amount + '</td>'
                   + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
                   + '<td class="text-end cf-n cf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
                   + '<tr class="cf-mrow d-sm-none"><td colspan="2"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
-                  + '<span>' + statusCell(r, s) + (r.hasEmail ? '' : ' ' + emailCell(r)) + '</span>' + actionsCell(r, s) + '</div></td></tr>';
+                  + '<span>' + statusCell(r, s) + '</span>' + actionsCell(r, s) + '</div></td></tr>';
         });
-        html += '<tr class="cf-total"><td>Totalt</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-md-table-cell"></td><td class="text-end cf-n">' + kr(total)
+        html += '<tr class="cf-total"><td>Totalt</td><td class="d-none d-sm-table-cell"></td><td class="text-end cf-n">' + kr(total)
               + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
         $('cfRows').innerHTML = html;
 

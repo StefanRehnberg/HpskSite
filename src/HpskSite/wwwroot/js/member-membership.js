@@ -66,7 +66,7 @@
             h += '<label class="hm-opt"><input type="radio" name="hm_status" value="' + o[0] + '"' + (c.status === o[0] ? ' checked' : '') + '><span><b>' + o[1] + '</b><span>' + o[2] + '</span></span></label>';
         });
         h += '<div id="hmSlut"' + (c.status === 'Slut' ? '' : ' hidden') + '>'
-           + '<div class="hm-field"><label for="hm_until">Slutade den</label><input type="date" id="hm_until" class="form-control" max="' + today() + '" value="' + esc(c.until || today()) + '"></div>'
+           + '<div class="hm-field"><label for="hm_until">Slutade den</label><input type="text" id="hm_until" class="form-control" autocomplete="off" max="' + today() + '" value="' + esc(c.until || today()) + '"></div>'
            + '<div class="hm-field"><label for="hm_reason">Varför</label><select id="hm_reason" class="form-select">';
         d.reasons.forEach(function (r) { h += '<option' + (c.reason === r ? ' selected' : '') + '>' + esc(r) + '</option>'; });
         h += '</select></div><div class="hm-field" id="hmReasonTextWrap"' + (c.reason === 'Annat' ? '' : ' hidden') + '><label for="hm_reasonText">Skriv orsaken</label><input type="text" id="hm_reasonText" class="form-control" maxlength="200" value="' + esc(c.reasonText || '') + '"></div>'
@@ -74,7 +74,7 @@
         h += '<div class="hm-since" id="hmSince">';
         if (c.since) h += '<span>Medlem sedan ' + esc(datum(c.since)) + '</span><button type="button" class="btn btn-link p-0" data-hm-act="since">Ändra</button>';
         else h += '<span>Medlem sedan: inte angivet</span><button type="button" class="btn btn-link p-0" data-hm-act="since">Ange datum</button>';
-        h += '</div><div class="hm-field" id="hmSinceField" hidden><label for="hm_since">Medlem sedan</label><input type="date" id="hm_since" class="form-control" max="' + today() + '" value="' + esc(c.since || '') + '"></div></div>';
+        h += '</div><div class="hm-field" id="hmSinceField" hidden><label for="hm_since">Medlem sedan</label><input type="text" id="hm_since" class="form-control" autocomplete="off" max="' + today() + '" value="' + esc(c.since || '') + '"></div></div>';
         return h;
     }
 
@@ -122,7 +122,7 @@
         var c = S.cur;
         return '<details class="hm-card"><summary>Övrigt<small>Belastningsregister, anteckningar</small></summary>'
             + '<label class="hm-opt"><input type="checkbox" id="hm_bg"' + (c.bg ? ' checked' : '') + '><span><b>Kontroll mot belastningsregistret är godkänd</b></span></label>'
-            + '<div class="hm-field"><label for="hm_bgDate">Datum för kontrollen</label><input type="date" id="hm_bgDate" class="form-control" max="' + today() + '" value="' + esc(c.bgDate || '') + '"></div>'
+            + '<div class="hm-field"><label for="hm_bgDate">Datum för kontrollen</label><input type="text" id="hm_bgDate" class="form-control" autocomplete="off" max="' + today() + '" value="' + esc(c.bgDate || '') + '"></div>'
             + '<label class="hm-opt mt-3"><input type="checkbox" id="hm_map"' + (c.map ? ' checked' : '') + '><span><b>Finns i MAP</b><span>MAP är förbundets medlemsregister</span></span></label>'
             + '<div class="hm-field"><label for="hm_notes">Anteckningar (syns bara för klubben)</label><textarea id="hm_notes" class="form-control" rows="2" maxlength="4000">' + esc(c.notes || '') + '</textarea></div></details>';
     }
@@ -162,8 +162,19 @@
         el('hmBody').innerHTML = '<div id="hmError" class="alert alert-danger" role="alert" hidden></div>'
             + typesCard(d) + statusCard(d) + optionsCard(d) + familyCard(d) + clubsCard(d) + otherCard(d) + feeNote(d);
         fillLists();
+        initDates();
         S.initial = JSON.stringify(collect());
         el('hmSave').disabled = true;
+    }
+
+    // Husets datumväljare: flatpickr, svenska, ÅÅÅÅ-MM-DD. Fältets .value förblir ISO, så läsning och sparande är oförändrade.
+    // static: kalendern ligger i dialogens flöde (annars klipps den på telefon). allowInput: datumet går att skriva.
+    function initDates() {
+        if (!window.flatpickr) return;
+        ['hm_until', 'hm_since', 'hm_bgDate'].forEach(function (id) {
+            var f = el(id); if (!f) return;
+            flatpickr(f, { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today', allowInput: true, static: true, disableMobile: true });
+        });
     }
 
     function fillLists() {

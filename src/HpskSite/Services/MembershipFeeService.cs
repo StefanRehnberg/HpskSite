@@ -81,6 +81,12 @@ namespace HpskSite.Services
         {
             var parts = db.Fetch<MembershipFeePart>(
                 "SELECT * FROM MembershipFeePart WHERE ClubId = @0 AND Year = @1 ORDER BY SortOrder, Id", clubId, year);
+            if (parts.Any(p => p.OptionId.HasValue))
+            {
+                var names = db.Fetch<ClubFeeOption>("SELECT * FROM ClubFeeOption WHERE ClubId = @0", clubId).ToDictionary(o => o.Id, o => o.Name);
+                foreach (var p in parts.Where(p => p.OptionId.HasValue))
+                    p.OptionName = names.GetValueOrDefault(p.OptionId!.Value);
+            }
             var types = parts.Count == 0
                 ? Array.Empty<MembershipFeePartType>().ToList()
                 : db.Fetch<MembershipFeePartType>(

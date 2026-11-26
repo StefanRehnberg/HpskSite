@@ -77,6 +77,20 @@ namespace HpskSite.Models
 
         public int SortOrder { get; set; }
         public DateTime CreatedDate { get; set; }
+
+        /// <summary>Tillvalets namn när villkoret är Option. Fylls av <c>MembershipFeeService.LoadParts</c>, lagras inte.</summary>
+        [Ignore] public string? OptionName { get; set; }
+
+        /// <summary>
+        /// Texten på avgiftsraden och i mejlet. Ett tillägg som gäller ett tillval får tillvalets namn med
+        /// ("Förbundsavgift – Sportskytte"), annars säger flera rader samma sak. Heter etiketten redan så lämnas den.
+        /// </summary>
+        [Ignore]
+        public string DisplayLabel =>
+            Condition == MembershipFeePartCondition.Option && !string.IsNullOrWhiteSpace(OptionName)
+            && Label.IndexOf(OptionName, StringComparison.OrdinalIgnoreCase) < 0
+                ? $"{Label} – {OptionName}"
+                : Label;
     }
 
     [TableName("MembershipFeePartType")]

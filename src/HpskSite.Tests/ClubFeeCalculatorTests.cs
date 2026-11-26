@@ -46,6 +46,23 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Tillagg_for_ett_tillval_far_tillvalets_namn_pa_raden()
+        {
+            var a = Part(1, "Förbundsavgift", 100m, MembershipFeePartCondition.Option, option: 7); a.OptionName = "SPSF";
+            var b = Part(2, "Förbundsavgift", 80m, MembershipFeePartCondition.Option, option: 8); b.OptionName = "Sportskytte";
+            var c = Calc(600m, new[] { P(1, options: new[] { 7, 8 }) }, new[] { a, b });
+            Assert.Equal(new[] { "Senior", "Förbundsavgift – SPSF", "Förbundsavgift – Sportskytte" }, c.Lines.Select(l => l.Description).ToArray());
+        }
+
+        [Fact]
+        public void Heter_etiketten_redan_som_tillvalet_upprepas_namnet_inte()
+        {
+            var a = Part(1, "Avgift till SPSF", 100m, MembershipFeePartCondition.Option, option: 7); a.OptionName = "SPSF";
+            var c = Calc(600m, new[] { P(1, options: new[] { 7 }) }, new[] { a });
+            Assert.Equal("Avgift till SPSF", c.Lines[1].Description);
+        }
+
+        [Fact]
         public void Saknad_huvudklubb_traffar_varken_vi_eller_annan()
         {
             var parts = new[]
