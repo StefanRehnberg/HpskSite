@@ -338,15 +338,26 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var (parts, partTypes) = _feeService.GetParts(clubId, year);
+            // "Träffar N av M": SAMMA regel som avgiften (ClubFeeCalculator.Applies) över klubbens aktiva medlemmar.
+            // Ett fel här får inte fälla inställningarna: utan tal visar sidan bara ingen träffrad.
+            List<MemberFeeInput>? people = null;
+            try { people = ActiveFeeMembers(clubId); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Träffarna kunde inte räknas för klubb {ClubId}", clubId); }
             return Json(new
             {
                 success = true,
+                memberTotal = people?.Count,
                 parts = parts.Select(p => new
                 {
                     p.Id, p.Label, p.Amount, p.Condition, p.OptionId, p.SortOrder,
-                    typeKeys = partTypes[p.Id].ToList()   // tom lista = alla medlemstyper
+                    typeKeys = partTypes[p.Id].ToList(),   // tom lista = alla medlemstyper
+                    appliesTo = people?.Count(m => ClubFeeCalculator.Applies(p, new HashSet<string>(partTypes[p.Id]), m))
                 }),
-                options = _feeSettings.GetOptions(clubId).Select(o => new { o.Id, o.Name, o.SystemKey, o.IsActive }),
+                options = _feeSettings.GetOptions(clubId, includeInactive: true).Select(o => new
+                {
+                    o.Id, o.Name, o.SystemKey, o.IsActive,
+                    members = people?.Count(m => m.OptionIds.Contains(o.Id))
+                }),
                 // Förslag när klubben lägger till ett förbund som tillval (officiella namnet = SystemKey).
                 federations = HpskSite.Models.ForeningsintygDocument.AllaForbund
                     .Where(f => f != HpskSite.Models.ForeningsintygDocument.ForbundAnnat)
@@ -767,7 +778,7 @@ namespace HpskSite.Controllers
             if (p is null || p.Kind is ClubFeeKind.NoCategory or ClubFeeKind.NoType)
                 return Json(new { success = false, message = string.IsNullOrWhiteSpace(me.MembershipType)
                     ? "Medlemmen har ingen medlemstyp. Ange medlemstypen under Medlemmar först."
-                    : $"Klubben har ingen avgift för medlemstypen {me.MembershipType} i år. Lägg till den under Åtgärder → Avgift per medlemstyp." });
+                    : $"Klubben har ingen avgift för medlemstypen {me.MembershipType} i år. Lägg till den under Ekonomi → Avgiftsregler." });
             if (p.Kind == ClubFeeKind.Covered)
                 return Json(new { success = false, message = "Medlemmen ingår i familjens avgift, som huvudmedlemmen betalar." });
 

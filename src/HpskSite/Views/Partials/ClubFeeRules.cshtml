@@ -1,0 +1,202 @@
+@{
+    var ruClubId = ViewBag.clubId as int? ?? 0;
+    // Läsläge för styrelsen, revisorn och klubbadmin när det finns en kassör: samma sida, inga knappar.
+    var ruReadOnly = ViewData["feesReadOnly"] as bool? ?? false;
+    var ruWhich = ViewData["which"] as string ?? "rules";
+}
+@*
+    AVGIFTSREGLER och MEDLEMSTYPER OCH FÖRBUND — medlemsavgiftens inställningar som två egna rälsposter i Ekonomi
+    (Stefan 2026-11-26; wireframen "Avgiftsregler"). De sex modalerna under Åtgärder på Medlemsavgifter är borta.
+      - Avgiftsregler = det som ändras VARJE ÅR (årsväljare): exempelräkning, grundavgift, tillägg och avdrag.
+      - Medlemstyper och förbund = det som gäller ALLA ÅR (ingen årsväljare, inga belopp).
+    Ritas och styrs av wwwroot/js/club-fee-rules.js. Partialen läggs EN gång per `which` ("rules" | "types").
+    ⚠️ Inga alert()/prompt(): en blockerande dialog har redan rapporterats som att sidan "frös". Formulären är EN modal.
+*@
+@if (ruWhich == "rules")
+{
+<div id="frRoot" data-club-id="@ruClubId" data-readonly="@(ruReadOnly ? "1" : "0")">
+    @if (ruReadOnly)
+    {
+        <div class="alert alert-info small">Du läser föreningens avgiftsregler. Det är kassören som ändrar dem.</div>
+    }
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <p class="text-muted small mb-0" style="max-width:62ch">Beloppen kan ändras från år till år. Det du ändrar här gäller bara året du valt, och bara avgifter som inte skickats än.
+            Andra år och skickade avgifter påverkas inte.</p>
+        <div class="d-flex align-items-center gap-2">
+            <select id="frYear" class="form-select" style="width:auto" aria-label="År"></select>
+            <span class="badge bg-warning-subtle text-warning-emphasis border" id="frYearBadge">Gäller bara året du valt</span>
+            @if (!ruReadOnly)
+            {
+            <div class="dropdown">
+                <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item" type="button" id="frNewBase"><i class="bi bi-cash-coin me-2"></i>Ny grundavgift…</button></li>
+                    <li><button class="dropdown-item" type="button" id="frNewPart"><i class="bi bi-plus-slash-minus me-2"></i>Nytt tillägg eller avdrag…</button></li>
+                </ul>
+            </div>
+            }
+        </div>
+    </div>
+
+    <div class="alert alert-danger d-none" id="frError"></div>
+    <div class="alert alert-success d-none" id="frOk"></div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0">Så räknas avgiften</h2>
+                <span class="small text-muted">räknas av servern, samma regel som listan</span>
+            </div>
+            <p class="text-muted small mt-2">Avgiften är grundavgiften för medlemmens typ, plus tillägg, minus avdrag. Den blir aldrig lägre än 0 kr. Prova med en exempelmedlem:</p>
+            <div class="row g-2 align-items-end mb-2">
+                <div class="col-6 col-md-3"><label class="form-label small mb-0" for="frExType">Medlemstyp</label><select id="frExType" class="form-select form-select-sm"></select></div>
+                <div class="col-6 col-md-3"><label class="form-label small mb-0" for="frExHome">Huvudklubb</label>
+                    <select id="frExHome" class="form-select form-select-sm">
+                        <option value="ours">Vår klubb</option><option value="other">En annan klubb</option><option value="">Ingen huvudklubb</option>
+                    </select></div>
+                <div class="col-12 col-md-6"><div class="form-label small mb-0">Är med i förbund</div><div id="frExOpts" class="small"></div></div>
+            </div>
+            <div class="border rounded p-2 bg-body-tertiary" id="frExResult" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0" id="frBaseTitle">Grundavgift</h2>
+                <span class="small text-muted" id="frBaseStatus"></span>
+            </div>
+            <p class="text-muted small mt-2">Beloppet en medlem betalar för sin typ, före tillägg och avdrag. Årsmötet bestämmer beloppen. En familj betalar en gång, via huvudmedlemmen.
+                Typerna hämtas från <a href="#" data-view="medlemstyper">Medlemstyper och förbund</a>.
+                <strong>Medlemmen får välja typen själv</strong> betyder att medlemmen får välja just den typen på betalsidan, till exempel om hen blivit pensionär.</p>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Typ</th><th class="text-end">Grundavgift</th><th class="text-center">Medlemmen får välja typen själv</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                    <tbody id="frBaseRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0" id="frPartsTitle">Tillägg och avdrag</h2>
+                <span class="small text-muted" id="frPartsStatus"></span>
+            </div>
+            <p class="text-muted small mt-2">Belopp som läggs på eller dras av grundavgiften för vissa medlemmar. Huvudklubb är den klubb medlemmen räknas till i förbundets register;
+                den syns i färgen på typbrickan i listan. Förbunden ändras under <a href="#" data-view="medlemstyper">Medlemstyper och förbund</a>, men avgiften för ett förbund sätter du här.</p>
+            <div id="frParts"></div>
+        </div>
+    </div>
+</div>
+
+@* EN formulärmodal för grundavgift, tillägg och bekräftelser. Ingen modal i modalen, ingen lista som stängs och öppnas. *@
+<div class="modal fade" id="frModal" tabindex="-1" aria-hidden="true" aria-labelledby="frModalTitle">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="frModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="frModalBody"></div>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="frModalError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="frModalOk">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+}
+else
+{
+<div id="ftRoot" data-club-id="@ruClubId" data-readonly="@(ruReadOnly ? "1" : "0")">
+    @if (ruReadOnly)
+    {
+        <div class="alert alert-info small">Du läser föreningens medlemstyper och förbund. Det är kassören och klubbens administratör som ändrar dem.</div>
+    }
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <p class="text-muted small mb-0" style="max-width:62ch">Det här gäller alla år, inte bara ett. Namn, åldersgränser och förbund ändras sällan. Beloppen sätter du under
+            <a href="#" data-view="avgiftsregler">Avgiftsregler</a>. Redan skickade avgifter behåller sin text.</p>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-success-subtle text-success-emphasis border">Gäller alla år</span>
+            @if (!ruReadOnly)
+            {
+            <div class="dropdown">
+                <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item" type="button" id="ftNewType"><i class="bi bi-people me-2"></i>Ny medlemstyp…</button></li>
+                    <li><button class="dropdown-item" type="button" id="ftNewFed"><i class="bi bi-flag me-2"></i>Nytt förbund…</button></li>
+                </ul>
+            </div>
+            }
+        </div>
+    </div>
+
+    <div class="alert alert-danger d-none" id="ftError"></div>
+    <div class="alert alert-success d-none" id="ftOk"></div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0">Medlemstyper</h2>
+                <span class="small text-muted" id="ftTypesStatus"></span>
+            </div>
+            <p class="text-muted small mt-2">Varje medlem har en medlemstyp, till exempel Senior eller Pensionär. Typen avgör grundavgiften. Du kan byta namn på typer och ange från vilken ålder de gäller.
+                Åldern räknas som avgiftsåret minus födelseåret.</p>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-2">
+                    <thead><tr><th>Typ</th><th class="text-end">Från ålder</th><th class="text-end">Medlemmar</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                    <tbody id="ftTypeRows"></tbody>
+                </table>
+            </div>
+            <div class="small text-muted" id="ftTypesNote"></div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0">Förbund</h2>
+                <span class="small text-muted" id="ftFedStatus"></span>
+            </div>
+            <p class="text-muted small mt-2">Förbund som medlemmar kan vara med i. Vilka medlemmar som är med anger du under Åtgärder → Medlemskap på raden i Medlemsavgifter.
+                Avgiften för ett förbund sätter du som tillägg under <a href="#" data-view="avgiftsregler">Avgiftsregler</a>.</p>
+            <div class="alert alert-warning small">Avgiften till Svenska Pistolskytteförbundet beror oftast på <strong>huvudklubb</strong>, inte på att medlemmen är markerad som med i förbundet.
+                Den finns som tillägg under Avgiftsregler.</div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Förbund</th><th>Används av</th><th class="text-end">Medlemmar</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                    <tbody id="ftFedRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="ftModal" tabindex="-1" aria-hidden="true" aria-labelledby="ftModalTitle">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ftModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="ftModalBody"></div>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="ftModalError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ftModalOk">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+}

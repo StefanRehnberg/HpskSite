@@ -176,7 +176,7 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
   ["Familj och hushåll","",["Huvudmedlem","Övriga ingår i avgiften"]],
   ["Medlemsavgifter","En avgift per medlemstyp och år.",[
    ["Medlemstyper","",["Senior","Pensionär","Junior","Familj","Hedersmedlem","Ständig medlem","Stödjande medlem"]],
-   "Belopp per typ och år","Tillägg och avdrag","Tillval och förbund","Åldersgränser och åldersförslag","Medlemmen väljer typ själv","Avgiftslista med uppdelning","Utskick och påminnelse",
+   "Belopp per typ och år","Tillägg och avdrag","Förbund","Åldersgränser och åldersförslag","Medlemmen väljer typ själv","Avgiftslista med uppdelning","Utskick och påminnelse",
    ["Betalsida utan inloggning","",["Swish-QR","Bankgiro-QR","Jag har betalat"]],
    "Markera betald","Bokförs i liggaren","Läsläge för styrelse och revisor"]],
   ["Import","",["Excel eller CSV","Förifyllt för Svenska Lag","Medlemstyp och förbund","Testkörning","Dubblettskydd"]],

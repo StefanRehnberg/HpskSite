@@ -37,7 +37,7 @@
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
         <div>
             <div class="fw-semibold" id="cfRateLine"></div>
-            <div class="small text-muted" id="cfSummary"></div>
+            <div class="small text-muted"><span id="cfSummary"></span> <a href="#" data-view="avgiftsregler" id="cfRulesLink">Så räknas avgiften →</a></div>
         </div>
         <div class="d-flex align-items-center gap-2">
             <select id="cfYear" class="form-select" style="width:auto" aria-label="År"></select>
@@ -52,13 +52,6 @@
                     <li><button class="dropdown-item" type="button" id="cfSend"><i class="bi bi-envelope me-2"></i><span></span></button></li>
                     <li><button class="dropdown-item" type="button" id="cfRemind"><i class="bi bi-bell me-2"></i><span></span></button></li>
                     <li><span class="dropdown-item-text small text-muted d-none" id="cfNothingToSend"></span></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><h6 class="dropdown-header">Inställningar</h6></li>
-                    <li><button class="dropdown-item" type="button" id="cfEditRates"><i class="bi bi-cash-coin me-2"></i><span>Avgift per medlemstyp</span></button></li>
-                    <li><button class="dropdown-item" type="button" id="cfEditParts"><i class="bi bi-plus-slash-minus me-2"></i><span>Tillägg och avdrag…</span></button></li>
-                    <li><button class="dropdown-item" type="button" id="cfEditOptions"><i class="bi bi-ui-checks me-2"></i><span>Tillval och förbund…</span></button></li>
-                    <li><button class="dropdown-item" type="button" id="cfEditTypes"><i class="bi bi-people me-2"></i><span>Medlemstyper och åldersgränser…</span></button></li>
-                    <li class="d-none" id="cfAgeItemLi"><button class="dropdown-item" type="button" id="cfAgeItem"><i class="bi bi-arrow-left-right me-2"></i><span>Åldersförslag…</span></button></li>
                 </ul>
             </div>
             }
@@ -78,17 +71,19 @@
             }
         </div>
     </div>
-    @* Läsrollerna (styrelse, revisor) har ingen Åtgärder-meny men ska kunna läsa förslagslistan. *@
-    @if (feeReadOnly)
-    {
-    <div class="small mb-2 d-none" id="cfAgeLink"><button type="button" class="btn btn-link btn-sm p-0" id="cfAgeLinkBtn"></button></div>
-    }
+    @* Åldersförslagen är en gul uppgiftsrad som "Sätt typ på alla" (inte en menyrad). Läsrollerna kan läsa förslagslistan. *@
+    <div class="alert alert-warning d-none" id="cfAgeRow">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span id="cfAgeRowText"></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="cfAgeRowBtn">Granska förslagen…</button>
+        </div>
+    </div>
 
     <div class="text-center py-4 d-none" id="cfNoRate">
         <p class="mb-3" id="cfNoRateText"></p>
         @if (!feeReadOnly)
         {
-        <button type="button" class="btn btn-primary" id="cfNoRateBtn">Bestäm avgiften</button>
+        <button type="button" class="btn btn-primary" data-view="avgiftsregler" id="cfNoRateBtn">Bestäm avgiften</button>
         }
     </div>
 
@@ -115,93 +110,6 @@
                 </tr></thead>
                 <tbody id="cfRows"></tbody>
             </table>
-        </div>
-    </div>
-</div>
-
-@* Inställningen: avgift per medlemstyp. Ändringar sparas direkt; "Klar" stänger. *@
-<div class="modal fade" id="cfRatesModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfRatesTitle">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="cfRatesTitle">Avgift per medlemstyp</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-            </div>
-            <div class="modal-body">
-                <p class="text-muted small">Årsmötet bestämmer avgiften. Varje medlem betalar avgiften för sin medlemstyp.
-                    En familj betalar en gång, via huvudmedlemmen.</p>
-                <p class="text-muted small"><strong>Medlemmen kan välja</strong> — medlemmen får välja den här medlemstypen själv
-                    på betalsidan, till exempel om hen blivit pensionär. Du ser i listan när en medlem valt själv.
-                    Familj, hedersmedlem och ständig medlem är avstängda från början.</p>
-                <table class="table table-sm align-middle">
-                    <thead><tr><th>Medlemstyp</th><th class="text-end">Avgift</th><th class="text-center">Medlemmen kan välja</th><th></th></tr></thead>
-                    <tbody id="cfRatesRows"></tbody>
-                </table>
-                <div class="row g-2 align-items-end">
-                    <div class="col-6">
-                        <label class="form-label small mb-0" for="cfNewType">Medlemstyp</label>
-                        <select id="cfNewType" class="form-select form-select-sm"></select>
-                    </div>
-                    <div class="col-3">
-                        <label class="form-label small mb-0" for="cfNewAmount">Avgift</label>
-                        <input id="cfNewAmount" type="number" min="0" step="1" class="form-control form-control-sm" autocomplete="off">
-                    </div>
-                    <div class="col-3">
-                        <button type="button" class="btn btn-primary btn-sm w-100" id="cfAddRate">Lägg till</button>
-                    </div>
-                </div>
-                <p class="text-muted small mt-3 mb-0">Avgifter som redan skickats ändras inte.</p>
-                <div class="alert alert-danger d-none mt-3 mb-0" id="cfRatesError"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-@* Tillägg och avdrag: belopp med tecken som läggs på grundavgiften. Sparas direkt; formuläret är den lilla dialogen. *@
-<div class="modal fade" id="cfPartsModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfPartsTitle">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="cfPartsTitle">Tillägg och avdrag</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-            </div>
-            <div class="modal-body">
-                <p class="text-muted small">Avgiften är grundavgiften för medlemstypen plus tillägg och minus avdrag, men aldrig under 0 kr.
-                    Ett tillägg gäller alla, eller bara dem som uppfyller ett villkor — till exempel att klubben är huvudklubb, eller att medlemmen har ett tillval.</p>
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-2">
-                        <thead><tr><th>Namn</th><th class="text-end">Belopp</th><th class="d-none d-sm-table-cell">Gäller</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
-                        <tbody id="cfPartRows"></tbody>
-                    </table>
-                </div>
-                <div><button type="button" class="btn btn-sm btn-outline-secondary" id="cfNewPartBtn"><i class="bi bi-plus-lg me-1"></i>Nytt tillägg eller avdrag…</button></div>
-                <p class="text-muted small mt-3 mb-0">Avgifter som redan skickats ändras inte. Oskickade räknas om.</p>
-                <div class="alert alert-danger d-none mt-3 mb-0" id="cfPartsError"></div>
-            </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
-        </div>
-    </div>
-</div>
-
-@* Tillval: klubbens egna val (förbund, sportskytte …) som medlemmar kan ha — många per medlem. *@
-<div class="modal fade" id="cfOptionsModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfOptionsTitle">
-    <div class="modal-dialog modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="cfOptionsTitle">Tillval och förbund</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-            </div>
-            <div class="modal-body">
-                <p class="text-muted small">Ett tillval är något en medlem kan ha utöver grundmedlemskapet, till exempel ett förbund som klubben tar avgift för.
-                    Du sätter tillvalen på varje medlem (Åtgärder på raden) eller i importen, och kopplar sedan ett tillägg till tillvalet.</p>
-                <table class="table table-sm align-middle mb-2"><tbody id="cfOptionRows"></tbody></table>
-                <div><button type="button" class="btn btn-sm btn-outline-secondary" id="cfNewOptionBtn"><i class="bi bi-plus-lg me-1"></i>Nytt tillval…</button></div>
-                <div class="alert alert-danger d-none mt-3 mb-0" id="cfOptionsError"></div>
-            </div>
-            <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button></div>
         </div>
     </div>
 </div>
