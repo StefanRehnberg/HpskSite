@@ -186,7 +186,7 @@
         // Ingenting att filtrera på → ingen väljare.
         var wrap = $('cfFilterWrap'), sel = $('cfFilter');
         if (!wrap) return;
-        if (opts.length < 2) { filterVal = 'all'; show(wrap, false); return; }
+        if (opts.length < 2) { filterVal = 'all'; sel.innerHTML = ''; show(wrap, false); return; }
         if (!opts.some(function (o) { return o[0] === filterVal; })) filterVal = 'all';
         sel.innerHTML = opts.map(function (o) { return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>'; }).join('');
         sel.value = filterVal;
