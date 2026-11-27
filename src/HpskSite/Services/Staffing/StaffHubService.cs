@@ -52,6 +52,14 @@ namespace HpskSite.Services
                 s.OpenFirstCompetitionId = open.FirstOrDefault()?.CompetitionId;
                 if (open.FirstOrDefault() is { } first)
                     s.OpenFirstPath = first.PlanningId > 0 ? $"/bemanna?p={first.PlanningId}" : $"/bemanna?c={first.CompetitionId}";
+                // En rad per öppning, så att varje tävling har en egen länk (kortet räknade förut flera men länkade bara den första).
+                s.OpenItems = open.Select(o => new StaffHubItem
+                {
+                    CompetitionId = o.CompetitionId,
+                    SignupPath = o.PlanningId > 0 ? $"/bemanna?p={o.PlanningId}" : $"/bemanna?c={o.CompetitionId}",
+                    CompName = o.CompName,
+                    CompDate = o.CompDate,
+                }).ToList();
 
                 // Upcoming first (in GetMyAssignments' order), the recent-past tail newest-first.
                 s.Assignments = s.Assignments.Where(a => !a.IsPast)
@@ -78,6 +86,8 @@ namespace HpskSite.Services
         public int? OpenFirstCompetitionId { get; set; }
         /// <summary>P2b: anmälningssidan för den första öppningen (/bemanna?p= eller ?c=).</summary>
         public string? OpenFirstPath { get; set; }
+        /// <summary>Alla öppna anmälningar, i datumordning. Kortet listar dem när det är fler än en.</summary>
+        public List<StaffHubItem> OpenItems { get; set; } = new();
 
         /// <summary>
         /// The rows this card should still show once the home page's "Ditt schema" card has taken over

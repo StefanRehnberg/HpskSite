@@ -510,7 +510,24 @@ else
                         }
                     </div>
                 }
-                @if (staff.OpenCount > 0)
+                @if (staff.OpenCount > 1 && staff.OpenItems.Count > 1)
+                {
+                    @* Flera öppna: en rad per tävling, var och en med sin egen anmälan. *@
+                    if (staffVisibleCount > 0) { <div class="text-muted small mb-1">Söker funktionärer</div> }
+                    <div class="list-group list-group-flush" data-staff-open-list>
+                        @foreach (var o in staff.OpenItems)
+                        {
+                            <a href="@o.SignupPath" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-0">
+                                <span>
+                                    <span class="fw-semibold">@o.CompName</span>
+                                    @if (!string.IsNullOrEmpty(o.CompDate)) { <span class="text-muted small ms-1">· @o.CompDate</span> }
+                                </span>
+                                <i class="bi bi-chevron-right text-muted"></i>
+                            </a>
+                        }
+                    </div>
+                }
+                else if (staff.OpenCount > 0)
                 {
                     <a href="@(staff.OpenFirstPath ?? $"/bemanna?c={staff.OpenFirstCompetitionId}")" class="small text-decoration-none">
                         <i class="bi bi-clipboard-plus me-1"></i>@staff.OpenCount tävling@(staff.OpenCount == 1 ? "" : "ar") söker funktionärer — anmäl dig →
