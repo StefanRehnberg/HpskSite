@@ -371,17 +371,27 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpGet]
         [HpskSite.Services.Security.InCodeAuth("LedgerAccess.CanRead(klubben); skriver inget, räknar på syntetiska personer")]
-        public async Task<IActionResult> PreviewFee(int clubId, int year, string[]? type, string[]? home, string[]? options)
+        public async Task<IActionResult> PreviewFee(int clubId, int year, string[]? type, string[]? home, string[]? options, int? memberId = null)
         {
             if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var types = type ?? Array.Empty<string>();
-            if (types.Length == 0 || types.Length > 12)
+            var people = new List<MemberFeeInput>();
+            string? personName = null;
+            if (memberId is > 0)
+            {
+                // En riktig medlem i DEN HÄR klubben (aldrig ett id rakt av): typ, huvudklubb och förbund som i listan.
+                var real = ActiveFeeMembers(clubId).FirstOrDefault(m => m.MemberId == memberId.Value);
+                if (real is null) return Json(new { success = false, message = "Medlemmen hittades inte i klubben." });
+                people.Add(real);
+                personName = MemberInfo(new[] { real.MemberId }).TryGetValue(real.MemberId, out var info) ? info.Name : null;
+                types = new[] { real.MembershipType ?? "" };
+            }
+            else if (types.Length == 0 || types.Length > 12)
                 return Json(new { success = false, message = "Ange mellan 1 och 12 personer." });
 
-            var people = new List<MemberFeeInput>();
-            for (var i = 0; i < types.Length; i++)
+            for (var i = 0; i < types.Length && people.Count < types.Length && memberId is not > 0; i++)
             {
                 var ids = new List<int>();
                 var raw = options is not null && i < options.Length ? options[i] : null;
@@ -404,12 +414,83 @@ namespace HpskSite.Controllers
             var categories = _feeService.GetCategories(clubId, year);
             var (parts, partTypes) = _feeService.GetParts(clubId, year);
             var result = ClubFeePreview.Compute(categories.ToList(), parts.ToList(), partTypes, people);
+            // "Gäller inte den här medlemmen": de tillägg som inte träffar (första personen = huvudmedlemmen) och varför.
+            var optionNames = _feeSettings.GetOptions(clubId, includeInactive: true).ToDictionary(o => o.Id, o => o.Name);
+            var skipped = parts.Select(p => new
+            {
+                p.Label,
+                reason = ClubFeePreview.NotApplyReason(p, new HashSet<string>(partTypes[p.Id]), people[0],
+                    p.OptionId is int oid && optionNames.TryGetValue(oid, out var on) ? on : null)
+            }).Where(x => x.reason is not null).ToList();
             return Json(new
             {
                 success = true,
                 kind = result.Kind.ToString(),
                 total = result.Calculation.Total,
+                person = memberId is > 0 ? new { name = personName, type = people[0].MembershipType } : null,
+                skipped,
                 lines = result.Calculation.Lines.Select(l => new { l.Kind, l.Description, l.Amount, l.PartId })
+            });
+        }
+
+        /// <summary>
+        /// "Så här blir det" i tilläggsformuläret, live medan kassören fyller i: hur många av klubbens medlemmar träffas, ett
+        /// exempel med avgiften före och efter, och en medlem som inte träffas (med skälet). Skriver ingenting.
+        /// Samma regel som avgiften (<see cref="ClubFeeCalculator.Applies"/> + <see cref="ClubFeePreview"/>). <c>partId</c> &gt; 0 =
+        /// ett befintligt tillägg som ändras (ersätts i räkningen, annars räknas det dubbelt).
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("LedgerAccess.CanRead(klubben); skriver inget, räknar på klubbens medlemmar")]
+        public async Task<IActionResult> PreviewPart(int clubId, int year, int partId, decimal amount, string? condition, int? optionId, string[]? typeKeys)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (condition is not (MembershipFeePartCondition.Always or MembershipFeePartCondition.PrimaryClub
+                or MembershipFeePartCondition.NotPrimaryClub or MembershipFeePartCondition.Option))
+                return Json(new { success = false, message = "Okänt villkor." });
+
+            List<MemberFeeInput> people;
+            try { people = ActiveFeeMembers(clubId); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Förhandsvisningen kunde inte räkna för klubb {ClubId}", clubId);
+                return Json(new { success = false, message = "Träffarna kunde inte räknas just nu." });
+            }
+
+            const int draftId = -1;
+            var draft = new MembershipFeePart { Id = draftId, ClubId = clubId, Year = year, Label = "(nytt)", Amount = amount, Condition = condition,
+                                                OptionId = condition == MembershipFeePartCondition.Option ? optionId : null };
+            var draftKeys = (typeKeys ?? Array.Empty<string>()).Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => k.Trim()).ToHashSet();
+            var applies = people.Where(m => ClubFeeCalculator.Applies(draft, draftKeys, m)).ToList();
+
+            var categories = _feeService.GetCategories(clubId, year).ToList();
+            var (parts, partTypes) = _feeService.GetParts(clubId, year);
+            var baseParts = parts.Where(p => p.Id != partId).ToList();
+            var withDraft = baseParts.Append(draft).ToList();
+            var lookup = baseParts.SelectMany(p => partTypes[p.Id].Select(k => (p.Id, k)))
+                .Concat(draftKeys.Select(k => (draftId, k))).ToLookup(x => x.Item1, x => x.k);
+
+            // Exemplet: första träffade medlem vars avgift går att räkna (har typ och grundavgift). Före = utan tillägget, efter = med.
+            (int memberId, string? type, decimal before, decimal after)? example = null;
+            foreach (var m in applies)
+            {
+                var before = ClubFeePreview.Compute(categories, baseParts, lookup, new[] { m });
+                if (before.Kind is not (ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary)) continue;
+                var after = ClubFeePreview.Compute(categories, withDraft, lookup, new[] { m });
+                example = (m.MemberId, m.MembershipType, before.Calculation.Total, after.Calculation.Total);
+                break;
+            }
+            var miss = people.FirstOrDefault(m => !applies.Contains(m));
+            var optionName = draft.OptionId is int oid2 ? _feeSettings.GetOptions(clubId, includeInactive: true).FirstOrDefault(o => o.Id == oid2)?.Name : null;
+            var names = MemberInfo(new[] { example?.memberId ?? 0, miss?.MemberId ?? 0 }.Where(i => i > 0));
+            string? NameOf(int id) => names.TryGetValue(id, out var n) ? n.Name : null;
+            return Json(new
+            {
+                success = true,
+                total = people.Count,
+                applies = applies.Count,
+                example = example is null ? null : new { name = NameOf(example.Value.memberId), type = example.Value.type, before = example.Value.before, after = example.Value.after },
+                notApplying = miss is null ? null : new { name = NameOf(miss.MemberId), reason = ClubFeePreview.NotApplyReason(draft, draftKeys, miss, optionName) }
             });
         }
 

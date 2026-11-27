@@ -16,6 +16,27 @@ namespace HpskSite.Models
     {
         private const string HouseholdKey = "preview-household";
 
+        /// <summary>
+        /// Varför ett tillägg/avdrag INTE gäller en person, i klartext — eller null när det gäller. Beslutet är
+        /// <see cref="ClubFeeCalculator.Applies"/> (ingen egen regel); den här funktionen bara förklarar nej:et.
+        /// </summary>
+        public static string? NotApplyReason(MembershipFeePart part, ISet<string> partTypeKeys, MemberFeeInput person, string? optionName)
+        {
+            if (ClubFeeCalculator.Applies(part, partTypeKeys, person)) return null;
+            if (partTypeKeys.Count > 0)
+            {
+                var key = MembershipTypeKeys.StandardKey(person.MembershipType) ?? person.MembershipType?.Trim();
+                if (string.IsNullOrEmpty(key) || !partTypeKeys.Contains(key)) return "medlemstypen ingår inte";
+            }
+            return part.Condition switch
+            {
+                MembershipFeePartCondition.PrimaryClub => person.HomeClub == PrimaryClubState.Other ? "en annan klubb är huvudklubb" : "ingen huvudklubb är angiven",
+                MembershipFeePartCondition.NotPrimaryClub => person.HomeClub == PrimaryClubState.Ours ? "klubben är huvudklubb" : "ingen huvudklubb är angiven",
+                MembershipFeePartCondition.Option => string.IsNullOrWhiteSpace(optionName) ? "är inte med i förbundet" : $"är inte med i {optionName}",
+                _ => "villkoret är inte uppfyllt"
+            };
+        }
+
         public static ClubFeePreviewResult Compute(
             IReadOnlyList<MembershipFeeCategory> categories, IReadOnlyList<MembershipFeePart> parts,
             ILookup<int, string> partTypes, IReadOnlyList<MemberFeeInput> people)

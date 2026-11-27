@@ -76,5 +76,33 @@ namespace HpskSite.Tests
                 ClubFeePreview.Compute(Cats, Parts, Types, new[] { P("Hedersmedlem", PrimaryClubState.Ours) }).Kind);
             Assert.Equal(0m, ClubFeePreview.Compute(Cats, Parts, Types, Array.Empty<MemberFeeInput>()).Calculation.Total);
         }
+
+        /// <summary>"Gäller inte"-skälet får aldrig säga något annat än regeln: ett skäl finns exakt när <see cref="ClubFeeCalculator.Applies"/> säger nej.</summary>
+        [Theory]
+        [InlineData("Senior", PrimaryClubState.Ours, new int[0])]
+        [InlineData("Senior", PrimaryClubState.Other, new int[0])]
+        [InlineData("Senior", PrimaryClubState.Unknown, new[] { 7 })]
+        [InlineData("Junior", PrimaryClubState.Ours, new[] { 7 })]
+        [InlineData("", PrimaryClubState.Other, new int[0])]
+        public void Skalet_finns_exakt_nar_tillagget_inte_galler(string type, PrimaryClubState home, int[] opts)
+        {
+            var person = P(type, home, opts);
+            foreach (var part in Parts)
+            {
+                var keys = new HashSet<string>(Types[part.Id]);
+                var reason = ClubFeePreview.NotApplyReason(part, keys, person, "Svenska Pistolskytteförbundet");
+                Assert.Equal(ClubFeeCalculator.Applies(part, keys, person), reason is null);
+            }
+        }
+
+        [Fact]
+        public void Skalet_namner_det_som_hindrar()
+        {
+            var other = Parts[0];   // annan huvudklubb
+            Assert.Contains("klubben är huvudklubb", ClubFeePreview.NotApplyReason(other, new HashSet<string>(), P("Senior", PrimaryClubState.Ours), null));
+            Assert.Contains("ingen huvudklubb", ClubFeePreview.NotApplyReason(other, new HashSet<string>(), P("Senior", PrimaryClubState.Unknown), null));
+            Assert.Contains("Svenska Pistolskytteförbundet", ClubFeePreview.NotApplyReason(Parts[1], new HashSet<string>(), P("Senior", PrimaryClubState.Ours), "Svenska Pistolskytteförbundet"));
+            Assert.Contains("medlemstypen", ClubFeePreview.NotApplyReason(Parts[2], new HashSet<string> { "Junior" }, P("Senior", PrimaryClubState.Ours), null));
+        }
     }
 }

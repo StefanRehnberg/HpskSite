@@ -57,8 +57,11 @@
                         <option value="ours">Vår klubb</option><option value="other">En annan klubb</option><option value="">Ingen huvudklubb</option>
                     </select></div>
                 <div class="col-12 col-md-6"><div class="form-label small mb-0">Är med i förbund</div><div id="frExOpts" class="small"></div></div>
+                <div class="col-12 col-md-6"><label class="form-label small mb-0" for="frExMember">eller räkna på en riktig medlem</label>
+                    <select id="frExMember" class="form-select form-select-sm"><option value="">Välj en medlem…</option></select></div>
             </div>
             <div class="border rounded p-2 bg-body-tertiary" id="frExResult" aria-live="polite"></div>
+            <div class="small text-muted mt-2 d-none" id="frExSkipped"></div>
         </div>
     </div>
 
@@ -72,8 +75,20 @@
                 Typerna hämtas från <a href="#" data-view="medlemstyper">Medlemstyper och förbund</a>.
                 <strong>Medlemmen får välja typen själv</strong> betyder att medlemmen får välja just den typen på betalsidan, till exempel om hen blivit pensionär.</p>
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
-                    <thead><tr><th>Typ</th><th class="text-end">Grundavgift</th><th class="text-center">Medlemmen får välja typen själv</th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
+                @* Telefon: fyra kolumner får inte plats (Åtgärder hamnade utanför skärmen). Varje rad blir ett litet kort:
+                   typ + belopp, sedan valet + Åtgärder. Tomma celler (typ utan avgift har inget val) göms. *@
+                <style>
+                    @@media (max-width: 575.98px) {
+                        .fr-base-table thead { display: none; }
+                        .fr-base-table tr { display: grid; grid-template-columns: 1fr auto; gap: .35rem .5rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--bs-border-color); }
+                        .fr-base-table td { border: 0; padding: 0; }
+                        .fr-base-table td:empty { display: none; }
+                        .fr-base-table td[data-fr-cell="sel"] { text-align: left !important; font-size: .85rem; color: var(--bs-secondary-color); }
+                        .fr-base-table td[data-fr-cell="sel"]::before { content: "Medlemmen får välja typen själv"; display: block; margin-bottom: .1rem; }
+                    }
+                </style>
+                <table class="table table-sm align-middle mb-0 fr-base-table">
+                    <thead><tr><th>Typ</th><th class="text-end">Grundavgift</th><th class="text-center"><span class="d-none d-md-inline">Medlemmen får välja typen själv</span><span class="d-md-none">Väljer själv</span></th><th><span class="visually-hidden">Åtgärder</span></th></tr></thead>
                     <tbody id="frBaseRows"></tbody>
                 </table>
             </div>

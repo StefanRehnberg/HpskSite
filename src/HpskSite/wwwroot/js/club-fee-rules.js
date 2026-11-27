@@ -144,7 +144,7 @@
                 var c = categoryOf(t.key); listed[(t.key || '').toLowerCase()] = 1;
                 if (c) {
                     rows += '<tr><td>' + esc(t.name) + '</td><td class="text-end text-nowrap">' + kr(c.amount) + '</td>'
-                        + '<td class="text-center">' + (READONLY ? (c.memberSelectable ? 'Ja' : 'Nej')
+                        + '<td class="text-center" data-fr-cell="sel">' + (READONLY ? (c.memberSelectable ? 'Ja' : 'Nej')
                             : '<div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" data-fr-sel="' + c.id + '"'
                               + (c.memberSelectable ? ' checked' : '') + ' aria-label="Medlemmen får välja ' + esc(t.name) + ' själv"></div>') + '</td>'
                         + '<td class="text-end">' + (READONLY ? '' : menu('fr-base', c.id, [['edit', 'Ändra belopp…'], ['delete', 'Ta bort…', true]])) + '</td></tr>';
@@ -185,17 +185,41 @@
                 return '<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" value="' + o.id + '" id="frExO' + o.id + '"' + (checked[o.id] ? ' checked' : '') + '>'
                     + '<label class="form-check-label" for="frExO' + o.id + '">' + esc(o.name) + '</label></div>';
             }).join('') || '<span class="text-muted">Inga förbund än.</span>';
+
+            // Medlemsväljaren: klubbens medlemmar ur samma översikt som listan (namn + typ). Valet behålls över omladdningar.
+            var msel = $('frExMember'), keepM = msel.value;
+            msel.innerHTML = '<option value="">Välj en medlem…</option>' + ((data && data.rows) || []).map(function (r) {
+                return '<option value="' + r.memberId + '">' + esc(r.name) + (r.membershipType ? ' (' + esc(typeName(r.membershipType)) + ')' : '') + '</option>';
+            }).join('');
+            if (keepM) msel.value = keepM;
+            syncExampleMode();
+        }
+        // En vald medlem ersätter de tre handvalen: de gråas så att ingen tror att de styr räkningen.
+        function syncExampleMode() {
+            var real = !!$('frExMember').value;
+            $('frExType').disabled = real; $('frExHome').disabled = real;
+            Array.prototype.forEach.call($('frExOpts').querySelectorAll('input'), function (b) { b.disabled = real; });
         }
         var exSeq = 0;
         async function runExample() {
-            var box = $('frExResult');
+            var box = $('frExResult'), skipBox = $('frExSkipped');
+            show(skipBox, false);
+            var memberId = $('frExMember').value;
             var type = $('frExType').value;
-            if (!type) { box.innerHTML = '<span class="text-muted small">Välj en medlemstyp för att räkna.</span>'; return; }
+            if (!memberId && !type) { box.innerHTML = '<span class="text-muted small">Välj en medlemstyp för att räkna.</span>'; return; }
             var ids = Array.prototype.map.call($('frExOpts').querySelectorAll('input:checked'), function (b) { return b.value; }).join(',');
             var mine = ++exSeq;
-            var d = await get('PreviewFee', 'clubId=' + CLUB_ID + '&year=' + year() + '&type=' + encodeURIComponent(type) + '&home=' + encodeURIComponent($('frExHome').value) + '&options=' + encodeURIComponent(ids));
+            var q = 'clubId=' + CLUB_ID + '&year=' + year() + (memberId ? '&memberId=' + encodeURIComponent(memberId)
+                : '&type=' + encodeURIComponent(type) + '&home=' + encodeURIComponent($('frExHome').value) + '&options=' + encodeURIComponent(ids));
+            var d = await get('PreviewFee', q);
             if (mine !== exSeq) return;
             if (!d.success) { box.innerHTML = '<span class="text-danger small">' + esc(d.message || 'Räkningen gick inte att göra.') + '</span>'; return; }
+            // Tilläggen som inte träffar den här personen, med skälet ("Gäller inte den här medlemmen: …").
+            if (d.skipped && d.skipped.length) {
+                skipBox.innerHTML = 'Gäller inte ' + (memberId ? esc((d.person && d.person.name) || 'den här medlemmen') : 'den här medlemmen') + ': '
+                    + d.skipped.map(function (s) { return esc(s.label) + ' (' + esc(s.reason) + ')'; }).join(', ') + '.';
+                show(skipBox, true);
+            }
             if (d.kind !== 'Individual' && d.kind !== 'HouseholdPrimary') {
                 box.innerHTML = '<span class="text-muted small">' + (d.kind === 'NoCategory' ? 'Ingen grundavgift är bestämd för ' + esc(typeName(type)) + ' ' + year() + ', så ingen avgift tas ut.' : 'Ingen avgift för den här kombinationen.') + '</span>';
                 return;
@@ -204,6 +228,7 @@
                 return '<div class="d-flex justify-content-between"><span>' + esc(l.description) + '</span><span class="text-nowrap">' + (l.kind === 'fee-base' ? kr(l.amount) : signed(l.amount)) + '</span></div>';
             }).join('') + '<div class="d-flex justify-content-between fw-bold border-top mt-1 pt-1"><span>Att betala</span><span>' + kr(d.total) + '</span></div>';
         }
+        $('frExMember').addEventListener('change', function () { syncExampleMode(); runExample(); });
         $('frExType').addEventListener('change', runExample);
         $('frExHome').addEventListener('change', runExample);
         $('frExOpts').addEventListener('change', runExample);
@@ -329,13 +354,49 @@
                     return '<div class="form-check"><input class="form-check-input" type="checkbox" data-fr-ptype="' + esc(t.key) + '" id="frPT_' + esc(t.key) + '"'
                         + (chosen.indexOf((t.key || '').toLowerCase()) >= 0 ? ' checked' : '') + '><label class="form-check-label" for="frPT_' + esc(t.key) + '">' + esc(t.name) + '</label></div>';
                 }).join('') + '</div>'
+                // Fast i modalens botten: typlistan är lång och blocket under den hamnade utom synhåll medan villkoret ändras högre upp.
+                + '<div class="border rounded p-2 bg-body-tertiary small mt-3 shadow-sm" id="frPLive" style="position:sticky;bottom:0" aria-live="polite"><strong>Så här blir det</strong> <span class="text-muted">(räknas av servern)</span>'
+                + '<div id="frPLiveBody" class="mt-1"></div></div>'
                 + '<p class="text-muted small mt-3 mb-0">Avgifter som redan skickats ändras inte. Oskickade räknas om när du sparar.</p>';
         }
-        function wirePartForm() {
+        function wirePartForm(editing) {
             var cond = $('frPCond'), optSel = $('frPOpt');
+            // ── "Så här blir det": träffar, ett exempel och en medlem som inte träffas. Ritas om medan formuläret fylls i. ──
+            var liveSeq = 0, liveTimer = null;
+            function collect() {
+                var amt = parseFloat($('frPAmount').value);
+                var q = new URLSearchParams();
+                q.append('clubId', CLUB_ID); q.append('year', year()); q.append('partId', editing ? editing.id : 0);
+                q.append('amount', isNaN(amt) ? 0 : ($('frPSign').value === 'minus' ? -amt : amt));
+                q.append('condition', cond.value);
+                if (cond.value === 'Option' && optSel.value !== 'new') q.append('optionId', optSel.value);
+                if (!$('frPAllTypes').checked) Array.prototype.forEach.call($('frPTypes').querySelectorAll('input:checked'), function (b) { q.append('typeKeys', b.getAttribute('data-fr-ptype')); });
+                return q;
+            }
+            async function live() {
+                var body = $('frPLiveBody'); if (!body) return;
+                if (cond.value === 'Option' && (optSel.value === 'new' || !optSel.value)) {
+                    body.innerHTML = '<span class="text-muted">Förbundet skapas när du sparar. Träffarna räknas då.</span>'; return;
+                }
+                var mine = ++liveSeq;
+                var d = await get('PreviewPart', collect().toString());
+                if (mine !== liveSeq || !$('frPLiveBody')) return;
+                if (!d.success) { body.innerHTML = '<span class="text-muted">' + esc(d.message || 'Träffarna kunde inte räknas.') + '</span>'; return; }
+                var h = '<div>Träffar <strong>' + d.applies + '</strong> av ' + plural(d.total, 'medlem', 'medlemmar') + '</div>';
+                if (d.example) h += '<div>Exempel: ' + esc(d.example.name || 'en medlem') + (d.example.type ? ' (' + esc(typeName(d.example.type)) + ')' : '') + ' <span class="text-nowrap">'
+                    + kr(d.example.before) + ' → ' + kr(d.example.after) + '</span></div>';
+                else if (d.applies > 0) h += '<div class="text-muted">Ingen av de träffade har en avgift att visa som exempel än.</div>';
+                if (d.notApplying) h += '<div class="text-muted">Gäller inte: ' + esc(d.notApplying.name || 'en medlem') + (d.notApplying.reason ? ' (' + esc(d.notApplying.reason) + ')' : '') + '.</div>';
+                body.innerHTML = h;
+            }
+            function liveSoon() { clearTimeout(liveTimer); liveTimer = setTimeout(live, 250); }
+            ['frPAmount', 'frPSign', 'frPCond', 'frPOpt'].forEach(function (id) { $(id).addEventListener('input', liveSoon); $(id).addEventListener('change', liveSoon); });
+            $('frPAllTypes').addEventListener('change', liveSoon); $('frPTypes').addEventListener('change', liveSoon);
+            if ($('frPTemplate')) $('frPTemplate').addEventListener('change', liveSoon);
             function sync() {
                 show($('frPOptWrap'), cond.value === 'Option');
                 show($('frPNewWrap'), cond.value === 'Option' && optSel.value === 'new');
+                liveSoon();
             }
             cond.addEventListener('change', function () {
                 // Inget förbund än: vi går direkt till "Nytt förbund…" så att kassören inte tappar det hon skrivit.
@@ -367,7 +428,7 @@
         }
         function openPart(p) {
             openModal({ title: p ? 'Ändra ' + p.label : 'Nytt tillägg eller avdrag', ok: p ? 'Spara' : 'Lägg till', body: partForm(p),
-                after: wirePartForm,
+                after: function () { wirePartForm(p); },
                 onOk: async function () {
                     var amt = parseFloat($('frPAmount').value);
                     if (isNaN(amt) || amt <= 0) return 'Fyll i ett belopp över 0 kr. Välj Avdrag om det ska dras av.';
