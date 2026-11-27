@@ -302,12 +302,17 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 var res=sh.results||sh.Results||[];
                 var tot=0,tx=0,sr=[];
                 res.forEach(function(r){var shots=JSON.parse(r.shots||r.Shots||'[]');var s=0,x=0;shots.forEach(function(v){s+=(v==='X'||v==='x')?10:(parseInt(v)||0);if(v==='X'||v==='x')x++});sr.push({s:s,x:x});tot+=s;tx+=x});
-                all.push({nm:nm,cl:cl,sc:sc,sr:sr,tot:tot,tx:tx,medal:sh.standardMedal||sh.StandardMedal||'',outside:(sh.outOfCompetition===true||sh.OutOfCompetition===true)});
+                var so=sh.shootOffRoundTotals||sh.ShootOffRoundTotals||[];
+                var pl=sh.placement!=null?sh.placement:sh.Placement;
+                all.push({nm:nm,cl:cl,sc:sc,sr:sr,tot:tot,tx:tx,so:so,sop:(so.length>0&&pl!=null)?pl:1e6,medal:sh.standardMedal||sh.StandardMedal||'',outside:(sh.outOfCompetition===true||sh.OutOfCompetition===true)});
             });
         });
         if(!all.length){wr.innerHTML='<div style="text-align:center;padding:3rem 0;opacity:.5"><i class="bi bi-inbox" style="font-size:2rem"></i><p>Inga resultat</p></div>';return}
-        // Sort by total desc, then X count desc
-        all.sort(function(a,b){return b.tot-a.tot||(b.tx-a.tx)});
+        // Sort by total desc, then X count desc. Lika på båda: den som en särskjutning placerat går före (serverns plats), annars
+        // sorterade tavlan om dem och körde över särskjutningen (samma fel som fältets tavla, KM 7557).
+        all.sort(function(a,b){return b.tot-a.tot||(b.tx-a.tx)||(a.sop-b.sop)});
+        var soCols=all.reduce(function(m,s){return Math.max(m,s.so.length)},0);
+        var soGrid='display:inline-grid;grid-template-columns:repeat('+soCols+',2.6em);justify-items:center;white-space:nowrap';
         var maxSeries=0;
         all.forEach(function(s){if(s.sr.length>maxSeries)maxSeries=s.sr.length});
         var useFinals=hasFinalsRound&&maxSeries>=totalSeriesCount;
@@ -318,7 +323,9 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             for(var g=0;g<3;g++){for(var i=g*4+1;i<=g*4+4;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-subtotal">'+gLabels[g]+'</th>'}
         } else if(useFinals){for(var i=1;i<=qualSeriesCount;i++)h+='<th class="rb-series-col">'+i+'</th>';h+='<th class="rb-series-col">Tot</th>';for(var i=1;i<=numFinalSeries;i++)h+='<th class="rb-series-col">F'+i+'</th>'}
         else{for(var i=1;i<=maxSeries;i++)h+='<th class="rb-series-col">'+i+'</th>'}
-        h+='<th>Tot</th><th>X</th>';if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
+        h+='<th>Tot</th><th>X</th>';
+        if(soCols>0){var nums='';for(var i=1;i<=soCols;i++)nums+='<span style="opacity:.6;font-weight:400">'+i+'</span>';h+='<th title="Särskjutning, omgång för omgång">Sär<div style="'+soGrid+'">'+nums+'</div></th>'}
+        if(isMedals)h+='<th>S</th>';h+='</tr></thead><tbody>';
         var contenders=0;
         all.forEach(function(sh,pos0){
             // Den som skjuter utanför mästerskapet får ingen plats och ingen pallfärg, och räknas inte i placeringen (utan sådana skyttar är
@@ -340,6 +347,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 for(var i=0;i<maxSeries;i++)h+='<td class="rb-series-col">'+(i<sr.length?sr[i].s:'-')+'</td>';
             }
             h+='<td><strong>'+sh.tot+'</strong></td><td>'+sh.tx+'</td>';
+            if(soCols>0){var cs='';for(var r=0;r<soCols;r++)cs+=r<sh.so.length?'<span style="font-weight:700" title="Omgång '+(r+1)+'">'+sh.so[r]+'</span>':'<span></span>';h+='<td><div style="'+soGrid+'">'+cs+'</div></td>'}
             if(isMedals){var mc=sh.medal==='S'?' rb-medal-s':sh.medal==='B'?' rb-medal-b':'';h+='<td class="'+mc.trim()+'">'+sh.medal+'</td>'}
             h+='</tr>';
         });
@@ -371,23 +379,31 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             var shooters=buckets[wc];
             if(!shooters.length)return;
             // Rank across the whole weapon class using the server's tiebreaker keys.
+            // En avgjord särskjutning går före målpoängen (Pm): servern märker de skyttar den skilt åt med shootOffRank
+            // (platsen i kategorin, lägre = bättre). Utan nyckeln sorterades de om på Pm och tavlan visade fel plats (KM fält 7557).
+            // Skyttar utan särskjutning får 1e6 och hamnar efter. Samma nyckel som resultatsidan.
+            function soKey(s){var r=s.shootOffRank!=null?s.shootOffRank:s.ShootOffRank;return r!=null?r:1e6}
             shooters.sort(function(a,b){
                 if(faltIsPoang){
                     return fNum(b.totalPoints,b.TotalPoints)-fNum(a.totalPoints,a.TotalPoints)
+                        || soKey(a)-soKey(b)
                         || fNum(b.totalTiebreakerScore,b.TotalTiebreakerScore)-fNum(a.totalTiebreakerScore,a.TotalTiebreakerScore);
                 }
                 return fNum(b.totalHits,b.TotalHits)-fNum(a.totalHits,a.TotalHits)
                     || fNum(b.totalFigures,b.TotalFigures)-fNum(a.totalFigures,a.TotalFigures)
+                    || soKey(a)-soKey(b)
                     || fNum(b.totalTiebreakerScore,b.TotalTiebreakerScore)-fNum(a.totalTiebreakerScore,a.TotalTiebreakerScore);
             });
             var hasSS=shooters.some(function(s){var r=s.shootOffRounds||s.ShootOffRounds;return Array.isArray(r)&&r.length>0});
+            var soCols=shooters.reduce(function(m,s){var r=s.shootOffRounds||s.ShootOffRounds;return Math.max(m,Array.isArray(r)?r.length:0)},0);
+            var soGrid='display:inline-grid;grid-template-columns:repeat('+soCols+',3.6em);justify-items:center;white-space:nowrap';
             var cols=4+n+2+(hasSS?1:0)+(isMedals?1:0);
             h+='<table class="rb-table" style="margin-bottom:1rem">';
             h+='<thead><tr><td colspan="'+cols+'" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.5rem;text-align:left;border-bottom:2px solid #4ecca3">Vapengrupp '+wcLabel(wc)+' <span style="opacity:.6;font-weight:400">('+shooters.length+' deltagare)</span></td></tr>';
             h+='<tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
             for(var i=1;i<=n;i++)h+='<th class="rb-series-col">'+i+'</th>';
             h+='<th>'+(faltIsPoang?'Poäng':'Tot')+'</th><th>Pm</th>';
-            if(hasSS)h+='<th>Sär</th>';
+            if(hasSS){var nums='';for(var i=1;i<=soCols;i++)nums+='<span style="opacity:.6;font-weight:400">'+i+'</span>';h+='<th title="Särskjutning, omgång för omgång">Sär<div style="'+soGrid+'">'+nums+'</div></th>'}
             if(isMedals)h+='<th>S</th>';
             h+='</tr></thead><tbody>';
             var contenders=0;
@@ -421,7 +437,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 h+='<td>'+(pm||'')+'</td>';
                 if(hasSS){
                     var rounds=sh.shootOffRounds||sh.ShootOffRounds||[];
-                    if(rounds.length>0){var tip=rounds.map(function(t,i){return'Runda '+(i+1)+': '+t}).join(', ');h+='<td title="'+tip+'"><strong>'+rounds.join(' / ')+'</strong></td>'}
+                    if(rounds.length>0){var cs='';for(var r=0;r<soCols;r++)cs+=r<rounds.length?'<span style="font-weight:700" title="Omgång '+(r+1)+'">'+rounds[r]+'</span>':'<span></span>';h+='<td><div style="'+soGrid+'">'+cs+'</div></td>'}
                     else h+='<td style="opacity:.4">—</td>';
                 }
                 if(isMedals){var m=sh.standardMedal||sh.StandardMedal||'';var mc=m==='S'?' rb-medal-s':m==='B'?' rb-medal-b':'';h+='<td class="'+mc.trim()+'">'+m+'</td>'}
