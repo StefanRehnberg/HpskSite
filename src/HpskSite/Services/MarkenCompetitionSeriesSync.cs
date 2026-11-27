@@ -86,6 +86,81 @@ namespace HpskSite.Services
         /// </summary>
         private const string TableNationellHelmatch = "NationellHelmatchResultEntry";
 
+        /// <summary>
+        /// <b>SportpistolResultEntry</b> och <b>StandardpistolResultEntry</b> (Stefan 2026-11-27, efter
+        /// felrapport från Åmåls PK). Samma form som helmatch: tabellen bär flera sorters serier och
+        /// serienumret avgör — <see cref="SeriesSegments.KindOf"/> är den enda kartan.
+        /// <list type="bullet">
+        /// <item>Sportpistol serie 1–6 = precisionsserier (Guldfordringens del 1, Elits precisionshalva),
+        /// serie 7–12 = duellserier (Elits snabbhalva).</item>
+        /// <item>Standardpistol serie 1–4 (150 s) = precisionsserier. 20 s och 10 s räknas inte.</item>
+        /// </list>
+        /// Policy utan SPSF-text: SHB 2026 nämner inte grenarna. Tävlingen måste ha exakt 12 serier.
+        /// </summary>
+        private const string TableSportpistol = "SportpistolResultEntry";
+        private const string TableStandardpistol = "StandardpistolResultEntry";
+
+        /// <summary>
+        /// EN lista över källtabellerna — upptäckten av skyttar och läsningen av rader byggs ur den, så att en
+        /// glömd tabell inte kan finnas på ett ställe men inte på ett annat (klubbytorna såg annars inte en
+        /// skytt som bara skjutit en av de nya grenarna).
+        /// </summary>
+        private static readonly string[] SourceTables =
+            { TablePrecision, TableDuell, TableNationellHelmatch, TableSportpistol, TableStandardpistol };
+
+        /// <summary>
+        /// De två nya källorna materialiseras bara från detta år (Stefan 2026-11-27). Märken är enkelriktade
+        /// och kan inte dras tillbaka automatiskt, så äldre år tas in först på begäran.
+        /// </summary>
+        public const int NewSourcesFromYear = 2026;
+
+        /// <summary>Källtabellerna, för spärrtestet mot <see cref="CompetitionResultTables.AllTables"/>.</summary>
+        public static IReadOnlyList<string> SourceTableNames => SourceTables;
+
+        private static bool IsNewSource(string table) => table == TableSportpistol || table == TableStandardpistol;
+
+        /// <summary>
+        /// Vad märkessystemet gör med en serie ur <paramref name="sourceTable"/>. Precision- och Duell-tabellerna
+        /// ger svaret själva; övriga läser serienumret mot <see cref="SeriesSegments"/>. Publik för att kunna
+        /// provas direkt.
+        /// </summary>
+        public static SeriesSegments.MarkenSeriesKind KindOf(string sourceTable, int seriesNumber, int numberOfSeries)
+            => sourceTable switch
+            {
+                TablePrecision => SeriesSegments.MarkenSeriesKind.Precision,
+                TableDuell => SeriesSegments.MarkenSeriesKind.Speed,
+                TableNationellHelmatch => SeriesSegments.KindOf("NationellHelmatch", seriesNumber, numberOfSeries),
+                TableSportpistol => SeriesSegments.KindOf("Sportpistol", seriesNumber, numberOfSeries),
+                TableStandardpistol => SeriesSegments.KindOf("Standardpistol", seriesNumber, numberOfSeries),
+                _ => SeriesSegments.MarkenSeriesKind.None
+            };
+
+        /// <summary>Radens etikett: tävlingens namn, och för de nya grenarna också gren, halva och serienummer.</summary>
+        public static string LabelFor(string competitionName, string sourceTable, int seriesNumber, SeriesSegments.MarkenSeriesKind kind)
+            => sourceTable switch
+            {
+                TableSportpistol => $"{competitionName} · Sportpistol, {(kind == SeriesSegments.MarkenSeriesKind.Speed ? "duellhalvan" : "precisionshalvan")}, serie {seriesNumber}",
+                TableStandardpistol => $"{competitionName} · Standardpistol, 150 s, serie {seriesNumber}",
+                _ => competitionName
+            };
+
+        /// <summary>Samma skott i samma ordning (och minst ett skott) — samma regel som vid inskick.</summary>
+        public static bool SameShots(string? a, string? b)
+        {
+            if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+            try
+            {
+                var xa = System.Text.Json.JsonSerializer.Deserialize<List<string>>(a);
+                var xb = System.Text.Json.JsonSerializer.Deserialize<List<string>>(b);
+                if (xa == null || xb == null || xa.Count == 0 || xa.Count != xb.Count) return false;
+                for (int i = 0; i < xa.Count; i++)
+                    if (!string.Equals((xa[i] ?? "").Trim(), (xb[i] ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+                        return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
         /// <summary>What one reconciliation did. Returned so callers can log or assert on it.</summary>
         public record SyncResult(int Inserted, int Updated, int Deleted)
         {
@@ -116,21 +191,21 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<SyncResult> SyncYearFromResultsAsync(int year)
         {
-            List<int> ids;
-            try
+            // Per tabell, med egen try/catch: en tabell som inte går att läsa kostar inte de andra deras synk.
+            // (Medlemmar som bara finns i den tabellen ingår då inte alls — och ingenting raderas för dem,
+            // eftersom raderingen bara gäller medlemmar som är med i anropet.)
+            var ids = new HashSet<int>();
+            using var db = _databaseFactory.CreateDatabase();
+            foreach (var table in SourceTables)
             {
-                using var db = _databaseFactory.CreateDatabase();
-                ids = await db.FetchAsync<int>(
-                    @"SELECT DISTINCT MemberId FROM PrecisionResultEntry WHERE MemberId > 0
-                      UNION
-                      SELECT DISTINCT MemberId FROM DuellResultEntry WHERE MemberId > 0
-                      UNION
-                      SELECT DISTINCT MemberId FROM NationellHelmatchResultEntry WHERE MemberId > 0");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Marken competition-series sync could not list shooters with results");
-                return SyncResult.None;
+                try
+                {
+                    ids.UnionWith(await db.FetchAsync<int>($"SELECT DISTINCT MemberId FROM [{table}] WHERE MemberId > 0"));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Marken competition-series sync could not list shooters in {Table}", table);
+                }
             }
             return await SyncManyAsync(ids, year);
         }
@@ -156,11 +231,14 @@ namespace HpskSite.Services
             }
 
             List<ResultRow> rows;
+            HashSet<string> failedTables;
             List<MarkenSeries> existing;
+            List<MarkenSeries> handEntered;
             try
             {
-                rows = await ReadResultRowsAsync(ids);
+                (rows, failedTables) = await ReadResultRowsAsync(ids);
                 existing = await ReadMaterialisedAsync(ids, year);
+                handEntered = await ReadHandEnteredAsync(ids, year);
             }
             catch (Exception ex)
             {
@@ -170,14 +248,18 @@ namespace HpskSite.Services
             }
 
             // Resolve each competition once: year, name, and the shooter-independent club.
-            var comps = new Dictionary<int, (int Year, string Name, DateTime? Date)>();
+            // NumberOfSeries: de nya grenarnas indelning gäller bara vid exakt 12 serier (SeriesSegments.KindOf).
+            // unreadableComps: en tävling som inte gick att hämta är OKÄND, inte "år 0" — raderna som hör till den
+            // får inte raderas av en övergående miss (och en admins "Räkna inte" går då inte förlorad).
+            var comps = new Dictionary<int, (int Year, string Name, DateTime? Date, int NumberOfSeries)>();
+            var unreadableComps = new HashSet<int>();
             foreach (var r in rows)
             {
                 if (comps.ContainsKey(r.CompetitionId)) continue;
                 var node = _competitions.Get(r.CompetitionId);
-                if (node == null) { comps[r.CompetitionId] = (0, "", null); continue; }
+                if (node == null) { comps[r.CompetitionId] = (0, "", null, 0); unreadableComps.Add(r.CompetitionId); continue; }
                 var compDate = node.CompetitionDate;
-                comps[r.CompetitionId] = (compDate?.Year ?? 0, node.Name ?? "Tävling", compDate);
+                comps[r.CompetitionId] = (compDate?.Year ?? 0, node.Name ?? "Tävling", compDate, node.NumberOfSeriesOrStations);
             }
 
             // Birth year drives the age-adjusted gold threshold, so it decides whether a series
@@ -207,17 +289,21 @@ namespace HpskSite.Services
             {
                 if (!comps.TryGetValue(r.CompetitionId, out var ci) || ci.Year != year) continue;
 
+                // Sportpistol/Standardpistol: bara från NewSourcesFromYear (märken är enkelriktade).
+                if (IsNewSource(r.SourceTable) && ci.Year < NewSourcesFromYear) continue;
+
                 var group = Marken.WeaponGroup(r.ShootingClass);
                 if (group == null) continue;
 
                 // Vilken SORTS serie raden är — inte vilken tabell den låg i. En helmatchs tolv
                 // rader bär fyra precisionsserier, fyra duellserier och fyra fältserier, och bara
-                // de två första sorterna finns det något att materialisera för.
-                var kind = SeriesKindOf(r);
-                if (kind == SeriesKind.None) continue;
+                // de två första sorterna finns det något att materialisera för. Samma karta
+                // (SeriesSegments) läser Sportpistol och Standardpistol.
+                var kind = KindOf(r.SourceTable, r.SeriesNumber, ci.NumberOfSeries);
+                if (kind == SeriesSegments.MarkenSeriesKind.None) continue;
 
                 int total = SumShots(r.Shots);
-                bool isDuell = kind == SeriesKind.Speed;
+                bool isDuell = kind == SeriesSegments.MarkenSeriesKind.Speed;
 
                 // ── What is worth materialising ──
                 // Not every series: a precision competition holds 7-10 per shooter, and rows that can
@@ -274,7 +360,7 @@ namespace HpskSite.Services
                     Qualifies = total >= threshold,
                     Status = Marken.StatusVerified,
                     ValidatedDate = r.EnteredAt,
-                    Notes = ci.Name,
+                    Notes = LabelFor(ci.Name, r.SourceTable, r.SeriesNumber, kind),
                     SourceResultId = r.Id,
                     SourceTable = r.SourceTable,
                     SourceCompetitionId = r.CompetitionId,
@@ -290,6 +376,17 @@ namespace HpskSite.Services
                 var have = existing.FirstOrDefault(e => e.SourceResultId == key.Id && e.SourceTable == key.Table);
                 if (have == null)
                 {
+                    // ⚠️ Omvänd dubblettkontroll. Inskicket varnar bara när tävlingsraden redan finns; skickade
+                    // skytten in serien för hand FÖRE resultatet matades in kom tävlingskopian hit och räknades en
+                    // andra gång. Samma fysiska serie = samma skytt, dag, vapengrupp, poäng och skott. Det är
+                    // TÄVLINGSRADEN som inte räknas (handraden är skyttens eget, validerade underlag), och
+                    // flaggan består — den skrivs aldrig över vid uppdatering. En funktionär kan slå på den.
+                    if (want.SeriesType == Marken.SeriesTypePrecision && handEntered.Any(h =>
+                            h.MemberId == want.MemberId && h.WeaponGroup == want.WeaponGroup
+                            && h.Total == want.Total && h.SeriesDate.Date == want.SeriesDate.Date
+                            && SameShots(h.Shots, want.Shots)))
+                        want.CountsTowardGuldfodring = false;
+
                     want.CreatedAt = DateTime.Now;
                     want.UpdatedAt = DateTime.Now;
                     try { await db.InsertAsync(want); inserted++; }
@@ -309,28 +406,25 @@ namespace HpskSite.Services
                     && have.ClubId == want.ClubId && have.Shots == want.Shots
                     && have.Status == want.Status && have.SourceTable == want.SourceTable
                     && have.SeriesType == want.SeriesType && have.Target == want.Target
-                    && have.ClaimedLevel == want.ClaimedLevel) continue;
+                    && have.ClaimedLevel == want.ClaimedLevel
+                    && have.Notes == want.Notes) continue;
 
-                have.Total = want.Total;
-                have.Threshold = want.Threshold;
-                have.Qualifies = want.Qualifies;
-                have.WeaponGroup = want.WeaponGroup;
-                have.SeriesDate = want.SeriesDate;
-                have.ClubId = want.ClubId;
-                have.Shots = want.Shots;
-                have.Status = want.Status;
-                have.Notes = want.Notes;
-                have.SourceCompetitionId = want.SourceCompetitionId;
-                have.SourceTable = want.SourceTable;   // backfilled rows may still carry null
-                // A result row cannot change which discipline it is, but keeping these in sync means a
-                // row written by an older build converges instead of staying half-formed.
-                have.SeriesType = want.SeriesType;
-                have.Target = want.Target;
-                have.ClaimedLevel = want.ClaimedLevel;
-                // ⚠️ CountsTowardGuldfodring is NOT overwritten. An admin who excluded this series as a
-                // duplicate must not have that decision undone by a re-sync.
-                have.UpdatedAt = DateTime.Now;
-                await db.UpdateAsync(have);
+                // ⚠️ RIKTAD UPDATE av just de kolumner synken äger — aldrig `UpdateAsync(have)`, som skriver HELA
+                // raden med värdena från läsningen. Synken över ett helt år är en lång slinga, och en funktionär
+                // som under tiden tryckt "Räkna inte" (en riktad UPDATE av CountsTowardGuldfodring i ledgern)
+                // fick sitt beslut överskrivet. CountsTowardGuldfodring ingår därför aldrig här.
+                // A result row cannot change which discipline it is, but keeping SeriesType/Target/ClaimedLevel
+                // in sync means a row written by an older build converges instead of staying half-formed.
+                await db.ExecuteAsync(
+                    @"UPDATE MarkenSeries SET Total = @0, Threshold = @1, Qualifies = @2, WeaponGroup = @3,
+                          SeriesDate = @4, ClubId = @5, Shots = @6, Status = @7, Notes = @8,
+                          SourceCompetitionId = @9, SourceTable = @10, SeriesType = @11, Target = @12,
+                          ClaimedLevel = @13, UpdatedAt = @14
+                      WHERE Id = @15",
+                    want.Total, want.Threshold, want.Qualifies, want.WeaponGroup,
+                    want.SeriesDate, want.ClubId, want.Shots, want.Status, want.Notes,
+                    want.SourceCompetitionId, want.SourceTable, want.SeriesType, want.Target,
+                    want.ClaimedLevel, DateTime.Now, have.Id);
                 updated++;
             }
 
@@ -338,8 +432,15 @@ namespace HpskSite.Services
             // corrected below the krav, the class was changed to a weapon group with a higher krav, or a
             // personnummer arrived and moved the threshold. Leaving it would keep a guldserie standing on
             // a score that does not exist.
+            //
+            // ⚠️ Men aldrig på grund av en MISS: en tabell som inte gick att läsa (failedTables) eller en tävling
+            // som inte gick att hämta (unreadableComps) betyder "vet inte", inte "finns inte". Utan det
+            // raderade en övergående timeout på EN tabell varje märkesserie från den för alla i anropet, och
+            // vid återskapandet var en admins "Räkna inte" borta.
             foreach (var stale in existing.Where(e => e.SourceResultId.HasValue
-                                                     && !desired.ContainsKey((e.SourceTable ?? TablePrecision, e.SourceResultId.Value))))
+                                                     && !desired.ContainsKey((e.SourceTable ?? TablePrecision, e.SourceResultId.Value))
+                                                     && !failedTables.Contains(e.SourceTable ?? TablePrecision)
+                                                     && !(e.SourceCompetitionId.HasValue && unreadableComps.Contains(e.SourceCompetitionId.Value))))
             {
                 await db.ExecuteAsync("DELETE FROM MarkenSeries WHERE Id = @0", stale.Id);
                 deleted++;
@@ -477,11 +578,13 @@ namespace HpskSite.Services
         //
         // ⚠️ DuellResultEntry has the same shape as PrecisionResultEntry (it derives from it) and its own
         // identity column, so each row is tagged with the table it came from — see MarkenSeries.SourceTable.
-        private async Task<List<ResultRow>> ReadResultRowsAsync(List<int> ids)
+        private async Task<(List<ResultRow> Rows, HashSet<string> FailedTables)> ReadResultRowsAsync(List<int> ids)
         {
             var all = new List<ResultRow>();
+            // Tabeller som inte gick att läsa — anroparen får INTE tolka deras frånvarande rader som "borta".
+            var failed = new HashSet<string>();
             using var db = _databaseFactory.CreateDatabase();
-            foreach (var table in new[] { TablePrecision, TableDuell, TableNationellHelmatch })
+            foreach (var table in SourceTables)
             {
                 foreach (var chunk in Chunk(ids, 1000))
                 {
@@ -496,11 +599,28 @@ namespace HpskSite.Services
                     {
                         // One discipline's table missing must not cost the other its sync.
                         _logger.LogWarning(ex, "Marken competition-series sync could not read {Table}", table);
-                        continue;
+                        failed.Add(table);
+                        break;   // resten av tabellens delar läggs inte till — den är hel eller okänd
                     }
                     foreach (var r in rows) { r.SourceTable = table; all.Add(r); }
                 }
             }
+            return (all, failed);
+        }
+
+        /// <summary>
+        /// Handinlagda precisionsserier (inget resultat bakom) som räknas — underlaget för den omvända
+        /// dubblettkontrollen vid insert. Avvisade och redan undantagna räknas inte: de skyddar ingenting.
+        /// </summary>
+        private async Task<List<MarkenSeries>> ReadHandEnteredAsync(List<int> ids, int year)
+        {
+            var all = new List<MarkenSeries>();
+            using var db = _databaseFactory.CreateDatabase();
+            foreach (var chunk in Chunk(ids, 1000))
+                all.AddRange(await db.FetchAsync<MarkenSeries>(
+                    @"WHERE MemberId IN (@0) AND [Year] = @1 AND SourceResultId IS NULL AND BadgeFamily = @2
+                        AND SeriesType = @3 AND Status <> @4 AND CountsTowardGuldfodring = 1",
+                    chunk, year, Marken.FamilyPistolskytte, Marken.SeriesTypePrecision, Marken.StatusRejected));
             return all;
         }
 
@@ -545,41 +665,6 @@ namespace HpskSite.Services
                 return total;
             }
             catch { return 0; }
-        }
-
-        /// <summary>Vad en resultatrad är för sorts serie när märkessystemet läser den.</summary>
-        private enum SeriesKind
-        {
-            /// <summary>Precisionsserie — Guldfodringens precisionsdel och Elits precisionshalva.</summary>
-            Precision,
-            /// <summary>Snabbpistolserie (duell) — bara Elits snabbhalva.</summary>
-            Speed,
-            /// <summary>Varken eller: fält-/figurserierna i en helmatch har ingen märkesserieform.</summary>
-            None
-        }
-
-        /// <summary>
-        /// Vilken sorts serie en resultatrad bär. För precisionens och duellens egna tabeller ger
-        /// tabellen svaret; för en helmatch ger SERIENUMRET det, via delmomenten i
-        /// <see cref="SeriesSegments"/>.
-        /// </summary>
-        private static SeriesKind SeriesKindOf(ResultRow r)
-        {
-            if (r.SourceTable == TablePrecision) return SeriesKind.Precision;
-            if (r.SourceTable == TableDuell) return SeriesKind.Speed;
-
-            if (r.SourceTable == TableNationellHelmatch)
-            {
-                var a = SeriesSegments.Delmoment("NationellHelmatch", "A");
-                var b = SeriesSegments.Delmoment("NationellHelmatch", "B");
-                if (a != null && r.SeriesNumber >= a.FirstSeries && r.SeriesNumber <= a.LastSeries)
-                    return SeriesKind.Precision;
-                if (b != null && r.SeriesNumber >= b.FirstSeries && r.SeriesNumber <= b.LastSeries)
-                    return SeriesKind.Speed;
-                return SeriesKind.None; // delmoment C — fält/figur
-            }
-
-            return SeriesKind.None;
         }
 
         private class ResultRow

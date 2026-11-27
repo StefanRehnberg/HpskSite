@@ -25,6 +25,14 @@
         };
 
         /// <summary>
+        /// Every result table, once. Exists so that LISTS of result tables elsewhere (GDPR purge, märken sync)
+        /// can be checked against the registry by a test instead of drifting — see
+        /// <c>ResultTableListGuardTests</c>.
+        /// </summary>
+        public static IReadOnlyCollection<string> AllTables =>
+            ByType.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        /// <summary>
         /// The precision-family fallback for an empty or unknown type is deliberate — legacy nodes
         /// carry no competitionType and are Precision. ⚠️ It also means a typo in a NAMED discipline
         /// silently reads the wrong table, so prefer <see cref="TryFor"/> where a wrong answer is

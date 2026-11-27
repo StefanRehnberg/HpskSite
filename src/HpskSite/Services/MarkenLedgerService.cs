@@ -269,8 +269,10 @@ namespace HpskSite.Services
         {
             using var db = _databaseFactory.CreateDatabase();
             return await db.FetchAsync<MarkenSeries>(
+                // CountsTowardGuldfodring = 1: "Räkna inte" gäller även föreningsintygets skjutprov
+                // (ForeningsintygDocumentService läser den här frågan) — inte bara guldfordringen.
                 @"WHERE MemberId = @0 AND BadgeFamily = @1 AND [Year] = @2 AND SeriesType = @3
-                   AND Status = @4 AND Qualifies = 1 AND ClaimedLevel = @5
+                   AND Status = @4 AND Qualifies = 1 AND ClaimedLevel = @5 AND CountsTowardGuldfodring = 1
                    ORDER BY SeriesDate, Id",
                 memberId, family, year, Marken.SeriesTypePrecision, Marken.StatusVerified, Marken.LevelGuld);
         }

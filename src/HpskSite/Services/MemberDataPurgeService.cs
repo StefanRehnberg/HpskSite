@@ -107,6 +107,11 @@ namespace HpskSite.Services
             ("MilsnabbResultEntry",          "MemberId"),
             ("NationellHelmatchResultEntry", "MemberId"),
             ("SpringskytteResultEntry",      "MemberId"),
+            // Sportpistol och Standardpistol saknades här — GDPR-rensningen lämnade skyttens resultat kvar, och en
+            // sammanslagning flyttade märkesserierna (MarkenSeries) men inte resultaten bakom dem, så nästa
+            // synk såg serierna som föräldralösa och raderade dem. (FaltskytteResultEntry saknas också: egen fråga.)
+            ("SportpistolResultEntry",       "MemberId"),
+            ("StandardpistolResultEntry",    "MemberId"),
             ("CompetitionShootOffEntry",     "MemberId"),
             ("CompetitionTeamMember",        "MemberId"),
 

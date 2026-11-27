@@ -1276,7 +1276,11 @@ namespace HpskSite.Controllers
             // BadgeFamily = Elit) is judged against Elit brons (45) and not the guldkrav, yet it was
             // counted here as a guldserie. Gate on the family too — a "guldserie" is a Pistolskyttemärke
             // concept. Duell/snabbserier and luftpistol were already excluded by the discipline test.
+            // ⚠️ CountsTowardGuldfodring: en funktionärs "Räkna inte" (dublett, felinmatad serie) gäller ligan
+            // lika mycket som guldfordringen. Utan filtret rättades guldfordringen men ligan räknade serien
+            // ändå — och med sex och fyra serier per Sportpistol-/Standardpistol-tävling syns det på riktigt.
             var prec = all.Where(s => s.BadgeFamily == Family
+                                      && s.CountsTowardGuldfodring
                                       && Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplinePrecision);
             if (year is > 0) prec = prec.Where(s => s.Year == year);
 
@@ -2273,6 +2277,9 @@ namespace HpskSite.Controllers
                 series = (await _ledger.GetAllVerifiedSeriesAsync(memberId))
                     .Where(s =>
                     {
+                        // "Räkna inte" gäller Elit lika mycket som guldfordringen: en serie som flaggats som
+                        // dubblett (handinskickad + samma serie från tävling) får inte räknas två gånger här heller.
+                        if (!s.CountsTowardGuldfodring) return false;
                         var d = Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target);
                         return d == Marken.DisciplinePrecision || d == Marken.DisciplineSnabbpistol;
                     })
