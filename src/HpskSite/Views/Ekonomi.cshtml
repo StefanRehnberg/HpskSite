@@ -80,8 +80,12 @@
       border-left-color: var(--bs-primary); }
   .ek-page .rail a.ek-nav.soon { color: var(--bs-secondary-color); }
   /* Gruppetiketterna i rälsen: små, dämpade, inga länkar. */
-  .ek-page .rail .ek-railh { font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-      color: var(--bs-secondary-color); padding: 12px 12px 2px; }
+  .ek-page .rail .ek-railh { font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--bs-secondary-color); padding: 14px 12px 4px; }
+  /* ⚠️ Som adminrälsen (.admin-rail: nav-pills flex-column med gap 2px): posterna ska inte ligga kant i kant. */
+  @@media (min-width: 992px) {
+    .ek-page .rail { display: flex; flex-direction: column; gap: 2px; }
+  }
   /* Tillbaka ar en utgang, inte en vy — avskild med en linje och i dampad ton, sa den inte
      konkurrerar med de sex posterna som ar arbetet. */
   .ek-page .rail a.ek-back { color: var(--bs-secondary-color); font-size: .9rem;
@@ -519,60 +523,60 @@
            ut som den gör, inte något en kassör behöver läsa. Den bor i koden, inte i granssnittet. *@
         <a href="@Model.BackUrl" class="ek-nav ek-back">← Tillbaka</a>
 
-        <a href="#" class="ek-nav on" data-view="oversikt">Översikt</a>
+        <a href="#" class="ek-nav on" data-view="oversikt"><i class="bi bi-speedometer2 me-2"></i>Översikt</a>
         @* Rälsen är grupperad (Stefan 2026-11-26): rubrikerna är inga platser, bara etiketter. *@
         <div class="ek-railh">Bokföring</div>
         @* ⚠️ Skrivytorna renderas INTE för en läsare. En knapp som nekas är sämre än ingen
            knapp — och den riktiga gränsen ligger i endpointarna, inte här. *@
         @if (Model.CanWrite)
         {
-            <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
+            <a href="#" class="ek-nav" data-view="bokfor"><i class="bi bi-pencil-square me-2"></i>Bokför</a>
         }
         @* ⚠️ Verifikationerna ligger direkt efter Bokför, inte bland rapporterna. Det är dit man
            går för att LETA REDA PÅ en post — "vad var det där på 3 400 i mars?" — och det är en
            daglig fråga, inte en årlig. *@
-        <a href="#" class="ek-nav" data-view="verifikationer">Verifikationer</a>
-        <a href="#" class="ek-nav" data-view="avstamning">Avstämning</a>
+        <a href="#" class="ek-nav" data-view="verifikationer"><i class="bi bi-journal-text me-2"></i>Verifikationer</a>
+        <a href="#" class="ek-nav" data-view="avstamning"><i class="bi bi-check2-square me-2"></i>Avstämning</a>
         <div class="ek-railh">Uppföljning</div>
-        <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
+        <a href="#" class="ek-nav" data-view="rapport"><i class="bi bi-bar-chart-line me-2"></i>Rapport</a>
         @* Bara för en momsregistrerad förening — för alla andra finns inget att deklarera. *@
         @if (Model.IsVatRegistered)
         {
-            <a href="#" class="ek-nav" data-view="moms">Moms</a>
+            <a href="#" class="ek-nav" data-view="moms"><i class="bi bi-percent me-2"></i>Moms</a>
         }
         @* ⚠️ Projekt ligger intill Rapport: det är samma sorts fråga ("vad gav tävlingen?") och
            läses av styrelsen och revisorn lika mycket som av kassören — därför INTE gated på
            skrivrätt. Skrivkontrollerna inuti är det. *@
-        <a href="#" class="ek-nav" data-view="projekt">Projekt</a>
+        <a href="#" class="ek-nav" data-view="projekt"><i class="bi bi-folder2-open me-2"></i>Projekt</a>
         <div class="ek-railh">Inkomster</div>
-        <a href="#" class="ek-nav" data-view="avgifter">Att få in</a>
+        <a href="#" class="ek-nav" data-view="avgifter"><i class="bi bi-inbox me-2"></i>Att få in</a>
         @* ⚠️ Fakturorna bodde i klubbens och kretsens ADMINPANEL (Admin → Fakturor) fram till
            2026-09-24 (Stefan: "Allt under Admin / Fakturor för klubbar och Kretsar ska in under
            Ekonomin"). Tävlingsavgifterna i den nya modellen, fakturorna till klubbar, inkommande
            fakturor och den gamla modellens lista — på ETT ställe. Läsbart för styrelsen. *@
-        <a href="#" class="ek-nav" data-view="fakturor">Fakturor</a>
+        <a href="#" class="ek-nav" data-view="fakturor"><i class="bi bi-receipt me-2"></i>Fakturor</a>
         @* ⚠️ Årsavgiften bodde förut i klubbens/kretsens ADMINPANEL (flyttad 2026-09-23). Det är
            kassörens arbete, och här har den rätt behörighet: kassören skriver, styrelsen läser. *@
-        <a href="#" class="ek-nav" data-view="arsavgift">@feeWord</a>
+        <a href="#" class="ek-nav" data-view="arsavgift"><i class="bi bi-people me-2"></i>@feeWord</a>
         @* Medlemsavgiftens inställningar: det som ändras varje år, och det som gäller alla år (Stefan 2026-11-26). Bara klubbar. *@
         @if (Model.IssuerType != 1)
         {
-            <a href="#" class="ek-nav" data-view="avgiftsregler">Avgiftsregler</a>
-            <a href="#" class="ek-nav" data-view="medlemstyper">Medlemstyper och förbund</a>
+            <a href="#" class="ek-nav" data-view="avgiftsregler"><i class="bi bi-cash-coin me-2"></i>Avgiftsregler</a>
+            <a href="#" class="ek-nav" data-view="medlemstyper"><i class="bi bi-tags me-2"></i>Medlemstyper och förbund</a>
         }
         <div class="ek-railh">Utgifter och bokslut</div>
-        <a href="#" class="ek-nav" data-view="utgifter">Utgifter</a>
-        <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
-        <a href="#" class="ek-nav" data-view="bokslut">Bokslut</a>
+        <a href="#" class="ek-nav" data-view="utgifter"><i class="bi bi-wallet2 me-2"></i>Utgifter</a>
+        <a href="#" class="ek-nav" data-view="tillgangar"><i class="bi bi-box-seam me-2"></i>Tillgångar</a>
+        <a href="#" class="ek-nav" data-view="bokslut"><i class="bi bi-journal-check me-2"></i>Bokslut</a>
         <div class="ek-railh">Förening</div>
         @if (Model.CanWrite)
         {
-            <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
-            <a href="#" class="ek-nav" data-view="revisorer">Revisorer</a>
+            <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup"><i class="bi bi-gear me-2"></i>Inställningar</a>
+            <a href="#" class="ek-nav" data-view="revisorer"><i class="bi bi-person-check me-2"></i>Revisorer</a>
         }
         @* ⚠️ För ALLA som läser: styrelsen och revisorn ska kunna se vilka som arbetar med
            ekonomin, och ordföranden (en läsare) ska kunna ge rätten. *@
-        <a href="#" class="ek-nav" data-view="behorigheter">Behörigheter</a>
+        <a href="#" class="ek-nav" data-view="behorigheter"><i class="bi bi-shield-lock me-2"></i>Behörigheter</a>
 
         @* ⚠️ Växlaren ligger SIST och lågmält. Att byta liggare är sällsynt och allvarligt;
            den ska gå att hitta, inte att råka klicka på. *@
