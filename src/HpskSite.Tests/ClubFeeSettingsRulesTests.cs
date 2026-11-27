@@ -24,6 +24,23 @@ namespace HpskSite.Tests
         [InlineData(null)] [InlineData("")] [InlineData("   ")]
         public void Namn_krävs(string? label) => Assert.NotNull(Part(label: label));
 
+        private static MembershipFeePart P(string label, decimal amount = 100m, string cond = MembershipFeePartCondition.Always, int? opt = null)
+            => new() { Label = label, Amount = amount, Condition = cond, OptionId = opt };
+
+        [Fact] public void Samma_tillagg_ar_samma_namn_villkor_tillval_och_typurval_oavsett_belopp_och_skiftlage()
+        {
+            Assert.True(ClubFeeSettingsRules.IsSamePart(P("Förbundsavgift", 100m), new[] { "Senior" }, P(" förbundsavgift ", 150m), new[] { "senior" }));
+            Assert.True(ClubFeeSettingsRules.IsSamePart(P("X"), new[] { "Senior", "Junior" }, P("X"), new[] { "Junior", "Senior" }));
+        }
+
+        [Fact] public void Olika_namn_villkor_tillval_eller_typurval_ar_inte_samma_tillagg()
+        {
+            Assert.False(ClubFeeSettingsRules.IsSamePart(P("A"), Array.Empty<string>(), P("B"), Array.Empty<string>()));
+            Assert.False(ClubFeeSettingsRules.IsSamePart(P("A"), Array.Empty<string>(), P("A", cond: MembershipFeePartCondition.PrimaryClub), Array.Empty<string>()));
+            Assert.False(ClubFeeSettingsRules.IsSamePart(P("A", cond: MembershipFeePartCondition.Option, opt: 5), Array.Empty<string>(), P("A", cond: MembershipFeePartCondition.Option, opt: 6), Array.Empty<string>()));
+            Assert.False(ClubFeeSettingsRules.IsSamePart(P("A"), new[] { "Senior" }, P("A"), Array.Empty<string>()));
+        }
+
         [Fact] public void Typnamn_unikt_utan_hansyn_till_skiftlage_och_accent()
         {
             Assert.NotNull(ClubFeeSettingsRules.ValidateTypeName("pensionar", new[] { "Pensionär" }));

@@ -16,6 +16,9 @@
     var O = null;
     var types = [], untyped = 0, ageRules = { enabled: false, error: null };
     var ageEdit = {}, ageCur = null, ageAll = {}, ageResult = null, ageNames = {};
+    // Åldersförslagen ritas i dialogen (id-prefix "mt") eller inbäddade på sidan (prefix "mtE", mountAge). AP = prefixet för
+    // den yta som just nu används; varje ingång (öppna, klick, godkänn) sätter det först. Tillståndet delas — bara en yta används åt gången.
+    var AP = 'mt';
     var subCfg = null;
 
     function $(id) { return document.getElementById(id); }
@@ -226,7 +229,7 @@
         return out;
     }
     async function openAge(o) {
-        O = o;
+        O = o; AP = 'mt';
         await loadTypes();
         ageResult = null; ageAll = {};
         $('mtAgeTitle').textContent = 'Åldersförslag ' + year();
@@ -318,12 +321,12 @@
             if (!change.length && !untypedRows.length && !cannot.length && !house.length && !kept.length)
                 h += '<p class="mb-0">Alla medlemmar har redan rätt medlemstyp för sin ålder.</p>';
         }
-        $('mtAgeBody').innerHTML = h;
+        $(AP + 'AgeBody').innerHTML = h;
         updateApply();
     }
     function updateApply() {
-        var b = $('mtAgeApply'); if (!b) return;
-        var n = $('mtAgeBody').querySelectorAll('[data-mt-age-sel]:checked').length;
+        var b = $(AP + 'AgeApply'); if (!b) return;
+        var n = $(AP + 'AgeBody').querySelectorAll('[data-mt-age-sel]:checked').length;
         b.disabled = n === 0;
         b.textContent = n ? 'Godkänn valda (' + n + ')' : 'Godkänn valda';
     }
@@ -426,28 +429,43 @@
         });
 
         wireTypesUi('mt', false);
-        $('mtAgeModal').addEventListener('change', function (ev) { if (ev.target.closest('[data-mt-age-sel]')) updateApply(); });
-        $('mtAgeModal').addEventListener('click', async function (ev) {
+        wireAgeUi($('mtAgeModal'), 'mt');
+    }
+
+    // Kopplar åldersförslagens klick (Visa alla, Behåll typen, Lås upp, Ångra) och Godkänn. Dialogen: root = mtAgeModal, p = "mt";
+    // den inbäddade ytan: root = hennes eget element, p = "mtE". Hanterarna sätter AP (och O) först, så att renderingen hamnar rätt.
+    function wireAgeUi(root, p) {
+        var embedded = p === 'mtE';
+        function use() { AP = p; if (embedded && EMBED_O) O = EMBED_O; }
+        root.addEventListener('change', function (ev) { use(); if (ev.target.closest('[data-mt-age-sel]')) updateApply(); });
+        root.addEventListener('click', async function (ev) {
+            use();
             var t;
             if ((t = ev.target.closest('[data-mt-age-all]'))) { ageAll[t.getAttribute('data-mt-age-all')] = true; renderAge(); return; }
-            if (ev.target.closest('[data-mt-open-types]')) { openTypes(O, 'mtAgeModal'); return; }
+            if (ev.target.closest('[data-mt-open-types]')) {
+                // Inbäddat ligger typtabellen på samma sida: rulla dit i stället för att öppna en dialog.
+                if (embedded) { var tr = $('mtETypeRows'); if (tr) tr.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                else openTypes(O, 'mtAgeModal');
+                return;
+            }
             if ((t = ev.target.closest('[data-mt-age-act]'))) {
                 var keep = t.getAttribute('data-mt-age-act') === 'keep';
                 var d = await form('SetAgeRuleOptOut', { clubId: O.clubId, year: year(), memberId: t.getAttribute('data-mt-age-id'), keep: keep ? '1' : '0' });
                 ageResult = d.success ? null : { error: d.message || 'Det gick inte att spara.' };
-                await reloadAge(); changed();
+                use(); await reloadAge(); changed();
                 return;
             }
             if (ev.target.closest('[data-mt-age-undo]')) {
                 var ids = (ageResult && ageResult.ids) || [];
                 var u = await form('UndoAgeProposals', { clubId: O.clubId, year: year(), memberIds: ids.map(String) });
                 ageResult = u.success ? { undone: u.undone, skipped: u.skipped } : { error: u.message || 'Det gick inte att ångra.' };
-                await reloadAge(); changed();
+                use(); await reloadAge(); changed();
                 return;
             }
         });
-        $('mtAgeApply').addEventListener('click', async function () {
-            var items = Array.prototype.map.call($('mtAgeBody').querySelectorAll('[data-mt-age-sel]:checked'), function (b) { return b.getAttribute('data-mt-age-sel'); });
+        $(p + 'AgeApply').addEventListener('click', async function () {
+            use();
+            var items = Array.prototype.map.call($(p + 'AgeBody').querySelectorAll('[data-mt-age-sel]:checked'), function (b) { return b.getAttribute('data-mt-age-sel'); });
             if (!items.length) return;
             this.disabled = true;
             var d = await form('ApplyAgeProposals', { clubId: O.clubId, year: year(), items: items });
@@ -457,7 +475,7 @@
                 var ids = items.map(function (i) { return parseInt(i.split(':')[0], 10); }).filter(function (id) { return skippedIds.indexOf(id) < 0; });
                 ageResult = { applied: d.applied, skipped: skipped, ids: ids, cleared: d.chargesCleared };
             }
-            await reloadAge(); changed();
+            use(); await reloadAge(); changed();
         });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
@@ -491,7 +509,25 @@
         return { newType: function () { var b = $('mtENewTypeBtn'); if (b) b.click(); }, reload: function () { EMBED_O = o; O = o; return reloadTypes(); } };
     }
 
+    // ── Inbäddade åldersförslag (Ekonomi → Medlemstyper och förbund) ────────────────────
+    // Samma lista och samma knappar som dialogen, ritade direkt i root med id-prefixet "mtE". Ett andra anrop läser bara om.
+    async function mountAge(root, o) {
+        EMBED_O = o; O = o; AP = 'mtE';
+        if (!root.getAttribute('data-mt-age-mounted')) {
+            root.setAttribute('data-mt-age-mounted', '1');
+            root.innerHTML = '<div id="mtEAgeBody"><p class="text-muted mb-0">Räknar…</p></div>'
+                + '<div class="d-flex justify-content-end mt-3' + (o.readOnly ? ' d-none' : '') + '"><button type="button" class="btn btn-primary" id="mtEAgeApply" disabled>Godkänn valda</button></div>';
+            wireAgeUi(root, 'mtE');
+        }
+        await loadTypes();
+        ageResult = null; ageAll = {};
+        await reload();
+        async function reload() { EMBED_O = o; O = o; AP = 'mtE'; await loadTypes(); ageCur = await fetchAge(); renderAge(); }
+        return { reload: function () { return reload(); } };
+    }
+
     window.hpskMemberTypes = {
+        mountAge: function (root, o) { wire(); return mountAge(root, o); },
         mountTypes: function (root, o) { wire(); return mountTypes(root, o); },
         openTypes: function (o, from) { wire(); return openTypes(o, from); },
         openAge: function (o) { wire(); return openAge(o); },

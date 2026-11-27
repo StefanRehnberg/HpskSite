@@ -34,6 +34,8 @@
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li><button class="dropdown-item" type="button" id="frNewBase"><i class="bi bi-cash-coin me-2"></i>Ny grundavgift…</button></li>
                     <li><button class="dropdown-item" type="button" id="frNewPart"><i class="bi bi-plus-slash-minus me-2"></i>Nytt tillägg eller avdrag…</button></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item" type="button" id="frCopy"><i class="bi bi-copy me-2"></i>Kopiera från förra året…</button></li>
                 </ul>
             </div>
             }
@@ -168,6 +170,17 @@ else
                 Åldern räknas som avgiftsåret minus födelseåret.</p>
             <div id="ftTypesMount"></div>
             <div class="small text-muted mt-2" id="ftTypesNote"></div>
+        </div>
+    </div>
+
+    <div class="card mb-3" id="ftAgeCard">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-baseline flex-wrap gap-2">
+                <h2 class="h6 mb-0" id="ftAgeTitle">Åldersförslag</h2>
+                <span class="small text-muted">från åldersgränserna ovan</span>
+            </div>
+            <p class="text-muted small mt-2">Medlemmar vars typ inte stämmer med åldern, till exempel någon som fyllt 21 och fortfarande är Junior. Inget byts förrän du godkänner.</p>
+            <div id="ftAgeMount"></div>
         </div>
     </div>
 

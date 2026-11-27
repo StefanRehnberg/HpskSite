@@ -2894,8 +2894,10 @@ namespace HpskSite.Services
             {
                 // Avgiftens rader (grundavgift, tillägg, avdrag) när det finns fler än en — en ensam rad säger inget mer än beloppet.
                 var linesBlock = "";
-                if (lines is { Count: > 1 })
-                    linesBlock = "<table style='border-collapse:collapse;font-size:14px;margin:-8px 0 12px'>"
+                // En ensam familjerad visas också: den nämner vilka som ingår i familjeavgiften.
+                if (lines is not null && HpskSite.Models.FeeLineText.WorthShowing(lines))
+                    linesBlock = "<p style='margin:-8px 0 4px;font-size:14px'>Avgiften avser:</p>"
+                        + "<table style='border-collapse:collapse;font-size:14px;margin:0 0 12px'>"
                         + string.Concat(lines.Select(l =>
                             $"<tr><td style='padding:2px 16px 2px 0'>{enc(l.Description)}</td>"
                             + $"<td style='padding:2px 0;text-align:right;white-space:nowrap'>{Math.Round(l.Amount).ToString("N0", sv)} kr</td></tr>"))

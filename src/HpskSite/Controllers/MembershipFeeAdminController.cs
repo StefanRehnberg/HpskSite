@@ -328,6 +328,116 @@ namespace HpskSite.Controllers
             return Json(new { success = true, consequences = await ConsequencesAsync(clubId, y, cleared) });
         }
 
+        // ── Kopiera från ett tidigare år ──────────────────────────────
+
+        /// <summary>Tidigare år (nyast först, högst sex bakåt) där klubben har grundavgifter eller tillägg att kopiera.</summary>
+        private List<int> YearsWithRules(int clubId, int year)
+        {
+            var years = new List<int>();
+            for (var y = year - 1; y >= year - 6 && y >= 2000; y--)
+                if (_feeService.GetCategories(clubId, y).Count > 0 || _feeService.GetParts(clubId, y).Parts.Count > 0) years.Add(y);
+            return years;
+        }
+
+        /// <summary>
+        /// Vad som kan kopieras från ett tidigare år till <paramref name="year"/>: grundavgifter och tillägg/avdrag, var och en märkt
+        /// med om målåret redan har den (då hoppas den över). Skriver ingenting. Läsrätt räcker.
+        /// </summary>
+        [HttpGet]
+        [HpskSite.Services.Security.InCodeAuth("LedgerAccess.CanRead(klubben); skriver inget, läser klubbens egna tidigare år")]
+        public async Task<IActionResult> PreviewCopyYear(int clubId, int year, int? fromYear = null)
+        {
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            var years = YearsWithRules(clubId, year);
+            if (years.Count == 0) return Json(new { success = true, fromYear = (int?)null, years });
+            var from = fromYear ?? years[0];
+            if (!years.Contains(from)) return Json(new { success = false, message = $"Det finns inga avgiftsregler för {from} att kopiera." });
+
+            var types = _feeSettings.GetTypesWithCounts(clubId).Select(t => t.Type).ToList();
+            var targetCats = _feeService.GetCategories(clubId, year);
+            var (srcParts, srcTypes) = _feeService.GetParts(clubId, from);
+            var (dstParts, dstTypes) = _feeService.GetParts(clubId, year);
+            return Json(new
+            {
+                success = true,
+                fromYear = (int?)from,
+                years,
+                categories = _feeService.GetCategories(clubId, from).Select(c =>
+                {
+                    var t = types.FirstOrDefault(x => MembershipTypeKeys.Same(x.Key, c.MembershipType));
+                    return new
+                    {
+                        type = c.MembershipType, typeName = t?.Name ?? c.MembershipType, c.Amount, c.MemberSelectable,
+                        typeGone = t is null || !t.IsActive,
+                        exists = targetCats.Any(x => MembershipTypeKeys.Same(x.MembershipType, c.MembershipType))
+                    };
+                }),
+                parts = srcParts.Select(p => new
+                {
+                    p.Id, p.Label, p.Amount, p.Condition, p.OptionId, optionName = p.OptionName,
+                    typeKeys = srcTypes[p.Id].ToList(),
+                    exists = dstParts.Any(d => ClubFeeSettingsRules.IsSamePart(p, srcTypes[p.Id], d, dstTypes[d.Id]))
+                })
+            });
+        }
+
+        /// <summary>
+        /// Kopierar valda grundavgifter och tillägg/avdrag från ett tidigare år. Beloppen kopieras som de är (kassören ändrar dem sedan);
+        /// det som målåret redan har hoppas över, aldrig skrivs över. Varje rad går genom samma skrivväg och prövning som en vanlig sparning.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [HpskSite.Services.Security.InCodeAuth("MembershipFeeAccess.CanWriteAsync(klubben); raderna läses ur klubbens eget tidigare år och skrivs bara om målåret saknar dem")]
+        public async Task<IActionResult> CopyFromYear(int clubId, int year, int fromYear, string[]? categoryTypes, int[]? partIds)
+        {
+            if (!await _feeAccess.CanWriteAsync(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+            if (fromYear < 2000 || fromYear >= year)
+                return Json(new { success = false, message = "Välj ett tidigare år att kopiera från." });
+
+            using var lease = _feeService.TryLockSettings(clubId, year);
+            if (lease is null) return Json(new { success = false, message = SettingsBusy });
+
+            var types = _feeSettings.GetTypesWithCounts(clubId).Select(t => t.Type).ToList();
+            var skipped = new List<string>();
+            int copiedCats = 0, copiedParts = 0;
+
+            var wantedTypes = categoryTypes ?? Array.Empty<string>();
+            foreach (var src in _feeService.GetCategories(clubId, fromYear).Where(c => wantedTypes.Any(w => MembershipTypeKeys.Same(w, c.MembershipType))))
+            {
+                var t = types.FirstOrDefault(x => MembershipTypeKeys.Same(x.Key, src.MembershipType));
+                if (t is null || !t.IsActive) { skipped.Add($"Grundavgift {src.MembershipType}: typen finns inte längre"); continue; }
+                if (_feeService.GetCategories(clubId, year).Any(x => MembershipTypeKeys.Same(x.MembershipType, src.MembershipType)))
+                { skipped.Add($"Grundavgift {t.Name}: finns redan {year}"); continue; }
+                _feeService.SaveCategory(new MembershipFeeCategory
+                {
+                    Id = 0, ClubId = clubId, Year = year, MembershipType = src.MembershipType, Label = src.Label,
+                    Amount = src.Amount, MemberSelectable = src.MemberSelectable
+                });
+                copiedCats++;
+                await LogAsync(clubId, year, ClubFeeChangeEntity.Category, src.MembershipType, ClubFeeChangeAction.Saved,
+                    $"Kopierad från {fromYear}: grundavgift {t.Name} {year}: {src.Amount:0.##} kr");
+            }
+
+            var wantedParts = new HashSet<int>(partIds ?? Array.Empty<int>());
+            var (srcParts, srcTypes) = _feeService.GetParts(clubId, fromYear);
+            foreach (var p in srcParts.Where(p => wantedParts.Contains(p.Id)))
+            {
+                var (dstParts, dstTypes) = _feeService.GetParts(clubId, year);
+                if (dstParts.Any(d => ClubFeeSettingsRules.IsSamePart(p, srcTypes[p.Id], d, dstTypes[d.Id])))
+                { skipped.Add($"{p.Label}: finns redan {year}"); continue; }
+                var (newId, error) = _feeSettings.SavePart(clubId, year, 0, p.Label, p.Amount, p.Condition, p.OptionId, srcTypes[p.Id].ToList());
+                if (error is not null) { skipped.Add($"{p.Label}: {error}"); continue; }
+                copiedParts++;
+                await LogAsync(clubId, year, ClubFeeChangeEntity.Part, newId.ToString(), ClubFeeChangeAction.Saved,
+                    $"Kopierat från {fromYear}: tillägg/avdrag {p.Label} {year}: {p.Amount:+0.##;−0.##} kr ({p.Condition})");
+            }
+
+            var cleared = (copiedCats + copiedParts) > 0 ? _feeService.ClearUnsentClubCharges(clubId, year) : 0;
+            return Json(new { success = true, copiedCategories = copiedCats, copiedParts, skipped, consequences = await ConsequencesAsync(clubId, year, cleared) });
+        }
+
         // ── Tillägg/avdrag och tillval (steg 3) ───────────────────────
 
         /// <summary>Klubbens tillägg/avdrag och tillval för året. Läsrätt räcker (styrelsen, revisorn).</summary>
@@ -889,7 +999,7 @@ namespace HpskSite.Controllers
                 clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId),
                 IssuerBankgiro(charge.ClubId), charge.PaymentReference, IssuerHasSwish(charge.ClubId),
                 choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose,
-                charge.Lines.Select(l => (l.Description, l.Amount)).ToList());
+                _feeService.DescribeLines(charge));
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
@@ -992,7 +1102,7 @@ namespace HpskSite.Controllers
                         to!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
                         _replyContacts.ForClub(clubId), bg, charge.PaymentReference, hasSwish,
                         choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose,
-                        charge.Lines.Select(l => (l.Description, l.Amount)).ToList());
+                        _feeService.DescribeLines(charge));
                 }
                 catch (Exception ex)
                 {

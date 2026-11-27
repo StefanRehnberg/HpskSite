@@ -78,6 +78,19 @@ namespace HpskSite.Services
             return null;
         }
 
+        /// <summary>
+        /// "Kopiera från förra året": finns tillägget redan i målåret? Samma namn, villkor, tillval och typurval räknas som samma
+        /// tillägg — beloppet ingår INTE (har kassören redan satt ett annat belopp ska kopian inte läggas bredvid).
+        /// </summary>
+        public static bool IsSamePart(MembershipFeePart a, IEnumerable<string> aTypes, MembershipFeePart b, IEnumerable<string> bTypes)
+        {
+            if (!string.Equals(a.Label?.Trim(), b.Label?.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
+            if (a.Condition != b.Condition || a.OptionId != b.OptionId) return false;
+            var x = aTypes.Select(k => k.Trim().ToLowerInvariant()).OrderBy(k => k).ToList();
+            var y = bTypes.Select(k => k.Trim().ToLowerInvariant()).OrderBy(k => k).ToList();
+            return x.SequenceEqual(y);
+        }
+
         /// <summary>Urvalet av medlemstyper normaliserat till nycklarnas kanoniska stavning, utan dubbletter.</summary>
         public static List<string> NormalizeTypeKeys(IEnumerable<string>? keys, IReadOnlyCollection<string> validTypeKeys)
         {

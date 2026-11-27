@@ -136,9 +136,11 @@
                 }
                 <div class="amount" id="belopp">@Kr(Model.Amount)</div>
 
-                @if (!Model.IsRegionFee && Model.Lines.Count > 1)
+                @* Raderna sätts av kontrollern bara när de säger något (flera rader, eller en familjerad som nämner vilka som ingår). *@
+                @if (!Model.IsRegionFee && Model.Lines.Count > 0)
                 {
-                    <table class="bg" id="avgiftsrader" style="margin:-8px auto 16px">
+                    <p class="notice" style="margin-bottom:4px">Avgiften avser:</p>
+                    <table class="bg" id="avgiftsrader" style="margin:0 auto 16px">
                         @foreach (var line in Model.Lines)
                         {
                             <tr><td style="color:var(--ink)">@line.Description</td>

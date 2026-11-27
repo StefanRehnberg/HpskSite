@@ -255,6 +255,28 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Radtexterna så som betalaren ska läsa dem (se <see cref="FeeLineText"/>): vad varje belopp avser, och för en familjeavgift
+        /// vilka som ingår. Används av mejlet, förhandsvisningen och betalsidan. Kretsavgiften har egna rader och rörs inte.
+        /// </summary>
+        public List<(string Description, decimal Amount)> DescribeLines(MembershipFeeCharge charge)
+        {
+            if (charge.IsRegionFee) return charge.Lines.Select(l => (l.Description, l.Amount)).ToList();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // De andra i familjen = avgifterna som pekar på den här (0 kr, "ingår i huvudmedlemmens avgift").
+            var coveredIds = scope.Database.Fetch<int>("SELECT MemberId FROM MembershipFeeCharge WHERE HouseholdCoveredByChargeId = @0 ORDER BY MemberId", charge.Id);
+            var names = new Dictionary<int, string?>();
+            string? NameOf(int id)
+            {
+                if (names.TryGetValue(id, out var n)) return n;
+                var m = _memberService.GetById(id);
+                var full = m is null ? null : $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+                return names[id] = string.IsNullOrEmpty(full) ? m?.Name : full;
+            }
+            var covered = coveredIds.Select(NameOf).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!).ToList();
+            return FeeLineText.Describe(charge.Lines, charge.MemberName, covered, NameOf);
+        }
+
+        /// <summary>
         /// Resolve MemberName + MemberEmail for a set of charges, batching distinct member
         /// lookups to avoid an N+1 cascade (same pattern as BoardRoleService.ResolveMemberNames).
         /// </summary>

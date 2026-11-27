@@ -162,8 +162,10 @@ namespace HpskSite.Controllers
             if (!charge.IsRegionFee)
             {
                 // Klubbavgiftens rader (grundavgift, tillägg, avdrag, tillval). En ensam rad säger inget mer än beloppet.
-                if (charge.Lines.Count > 1)
-                    model.Lines = charge.Lines.Select(l => (l.Description, l.Amount)).ToList();
+                {
+                    var described = _feeService.DescribeLines(charge);
+                    if (FeeLineText.WorthShowing(described)) model.Lines = described;
+                }
 
                 var choice = _feeService.GetTypeChoice(charge);
                 model.NeedsTypeChoice = charge.NeedsTypeChoice;

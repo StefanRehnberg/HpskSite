@@ -468,6 +468,49 @@
                     return null;
                 } });
         });
+        // ── Kopiera från ett tidigare år ──
+        // Visar vad som finns i källåret, förbockat det målåret saknar; det som redan finns är grått och hoppas över.
+        async function openCopy(fromYear) {
+            var y = year();
+            var d = await get('PreviewCopyYear', 'clubId=' + CLUB_ID + '&year=' + y + (fromYear ? '&fromYear=' + fromYear : ''));
+            if (!d.success) { note(false, d.message || 'Det gick inte att läsa det tidigare året.'); return; }
+            if (!d.fromYear) { note(false, 'Det finns inga avgiftsregler från tidigare år att kopiera till ' + y + '.'); return; }
+            var cats = d.categories || [], parts = d.parts || [];
+            function row(kind, key, checked, disabled, title, sub, amountHtml) {
+                return '<label class="d-flex justify-content-between align-items-start gap-2 py-2 border-bottom' + (disabled ? ' text-muted' : '') + '">'
+                    + '<span class="d-flex gap-2"><input class="form-check-input mt-1" type="checkbox" data-fr-copy="' + kind + '" value="' + esc(key) + '"' + (checked ? ' checked' : '') + (disabled ? ' disabled' : '') + '>'
+                    + '<span><span class="fw-semibold d-block">' + esc(title) + '</span><span class="small">' + sub + '</span></span></span>'
+                    + '<span class="text-nowrap fw-bold">' + amountHtml + '</span></label>';
+            }
+            var body = '<div class="mb-3"><label class="form-label" for="frCopyFrom">Kopiera från</label><select id="frCopyFrom" class="form-select" style="width:auto">'
+                + d.years.map(function (yy) { return '<option value="' + yy + '"' + (yy === d.fromYear ? ' selected' : '') + '>' + yy + '</option>'; }).join('') + '</select></div>'
+                + '<p class="small text-muted">Beloppen kopieras som de är, ändra dem efteråt. Det som redan finns ' + y + ' hoppas över och skrivs aldrig över. Avgifter som redan skickats ändras inte; oskickade räknas om.</p>'
+                + '<div class="fw-semibold mt-2">Grundavgifter</div>'
+                + (cats.length ? cats.map(function (c) {
+                    var off = c.exists || c.typeGone;
+                    return row('cat', c.type, !off, off, c.typeName, c.exists ? 'Finns redan ' + y : c.typeGone ? 'Typen finns inte längre' : (c.memberSelectable ? 'Medlemmen får välja typen själv' : ''), kr(c.amount));
+                }).join('') : '<div class="small text-muted py-2">Inga grundavgifter ' + d.fromYear + '.</div>')
+                + '<div class="fw-semibold mt-3">Tillägg och avdrag</div>'
+                + (parts.length ? parts.map(function (p) {
+                    return row('part', p.id, !p.exists, p.exists, p.label, p.exists ? 'Finns redan ' + y : esc(whoText(p)), signed(p.amount));
+                }).join('') : '<div class="small text-muted py-2">Inga tillägg eller avdrag ' + d.fromYear + '.</div>');
+            openModal({ title: 'Kopiera till ' + y, ok: 'Kopiera', body: body,
+                after: function () { $('frCopyFrom').addEventListener('change', function () { var v = parseInt(this.value, 10); bootstrap.Modal.getOrCreateInstance($('frModal')).hide(); setTimeout(function () { openCopy(v); }, 350); }); },
+                onOk: async function () {
+                    var chosen = function (k) { return Array.prototype.map.call($('frModalBody').querySelectorAll('input[data-fr-copy=' + k + ']:checked'), function (b) { return b.value; }); };
+                    var ct = chosen('cat'), pi = chosen('part');
+                    if (!ct.length && !pi.length) return 'Välj minst en rad att kopiera.';
+                    var r = await post('CopyFromYear', { clubId: CLUB_ID, year: y, fromYear: d.fromYear, categoryTypes: ct, partIds: pi });
+                    if (!r.success) return r.message || 'Kopieringen misslyckades.';
+                    var n = r.copiedCategories + r.copiedParts;
+                    var msg = (n ? 'Kopierade ' + plural(r.copiedCategories, 'grundavgift', 'grundavgifter') + ' och ' + plural(r.copiedParts, 'tillägg/avdrag', 'tillägg/avdrag') + ' från ' + d.fromYear + '. ' + consequenceText(r.consequences) : 'Inget kopierades.')
+                        + (r.skipped && r.skipped.length ? ' Hoppade över: ' + r.skipped.join('; ') + '.' : '');
+                    note(true, msg, r.skipped && r.skipped.length ? 'warn' : null);
+                    refreshList(); await load();
+                    return null;
+                } });
+        }
+        if ($('frCopy')) $('frCopy').addEventListener('click', function () { openCopy(null); });
         if ($('frNewBase')) $('frNewBase').addEventListener('click', function () { openBase(null, null); });
         if ($('frNewPart')) $('frNewPart').addEventListener('click', function () { openPart(null); });
 
@@ -513,7 +556,15 @@
 
         function mtOpts() {
             return { clubId: CLUB_ID, year: YEAR, canSeeFees: false, readOnly: READONLY, clubUrl: '',
-                     onChanged: function () { load(); refreshList(); }, onMessage: function (t) { note(true, t); } };
+                     onChanged: function () { load(); refreshList(); if (ageMount) ageMount.reload(); }, onMessage: function (t) { note(true, t); } };
+        }
+        // Åldersförslagen ritas direkt på sidan (mountAge) under typtabellen, inte bara i dialogen på Medlemsavgifter.
+        var ageMount = null, ageMounting = false;
+        function mountAgeList() {
+            if (ageMount || ageMounting) return;
+            ageMounting = true;
+            $('ftAgeTitle').textContent = 'Åldersförslag ' + YEAR;
+            window.hpskMemberTypes.mountAge($('ftAgeMount'), mtOpts()).then(function (m) { ageMount = m; ageMounting = false; }, function () { ageMounting = false; });
         }
         // Typtabellen ritas av den delade komponenten direkt på sidan (mountTypes), inte i en dialog.
         var typesMount = null, mounting = false;
@@ -529,6 +580,7 @@
             $('ftTypesStatus').textContent = plural(types.length, 'typ', 'typer')
                 + (ageRules.enabled ? ' · ' + types.filter(function (t) { return t.ageGroup; }).map(function (t) { return t.name + ' ' + t.ageGroup; }).join(' · ') : '');
             mountTypeTable();
+            mountAgeList();
             var bits = [];
             if (untyped > 0) bits.push(plural(untyped, 'medlem saknar', 'medlemmar saknar') + ' medlemstyp → <a href="#" data-view="arsavgift">Medlemsavgifter</a>');
             $('ftTypesNote').innerHTML = bits.join(' · ');
