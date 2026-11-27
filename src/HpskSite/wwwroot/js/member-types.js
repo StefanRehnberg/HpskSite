@@ -326,6 +326,8 @@
     }
     function updateApply() {
         var b = $(AP + 'AgeApply'); if (!b) return;
+        // Inbäddat: knappen visas bara när listan har något att godkänna (annars står en avstängd knapp under "inga förslag").
+        if (AP === 'mtE' && b.parentElement && !(O && O.readOnly)) b.parentElement.classList.toggle('d-none', !$(AP + 'AgeBody').querySelector('[data-mt-age-sel]'));
         var n = $(AP + 'AgeBody').querySelectorAll('[data-mt-age-sel]:checked').length;
         b.disabled = n === 0;
         b.textContent = n ? 'Godkänn valda (' + n + ')' : 'Godkänn valda';
