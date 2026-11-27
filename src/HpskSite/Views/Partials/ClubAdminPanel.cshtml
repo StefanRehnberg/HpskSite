@@ -2573,7 +2573,7 @@ function renderClubMarken(members) {
         if (m.pending > 0) statusCell = `<span class="badge bg-warning text-dark" title="Väntar på signering">${m.pending} att signera</span>`;
         else if (m.thisYearFulfilled) statusCell = '<span class="badge bg-success-subtle text-success">Signerad</span>';
         else if ((m.qualifyingSeries || 0) > 0 || (m.speedSeries || 0) > 0)
-            statusCell = `<span class="badge bg-info-subtle text-info" title="Framsteg mot årets guldfodring (godkända serier)">${m.qualifyingSeries || 0}/3 guldserier · ${m.speedSeries || 0}/3 snabb</span>`;
+            statusCell = `<span class="badge bg-info-subtle text-info" title="Framsteg mot årets guldfodring (godkända serier)">${(m.qualifyingSeries || 0) > 3 ? `3/3 klart (${m.qualifyingSeries})` : `${m.qualifyingSeries || 0}/3`} guldserier · ${(m.speedSeries || 0) > 3 ? `3/3 klart (${m.speedSeries})` : `${m.speedSeries || 0}/3`} snabb</span>`;
         else statusCell = '<span class="text-muted small">–</span>';
         const top = m.topLevel ? `<span class="badge bg-warning text-dark">${escapeMedalHtml(m.topLevel)}</span>` : '<span class="text-muted small">–</span>';
         html += `<tr>

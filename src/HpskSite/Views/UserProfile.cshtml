@@ -3913,12 +3913,14 @@ function renderMarken(data, year) {
                 </div>`;
             const pendingTxt = gf.pendingPrecisionCount > 0 ? ` <span class="text-muted">(${gf.pendingPrecisionCount} väntar)</span>` : '';
             const speedPending = gf.pendingSpeedCount > 0 ? ` <span class="text-muted">(${gf.pendingSpeedCount} väntar)</span>` : '';
+            // "17/3" läses som ett fel — en Sportpistol-tävling ger sex serier åt gången. Över kravet: "3/3 klart (17 godkända)".
+            const progressTxt = (n, req, noun) => n > req ? `${req}/${req} klart (${n} godkända)` : `${n}/${req} godkända ${noun}`;
             const speedDetail = gf.part2ViaFalt
                 ? 'fältmedalj'
-                : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} godkända snabbserier${speedPending}`;
+                : `${progressTxt(gf.part2SeriesCount || 0, gf.part2Required || 3, 'snabbserier')}${speedPending}`;
             // Each part carries its own explanation directly under it, so the fältmedalj route is
             // named where the speed part is — not only as a detail in the right-hand column.
-            let html = partRow('Precisionsdel', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
+            let html = partRow('Precisionsdel', part1, `${progressTxt(gf.qualifyingSeriesCount || 0, gf.requiredSeries, 'serier')}${pendingTxt}`);
             if (gf.part1Note) html += `<div class="small text-muted mb-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
             html += partRow('Snabbskyttedel', part2, speedDetail);
             if (gf.part2Explain) html += `<div class="small text-muted mb-1">${escapeHtmlMarken(gf.part2Explain)}</div>`;
