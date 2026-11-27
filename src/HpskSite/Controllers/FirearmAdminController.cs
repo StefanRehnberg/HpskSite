@@ -275,6 +275,7 @@ namespace HpskSite.Controllers
                         // Klubbvapen är licensbelagda precis som medlemmarnas, och en licens som
                         // förfaller obemärkt tar vapnet ur bruk. Klartext, så listan kan färga
                         // raden utan att avkryptera något.
+                        requiresLicense = f.RequiresLicense,
                         licenseExpiresOn = f.LicenseExpiresOn?.ToString("yyyy-MM-dd"),
                         daysUntilExpiry = f.LicenseExpiresOn.HasValue
                             ? (int?)(f.LicenseExpiresOn.Value.Date - DateTime.Now.Date).TotalDays
@@ -301,7 +302,8 @@ namespace HpskSite.Controllers
             string? writeDetails = null,
             string? fabrikat = null, string? modell = null, string? kaliber = null,
             string? piplangd = null, string? tillverkningsnummer = null,
-            string? licensnummer = null, string? licensdatum = null, string? anteckning = null)
+            string? licensnummer = null, string? licensdatum = null, string? anteckning = null,
+            string? requiresLicense = null)
         {
             if (clubId <= 0) return Json(new { success = false, message = "Ogiltig klubb" });
             if (!await _adminAuth.IsClubAdminForClub(clubId))
@@ -316,6 +318,8 @@ namespace HpskSite.Controllers
                 AnnanVapentyp = annanVapentyp,
                 AcquisitionStatus = FirearmAcquisitionStatus.Innehas,
                 LicenseExpiresOn = ParseDate(licenseExpiresOn),
+                // "1" licenspliktigt, "0" licensfritt, saknas = rör inte flaggan.
+                RequiresLicense = requiresLicense switch { "1" => true, "0" => false, _ => (bool?)null },
                 ClubWeaponNumber = number,
                 IsLoanable = isLoanable,
                 Status = status,

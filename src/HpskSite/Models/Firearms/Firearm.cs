@@ -135,6 +135,16 @@ namespace HpskSite.Models.Firearms
 
         public string AcquisitionStatus { get; set; } = FirearmAcquisitionStatus.Innehas;
 
+        /// <summary>
+        /// Är vapnet licenspliktigt? Luftvapen m.fl. är licensfria.
+        ///
+        /// <para><b>⚠️ Klartext, och förvalet är true.</b> Föreningsintygets "antal vapen sedan
+        /// tidigare" räknar bara licenspliktiga vapen (<c>FirearmService.CountHeldInFederation</c>),
+        /// och räkningen får inte avkryptera något. Licensfria vapen får inget förfallodatum och
+        /// ingen licenspåminnelse, och intyg kan inte begäras för dem.</para>
+        /// </summary>
+        public bool RequiresLicense { get; set; } = true;
+
         /// <summary>Klartext, så påminnelsesvepet kan läsa den utan att öppna en enda blob.</summary>
         public DateTime? LicenseExpiresOn { get; set; }
 

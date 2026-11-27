@@ -138,6 +138,9 @@ namespace HpskSite.Services.Firearms
         /// <para><b>⚠️ Bara <c>Innehas</c>.</b> Ett planerat vapen har ingen licens att förnya, och
         /// ett avvecklat ska inte påminna om något.</para>
         ///
+        /// <para><b>⚠️ Bara licenspliktiga vapen</b> (<c>RequiresLicense = 1</c>) — luftvapen har
+        /// ingen licens att förnya.</para>
+        ///
         /// <para>Ett förfallet vapen tas med tills det är 400 dagar gammalt. Utan ett tak skulle
         /// varje gammal rad läsas om vid varje svep i all framtid; med taket slutar den efter ett år,
         /// och då har medlemmen fått tre påminnelser.</para>
@@ -154,6 +157,7 @@ namespace HpskSite.Services.Firearms
                        WHERE ScopeKind = 'Member'
                          AND IsActive = 1
                          AND AcquisitionStatus = 'Innehas'
+                         AND RequiresLicense = 1
                          AND LicenseExpiresOn IS NOT NULL
                          AND DATEDIFF(day, CAST(GETDATE() AS DATE), LicenseExpiresOn) <= @0
                          AND DATEDIFF(day, CAST(GETDATE() AS DATE), LicenseExpiresOn) >= @1

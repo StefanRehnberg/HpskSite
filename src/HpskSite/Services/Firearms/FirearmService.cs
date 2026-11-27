@@ -192,7 +192,9 @@ namespace HpskSite.Services.Firearms
                     AcquisitionStatus = FirearmAcquisitionStatus.IsValid(request.AcquisitionStatus)
                         ? request.AcquisitionStatus!.Trim()
                         : FirearmAcquisitionStatus.Innehas,
-                    LicenseExpiresOn = request.LicenseExpiresOn,
+                    // Förval true (licenspliktigt). Ett licensfritt vapen har inget förfallodatum.
+                    RequiresLicense = request.RequiresLicense ?? true,
+                    LicenseExpiresOn = (request.RequiresLicense ?? true) ? request.LicenseExpiresOn : null,
                     ClubWeaponNumber = scope.Kind == FirearmOwnerKind.Club ? request.ClubWeaponNumber : null,
                     IsLoanable = scope.Kind == FirearmOwnerKind.Club && request.IsLoanable,
                     Status = scope.Kind == FirearmOwnerKind.Club ? Blank(request.Status) : null,
@@ -236,13 +238,19 @@ namespace HpskSite.Services.Firearms
 
             var scope = existing.Scope;
 
+            // ⚠️ null = "rör inte flaggan" (en begäran som inte nämner den ska aldrig tyst göra ett
+            // licensfritt vapen licenspliktigt eller tvärtom). Ett licensfritt vapen har inget
+            // förfallodatum — det nollas här så ingen licenspåminnelse kan finnas kvar.
+            var requiresLicense = request.RequiresLicense ?? existing.RequiresLicense;
+
             using (var uow = _scopeProvider.CreateScope(autoComplete: true))
             {
                 var db = uow.Database;
                 db.Execute(
                     @"UPDATE Firearm SET Alias = @0, WeaponClass = @1, Vapentyp = @2, AnnanVapentyp = @3,
                              AcquisitionStatus = @4, LicenseExpiresOn = @5, ClubWeaponNumber = @6,
-                             IsLoanable = @7, Status = @8, SortOrder = @9, UpdatedAt = @10
+                             IsLoanable = @7, Status = @8, SortOrder = @9, UpdatedAt = @10,
+                             RequiresLicense = @12
                        WHERE Id = @11",
                     request.Alias!.Trim(),
                     Blank(request.WeaponClass),
@@ -250,13 +258,14 @@ namespace HpskSite.Services.Firearms
                     Blank(request.AnnanVapentyp),
                     FirearmAcquisitionStatus.IsValid(request.AcquisitionStatus)
                         ? request.AcquisitionStatus!.Trim() : existing.AcquisitionStatus,
-                    request.LicenseExpiresOn,
+                    requiresLicense ? request.LicenseExpiresOn : null,
                     scope.Kind == FirearmOwnerKind.Club ? request.ClubWeaponNumber : null,
                     scope.Kind == FirearmOwnerKind.Club && request.IsLoanable,
                     scope.Kind == FirearmOwnerKind.Club ? Blank(request.Status) : null,
                     request.SortOrder,
                     DateTime.Now,
-                    firearmId);
+                    firearmId,
+                    requiresLicense);
 
                 // Relationerna skrivs om helt. En diff hade behövt hålla ordning på borttagningar
                 // också, och mängderna är små nog att ersättning är både enklare och säkrare.
@@ -305,6 +314,11 @@ namespace HpskSite.Services.Firearms
         /// licens för, och skulle det räknas som "sedan tidigare" vore siffran ett för hög på varje
         /// intyg. Avvecklade vapen räknas inte heller — de innehas inte.</para>
         ///
+        /// <para><b>⚠️ Bara licenspliktiga vapen räknas</b> (<c>RequiresLicense = 1</c>). Ett
+        /// föreningsintyg gäller licens, och luftvapen m.fl. är licensfria — de ska inte stå med i
+        /// "antal vapen sedan tidigare" (medlem 2026-11-25). Samma villkor måste gälla varje annan
+        /// räkning som hamnar på ett intyg; lägg aldrig en egen räkning bredvid den här.</para>
+        ///
         /// <para><paramref name="excludeFirearmId"/> tar bort det sökta vapnet ur räkningen, för
         /// fallet att det redan ligger i registret (en förnyelse).</para>
         /// </summary>
@@ -319,6 +333,7 @@ namespace HpskSite.Services.Firearms
                     JOIN FirearmFederation ff ON ff.FirearmId = f.Id
                    WHERE f.ScopeKind = @0 AND f.ScopeId = @1
                      AND f.IsActive = 1 AND f.AcquisitionStatus = @2
+                     AND f.RequiresLicense = 1
                      AND ff.Forbund = @3
                      AND (@4 IS NULL OR f.Id <> @4)",
                 FirearmOwnerKind.Member.ToString(), memberId,
@@ -550,6 +565,14 @@ namespace HpskSite.Services.Firearms
         public string? AnnanVapentyp { get; set; }
         public string? AcquisitionStatus { get; set; }
         public DateTime? LicenseExpiresOn { get; set; }
+
+        /// <summary>
+        /// Licenspliktigt? <c>null</c> = rör inte (vid uppdatering) / förval true (vid skapande).
+        /// Nullbart av samma skäl som <see cref="Details"/>: en begäran som inte nämner flaggan får
+        /// aldrig tyst ändra den.
+        /// </summary>
+        public bool? RequiresLicense { get; set; }
+
         public int SortOrder { get; set; }
 
         public List<string>? Federations { get; set; }

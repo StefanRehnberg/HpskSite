@@ -173,6 +173,12 @@ namespace HpskSite.Services.Firearms
             if (firearm.Scope != FirearmScope.Member(memberId))
                 return (0, "Du kan bara begära intyg för dina egna vapen.");
 
+            // ⚠️ Ett föreningsintyg gäller licens. Ett licensfritt vapen (t.ex. luftpistol) behöver
+            // inget — stoppas HÄR, så klubben aldrig får en förfrågan den inte kan göra något med.
+            if (!firearm.RequiresLicense)
+                return (0, "Det här vapnet är markerat som licensfritt, så det behövs inget " +
+                           "föreningsintyg. Är det licenspliktigt ändrar du det på vapnet i ditt register.");
+
             var fb = (forbund ?? "").Trim();
             if (!ForeningsintygDocument.AllaForbund.Contains(fb, StringComparer.Ordinal))
                 return (0, "Välj ett förbund ur listan.");

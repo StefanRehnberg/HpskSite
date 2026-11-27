@@ -111,7 +111,16 @@
                         <input type="text" class="form-control" id="fwAnnanVapentyp" name="fwAnnanVapentyp" autocomplete="off" maxlength="60">
                     </div>
 
-                    <div class="mt-3">
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="fwRequiresLicense" checked>
+                        <label class="form-check-label small fw-semibold" for="fwRequiresLicense">Licenspliktigt vapen</label>
+                        <div class="form-text mt-0">
+                            Bocka ur för licensfria vapen, till exempel luftpistol. De räknas inte
+                            med på föreningsintyg och får ingen licenspåminnelse.
+                        </div>
+                    </div>
+
+                    <div class="mt-3" id="fwExpiresWrap">
                         <label class="form-label small" for="fwExpires">Licensen förfaller</label>
                         <input type="text" class="form-control" id="fwExpires" name="fwExpires" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
                         <div class="form-text">
@@ -165,11 +174,11 @@
                             <label class="form-label small" for="fwTillverkningsnummer">Tillverkningsnummer</label>
                             <input type="text" class="form-control" id="fwTillverkningsnummer" name="fwTillverkningsnummer" autocomplete="off" maxlength="60">
                         </div>
-                        <div class="col-sm-6">
+                        <div class="col-sm-6" data-fw-licensed>
                             <label class="form-label small" for="fwLicensnummer">Licensnummer</label>
                             <input type="text" class="form-control" id="fwLicensnummer" name="fwLicensnummer" autocomplete="off" maxlength="60">
                         </div>
-                        <div class="col-sm-6">
+                        <div class="col-sm-6" data-fw-licensed>
                             <label class="form-label small" for="fwLicensdatum">Licensdatum</label>
                             <input type="text" class="form-control" id="fwLicensdatum" name="fwLicensdatum" autocomplete="off" placeholder="ÅÅÅÅ-MM-DD">
                         </div>
@@ -622,6 +631,10 @@
                 html += '<div class="small text-muted mb-1"><i class="bi bi-bank me-1"></i>' +
                     esc(f.federations.join(', ')) + '</div>';
 
+            if (f.requiresLicense === false)
+                html += '<div class="small text-muted mb-1"><i class="bi bi-patch-check me-1"></i>' +
+                    'Licensfritt vapen</div>';
+
             if (f.licenseExpiresOn) {
                 var cls = f.daysUntilExpiry < 0 ? 'fw-expiry-past'
                         : f.daysUntilExpiry <= 90 ? 'fw-expiry-soon' : 'text-muted';
@@ -673,7 +686,7 @@
             html += '<div class="d-flex gap-2 mt-2 flex-wrap">' +
                 '<button type="button" class="btn btn-sm btn-outline-primary" data-fw="edit" ' +
                 'data-firearm-id="' + f.id + '">Redigera</button>';
-            if (!f.openRequest)
+            if (!f.openRequest && f.requiresLicense !== false)
                 html += '<button type="button" class="btn btn-sm btn-outline-success" data-fw="request" ' +
                     'data-firearm-id="' + f.id + '">' + (f.issuedIntyg ? 'Beg\u00e4r nytt intyg' : 'Beg\u00e4r intyg') + '</button>';
             html += '<button type="button" class="btn btn-sm btn-outline-danger ms-auto" data-fw="remove" ' +
@@ -803,6 +816,9 @@
         // medlemmen just svarade på, i stället för att tvinga hen att rätta det själv.
         val('fwStatus', f ? f.acquisitionStatus : (forIntyg ? 'Planerat' : 'Innehas'));
         val('fwExpires', f ? (f.licenseExpiresOn || '') : '');
+        // Förval licenspliktigt (nytt vapen, och äldre rader utan flaggan i svaret).
+        document.getElementById('fwRequiresLicense').checked = !f || f.requiresLicense !== false;
+        syncLicense();
         setChecks('fwForbund', f ? f.federations : []);
         setChecks('fwDisciplines', f ? f.disciplines : []);
         syncAnnanTyp();
@@ -849,6 +865,15 @@
             'Uppgifterna är hämtade. Ändringar sparas krypterat.';
     }
 
+    // Ett licensfritt vapen har varken förfallodatum, licensnummer eller licensdatum.
+    function syncLicense() {
+        var licensed = document.getElementById('fwRequiresLicense').checked;
+        document.getElementById('fwExpiresWrap').classList.toggle('d-none', !licensed);
+        document.querySelectorAll('#fwEditModal [data-fw-licensed]').forEach(function (el) {
+            el.classList.toggle('d-none', !licensed);
+        });
+    }
+
     function syncAnnanTyp() {
         var wrap = document.getElementById('fwAnnanTypWrap');
         var isOther = document.getElementById('fwVapentyp').value === 'Annat';
@@ -874,6 +899,7 @@
             Vapentyp: document.getElementById('fwVapentyp').value,
             AnnanVapentyp: document.getElementById('fwAnnanVapentyp').value,
             AcquisitionStatus: document.getElementById('fwStatus').value,
+            RequiresLicense: document.getElementById('fwRequiresLicense').checked ? '1' : '0',
             LicenseExpiresOn: document.getElementById('fwExpires').value,
             Federations: getChecks('fwForbund').join(','),
             Disciplines: getChecks('fwDisciplines').join(','),
@@ -903,7 +929,8 @@
     }
 
     function openRequest(id) {
-        var list = state.firearms || [];
+        // Ett föreningsintyg gäller licens — licensfria vapen (luftpistol m.fl.) erbjuds inte.
+        var list = (state.firearms || []).filter(function (x) { return x.requiresLicense !== false; });
         if (list.length === 0) return;
 
         document.getElementById('fwReqError').classList.add('d-none');
@@ -1116,6 +1143,10 @@
                 j.antal + ' vapen</strong> inom ' + esc(j.forbund) + '.' +
                 (Number(firearmId) > 0
                     ? ' <span class="text-muted">Vapnet den här förfrågan gäller räknas inte med.</span>'
+                    : '') +
+                (j.licensfria > 0
+                    ? ' <span class="text-muted">Licensfria vapen (' + j.licensfria +
+                      ' st) räknas inte med.</span>'
                     : '');
 
             if (j.utanForbund && j.utanForbund.length) {
@@ -1136,14 +1167,14 @@
     /// Ingången till intygsflödet. Den andra vägen är avstängd med en förklaring när garderoben
     /// är tom — en klickbar knapp mot en tom väljare säger inte varför den inte fungerar.
     function openIntygStart() {
-        var has = (state && (state.firearms || []).length > 0);
+        var has = (state && (state.firearms || []).some(function (x) { return x.requiresLicense !== false; }));
         var btn = document.querySelector('[data-fw="intyg-existing"]');
         var hint = document.getElementById('fwIntygExistingHint');
         if (btn) btn.disabled = !has;
         if (hint) {
             hint.innerHTML = has
                 ? 'Förnyelse av en licens, eller ett planerat vapen jag redan lagt in.'
-                : 'Din vapengarderob är tom — välj alternativet ovan.';
+                : 'Du har inga licenspliktiga vapen i registret — välj alternativet ovan.';
         }
         bootstrap.Modal.getOrCreateInstance(document.getElementById('fwIntygStartModal')).show();
     }
@@ -1316,6 +1347,7 @@
 
     document.addEventListener('change', function (ev) {
         if (ev.target && ev.target.id === 'fwVapentyp') syncAnnanTyp();
+        if (ev.target && ev.target.id === 'fwRequiresLicense') syncLicense();
     });
     document.addEventListener('click', function (ev) {
         if (ev.target && ev.target.id === 'fwSaveBtn') save();

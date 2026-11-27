@@ -680,6 +680,13 @@
                             <select class="form-select" id="vapCfStatus"></select>
                         </div>
                         <div class="col-sm-4">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="vapCfRequiresLicense" checked>
+                                <label class="form-check-label small fw-semibold" for="vapCfRequiresLicense">
+                                    Licenspliktigt vapen
+                                </label>
+                                <div class="form-text mt-0">Bocka ur för licensfria vapen, t.ex. luftpistol.</div>
+                            </div>
                             <label class="form-label small" for="vapCfExpires">
                                 Licensen förfaller
                             </label>
@@ -1253,10 +1260,12 @@
         // ⚠️ Förfallodatumet är med i LISTAN, inte bara i formuläret. Ett klubbvapen vars licens
         // går ut obemärkt tas ur bruk, och ingen enskild person får en påminnelse för föreningens
         // vapen — så synligheten här är hela varningen. Samma trösklar som medlemskorten (90/30).
+        // Licensfria vapen har inget förfallodatum (servern nollar det), men filtreras ändå bort här.
         var expired = list.filter(function (f) {
-            return f.daysUntilExpiry != null && f.daysUntilExpiry < 0; }).length;
+            return f.requiresLicense !== false && f.daysUntilExpiry != null && f.daysUntilExpiry < 0; }).length;
         var soon = list.filter(function (f) {
-            return f.daysUntilExpiry != null && f.daysUntilExpiry >= 0 && f.daysUntilExpiry <= 90;
+            return f.requiresLicense !== false && f.daysUntilExpiry != null
+                && f.daysUntilExpiry >= 0 && f.daysUntilExpiry <= 90;
         }).length;
 
         var html = '';
@@ -1277,7 +1286,8 @@
             var expCls = f.daysUntilExpiry == null ? 'text-muted'
                        : f.daysUntilExpiry < 0 ? 'vap-expiry-past'
                        : f.daysUntilExpiry <= 90 ? 'vap-expiry-soon' : '';
-            var expTxt = !f.licenseExpiresOn ? '\u2014'
+            var expTxt = f.requiresLicense === false ? 'Licensfritt'
+                       : !f.licenseExpiresOn ? '\u2014'
                        : esc(f.licenseExpiresOn) +
                          (f.daysUntilExpiry < 0 ? ' (f\u00f6rfallen)'
                           : f.daysUntilExpiry <= 90 ? ' (' + f.daysUntilExpiry + ' dagar)' : '');
@@ -1361,6 +1371,8 @@
         document.getElementById('vapCfStatus').value = f ? f.status : (o.statuses || [''])[0];
         document.getElementById('vapCfLoanable').checked = f ? !!f.isLoanable : true;
         document.getElementById('vapCfExpires').value = f ? (f.licenseExpiresOn || '') : '';
+        document.getElementById('vapCfRequiresLicense').checked = !f || f.requiresLicense !== false;
+        cfSyncLicense();
         cfSetChecks('vapCfForbund', f ? f.federations : []);
         cfSetChecks('vapCfDisciplines', f ? f.disciplines : []);
         cfSyncAnnanTyp();
@@ -1407,7 +1419,18 @@
         wrap.classList.toggle('d-none', !isOther);
         if (!isOther) document.getElementById('vapCfAnnanTyp').value = '';
     }
+    // Ett licensfritt vapen har inget förfallodatum — fältet göms (servern nollar det också).
+    function cfSyncLicense() {
+        var licensed = document.getElementById('vapCfRequiresLicense').checked;
+        var exp = document.getElementById('vapCfExpires');
+        exp.closest('.col-sm-4').querySelectorAll('label[for=vapCfExpires], #vapCfExpires, .form-text')
+            .forEach(function (el) {
+                if (el.closest('.form-check')) return;   // rutan själv ska alltid synas
+                el.classList.toggle('d-none', !licensed);
+            });
+    }
     document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'vapCfRequiresLicense') cfSyncLicense();
         if (ev.target && ev.target.id === 'vapCfType') cfSyncAnnanTyp();
     });
 
@@ -1464,6 +1487,7 @@
             number: document.getElementById('vapCfNumber').value,
             isLoanable: document.getElementById('vapCfLoanable').checked,
             status: document.getElementById('vapCfStatus').value,
+            requiresLicense: document.getElementById('vapCfRequiresLicense').checked ? '1' : '0',
             licenseExpiresOn: document.getElementById('vapCfExpires').value,
             // ⚠️ BÅDA listorna skickas alltid, även tomma. Servern skriver om relationerna helt
             // vid varje sparning, så ett utelämnat fält RENSAR dem — och förbundet är vad

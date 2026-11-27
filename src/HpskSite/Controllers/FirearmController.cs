@@ -401,6 +401,20 @@ namespace HpskSite.Controllers
             if (!_memberClubs.GetAllClubIds(member).Contains(clubId))
                 return Json(new { success = false, message = "Du kan bara begära intyg av en klubb du är medlem i." });
 
+            // ⚠️ Licensfritt vapen (t.ex. luftpistol): inget intyg behövs. Kontrollen ligger FÖRE
+            // profilspärren nedan — en medlem ska inte behöva fylla i personnummer för ett vapen som
+            // aldrig kan få något intyg. (Servicen `ForeningsintygRequestService.Create` har samma
+            // spärr som sista skydd för andra anropare.)
+            var requested = _firearms.GetById(firearmId);
+            if (requested is not null && requested.Scope == FirearmScope.Member(memberId)
+                && !requested.RequiresLicense)
+                return Json(new
+                {
+                    success = false,
+                    message = "Det här vapnet är markerat som licensfritt, så det behövs inget " +
+                              "föreningsintyg. Är det licenspliktigt ändrar du det på vapnet i ditt register."
+                });
+
             // ⚠️⚠️ SPÄRR: medlemmens egna uppgifter måste vara ifyllda (Stefans beslut 2026-09-09).
             //
             // Rapporterat: klubben öppnade blanketten för en medlem och möttes av "personnummer
@@ -498,14 +512,24 @@ namespace HpskSite.Controllers
 
                 // Innehav som inte bär något förbund alls. `Planerat` räknas inte här — ett vapen
                 // medlemmen ännu inte äger hör inte till "sedan tidigare" oavsett förbund.
-                var utanForbund = _firearms.GetForScope(FirearmScope.Member(memberId))
+                var innehav = _firearms.GetForScope(FirearmScope.Member(memberId))
                     .Where(f => f.AcquisitionStatus == FirearmAcquisitionStatus.Innehas
-                                && f.Id != excludeFirearmId
-                                && f.Federations.Count == 0)
+                                && f.Id != excludeFirearmId)
+                    .ToList();
+
+                // Licensfria vapen saknar medvetet förbund-kravet: de räknas aldrig, så att de saknar
+                // förbund är ingen underrapportering.
+                var utanForbund = innehav
+                    .Where(f => f.RequiresLicense && f.Federations.Count == 0)
                     .Select(f => new { f.Id, f.Alias })
                     .ToList();
 
-                return Json(new { success = true, forbund = fb, antal, utanForbund });
+                // Hur många licensfria innehav som INTE räknas i förbundet — så siffran kan förklara
+                // sig själv ("… luftvapen räknas inte").
+                var licensfria = innehav.Count(f => !f.RequiresLicense
+                    && f.Federations.Contains(fb, StringComparer.Ordinal));
+
+                return Json(new { success = true, forbund = fb, antal, utanForbund, licensfria });
             }
             catch (Exception ex)
             {
@@ -855,6 +879,7 @@ namespace HpskSite.Controllers
             f.AnnanVapentyp,
             vapentypDisplay = f.VapentypDisplay,
             f.AcquisitionStatus,
+            requiresLicense = f.RequiresLicense,
             statusLabel = FirearmAcquisitionStatus.Label(f.AcquisitionStatus),
             licenseExpiresOn = f.LicenseExpiresOn?.ToString("yyyy-MM-dd"),
             daysUntilExpiry = f.DaysUntilLicenseExpiry,
@@ -915,6 +940,13 @@ namespace HpskSite.Controllers
         public string? AnnanVapentyp { get; set; }
         public string? AcquisitionStatus { get; set; }
         public string? LicenseExpiresOn { get; set; }
+
+        /// <summary>
+        /// <c>"1"</c> = licenspliktigt, <c>"0"</c> = licensfritt. Allt annat (fältet saknas) = rör
+        /// inte flaggan — en äldre flik som inte skickar den får aldrig tyst ändra den.
+        /// </summary>
+        public string? RequiresLicense { get; set; }
+
         public string? Federations { get; set; }
         public string? Disciplines { get; set; }
 
@@ -942,6 +974,7 @@ namespace HpskSite.Controllers
             AnnanVapentyp = AnnanVapentyp,
             AcquisitionStatus = AcquisitionStatus,
             LicenseExpiresOn = ParseDate(LicenseExpiresOn),
+            RequiresLicense = RequiresLicense switch { "1" => true, "0" => false, _ => (bool?)null },
             Federations = Split(Federations),
             Disciplines = Split(Disciplines),
             Details = WriteDetails == "1"
