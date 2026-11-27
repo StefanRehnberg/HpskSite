@@ -35,19 +35,22 @@ namespace HpskSite.Controllers
         private readonly LedgerSandboxService _sandbox;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
+        private readonly MembershipAccess _membershipAccess;
 
         public EkonomiController(
             LedgerAccessService access,
             LedgerSetupService setup,
             LedgerSandboxService sandbox,
             IUmbracoContextAccessor umbracoContextAccessor,
-            IMemberManager memberManager)
+            IMemberManager memberManager,
+            MembershipAccess membershipAccess)
         {
             _access = access;
             _setup = setup;
             _sandbox = sandbox;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
+            _membershipAccess = membershipAccess;
         }
 
         /// <param name="type">Ägarens typ ur <see cref="DocumentOwnerType"/>.</param>
@@ -130,6 +133,8 @@ namespace HpskSite.Controllers
                     ? _sandbox.ListForOwner(type, id)
                     : new List<HpskSite.Models.Ledger.LedgerIssuer> { live },
                 CanWrite = access.CanWrite,
+                // Medlemstyper och förbund ändras av klubbadmin OCH kassör, men aldrig av revisorn (MembershipAccess). Bara klubbar.
+                CanManageMembers = type == (int)DocumentOwnerType.Club && await _membershipAccess.CanManageMemberAsync(id),
                 AccessBasis = access.Basis,
                 CanManageWriteGrants = access.CanManageWriteGrants,
                 IsVatRegistered = status.IsVatRegistered,
@@ -192,6 +197,13 @@ namespace HpskSite.Controllers
         /// som ett fel; därför står det skrivet vem som bokför.</para>
         /// </summary>
         public bool CanWrite { get; set; } = true;
+
+        /// <summary>
+        /// Får den inloggade ändra medlemmarnas typer, åldersgränser och förbund (sidan Medlemstyper och förbund)?
+        /// Klubbadmin eller kassör, aldrig revisorn. ⚠️ Inte samma sak som <see cref="CanWrite"/>: en klubbadmin utan
+        /// kassörsrätt får ändra typerna men inte avgifterna.
+        /// </summary>
+        public bool CanManageMembers { get; set; }
 
         /// <summary>
         /// VARFÖR den inloggade får det hen får — styr rälsens roll och förklaringen. Se

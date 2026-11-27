@@ -1362,7 +1362,7 @@
                         }
                         else
                         {
-                            @await Html.PartialAsync("ClubFeeRules", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["clubId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanWrite, ["which"] = "types" })
+                            @await Html.PartialAsync("ClubFeeRules", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["clubId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanManageMembers, ["which"] = "types" })
                         }
                     </div>
                 </section>
