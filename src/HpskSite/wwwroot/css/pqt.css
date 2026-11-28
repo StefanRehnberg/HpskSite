@@ -1,0 +1,73 @@
+/* /pqt — informationssidan om PQT. Smal läsbredd, kort som övriga sajtens sidor; färgerna ur Bootstrap-variablerna så ljust/mörkt läge följer sajten.
+   Märkesplattorna är alltid mörka: märkena är silver och syns inte på en ljus yta. */
+.pqt { max-width: 900px; margin: 0 auto; padding: 1.25rem 0 2rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.pqt p { max-width: 68ch; }
+.pqt h1 { font-size: clamp(2.6rem, 8vw, 4rem); text-transform: uppercase; letter-spacing: .03em; margin: 0; line-height: 1.05; }
+.pqt-h2 { font-size: 1.5rem; margin: 0 0 .75rem; text-wrap: balance; }
+.pqt-h2-free { padding-inline: .25rem; }
+.pqt-h3 { font-size: 1.15rem; margin: 1.25rem 0 .5rem; }
+.pqt-count { font-size: 1rem; font-weight: 400; color: var(--bs-secondary-color); }
+.pqt-eyebrow { font-size: .75rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--bs-secondary-color); }
+.pqt-src { font-size: .85rem; color: var(--bs-secondary-color); }
+.pqt-msg { font-size: .9rem; color: var(--bs-secondary-color); }
+.pqt-msg.is-error { color: var(--bs-danger); }
+.pqt-msg.is-ok { color: var(--bs-success); }
+
+.pqt-hero { background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem; padding: 1.75rem 1.5rem; display: flex; flex-direction: column; gap: .9rem; }
+.pqt-lead { font-size: 1.15rem; max-width: 60ch; margin: 0; }
+.pqt-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .6rem; padding: 1.25rem; min-width: 0; }
+
+.pqt-badges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-top: .5rem; }
+.pqt-badges-end { margin: 1rem 0 1.5rem; }
+.pqt-plate { background: #20252b; border-radius: .6rem; padding: 1rem .6rem .75rem; text-align: center; min-width: 0; }
+.pqt-plate img { display: block; margin: 0 auto; height: 150px; width: auto; max-width: 100%; object-fit: contain; }
+.pqt-plate b { display: block; margin-top: .6rem; font-size: 1.15rem; letter-spacing: .06em; text-transform: uppercase; color: #e8eaed; }
+.pqt-plate span { font-size: .85rem; color: #a3abb5; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .pqt-badges { grid-template-columns: minmax(0, 1fr); } .pqt-plate img { height: 130px; } }
+
+.pqt-like { display: flex; flex-wrap: wrap; gap: .6rem .9rem; align-items: center; margin-top: .25rem; }
+.pqt-like-count { font-variant-numeric: tabular-nums; }
+
+.pqt-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+@media (max-width: 760px) { .pqt-steps { grid-template-columns: minmax(0, 1fr); } }
+.pqt-step { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .6rem; padding: 1rem; min-width: 0; }
+.pqt-step h3 { font-size: 1.35rem; margin: .15rem 0 .25rem; }
+.pqt-big { font-size: 2.6rem; font-weight: 700; line-height: 1; color: var(--bs-primary); font-variant-numeric: tabular-nums; }
+.pqt-big small { font-size: 1.1rem; font-weight: 600; color: var(--bs-secondary-color); }
+.pqt-facts { display: grid; grid-template-columns: auto 1fr; gap: .25rem .75rem; margin: .75rem 0 0; font-size: .9rem; }
+.pqt-facts dt { color: var(--bs-secondary-color); font-weight: 400; }
+.pqt-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.pqt-targets { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+.pqt-targets figure { margin: 0; text-align: center; font-size: .85rem; color: var(--bs-secondary-color); min-width: 0; }
+.pqt-targets img { display: block; margin: 0 auto .4rem; height: 190px; width: auto; max-width: 100%; border-radius: .4rem; background: #fff; }
+.pqt-targets figcaption b { color: var(--bs-body-color); }
+
+.pqt-levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+@media (max-width: 760px) { .pqt-levels { grid-template-columns: minmax(0, 1fr); } }
+.pqt-level { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: .75rem; align-items: center; background: var(--bs-tertiary-bg); border-radius: .6rem; padding: .6rem; }
+.pqt-level .pqt-plate { padding: .5rem .25rem; }
+.pqt-level .pqt-plate img { height: 64px; }
+.pqt-level b { display: block; font-size: 1.15rem; text-transform: uppercase; letter-spacing: .04em; }
+.pqt-level span { font-size: .9rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+.pqt-table { font-variant-numeric: tabular-nums; margin-bottom: .5rem; }
+
+.pqt-stance { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
+.pqt-stance figure { margin: 0; max-width: 220px; font-size: .85rem; color: var(--bs-secondary-color); }
+.pqt-stance img { display: block; width: 100%; height: auto; border-radius: .4rem; }
+.pqt-stance > div { flex: 1 1 320px; min-width: 0; }
+.pqt-original { margin: .75rem 0 0; max-width: 640px; }
+.pqt-original img { display: block; width: 100%; height: auto; border-radius: .5rem; }
+.pqt-original figcaption { font-size: .85rem; color: var(--bs-secondary-color); margin-top: .4rem; }
+
+.pqt-interest { border-top: 1px solid var(--bs-border-color); padding-top: 1rem; }
+
+.pqt-comments { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: .6rem; }
+.pqt-comment { background: var(--bs-tertiary-bg); border-radius: .5rem; padding: .7rem .9rem; min-width: 0; }
+.pqt-comment.is-pending { border: 1px dashed var(--bs-warning); }
+.pqt-comment.is-deleted { opacity: .7; }
+.pqt-meta { display: flex; flex-wrap: wrap; gap: .25rem .6rem; align-items: baseline; font-size: .9rem; }
+.pqt-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .25rem 0; }
+.pqt-actions { display: flex; flex-wrap: wrap; gap: 0 .5rem; }
+.pqt-actions .btn-link { padding-left: 0; padding-right: 0; }
+.pqt-inline { display: flex; flex-direction: column; gap: .5rem; margin-top: .4rem; }

@@ -1,0 +1,274 @@
+@using HpskSite.Models
+@using HpskSite.Services.Pqt
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@*
+    /pqt — informationssidan om PQT (pistolprovet från andra världskriget, ett eget experiment från pistol.nu). Routad av PqtController, ingen Umbraco-nod.
+    Innehållet är text i vyn. Tre delar är levande: gilla, intresseanmälan för märken och kommentarer (pqt.js). Allt som avgör vem som får göra vad ligger i PqtController.
+    ⚠️ Texterna är ren text i vyn: nivågränserna (70/80/90 %) och momentens mått står även i beslutsnoten notes/expertgrupp-pqt-2026-11-26.md. Ändras en regel, ändra båda.
+*@
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "PQT - pistolprovet från andra världskriget";
+    ViewBag.MetaDescription = "PQT är ett pistolprov med tre moment, ett resultat i procent och tre nivåer: Marksman, Sharpshooter och Expert. Ett experiment från pistol.nu som bygger på US Armys prov från andra världskriget.";
+    var pq = (PqtPageModel)ViewData["Pqt"]!;
+    var loginUrl = "/login-register/?tab=login&returnUrl=%2Fpqt";
+}
+
+<link href="~/css/pqt.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="pqt" id="pqt-root">
+    @Html.AntiForgeryToken()
+
+    <header class="pqt-hero">
+        <div class="pqt-eyebrow">Experiment från pistol.nu · Pistolprov från andra världskriget</div>
+        <h1>PQT</h1>
+        <p class="pqt-lead">Tre moment, ett resultat i procent och tre nivåer att sträva efter. Provet bygger på det kvalifikationsprov som US Army använde med pistol M1911 under andra världskriget, omgjort för våra egna tavlor och avstånd i meter.</p>
+        <div class="pqt-badges">
+            <div class="pqt-plate"><img src="~/images/pqt/marksman.png" alt="Märket Pistol Marksman" width="259" height="300" loading="lazy"><b>Marksman</b><span>från 70 %</span></div>
+            <div class="pqt-plate"><img src="~/images/pqt/sharpshooter.png" alt="Märket Pistol Sharpshooter" width="256" height="300" loading="lazy"><b>Sharpshooter</b><span>från 80 %</span></div>
+            <div class="pqt-plate"><img src="~/images/pqt/expert.png" alt="Märket Pistol Expert" width="238" height="300" loading="lazy"><b>Expert</b><span>från 90 %</span></div>
+        </div>
+        <div class="pqt-like" id="pqt-like-bar" data-liked="@(pq.Liked ? "1" : "0")" data-logged-in="@(pq.LoggedIn ? "1" : "0")">
+            <button type="button" class="btn @(pq.Liked ? "btn-primary" : "btn-outline-primary")" id="pqt-like" aria-pressed="@(pq.Liked ? "true" : "false")">
+                <i class="bi @(pq.Liked ? "bi-heart-fill" : "bi-heart")" aria-hidden="true"></i> <span id="pqt-like-label">@(pq.Liked ? "Du gillar PQT" : "Gilla")</span>
+            </button>
+            <span class="pqt-like-count"><span id="pqt-like-count">@pq.LikeCount</span> gillar PQT</span>
+            <span class="pqt-msg" id="pqt-like-msg" role="status">@(pq.LoggedIn ? "" : "Logga in för att gilla.")</span>
+            @if (!pq.LoggedIn) { <a href="@loginUrl">Logga in</a> }
+        </div>
+    </header>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Vad är PQT?</h2>
+        <p>PQT står för Pistol Qualification Test. Du skjuter tre olika moment: ett lugnt (Slow Fire), ett på tid (Rapid Fire) och ett snabbt på en figur (Quick Fire). Varje moment räknas om till procent av maxpoängen, och ditt slutresultat är medelvärdet av de tre.</p>
+        <p>Det är en tävling mot dig själv lika mycket som mot andra. De tre nivåerna är målen: har du 80 % är du Sharpshooter oavsett vad någon annan skjuter. Placeringen i resultatlistan avgörs av procenten.</p>
+        <p class="text-body-secondary">PQT är ett eget initiativ från pistol.nu för att se om intresset finns. Det är inte en förbundsgren och ingår inte i Svenska Pistolskytteförbundets handbok.</p>
+        <p>Vi är inte många som har skjutit PQT ännu, så provet är fortfarande under uppbyggnad. Målet är att de flesta av oss ska kunna nå Marksman, men att Expert ska vara svårt. Vi tar tacksamt emot förslag på hur tider, avstånd och tavlor kan ändras för att få svårigheten i perfekt balans. Svårigheten ska helst också vara i balans mellan delmomenten Slow Fire, Rapid Fire och Quick Fire, så att inget av dem blir mycket lättare eller svårare än de andra.</p>
+        <p class="mb-0">Skriv gärna dina förslag i <a href="#pqt-kommentarer">kommentarerna</a> längst ner på sidan.</p>
+    </section>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Bakgrund</h2>
+        <p>Under andra världskriget fick amerikanska soldater sitt pistolskytte bedömt enligt fältmanualen <i>FM 23-35, Automatic Pistol, Cal. .45, M1911 and M1911A1</i>. Där fanns en tränings- och en provomgång med tre sorters skjutning: <b>slow fire</b> utan eller med generös tid, <b>rapid fire</b> där fem skott skulle hinnas inom en bestämd tid, och <b>quick fire</b> där man sköt på en siluett som bara visades några sekunder.</p>
+        <p>Skytten bedömdes i procent. Varje moment räknades för sig, procenttalen lades ihop och delades med tre. Resultatet gav klassningen <i>pistol expert</i>, <i>pistol sharpshooter</i>, <i>pistol marksman</i> eller ej kvalificerad. Manualen har även en regel för lika resultat vid en klassgräns: alla som delar gränsresultatet får den högre klassen.</p>
+        <p>Originalet skjuts i yards på särskilda tavlor (en stor rektangulär bullseye-tavla och en siluett). Vi har behållit idén med tre moment, procent och tre nivåer, men flyttat provet till metermått och tavlor som finns på våra banor.</p>
+        <p class="pqt-src mb-0">Källa: FM 23-35, kapitel om skjutning på känt avstånd (§ 53–54 skjuttabeller, § 60 poängberäkning, § 61 klassning).</p>
+    </section>
+
+    <section>
+        <h2 class="pqt-h2 pqt-h2-free">Så skjuter vi PQT</h2>
+        <div class="pqt-steps">
+            <div class="pqt-step">
+                <div class="pqt-eyebrow">Moment 1</div>
+                <h3>Slow Fire</h3>
+                <div class="pqt-big">100 <small>p</small></div>
+                <p>Tio skott i lugn takt. Sikta noga och skjut när du är redo.</p>
+                <dl class="pqt-facts">
+                    <dt>Avstånd</dt><dd>25 m</dd>
+                    <dt>Skott</dt><dd>10</dd>
+                    <dt>Tid</dt><dd>4 minuter</dd>
+                    <dt>Tavla</dt><dd>Snabbtavlan, 10-ringad</dd>
+                    <dt>Poäng</dt><dd>0–10 per skott</dd>
+                </dl>
+            </div>
+            <div class="pqt-step">
+                <div class="pqt-eyebrow">Moment 2</div>
+                <h3>Rapid Fire</h3>
+                <div class="pqt-big">100 <small>p</small></div>
+                <p>Samma tavla, men nu på tid. Först fem skott på 25 m, sedan fem på 15 m.</p>
+                <dl class="pqt-facts">
+                    <dt>Avstånd</dt><dd>25 m, därefter 15 m</dd>
+                    <dt>Skott</dt><dd>5 + 5</dd>
+                    <dt>Tid</dt><dd>15 s på 25 m, 11 s på 15 m</dd>
+                    <dt>Tavla</dt><dd>Snabbtavlan, 10-ringad</dd>
+                    <dt>Poäng</dt><dd>0–10 per skott</dd>
+                </dl>
+            </div>
+            <div class="pqt-step">
+                <div class="pqt-eyebrow">Moment 3</div>
+                <h3>Quick Fire</h3>
+                <div class="pqt-big">10 <small>p</small></div>
+                <p>Fem gånger två snabba skott mot en figur. Varje träff ger en poäng, var på figuren den än sitter.</p>
+                <dl class="pqt-facts">
+                    <dt>Avstånd</dt><dd>15 m</dd>
+                    <dt>Skott</dt><dd>5 dubbelskott</dd>
+                    <dt>Tid</dt><dd>5 sekunder per dubbelskott</dd>
+                    <dt>Tavla</dt><dd>Helfigur Mini, L2 eller S25</dd>
+                    <dt>Poäng</dt><dd>1 per träff, högst 10</dd>
+                </dl>
+            </div>
+        </div>
+    </section>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Tavlorna</h2>
+        <p>Vi skjuter på tavlor som finns på våra banor. Originalet skjuts på betydligt större tavlor.</p>
+        <div class="pqt-targets">
+            <figure><img src="~/images/pqt/snabbtavla.jpg" alt="Snabbtavlan" height="170" style="height:170px" loading="lazy"><figcaption><b>Snabbtavlan</b><br>Slow Fire och Rapid Fire</figcaption></figure>
+            <figure><img src="~/images/pqt/mini.jpg" alt="Helfigur Mini" loading="lazy"><figcaption><b>Helfigur Mini</b><br>Quick Fire</figcaption></figure>
+            <figure><img src="~/images/pqt/l2.jpg" alt="L2" loading="lazy"><figcaption><b>L2</b><br>Quick Fire</figcaption></figure>
+            <figure><img src="~/images/pqt/s25.jpg" alt="S25" loading="lazy"><figcaption><b>S25</b><br>Quick Fire</figcaption></figure>
+        </div>
+
+        <h3 class="pqt-h3">Originaltavlorna</h3>
+        <div class="pqt-targets">
+            <figure><img src="~/images/pqt/orig-slow.jpg" alt="Target L" style="height:220px" loading="lazy"><figcaption><b>Target L</b><br>Slow Fire och Rapid Fire<br>6 × 4 fot, cirka 1,8 × 1,2 m</figcaption></figure>
+            <figure><img src="~/images/pqt/orig-quick.jpg" alt="Target E" style="height:220px" loading="lazy"><figcaption><b>Target E</b><br>Quick Fire<br>40 × 19,5 tum, cirka 1 m × 50 cm</figcaption></figure>
+        </div>
+        <p class="mt-3">Target L är nästan två meter hög och en och en kvarts meter bred. Mitten är en svart bullseye på 5 tum, cirka 12,7 cm, och resten av tavlan är ytor som ger poäng. Target E är en siluett på en meter i höjd och en halv meter i bredd.</p>
+        <p class="mb-0">Hade vi behållit de måtten hade det varit närmast omöjligt att missa. Vi har gjort om provet för skyttar som kan skjuta.</p>
+    </section>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Poäng och nivåer</h2>
+        <p>Ditt slutresultat är medelvärdet av momentens procent. Eftersom Quick Fire bara har tio poäng räknar vi om den till hundra, så att alla tre momenten väger lika. Max är 100 %.</p>
+        <div class="pqt-levels">
+            <div class="pqt-level"><div class="pqt-plate"><img src="~/images/pqt/marksman.png" alt="" width="259" height="300" loading="lazy"></div><div><b>Marksman</b><span>70 % till under 80 %</span></div></div>
+            <div class="pqt-level"><div class="pqt-plate"><img src="~/images/pqt/sharpshooter.png" alt="" width="256" height="300" loading="lazy"></div><div><b>Sharpshooter</b><span>80 % till under 90 %</span></div></div>
+            <div class="pqt-level"><div class="pqt-plate"><img src="~/images/pqt/expert.png" alt="" width="238" height="300" loading="lazy"></div><div><b>Expert</b><span>90 % och över</span></div></div>
+        </div>
+        <p class="text-body-secondary mt-3">Under 70 % får ingen nivå, men resultatet står ändå i resultatlistan.</p>
+
+        <h3 class="pqt-h3">Varför just 70, 80 och 90 %?</h3>
+        <p>Eftersom slutresultatet är ett medelvärde kan en bra siffra i två moment dölja ett dåligt tredje. Gränserna är satta så att en nivå betyder att du klarar <i>alla</i> tre momenten, inte bara två av dem:</p>
+        <div class="table-responsive">
+            <table class="table pqt-table">
+                <thead><tr><th>Nivå</th><th class="text-end">Gräns</th><th>Om de två andra momenten ger 100 % får det sämsta momentet som lägst vara</th></tr></thead>
+                <tbody>
+                    <tr><td>Marksman</td><td class="text-end">70 %</td><td>10 %</td></tr>
+                    <tr><td>Sharpshooter</td><td class="text-end">80 %</td><td>40 %</td></tr>
+                    <tr><td>Expert</td><td class="text-end">90 %</td><td>70 %</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Det viktigaste är att du inte kan bli Marksman genom att helt missa ett moment: med noll i ett moment blir slutresultatet som mest 66,7 %. Expert kräver minst 70 % i varje moment, även om du är perfekt i de två andra. Stegen är lika stora, 10 procentenheter, så gränserna är lätta att komma ihåg. Siffrorna är vår första gissning. Märker vi att de är för lätta eller för svåra justerar vi dem, och då vill vi gärna höra vad du tycker.</p>
+
+        <h3 class="pqt-h3">Räkneexempel</h3>
+        <div class="table-responsive">
+            <table class="table pqt-table">
+                <thead><tr><th>Moment</th><th class="text-end">Poäng</th><th class="text-end">Av</th><th class="text-end">Procent</th></tr></thead>
+                <tbody>
+                    <tr><td>Slow Fire</td><td class="text-end">86</td><td class="text-end">100</td><td class="text-end">86 %</td></tr>
+                    <tr><td>Rapid Fire</td><td class="text-end">78</td><td class="text-end">100</td><td class="text-end">78 %</td></tr>
+                    <tr><td>Quick Fire</td><td class="text-end">9</td><td class="text-end">10</td><td class="text-end">90 %</td></tr>
+                    <tr class="fw-bold"><td>Slutresultat (medelvärde)</td><td colspan="2"></td><td class="text-end">84,7 % <span class="badge text-bg-primary">Sharpshooter</span></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-body-secondary mb-0">Med 94, 88 och 9 träffar hade slutresultatet blivit 90,7 % och Expert.</p>
+    </section>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Resultatlistan</h2>
+        <p>Listan sorteras på slutresultat, högst först. Nivån visas bredvid, men den avgör inte ordningen.</p>
+        <p class="mb-0">Vid lika slutresultat vinner den som har bäst <b>Quick Fire</b>. Är den också lika räknas <b>Rapid Fire</b>, och sist <b>Slow Fire</b>. Är allt lika delar ni plats.</p>
+    </section>
+
+    <section class="pqt-card">
+        <h2 class="pqt-h2">Vapen och klasser</h2>
+        <p>Du kan skjuta PQT med vapengrupp <b>A</b> eller <b>R</b>, och alla klasser inom dem är tillåtna.</p>
+        <p>Provet är tänkt för vapen från andra världskriget. Skjuter du grupp A rekommenderar vi därför klassen <b>AM</b> (militära pistoler, äldre modell). Det är en rekommendation, inte ett krav. Anmälan och startlistor fungerar som för övriga precisionsgrenar.</p>
+        <h3 class="pqt-h3">Skjut med en hand</h3>
+        <div class="pqt-stance">
+            <figure>
+                <img src="~/images/pqt/stance.jpg" alt="Soldat som skjuter med pistol i en hand, armen sträckt mot målet" loading="lazy">
+                <figcaption>Kroppsställningen enligt FM 23-35, figur 12.</figcaption>
+            </figure>
+            <div>
+                <p>På andra världskrigets tid lärde sig soldaterna att skjuta pistol med <b>en hand</b>. Fältmanualen beskriver ställningen så här: kroppen är lite mer än halvt vänd åt sidan, fötterna står 30 till 45 cm isär, huvudet är upprätt och kroppen är i balans när pistolen hålls i skjutläge. Hela ställningen ska kännas naturlig och bekväm. Pekar pistolen inte mot tavlans mitt flyttar man hela kroppen i stället för att tvinga pistolen dit med muskelkraft, och man undviker att spänna hand, arm eller kropp. Den fria handen hänger vid sidan.</p>
+                <p class="mb-0">Därför skjuts <b>hela PQT med en hand</b>. Det gäller alla skyttar utom äldre veteraner, som får använda stödhand.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="pqt-card" id="pqt-markena">
+        <h2 class="pqt-h2">Märkena</h2>
+        <p>De tre märkena är symbolerna för nivåerna. De är hämtade från de märken som US Army delade ut för skyttekunskap under andra världskriget.</p>
+        <figure class="pqt-original">
+            <img src="~/images/pqt/originals.jpg" alt="Originalmärken i silver: kors för Marksman, kors med måltavla för Sharpshooter, kors med måltavla och lagerkrans för Expert, och skyltar med texterna Rifle, Pistol, Carbine, Machine Gun och Hand Grenade" loading="lazy">
+            <figcaption>Originalmärken från US Army. Skyltarna hängs under märket med små kedjor.</figcaption>
+        </figure>
+        <h3 class="pqt-h3">Så fungerade originalen</h3>
+        <p>Märket visade <b>hur bra</b> du var, och formen skilde nivåerna åt. Marksman var ett enkelt kors. Sharpshooter var korset med en måltavla i mitten. Expert hade samma kors och måltavla, omgivna av en lagerkrans.</p>
+        <p>Märket sa ingenting om <b>vilket vapen</b> du var kvalificerad med. Det stod på små skyltar som hängdes under märket med kedjor: <i>Rifle</i>, <i>Pistol</i>, <i>Carbine</i>, <i>Machine Gun</i>, <i>Hand Grenade</i> och fler. Den som kunde flera vapen bar flera skyltar i en rad under samma märke, som bilden längst till höger visar.</p>
+        <h3 class="pqt-h3">Vår anpassning</h3>
+        <p>Vi har behållit märkenas utseende: korset, måltavlan och lagerkransen visar nivån, precis som förr. Eftersom PQT bara gäller pistol behöver vi ingen skylt för vapnet. I stället står <i>Pistol</i> och nivåns namn på skylten som sitter fast under märket, så att varje märke är ett färdigt föremål: <i>Pistol Marksman</i>, <i>Pistol Sharpshooter</i> och <i>Pistol Expert</i>.</p>
+        <p>Om intresset finns låter vi tillverka märkena i metall. Varje märke blir cirka 25 mm brett och har nål på baksidan. Priset blir cirka 100 kr per märke om vi beställer några hundra, så det beror på hur många som vill ha. Vill du ha märken för att kunna dela ut dem på ditt klubbevent eller din tävling, anmäl intresse så vet vi hur många vi ska beställa.</p>
+        <div class="pqt-badges pqt-badges-end">
+            <div class="pqt-plate"><img src="~/images/pqt/marksman.png" alt="Märket Pistol Marksman" width="259" height="300" loading="lazy"><b>Marksman</b><span>från 70 %</span></div>
+            <div class="pqt-plate"><img src="~/images/pqt/sharpshooter.png" alt="Märket Pistol Sharpshooter" width="256" height="300" loading="lazy"><b>Sharpshooter</b><span>från 80 %</span></div>
+            <div class="pqt-plate"><img src="~/images/pqt/expert.png" alt="Märket Pistol Expert" width="238" height="300" loading="lazy"><b>Expert</b><span>från 90 %</span></div>
+        </div>
+
+        <div class="pqt-interest" id="pqt-interest">
+            <h3 class="pqt-h3 mt-0">Anmäl intresse för märken</h3>
+            @if (!pq.LoggedIn)
+            {
+                <p class="mb-0"><a href="@loginUrl">Logga in</a> för att anmäla intresse.</p>
+            }
+            else
+            {
+                if (pq.MyInterest != null)
+                {
+                    var mi = pq.MyInterest;
+                    <div class="alert alert-success" role="status" id="pqt-interest-mine">
+                        Din anmälan: <b>@mi.Marksman</b> Marksman, <b>@mi.Sharpshooter</b> Sharpshooter och <b>@mi.Expert</b> Expert, till <b>@mi.ClubOrEvent</b>.
+                        Du kan ändra den nedan eller <button type="button" class="btn btn-link p-0 align-baseline" id="pqt-interest-delete">ta bort den</button>.
+                    </div>
+                }
+                var cur = pq.MyInterest;
+                <form id="pqt-interest-form" novalidate>
+                    <div class="row g-3">
+                        <div class="col-6 col-md-3"><label class="form-label" for="pqt-i-marksman">Marksman</label><input class="form-control" type="number" min="0" max="@PqtRules.MaxBadges" inputmode="numeric" id="pqt-i-marksman" name="marksman" value="@(cur?.Marksman ?? 0)"></div>
+                        <div class="col-6 col-md-3"><label class="form-label" for="pqt-i-sharpshooter">Sharpshooter</label><input class="form-control" type="number" min="0" max="@PqtRules.MaxBadges" inputmode="numeric" id="pqt-i-sharpshooter" name="sharpshooter" value="@(cur?.Sharpshooter ?? 0)"></div>
+                        <div class="col-6 col-md-3"><label class="form-label" for="pqt-i-expert">Expert</label><input class="form-control" type="number" min="0" max="@PqtRules.MaxBadges" inputmode="numeric" id="pqt-i-expert" name="expert" value="@(cur?.Expert ?? 0)"></div>
+                        <div class="col-12 col-md-6"><label class="form-label" for="pqt-i-club">Klubb eller tävling märkena är till</label><input class="form-control" type="text" maxlength="@PqtRules.ClubOrEventMax" id="pqt-i-club" name="clubOrEvent" value="@(cur?.ClubOrEvent ?? "")"></div>
+                        <div class="col-12 col-md-6"><label class="form-label" for="pqt-i-note">Något vi bör veta (valfritt)</label><input class="form-control" type="text" maxlength="@PqtRules.NoteMax" id="pqt-i-note" name="note" value="@(cur?.Note ?? "")"></div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                        <button type="submit" class="btn btn-primary" id="pqt-interest-save">@(cur == null ? "Anmäl intresse" : "Spara ändringen")</button>
+                        <span class="pqt-msg" id="pqt-interest-msg" role="status"></span>
+                    </div>
+                    <p class="small text-body-secondary mt-2 mb-0">Anmälan visar ditt namn för administratören. Den är ingen beställning.</p>
+                </form>
+            }
+        </div>
+    </section>
+
+    @if (pq.Admin)
+    {
+        var sumM = pq.AllInterest.Sum(x => x.Marksman);
+        var sumS = pq.AllInterest.Sum(x => x.Sharpshooter);
+        var sumE = pq.AllInterest.Sum(x => x.Expert);
+        <section class="pqt-card" id="pqt-interest-admin">
+            <h2 class="pqt-h2">Intresseanmälningar (bara administratören ser den här listan)</h2>
+            @if (pq.AllInterest.Count == 0)
+            {
+                <p class="mb-0">Ingen har anmält intresse än.</p>
+            }
+            else
+            {
+                <p><b>@pq.AllInterest.Count</b> anmälningar. Totalt <b>@sumM</b> Marksman, <b>@sumS</b> Sharpshooter och <b>@sumE</b> Expert (<b>@(sumM + sumS + sumE)</b> märken).</p>
+                <div class="table-responsive">
+                    <table class="table table-sm pqt-table">
+                        <thead><tr><th>Namn</th><th>Klubb eller tävling</th><th class="text-end">Marksman</th><th class="text-end">Sharpshooter</th><th class="text-end">Expert</th><th>Anteckning</th><th>Ändrad</th></tr></thead>
+                        <tbody>
+                            @foreach (var r in pq.AllInterest)
+                            {
+                                <tr><td>@r.MemberName</td><td>@r.ClubOrEvent</td><td class="text-end">@r.Marksman</td><td class="text-end">@r.Sharpshooter</td><td class="text-end">@r.Expert</td><td>@r.Note</td><td>@r.UpdatedDate.ToString("yyyy-MM-dd")</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+
+    <section class="pqt-card" id="pqt-kommentarer">
+        <div id="pqt-comments">
+            @await Html.PartialAsync("~/Views/Partials/_PqtComments.cshtml", pq.Comments)
+        </div>
+    </section>
+</div>
+
+<script src="~/js/pqt.js" asp-append-version="true"></script>

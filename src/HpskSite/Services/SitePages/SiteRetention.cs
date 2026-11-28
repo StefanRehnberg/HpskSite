@@ -51,6 +51,7 @@ namespace HpskSite.Services.SitePages
             var (pnr, entries) = PurgeFormEntries(db, now);
             var posts = PurgeDeletedPosts(db, now);
             posts += PurgeDeletedComments(db, now);
+            posts += HpskSite.Services.Pqt.PqtStore.PurgeDeletedComments(db, now);   // /pqt: samma 30 dagar
             return new SiteRetentionResult(pages, versions, drafts, grants, audit, ip, pnr, entries, posts);
         }
 

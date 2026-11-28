@@ -78,6 +78,10 @@ namespace HpskSite.Services
             // Reaktioner på nyheter (2026-11-19): vem som reagerade är en personuppgift och raden har inget värde utan personen → hård radering. Tabellen har ett surrogat-Id
             // (MemberMergeService.MoveRowByRow kräver det när båda kontona reagerat på samma nyhet och det unika indexet krockar vid sammanslagningen).
             ("SitePostReaction",             "MemberId"),
+            // /pqt (2026-11-28): vem som gillade sidan och vem som anmält intresse för märken är uppgifter om personen och raderna har inget värde utan den → hård radering.
+            // Båda har surrogat-Id och unikt index på MemberId (MemberMergeService.MoveRowByRow tar krocken rad för rad).
+            ("PqtLike",                      "MemberId"),
+            ("PqtBadgeInterest",             "MemberId"),
             // Klubbprogrammet (F7): önskemålet om att bli tävlingsledare är en uppgift om personen och har inget värde utan den → hård radering.
             // Surrogat-Id finns (MemberMergeService kräver det när båda kontona önskat samma tävling och det unika indexet krockar).
             ("CompetitionManagerWish",       "MemberId"),
@@ -231,6 +235,11 @@ namespace HpskSite.Services
             ("SitePostImage",                        "ConsentByMemberId", "ConsentDate = ConsentDate"),
             ("SitePostImageRequest",                 "RequesterMemberId", "Message = NULL"),
             ("SitePostImageRequest",                 "HandledByMemberId", "CreatedDate = CreatedDate"),
+            // /pqt (2026-11-28): samma regler som nyhetskommentarerna. En raderingsbegäran tömmer kommentarens text och namn; anmälarens fria text rensas; de som raderade/hanterade är aktörer.
+            ("PqtComment",                           "AuthorMemberId",    "AuthorName = N'Tidigare medlem', Body = N'(Kommentaren är raderad på begäran)'"),
+            ("PqtComment",                           "DeletedByMemberId", "CreatedDate = CreatedDate"),
+            ("PqtCommentReport",                     "ReporterMemberId",  "Reason = NULL"),
+            ("PqtCommentReport",                     "HandledByMemberId", "CreatedDate = CreatedDate"),
             // Kretsutlysningen F2 (2026-11-20). Tävlingsansökans kontaktperson är en uppgift om personen (namn, e-post, telefon): släpps vid gallring, ansökan står kvar
             // (den hör till klubben och kretsens beslut). Rättning av en lucka som fanns sedan fas 4 — ansökans händelserader (ByName) har ByMemberId NOT NULL och kan inte släppas utan en
             // schemaändring i prod; den är en egen fråga.

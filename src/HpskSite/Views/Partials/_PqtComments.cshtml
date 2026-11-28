@@ -1,0 +1,72 @@
+@using HpskSite.Models
+@using HpskSite.Services.SitePages
+@model PqtCommentsModel
+@*
+    Kommentarerna på /pqt. Byts in som HTML av pqt.js efter varje åtgärd (GET /pqt/kommentarer), så all logik om vem som ser och får göra vad ligger HÄR och i PqtController,
+    aldrig i skriptet. En anonym ser bara antalet. Texten visas kodad som ren text (white-space: pre-wrap): en länk blir aldrig klickbar.
+*@
+<h2 class="pqt-h2" id="pqt-kommentarer-rubrik">Kommentarer <span class="pqt-count">@Model.VisibleCount</span></h2>
+@if (!Model.LoggedIn)
+{
+    <p class="mb-0">@(Model.VisibleCount == 0 ? "Det finns inga kommentarer än." : Model.VisibleCount == 1 ? "Det finns en kommentar." : $"Det finns {Model.VisibleCount} kommentarer.")
+        <a href="/login-register/?tab=login&returnUrl=%2Fpqt">Logga in</a> för att läsa dem och skriva en egen.</p>
+}
+else
+{
+    <div class="pqt-write">
+        <label class="form-label" for="pqt-new-body">Skriv en kommentar</label>
+        <textarea id="pqt-new-body" class="form-control" rows="3" maxlength="@SiteCommentRules.MaxLength" placeholder="Vad tycker du? Hur gick det? Förslag på tider, avstånd eller tavlor?"></textarea>
+        <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+            <button type="button" class="btn btn-primary" id="pqt-add-comment">Skicka</button>
+            <span class="pqt-msg" id="pqt-comment-msg" role="status"></span>
+        </div>
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="text-body-secondary mt-3 mb-0">Det finns inga kommentarer än. Skriv den första.</p>
+    }
+    <ul class="pqt-comments" id="pqt-comment-list">
+        @foreach (var c in Model.Rows)
+        {
+            var own = c.AuthorMemberId.HasValue && c.AuthorMemberId.Value == Model.ViewerMemberId;
+            var canEdit = !c.IsDeleted && SiteCommentRules.CanEdit(own, c.CreatedDate, Model.Now);
+            var canRestore = c.IsDeleted && Model.Moderator && SiteCommentRules.CanRestore(c.DeletedDate!.Value, Model.Now);
+            var itemClass = "pqt-comment" + (c.IsDeleted ? " is-deleted" : "") + (c.IsPending ? " is-pending" : "");
+            var reportsText = c.OpenReports == 1 ? "1 anmälan" : c.OpenReports + " anmälningar";
+            <li class="@itemClass" data-comment-id="@c.Id">
+                @if (c.IsDeleted && !Model.Moderator)
+                {
+                    <p class="pqt-body text-body-secondary fst-italic mb-0">Kommentaren är borttagen.</p>
+                }
+                else
+                {
+                    <div class="pqt-meta">
+                        <strong>@(string.IsNullOrWhiteSpace(c.AuthorName) ? "Tidigare medlem" : c.AuthorName)</strong>
+                        <span class="text-body-secondary">@c.CreatedDate.ToString("yyyy-MM-dd HH:mm") @(c.EditedDate.HasValue ? "(ändrad)" : "")</span>
+                        @if (c.IsPending) { <span class="badge text-bg-warning">Väntar på granskning</span> }
+                        @if (c.IsDeleted) { <span class="badge text-bg-secondary">Borttagen</span> }
+                        @if (c.OpenReports > 0) { <span class="badge text-bg-danger">@reportsText</span> }
+                    </div>
+                    <p class="pqt-body mb-1" data-body>@c.Body</p>
+                    @if (c.IsPending && own && !Model.Moderator)
+                    {
+                        <p class="small text-body-secondary mb-1">Kommentaren syns för andra när den har godkänts.</p>
+                    }
+                    <div class="pqt-actions">
+                        @if (canEdit) { <button type="button" class="btn btn-link btn-sm" data-act="edit">Ändra</button> }
+                        @if (!c.IsDeleted && (own || Model.Moderator)) { <button type="button" class="btn btn-link btn-sm" data-act="delete">Ta bort</button> }
+                        @if (!c.IsDeleted && !own && !c.IsPending) { <button type="button" class="btn btn-link btn-sm" data-act="report">Anmäl</button> }
+                        @if (Model.Moderator && c.IsPending && !c.IsDeleted) { <button type="button" class="btn btn-link btn-sm" data-act="approve">Godkänn</button> }
+                        @if (Model.Moderator && c.OpenReports > 0) { <button type="button" class="btn btn-link btn-sm" data-act="handled">Markera anmälan som hanterad</button> }
+                        @if (canRestore) { <button type="button" class="btn btn-link btn-sm" data-act="restore">Återställ</button> }
+                    </div>
+                }
+            </li>
+        }
+    </ul>
+    @if (Model.Total > Model.Rows.Count)
+    {
+        <p class="small text-body-secondary mb-0">Visar de första @Model.Rows.Count av @Model.Total kommentarer.</p>
+    }
+}
